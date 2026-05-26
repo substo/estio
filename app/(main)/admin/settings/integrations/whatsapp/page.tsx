@@ -63,12 +63,16 @@ type WhatsAppWebBridgeDiagnostics = {
     reachable: boolean;
     ok: boolean;
     severity: "healthy" | "warning" | "error";
+    status: "healthy" | "worker_unreachable" | "stale_worker" | "qr_required" | "unlinked" | "starting" | "failed" | "disconnected";
     message: string;
     baseUrl: string;
     uptimeSeconds: number | null;
     sessionCount: number | null;
     sessionDir: string | null;
+    expectedSessionDir: string | null;
+    sessionDirMatchesExpected: boolean | null;
     maxInlineMediaBytes: number | null;
+    protocolTimeoutMs: number | null;
     dbStatus: string;
     workerStatus: string | null;
     workerSessionPresent: boolean;
@@ -387,6 +391,8 @@ export default function WhatsAppSettingsPage() {
     };
 
     const handleClearWebBridge = async () => {
+        const confirmed = window.confirm("Clear saved WhatsApp pairing files and force a fresh QR scan?");
+        if (!confirmed) return;
         setCloudBusy(true);
         try {
             await clearWhatsAppWebBridge(settings.locationId || null);
@@ -869,8 +875,8 @@ export default function WhatsAppSettingsPage() {
                                         Self-hosted linked-device transport for normal free-text WhatsApp conversations and manual mobile/web echoes.
                                     </div>
                                 </div>
-                                <Badge variant={settings.webBridgeSession?.status === "ready" ? "default" : "outline"}>
-                                    {settings.webBridgeSession?.status || "not paired"}
+                                <Badge variant={settings.webBridgeDiagnostics?.status === "healthy" ? "default" : "outline"}>
+                                    {settings.webBridgeDiagnostics?.status?.replace(/_/g, " ") || settings.webBridgeSession?.status || "not paired"}
                                 </Badge>
                             </div>
 
@@ -954,6 +960,10 @@ export default function WhatsAppSettingsPage() {
                                             <span className="font-medium text-foreground">Inline media limit: </span>
                                             <span>{formatBridgeBytes(settings.webBridgeDiagnostics?.maxInlineMediaBytes)}</span>
                                         </div>
+                                        <div className="min-w-0">
+                                            <span className="font-medium text-foreground">Protocol timeout: </span>
+                                            <span>{settings.webBridgeDiagnostics?.protocolTimeoutMs ? `${settings.webBridgeDiagnostics.protocolTimeoutMs}ms` : "unknown"}</span>
+                                        </div>
                                         <div className="min-w-0 truncate">
                                             <span className="font-medium text-foreground">Health URL: </span>
                                             <span>{settings.webBridgeDiagnostics?.baseUrl || "not configured"}</span>
@@ -964,7 +974,22 @@ export default function WhatsAppSettingsPage() {
                                                 <span>{settings.webBridgeDiagnostics.sessionDir}</span>
                                             </div>
                                         )}
+                                        {settings.webBridgeDiagnostics?.expectedSessionDir && settings.webBridgeDiagnostics.sessionDirMatchesExpected === false && (
+                                            <div className="min-w-0 truncate sm:col-span-2 text-red-700">
+                                                <span className="font-medium">Expected session dir: </span>
+                                                <span>{settings.webBridgeDiagnostics.expectedSessionDir}</span>
+                                            </div>
+                                        )}
                                     </div>
+                                    {settings.webBridgeDiagnostics?.status === "qr_required" && (
+                                        <Alert>
+                                            <QrCode className="h-4 w-4" />
+                                            <AlertTitle>Relink required</AlertTitle>
+                                            <AlertDescription>
+                                                The bridge is waiting for a WhatsApp linked-device QR scan.
+                                            </AlertDescription>
+                                        </Alert>
+                                    )}
                                     {settings.webBridgeDiagnostics?.stale && (
                                         <Alert>
                                             <AlertTriangle className="h-4 w-4" />

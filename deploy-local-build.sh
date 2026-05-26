@@ -20,6 +20,9 @@ VIEWING_RELAY_DEFAULT_PORT=8788
 WHATSAPP_BRIDGE_APP_NAME="estio-whatsapp-web-bridge"
 WHATSAPP_BRIDGE_DEFAULT_PORT=3218
 WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
+WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
+WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
+REQUIRE_WHATSAPP_BRIDGE_READY="${REQUIRE_WHATSAPP_BRIDGE_READY:-false}"
 LEGACY_SCRAPE_WORKER_PORT=3010
 PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
 # Schema sync modes:
@@ -550,20 +553,43 @@ NODE
 
     probe_whatsapp_bridge_health() {
         if [ -n "\$BRIDGE_SECRET" ]; then
-            curl -fsS -H "x-whatsapp-web-bridge-secret: \$BRIDGE_SECRET" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true
+            curl --connect-timeout "$WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS" --max-time "$WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS" -fsS -H "x-whatsapp-web-bridge-secret: \$BRIDGE_SECRET" "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true
         else
-            curl -fsS "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true
+            curl --connect-timeout "$WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS" --max-time "$WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS" -fsS "http://127.0.0.1:\$WHATSAPP_BRIDGE_PORT/health" 2>/dev/null || true
         fi
     }
 
+    echo "🧹 Enforcing WhatsApp Web Bridge PM2 singleton..."
+    WHATSAPP_BRIDGE_SINGLETON_JSON=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" EXPECTED_CWD="\$SYMLINK_PATH" EXPECTED_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" EXPECTED_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" APPLY=1 node "\$SYMLINK_PATH/scripts/ops/whatsapp-bridge-pm2-singleton.js" 2>/dev/null || true)
+    if [ -n "\$WHATSAPP_BRIDGE_SINGLETON_JSON" ]; then
+        WHATSAPP_BRIDGE_SINGLETON_JSON="\$WHATSAPP_BRIDGE_SINGLETON_JSON" node <<-'NODE' || true
+const result = JSON.parse(process.env.WHATSAPP_BRIDGE_SINGLETON_JSON || '{}');
+const duplicateCount = Array.isArray(result.duplicates) ? result.duplicates.length : 0;
+if (duplicateCount > 0) {
+    console.log('🧹 Removed duplicate WhatsApp Web Bridge PM2 entries: ' + duplicateCount);
+}
+if (result.keep) {
+    console.log('📱 Keeping WhatsApp Web Bridge PM2 id=' + result.keep.id + ' status=' + result.keep.status + ' restarts=' + result.keep.restarts);
+}
+NODE
+    fi
+
     CURRENT_BRIDGE_WEBHOOK_URL=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || "");' 2>/dev/null || true)
+    CURRENT_BRIDGE_SESSION_DIR=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || "");' 2>/dev/null || true)
+    CURRENT_BRIDGE_CWD=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.pm_cwd || "");' 2>/dev/null || true)
     BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
 
-    if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
+    if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ]; then
         echo "✅ WhatsApp Web Bridge service is already reachable; preserving existing browser session"
     else
         if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ -n "\$CURRENT_BRIDGE_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" != "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
             echo "🔁 WhatsApp Web Bridge webhook changed; restarting once to move from \$CURRENT_BRIDGE_WEBHOOK_URL to \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"
+        fi
+        if [ -n "\$CURRENT_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" != "\$WHATSAPP_BRIDGE_SESSION_DIR" ]; then
+            echo "🔁 WhatsApp Web Bridge session dir changed; restarting with persistent dir \$WHATSAPP_BRIDGE_SESSION_DIR"
+        fi
+        if [ -n "\$CURRENT_BRIDGE_CWD" ] && [ "\$CURRENT_BRIDGE_CWD" != "\$SYMLINK_PATH" ]; then
+            echo "🔁 WhatsApp Web Bridge cwd changed; restarting from \$SYMLINK_PATH"
         fi
         if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
             pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
@@ -586,10 +612,14 @@ NODE
     done
 
     if [ "\$BRIDGE_READY" -ne 1 ]; then
-        echo "❌ WhatsApp Web Bridge failed readiness checks on :\$WHATSAPP_BRIDGE_PORT."
+        echo "⚠️  WhatsApp Web Bridge failed bounded health checks on :\$WHATSAPP_BRIDGE_PORT."
         pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" || true
         pm2 logs "\$WHATSAPP_BRIDGE_APP_NAME" --lines 120 --nostream || true
-        exit 1
+        if [ "$REQUIRE_WHATSAPP_BRIDGE_READY" = "true" ]; then
+            echo "❌ REQUIRE_WHATSAPP_BRIDGE_READY=true, failing deploy."
+            exit 1
+        fi
+        echo "⚠️  Continuing deploy because app cutover is healthy and bridge readiness is non-blocking."
     fi
 
     if [ -n "\$BRIDGE_HEALTH_JSON" ]; then

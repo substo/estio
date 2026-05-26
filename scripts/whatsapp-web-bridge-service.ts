@@ -33,6 +33,22 @@ const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_M
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
 const QR_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_QR_STALE_MS || 90_000), 30_000);
+const PROTOCOL_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_PROTOCOL_TIMEOUT_MS || 120_000), 30_000);
+const INITIALIZE_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_INITIALIZE_TIMEOUT_MS || 45_000), 10_000);
+const OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_OPERATION_TIMEOUT_MS || 30_000), 5_000);
+const MEDIA_OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_OPERATION_TIMEOUT_MS || 60_000), 10_000);
+const SESSION_RESTART_BACKOFF_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_SESSION_RESTART_BACKOFF_MS || 15_000), 1_000);
+const MAX_SESSION_RESTART_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_SESSION_RESTART_ATTEMPTS || 5), 1);
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    let timeout: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        if (timeout) clearTimeout(timeout);
+    });
+}
 
 function jidFromId(value: any) {
     return String(value?._serialized || value?.serialized || value || "").trim();
@@ -162,6 +178,24 @@ function serializeManagedSession(session: ManagedSession) {
 
 async function restartStaleSession(session: ManagedSession, error: unknown) {
     if (session.restarting) return;
+    const metadata = (session as any).restartMetadata || { attempts: 0, firstRestartAt: Date.now() };
+    const windowAgeMs = Date.now() - Number(metadata.firstRestartAt || Date.now());
+    const attempts = windowAgeMs > 10 * 60 * 1000 ? 1 : Number(metadata.attempts || 0) + 1;
+    (session as any).restartMetadata = {
+        attempts,
+        firstRestartAt: windowAgeMs > 10 * 60 * 1000 ? Date.now() : metadata.firstRestartAt,
+    };
+    if (attempts > MAX_SESSION_RESTART_ATTEMPTS) {
+        session.ready = false;
+        markSessionEvent(session, "failed", `Restart limit reached after ${MAX_SESSION_RESTART_ATTEMPTS} attempts. Last error: ${(error as any)?.message || error}`);
+        await emitSessionEvent(session, {
+            event: "auth_failure",
+            locationId: session.locationId,
+            sessionId: session.sessionId,
+            error: session.lastError,
+        });
+        return;
+    }
     session.restarting = true;
     session.ready = false;
     markSessionEvent(session, "restarting", error);
@@ -181,7 +215,7 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
             startSession(sessionId, locationId).catch((restartError: any) => {
                 console.error(`[WhatsApp Web Bridge] Failed to restart stale session ${sessionId}:`, restartError?.message || restartError);
             });
-        }, 1000);
+        }, SESSION_RESTART_BACKOFF_MS);
     }
 }
 
@@ -241,7 +275,11 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
         }
 
         try {
-            const media = await message.downloadMedia();
+            const media = await withTimeout(
+                message.downloadMedia(),
+                MEDIA_OPERATION_TIMEOUT_MS,
+                `WhatsApp media download ${id || "unknown"}`
+            );
             const base64 = String(media?.data || "");
             const approxBytes = Math.floor((base64.length * 3) / 4);
             const mimetype = media?.mimetype || message?._data?.mimetype || "";
@@ -335,6 +373,7 @@ async function startSession(sessionId: string, locationId: string) {
         }),
         puppeteer: {
             headless: true,
+            protocolTimeout: PROTOCOL_TIMEOUT_MS,
             args: [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
@@ -426,7 +465,19 @@ async function startSession(sessionId: string, locationId: string) {
         await emitSessionEvent(managed, { event: "message_ack", locationId, sessionId, messageId, ack });
     });
 
-    await client.initialize();
+    try {
+        await withTimeout(client.initialize(), INITIALIZE_TIMEOUT_MS, `WhatsApp session initialize ${sessionId}`);
+    } catch (error: any) {
+        managed.ready = false;
+        markSessionEvent(managed, "failed", error);
+        await emitSessionEvent(managed, {
+            event: "auth_failure",
+            locationId,
+            sessionId,
+            error: error?.message || "WhatsApp session initialization failed.",
+        });
+        throw error;
+    }
     return managed;
 }
 
@@ -456,9 +507,13 @@ async function sendMessage(sessionId: string, payload: any) {
             throw new Error(`WhatsApp Web could not read the signed media URL. Re-upload or resend the attachment. ${error?.message || ""}`.trim());
         }
         try {
-            const sent = await withStaleRecovery(session, () => session.client.sendMessage(to, media, {
-                caption: payload.caption || payload.text || undefined,
-            }));
+            const sent = await withStaleRecovery(session, () => withTimeout(
+                session.client.sendMessage(to, media, {
+                    caption: payload.caption || payload.text || undefined,
+                }),
+                MEDIA_OPERATION_TIMEOUT_MS,
+                `WhatsApp media send ${sessionId}`
+            ));
             return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
         } catch (error: any) {
             throw new Error(`WhatsApp Web media send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
@@ -466,7 +521,11 @@ async function sendMessage(sessionId: string, payload: any) {
     }
 
     try {
-        const sent = await withStaleRecovery(session, () => session.client.sendMessage(to, String(payload.text || "")));
+        const sent = await withStaleRecovery(session, () => withTimeout(
+            session.client.sendMessage(to, String(payload.text || "")),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp text send ${sessionId}`
+        ));
         return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
     } catch (error: any) {
         throw new Error(`WhatsApp Web send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
@@ -477,7 +536,11 @@ async function listChats(sessionId: string) {
     const session = sessions.get(sessionId);
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
 
-    const chats = await withStaleRecovery(session, () => session.client.getChats());
+    const chats = await withStaleRecovery(session, () => withTimeout(
+        session.client.getChats(),
+        OPERATION_TIMEOUT_MS,
+        `WhatsApp chat list ${sessionId}`
+    ));
     return Promise.all((chats || []).map(async (chat: any) => {
         const chatId = chat?.id?._serialized || chat?.id?.user || "";
         const contactIdentity = await buildContactIdentity(chat, chatId);
@@ -504,8 +567,16 @@ async function fetchMessages(sessionId: string, payload: any) {
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
     const messages = await withStaleRecovery(session, async () => {
-        const chat = await session.client.getChatById(chatId);
-        return chat.fetchMessages({ limit });
+        const chat = await withTimeout(
+            session.client.getChatById(chatId),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp get chat ${sessionId}`
+        );
+        return withTimeout(
+            chat.fetchMessages({ limit }),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp fetch messages ${sessionId}`
+        );
     });
     return Promise.all((messages || []).map((message: any) => withStaleRecovery(session, () => serializeMessage(message, { includeMedia }))));
 }
@@ -519,14 +590,22 @@ async function resolveChatForPhone(sessionId: string, payload: any) {
 
     const numberId = await withStaleRecovery(session, async () => {
         if (typeof session.client.getNumberId !== "function") return null;
-        return session.client.getNumberId(digits).catch(() => null);
+        return withTimeout(
+            session.client.getNumberId(digits),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp get number id ${sessionId}`
+        ).catch(() => null);
     });
     const numberChatId = jidFromId(numberId);
     if (numberChatId) {
         return { chatId: numberChatId, source: "getNumberId" };
     }
 
-    const chats = await withStaleRecovery(session, () => session.client.getChats());
+    const chats = await withStaleRecovery(session, () => withTimeout(
+        session.client.getChats(),
+        OPERATION_TIMEOUT_MS,
+        `WhatsApp resolve chat scan ${sessionId}`
+    ));
     for (const chat of chats || []) {
         if (chat?.isGroup) continue;
         const chatId = jidFromId(chat?.id);
@@ -561,6 +640,18 @@ const server = createServer(async (req, res) => {
                 sessions: Array.from(sessions.values()).map(serializeManagedSession),
                 sessionDir: SESSION_DIR,
                 maxInlineMediaBytes: MAX_INLINE_MEDIA_BYTES,
+                protocolTimeoutMs: PROTOCOL_TIMEOUT_MS,
+            });
+        }
+
+        if (req.method === "GET" && url.pathname === "/ready") {
+            const serializedSessions = Array.from(sessions.values()).map(serializeManagedSession);
+            const readySessions = serializedSessions.filter((session) => session.ready);
+            return json(res, readySessions.length > 0 ? 200 : 503, {
+                ok: readySessions.length > 0,
+                readySessionCount: readySessions.length,
+                sessions: serializedSessions,
+                sessionDir: SESSION_DIR,
             });
         }
 
@@ -570,15 +661,17 @@ const server = createServer(async (req, res) => {
                 const body = await readJson(req);
                 const locationId = String(body.locationId || "").trim();
                 if (!locationId) return json(res, 400, { error: "Missing locationId." });
-                await startSession(sessionId, locationId);
-                return json(res, 200, { success: true, sessionId });
+                startSession(sessionId, locationId).catch((error: any) => {
+                    console.error(`[WhatsApp Web Bridge] Failed to start session ${sessionId}:`, error?.message || error);
+                });
+                return json(res, 202, { success: true, sessionId, status: "starting" });
             }
             if (req.method === "POST" && parts[2] === "stop") {
-                await stopSession(sessionId);
+                await withTimeout(stopSession(sessionId), OPERATION_TIMEOUT_MS, `WhatsApp stop session ${sessionId}`);
                 return json(res, 200, { success: true, sessionId });
             }
             if (req.method === "POST" && parts[2] === "clear") {
-                await stopSession(sessionId);
+                await withTimeout(stopSession(sessionId), OPERATION_TIMEOUT_MS, `WhatsApp clear stop session ${sessionId}`);
                 await rm(path.join(SESSION_DIR, `session-${sessionId}`), { recursive: true, force: true }).catch(() => null);
                 return json(res, 200, { success: true, sessionId });
             }
@@ -631,9 +724,17 @@ setInterval(() => {
         if (!session.ready || session.restarting || !session.client) continue;
         withStaleRecovery(session, async () => {
             if (typeof session.client.getState === "function") {
-                await session.client.getState();
+                await withTimeout(
+                    session.client.getState(),
+                    OPERATION_TIMEOUT_MS,
+                    `WhatsApp watchdog state ${session.sessionId}`
+                );
             } else {
-                await session.client.getChats();
+                await withTimeout(
+                    session.client.getChats(),
+                    OPERATION_TIMEOUT_MS,
+                    `WhatsApp watchdog chats ${session.sessionId}`
+                );
             }
         }).catch((error: any) => {
             if (!isWhatsAppWebBridgeStaleError(error)) {

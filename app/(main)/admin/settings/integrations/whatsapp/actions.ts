@@ -42,6 +42,7 @@ import {
     stopWhatsAppWebBridgeSession,
     upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
+import { buildWebBridgeDiagnostics } from "@/lib/whatsapp/web-bridge-diagnostics";
 
 const MASKED_SECRET = "********";
 
@@ -74,60 +75,7 @@ async function listWhatsAppChannels(locationId: string) {
     return channels.map(serializeWhatsAppChannel);
 }
 
-function buildWebBridgeDiagnostics(session: any, health: any) {
-    const sessionId = session?.sessionId ? String(session.sessionId) : "";
-    const workerSession = sessionId && Array.isArray(health?.sessions)
-        ? health.sessions.find((item: any) => String(item.sessionId || "") === sessionId)
-        : null;
-    const dbStatus = String(session?.status || "not_created");
-    const workerStatus = workerSession?.status || (workerSession?.ready ? "ready" : null);
-    const dbReady = dbStatus === "ready";
-    const workerReady = Boolean(workerSession?.ready);
-    const stale = dbReady && (!health?.reachable || !workerReady);
-
-    let severity: "healthy" | "warning" | "error" = "healthy";
-    let message = "WhatsApp Web Bridge is reachable.";
-    if (!health?.reachable) {
-        severity = "error";
-        message = health?.error || "WhatsApp Web Bridge worker is not reachable.";
-    } else if (stale) {
-        severity = "warning";
-        message = "Database session says ready, but the worker does not have a matching ready session. Restart the bridge session.";
-    } else if (dbStatus === "failed") {
-        severity = "error";
-        message = session?.lastError || "Bridge session is failed. Clear or restart the session.";
-    } else if (dbStatus === "disconnected" || dbStatus === "not_created") {
-        severity = "warning";
-        message = "Bridge session is not connected. Start the session and scan the QR code.";
-    } else if (dbStatus === "qr") {
-        severity = "warning";
-        message = "QR code is waiting to be scanned.";
-    } else if (dbStatus === "authenticated" || dbStatus === "starting") {
-        severity = "warning";
-        message = "Bridge session is starting. Refresh status shortly.";
-    }
-
-    return {
-        reachable: Boolean(health?.reachable),
-        ok: Boolean(health?.ok),
-        severity,
-        message,
-        baseUrl: health?.baseUrl || getWhatsAppWebBridgeBaseUrl(),
-        uptimeSeconds: health?.uptimeSeconds ?? null,
-        sessionCount: health?.sessionCount ?? null,
-        sessionDir: health?.sessionDir || null,
-        maxInlineMediaBytes: health?.maxInlineMediaBytes ?? null,
-        dbStatus,
-        workerStatus,
-        workerSessionPresent: Boolean(workerSession),
-        workerReady,
-        stale,
-        workerLastEventAt: workerSession?.lastEventAt || null,
-        workerLastReadyAt: workerSession?.lastReadyAt || null,
-        workerLastError: workerSession?.lastError || null,
-        error: health?.error || null,
-    };
-}
+const EXPECTED_WEB_BRIDGE_SESSION_DIR = "/home/martin/whatsapp-web-sessions";
 
 async function resolveAdminContext(locationIdInput?: string | null) {
     const { userId } = await auth();
@@ -349,7 +297,11 @@ export async function getWhatsAppSettings(locationId?: string | null) {
             lastError: webBridgeSession.lastError || "",
             isDefaultOutbound: Boolean(webBridgeSession.isDefaultOutbound),
         } : null,
-        webBridgeDiagnostics: buildWebBridgeDiagnostics(webBridgeSession, webBridgeHealth),
+        webBridgeDiagnostics: buildWebBridgeDiagnostics({
+            session: webBridgeSession,
+            health: webBridgeHealth,
+            expectedSessionDir: EXPECTED_WEB_BRIDGE_SESSION_DIR,
+        }),
 
         // Twilio
         twilioAccountSid: payload.twilioAccountSid || location.twilioAccountSid || "",
@@ -369,7 +321,11 @@ export async function getWhatsAppWebBridgeDiagnostics(locationId?: string | null
     ]);
     return {
         success: true as const,
-        diagnostics: buildWebBridgeDiagnostics(session, health),
+        diagnostics: buildWebBridgeDiagnostics({
+            session,
+            health,
+            expectedSessionDir: EXPECTED_WEB_BRIDGE_SESSION_DIR,
+        }),
     };
 }
 

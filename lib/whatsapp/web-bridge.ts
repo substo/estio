@@ -46,6 +46,7 @@ export type WhatsAppWebBridgeHealth = {
     sessions?: WhatsAppWebBridgeHealthSession[];
     sessionDir?: string | null;
     maxInlineMediaBytes?: number | null;
+    protocolTimeoutMs?: number | null;
     error?: string | null;
 };
 
@@ -206,21 +207,35 @@ export async function upsertWhatsAppWebBridgeSession(locationId: string, data?: 
     return serializeSession(row)!;
 }
 
-async function bridgeFetch(path: string, init?: RequestInit) {
+async function bridgeFetch(path: string, init?: RequestInit & { timeoutMs?: number }) {
     const secret = getWhatsAppWebBridgeSecret();
-    const response = await fetch(`${getWhatsAppWebBridgeBaseUrl()}${path}`, {
-        ...init,
-        headers: {
-            "Content-Type": "application/json",
-            ...(secret ? { "x-whatsapp-web-bridge-secret": secret } : {}),
-            ...(init?.headers || {}),
-        },
-    });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(String((json as any)?.error || response.statusText || "WhatsApp Web bridge request failed."));
+    const timeoutMs = Math.max(Number(init?.timeoutMs || 10_000), 1_000);
+    const { timeoutMs: _timeoutMs, ...fetchInit } = init || {};
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(`${getWhatsAppWebBridgeBaseUrl()}${path}`, {
+            ...fetchInit,
+            signal: init?.signal || controller.signal,
+            headers: {
+                "Content-Type": "application/json",
+                ...(secret ? { "x-whatsapp-web-bridge-secret": secret } : {}),
+                ...(init?.headers || {}),
+            },
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(String((json as any)?.error || response.statusText || "WhatsApp Web bridge request failed."));
+        }
+        return json as any;
+    } catch (error: any) {
+        if (error?.name === "AbortError") {
+            throw new Error(`WhatsApp Web bridge request timed out after ${timeoutMs}ms.`);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
     }
-    return json as any;
 }
 
 export async function getWhatsAppWebBridgeHealth(): Promise<WhatsAppWebBridgeHealth> {
@@ -256,6 +271,7 @@ export async function getWhatsAppWebBridgeHealth(): Promise<WhatsAppWebBridgeHea
             sessions: Array.isArray((json as any)?.sessions) ? (json as any).sessions : [],
             sessionDir: (json as any)?.sessionDir || null,
             maxInlineMediaBytes: Number.isFinite(Number((json as any)?.maxInlineMediaBytes)) ? Number((json as any).maxInlineMediaBytes) : null,
+            protocolTimeoutMs: Number.isFinite(Number((json as any)?.protocolTimeoutMs)) ? Number((json as any).protocolTimeoutMs) : null,
             error: null,
         };
     } catch (error: any) {
@@ -282,6 +298,7 @@ export async function startWhatsAppWebBridgeSession(locationId: string) {
     return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/start`, {
         method: "POST",
         body: JSON.stringify({ locationId }),
+        timeoutMs: 20_000,
     });
 }
 
@@ -314,7 +331,7 @@ export async function resolveWhatsAppWebBridgeChatForPhone(input: {
 export async function stopWhatsAppWebBridgeSession(locationId: string) {
     const session = await getWhatsAppWebBridgeSession(locationId);
     if (!session) return { success: true, skipped: true };
-    const result = await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/stop`, { method: "POST" });
+    const result = await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/stop`, { method: "POST", timeoutMs: 10_000 });
     await upsertWhatsAppWebBridgeSession(locationId, {
         status: "disconnected",
         qrCode: null,
@@ -327,7 +344,7 @@ export async function stopWhatsAppWebBridgeSession(locationId: string) {
 export async function restartWhatsAppWebBridgeSession(locationId: string) {
     const session = await getWhatsAppWebBridgeSession(locationId);
     if (session) {
-        await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/stop`, { method: "POST" }).catch(() => null);
+        await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/stop`, { method: "POST", timeoutMs: 10_000 }).catch(() => null);
     }
     return startWhatsAppWebBridgeSession(locationId);
 }
@@ -335,7 +352,7 @@ export async function restartWhatsAppWebBridgeSession(locationId: string) {
 export async function clearWhatsAppWebBridgeSession(locationId: string) {
     const session = await getWhatsAppWebBridgeSession(locationId);
     if (session) {
-        await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/clear`, { method: "POST" }).catch(() => null);
+        await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/clear`, { method: "POST", timeoutMs: 15_000 }).catch(() => null);
         await (db as any).whatsAppWebBridgeSession.delete({ where: { locationId } }).catch(() => null);
     }
     return { success: true };
