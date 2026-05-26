@@ -6,6 +6,21 @@ import {
 } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia } from "@/lib/contacts/vcard";
 
+const DEFAULT_TRANSIENT_INGEST_ATTEMPTS = 3;
+const DEFAULT_TRANSIENT_INGEST_BACKOFF_MS = 250;
+
+type WebBridgeMediaIngestDependencies = {
+    dbClient?: typeof db;
+    putMediaObject?: typeof putWhatsAppMediaObject;
+    initAudioTranscriptionWorker?: () => Promise<unknown>;
+    enqueueAudioTranscription?: (input: {
+        locationId: string;
+        messageId: string;
+        attachmentId: string;
+    }) => Promise<unknown>;
+    sleep?: (ms: number) => Promise<void>;
+};
+
 export function normalizeBridgeMediaType(type: string | null | undefined): "image" | "audio" | "document" | null {
     const value = String(type || "").toLowerCase();
     if (value === "image" || value.startsWith("image/")) return "image";
@@ -67,6 +82,44 @@ export function formatWhatsAppWebBridgeMediaFailure(reason: string | undefined) 
     }
 }
 
+export function isTransientWebBridgeMediaIngestError(error: unknown): boolean {
+    const message = String((error as any)?.message || error || "").toLowerCase();
+    const code = String((error as any)?.code || (error as any)?.cause?.code || "").toLowerCase();
+    return [
+        "econnreset",
+        "etimedout",
+        "econnaborted",
+        "socket hang up",
+        "aborted",
+        "timeout",
+        "timed out",
+        "connection reset",
+        "network error",
+    ].some((needle) => message.includes(needle) || code.includes(needle));
+}
+
+async function defaultSleep(ms: number) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithTransientRetry<T>(args: {
+    maxAttempts: number;
+    backoffMs: number;
+    sleep: (ms: number) => Promise<void>;
+    work: () => Promise<T>;
+}) {
+    for (let attempt = 1; attempt <= args.maxAttempts; attempt++) {
+        try {
+            return await args.work();
+        } catch (error) {
+            const isLastAttempt = attempt >= args.maxAttempts;
+            if (!isTransientWebBridgeMediaIngestError(error) || isLastAttempt) throw error;
+            await args.sleep(args.backoffMs * attempt);
+        }
+    }
+    throw new Error("Transient media ingest retry exhausted.");
+}
+
 export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
     wamId: string;
     media: {
@@ -76,7 +129,18 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         size?: number | null;
     };
     messageType?: string | null;
+    maxTransientAttempts?: number;
+    transientBackoffMs?: number;
+    dependencies?: WebBridgeMediaIngestDependencies;
 }) {
+    const dbClient = (params.dependencies?.dbClient || db) as any;
+    const putMediaObject = params.dependencies?.putMediaObject || putWhatsAppMediaObject;
+    const sleep = params.dependencies?.sleep || defaultSleep;
+    const maxTransientAttempts = Math.max(
+        1,
+        Math.min(Number(params.maxTransientAttempts || DEFAULT_TRANSIENT_INGEST_ATTEMPTS), 5)
+    );
+    const transientBackoffMs = Math.max(0, Number(params.transientBackoffMs ?? DEFAULT_TRANSIENT_INGEST_BACKOFF_MS));
     const wamId = String(params.wamId || "").trim();
     const base64 = String(params.media?.data || "").trim();
     if (!wamId || !base64) return { status: "skipped" as const, reason: "missing_input" };
@@ -86,7 +150,7 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         : normalizeBridgeMediaType(params.media?.mimetype || params.messageType);
     if (!kind) return { status: "skipped" as const, reason: "unsupported_media_type" };
 
-    const message = await db.message.findFirst({
+    const message = await dbClient.message.findFirst({
         where: { wamId },
         include: {
             attachments: true,
@@ -123,36 +187,47 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         contentType,
     });
 
-    const uploaded = await putWhatsAppMediaObject({
-        key,
-        body: buffer,
-        contentType,
-        contentLength: size,
-    });
+    const stored = await runWithTransientRetry({
+        maxAttempts: maxTransientAttempts,
+        backoffMs: transientBackoffMs,
+        sleep,
+        work: async () => {
+            const uploaded = await putMediaObject({
+                key,
+                body: buffer,
+                contentType,
+                contentLength: size,
+            });
 
-    const createdAttachment = await db.messageAttachment.create({
-        data: {
-            messageId: message.id,
-            fileName,
-            contentType,
-            size,
-            url: uploaded.r2Uri,
+            const createdAttachment = await dbClient.messageAttachment.create({
+                data: {
+                    messageId: message.id,
+                    fileName,
+                    contentType,
+                    size,
+                    url: uploaded.r2Uri,
+                },
+            });
+
+            return { uploaded, createdAttachment };
         },
     });
 
     if (kind === "audio") {
         void (async () => {
-            const {
-                enqueueWhatsAppAudioTranscription,
-                initWhatsAppAudioTranscriptionWorker,
-            } = await import("@/lib/queue/whatsapp-audio-transcription");
+            const queue = params.dependencies?.enqueueAudioTranscription
+                ? {
+                    initWhatsAppAudioTranscriptionWorker: params.dependencies?.initAudioTranscriptionWorker || (async () => undefined),
+                    enqueueWhatsAppAudioTranscription: params.dependencies.enqueueAudioTranscription,
+                }
+                : await import("@/lib/queue/whatsapp-audio-transcription");
 
             try {
-                await initWhatsAppAudioTranscriptionWorker();
-                await enqueueWhatsAppAudioTranscription({
+                await queue.initWhatsAppAudioTranscriptionWorker();
+                await queue.enqueueWhatsAppAudioTranscription({
                     locationId: message.conversation.locationId,
                     messageId: message.id,
-                    attachmentId: createdAttachment.id,
+                    attachmentId: stored.createdAttachment.id,
                 });
             } catch (error) {
                 console.error(`[WhatsApp Web Bridge] Failed to enqueue audio transcription for ${wamId}:`, error);
@@ -160,5 +235,5 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         })();
     }
 
-    return { status: "stored" as const, key: uploaded.key };
+    return { status: "stored" as const, key: stored.uploaded.key };
 }
