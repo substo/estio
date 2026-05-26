@@ -61,13 +61,30 @@ export async function loadConversationWorkspaceCore(args: {
     messageMetadataMode: "full" | "firstPaint";
     dependencies: WorkspaceCoreLoadingDependencies;
 }) {
+    const startedAtMs = Date.now();
     const activityRefreshMode = args.includeActivity
         ? (args.includeMessages ? "with_messages" : "activity_only")
         : "skipped";
+    const transcriptEligibilityDeferred = args.refreshMode === "initial_hydration"
+        && args.messageMetadataMode === "firstPaint"
+        && !args.includeActivity;
+
+    const timed = async <T>(work: Promise<T>, onElapsed: (elapsedMs: number) => void): Promise<T> => {
+        const bucketStartedAtMs = Date.now();
+        try {
+            return await work;
+        } finally {
+            onElapsed(Date.now() - bucketStartedAtMs);
+        }
+    };
+
+    let messagesMs = 0;
+    let activityMs = 0;
+    let transcriptEligibilityMs = 0;
 
     const [messages, activityTimeline, transcriptEligibility] = await Promise.all([
         args.includeMessages
-            ? fetchMessagesForResolvedConversation({
+            ? timed(fetchMessagesForResolvedConversation({
                 requestedConversationId: args.conversationId,
                 location: args.location,
                 conversation: args.metadata.resolvedConversation,
@@ -82,10 +99,10 @@ export async function loadConversationWorkspaceCore(args: {
                     resolveTranscriptVisibilityAccess: args.dependencies.resolveTranscriptVisibilityAccess,
                     parseLegacyCrmLeadNotificationEmail: args.dependencies.parseLegacyCrmLeadNotificationEmail,
                 },
-            })
-            : Promise.resolve([] as Message[]),
+            }), (elapsedMs) => { messagesMs = elapsedMs; })
+            : timed(Promise.resolve([] as Message[]), (elapsedMs) => { messagesMs = elapsedMs; }),
         args.includeActivity
-            ? assembleTimelineEvents({
+            ? timed(assembleTimelineEvents({
                 mode: "chat",
                 locationId: args.location.id,
                 conversationId: args.conversationId,
@@ -103,14 +120,20 @@ export async function loadConversationWorkspaceCore(args: {
                     changes: entry.changes,
                     user: entry.user || null,
                 }));
-            })
-            : Promise.resolve([] as any[]),
-        args.dependencies.getTranscriptEligibility(args.conversationId)
-            .catch(() => ({
-                success: false as const,
+            }), (elapsedMs) => { activityMs = elapsedMs; })
+            : timed(Promise.resolve([] as any[]), (elapsedMs) => { activityMs = elapsedMs; }),
+        transcriptEligibilityDeferred
+            ? timed(Promise.resolve({
+                success: true as const,
                 enabled: false as const,
-                reason: "Failed to resolve eligibility.",
-            })),
+                reason: "Deferred until workspace enrichment.",
+            }), (elapsedMs) => { transcriptEligibilityMs = elapsedMs; })
+            : timed(args.dependencies.getTranscriptEligibility(args.conversationId)
+                .catch(() => ({
+                    success: false as const,
+                    enabled: false as const,
+                    reason: "Failed to resolve eligibility.",
+                })), (elapsedMs) => { transcriptEligibilityMs = elapsedMs; }),
     ]);
 
     const messageWindow: ConversationWorkspaceMessageWindow = {
@@ -135,6 +158,11 @@ export async function loadConversationWorkspaceCore(args: {
         message_count: messageWindow.count,
         returnedMessageCount: messageWindow.count,
         activity_count: Array.isArray(activityTimeline) ? activityTimeline.length : 0,
+        messages_ms: messagesMs,
+        activity_ms: activityMs,
+        transcript_eligibility_ms: transcriptEligibilityMs,
+        total_ms: Date.now() - startedAtMs,
+        transcriptEligibilityDeferred,
     }));
 
     return {
@@ -144,6 +172,7 @@ export async function loadConversationWorkspaceCore(args: {
         messages,
         activityTimeline,
         transcriptEligibility,
+        transcriptEligibilityDeferred,
         freshness: args.metadata.freshness,
         messageWindow,
     };

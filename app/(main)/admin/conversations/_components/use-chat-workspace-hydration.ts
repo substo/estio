@@ -339,10 +339,13 @@ export function useChatWorkspaceHydration({
                 const initialOpenMs = Date.now() - threadOpenStartedAtMs;
                 trackClientRequest("thread_open_initial", {
                     conversationId: selectedConversationId,
+                    selectedConversationId,
                     thread_open_initial_ms: initialOpenMs,
                     initial_message_count: initialMessages.length,
                     rendered_message_count: mergedInitialMessages.length,
                     requested_initial_limit: initialMessageLimit,
+                    requestedInitialLimit: initialMessageLimit,
+                    transcriptEligibilityDeferred: !!workspace?.transcriptEligibilityDeferred,
                 });
 
                 void markConversationReadInUi(selectedConversationId);
