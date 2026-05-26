@@ -31,12 +31,12 @@ import { getConversationFeatureFlags } from "@/lib/feature-flags";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { withResilience } from "@/lib/external/resilience";
 import { assembleTimelineEvents } from "@/lib/conversations/timeline-events";
-import { buildMessageCursorFromMessage } from "@/lib/conversations/thread-hydration";
 import {
     fetchMessagesForResolvedConversation as loadMessagesForResolvedConversation,
     type FetchMessagesOptions,
     type ResolvedConversationForMessages,
 } from "@/lib/conversations/message-loading";
+import { loadConversationWorkspaceCore } from "@/lib/conversations/workspace-core-loading";
 import {
     buildConversationReferenceWhere,
     getLegacyConversationAlias,
@@ -1941,13 +1941,6 @@ type ConversationWorkspaceCoreMetadata = {
     };
 };
 
-type ConversationWorkspaceMessageWindow = {
-    oldestCursor: string | null;
-    newestCursor: string | null;
-    count: number;
-    requestedLimit: number;
-};
-
 type ConversationWorkspaceOptions = {
     includeMessages?: boolean;
     includeActivity?: boolean;
@@ -2528,88 +2521,24 @@ export async function getConversationWorkspaceCore(
                 };
             }
 
-            const [messages, activityTimeline, transcriptEligibility] = await Promise.all([
-                includeMessages
-                    ? loadMessagesForResolvedConversation({
-                        requestedConversationId: trimmedConversationId,
-                        location,
-                        conversation: metadata.resolvedConversation,
-                        options: {
-                            take: messageLimit,
-                            includeLegacyEmailMeta: includeActivity,
-                            metadataMode: messageMetadataMode,
-                            refreshMode,
-                        },
-                        reusedConversationContext: true,
-                        dependencies: {
-                            resolveTranscriptVisibilityAccess,
-                            parseLegacyCrmLeadNotificationEmail,
-                        },
-                    })
-                    : Promise.resolve([] as Message[]),
-                includeActivity
-                    ? assembleTimelineEvents({
-                        mode: "chat",
-                        locationId: location.id,
-                        conversationId: trimmedConversationId,
-                        includeMessages: false,
-                        includeActivities: true,
-                        take: activityLimit,
-                        beforeCursor: options?.activityBeforeCursor || null,
-                    }).then((timeline) => {
-                        const activityEvents = timeline.events.filter((event) => event.kind === "activity");
-                        return activityEvents.map((entry) => ({
-                            id: entry.id,
-                            type: "activity",
-                            createdAt: entry.createdAt,
-                            action: entry.action,
-                            changes: entry.changes,
-                            user: entry.user || null,
-                        }));
-                    })
-                    : Promise.resolve([] as any[]),
-                getWhatsAppTranscriptOnDemandEligibility(trimmedConversationId)
-                    .catch(() => ({
-                        success: false as const,
-                        enabled: false as const,
-                        reason: "Failed to resolve eligibility.",
-                    })),
-            ]);
-
-            const messageWindow: ConversationWorkspaceMessageWindow = {
-                oldestCursor: includeMessages ? (buildMessageCursorFromMessage(messages[0]) || null) : null,
-                newestCursor: includeMessages ? (buildMessageCursorFromMessage(messages[messages.length - 1]) || null) : null,
-                count: includeMessages ? messages.length : 0,
-                requestedLimit: messageLimit,
-            };
-
-            console.log("[perf:conversations.workspace_core_window]", JSON.stringify({
+            return loadConversationWorkspaceCore({
                 traceId,
+                location,
                 conversationId: trimmedConversationId,
+                metadata,
                 includeMessages,
                 includeActivity,
                 messageLimit,
-                activeRefreshMessageLimit: refreshMode === "active_refresh" ? messageLimit : undefined,
                 activityLimit,
-                activityRefreshMode,
                 refreshMode,
                 messageMetadataMode,
-                reusedConversationContext: includeMessages,
-                message_count: messageWindow.count,
-                returnedMessageCount: messageWindow.count,
-                activity_count: Array.isArray(activityTimeline) ? activityTimeline.length : 0,
-            }));
-
-            return {
-                success: true as const,
-                traceId,
-                conversationHeader: metadata.conversationHeader,
-                messages,
-                activityTimeline,
-                transcriptEligibility,
-                freshness: metadata.freshness,
-                messageWindow,
-            };
+                activityBeforeCursor: options?.activityBeforeCursor || null,
+                dependencies: {
+                    resolveTranscriptVisibilityAccess,
+                    parseLegacyCrmLeadNotificationEmail,
+                    getTranscriptEligibility: getWhatsAppTranscriptOnDemandEligibility,
+                },
+            });
         });
     } catch (error: any) {
         console.error("[getConversationWorkspaceCore] Error:", error);
