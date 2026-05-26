@@ -211,6 +211,35 @@ export async function mapConversationListSnapshotRows(args: {
     return args.rows.map((row: any) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage));
 }
 
+export async function hydrateRankedConversationRows(args: {
+    location: ConversationRowMapperLocation & { id: string };
+    rankedConversationIds: string[];
+}) {
+    const fetchedRows = await db.conversation.findMany({
+        where: {
+            id: { in: args.rankedConversationIds },
+        },
+        include: {
+            contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } },
+        },
+    });
+
+    const dealMap = await buildActiveDealMapForConversationRows(args.location.id, fetchedRows);
+    const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
+
+    const rankIndex = new Map<string, number>();
+    args.rankedConversationIds.forEach((id, idx) => rankIndex.set(id, idx));
+
+    const sortedRows = fetchedRows.sort((a, b) => {
+        const left = rankIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const right = rankIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        if (left !== right) return left - right;
+        return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
+    });
+
+    return sortedRows.map((row) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage));
+}
+
 export async function queryConversationListDelta(args: {
     location: ConversationRowMapperLocation & { id: string };
     status: Exclude<ConversationListStatus, "tasks">;

@@ -42,6 +42,7 @@ import {
     decodeConversationDeltaCursor,
     encodeConversationDeltaCursor,
     getCachedConversationListSnapshot,
+    hydrateRankedConversationRows,
     mapConversationListSnapshotRows,
     queryConversationListDelta,
     queryConversationListSnapshot,
@@ -11684,48 +11685,16 @@ export async function searchConversations(query: string, options?: { limit?: num
             };
         }
 
-        const fetchedRows = await db.conversation.findMany({
-            where: {
-                id: { in: rankedConversationIds },
-            },
-            include: {
-                contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } },
-            },
-        });
-
-        const activeDeals = await db.dealContext.findMany({
-            where: {
-                locationId: location.id,
-                stage: "ACTIVE",
-                conversationIds: {
-                    hasSome: fetchedRows.map((row) => row.ghlConversationId),
-                },
-            },
-            select: { id: true, title: true, conversationIds: true },
-        });
-
-        const dealMap = new Map<string, { id: string; title: string }>();
-        for (const deal of activeDeals) {
-            for (const conversationId of deal.conversationIds) {
-                dealMap.set(conversationId, { id: deal.id, title: deal.title });
-            }
-        }
-        const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(location.id);
-
-        const rankIndex = new Map<string, number>();
-        rankedConversationIds.forEach((id, idx) => rankIndex.set(id, idx));
-        const sortedRows = fetchedRows.sort((a, b) => {
-            const left = rankIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-            const right = rankIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-            if (left !== right) return left - right;
-            return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
+        const conversations = await hydrateRankedConversationRows({
+            location,
+            rankedConversationIds,
         });
 
         return {
             success: true,
             traceId,
-            conversations: sortedRows.map((row) => mapConversationRowToUi(row, location, dealMap, locationDefaultReplyLanguage)),
-            total: sortedRows.length,
+            conversations,
+            total: conversations.length,
             hasMore: false,
             nextCursor: null,
             pageSize: limit,
