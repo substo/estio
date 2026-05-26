@@ -13,7 +13,7 @@ import { syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
+import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
@@ -51,6 +51,7 @@ import {
     isLikelyGhlConversationId,
     resolveConversationReference,
 } from "@/lib/conversations/identity";
+import { mapConversationRowToUi } from "@/lib/conversations/conversation-row-mapper";
 import { collectDealConversationReferences, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
@@ -1550,43 +1551,6 @@ async function getAuthenticatedLocationExternal() {
 // Backward compatibility for existing action implementations.
 async function getAuthenticatedLocation() {
     return getAuthenticatedLocationExternal();
-}
-
-function mapConversationRowToUi(
-    c: any,
-    location: { id?: string | null; ghlLocationId?: string | null },
-    dealMap?: Map<string, { id: string; title: string }>,
-    locationDefaultReplyLanguage?: string | null,
-) {
-    return {
-        id: c.id,
-        legacyConversationId: c.ghlConversationId || null,
-        providerConversationId: isLikelyGhlConversationId(c.ghlConversationId) ? c.ghlConversationId : null,
-        ghlConversationId: isLikelyGhlConversationId(c.ghlConversationId) ? c.ghlConversationId : null,
-        contactId: c.contactId,
-        legacyContactId: c.contact?.ghlContactId || null,
-        providerContactId: c.contact?.ghlContactId || null,
-        contactName: c.contact?.name || "Unknown",
-        contactPhone: c.contact?.phone || undefined,
-        contactEmail: c.contact?.email || undefined,
-        contactPreferredLanguage: c.contact?.preferredLang || null,
-        replyLanguageOverride: c.replyLanguageOverride || null,
-        locationDefaultReplyLanguage: locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
-        detectedThreadLanguage: c.detectedThreadLanguage || null,
-        detectedThreadLanguageConfidence: Number.isFinite(Number(c.detectedThreadLanguageConfidence))
-            ? Number(c.detectedThreadLanguageConfidence)
-            : null,
-        lastMessageBody: c.lastMessageBody || "",
-        lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
-        unreadCount: c.unreadCount,
-        status: c.status as any,
-        type: c.lastMessageType || 'TYPE_SMS',
-        lastMessageType: c.lastMessageType || undefined,
-        locationId: location.id || location.ghlLocationId || "",
-        activeDealId: dealMap?.get(c.id)?.id || dealMap?.get(c.ghlConversationId)?.id,
-        activeDealTitle: dealMap?.get(c.id)?.title || dealMap?.get(c.ghlConversationId)?.title,
-        suggestedActions: c.suggestedActions || [],
-    } satisfies Conversation;
 }
 
 function buildConversationStatusWhere(status: 'active' | 'archived' | 'trash' | 'tasks' | 'all', locationId: string) {
