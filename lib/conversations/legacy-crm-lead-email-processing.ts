@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
+import { createParsedLeadForLocation } from "@/lib/conversations/lead-import-service";
 
 type ParsedLeadData = any;
 
@@ -638,11 +639,10 @@ export async function processLegacyCrmLeadEmailForLocation(args: {
     }
 
     try {
-        const { createParsedLead } = await import("@/app/(main)/admin/conversations/actions");
-        const importResult = await createParsedLead(
+        const importResult = await createParsedLeadForLocation(
             parsed.parsedLeadData,
             parsed.bodyText,
-            { locationOverride: { ...(location as any), id: locationId }, skipAuthUserLookup: true }
+            { location: { ...(location as any), id: locationId }, preferredUserId: null }
         );
 
         if (!importResult?.success) {
