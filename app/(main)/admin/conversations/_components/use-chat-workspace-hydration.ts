@@ -568,12 +568,21 @@ export function useChatWorkspaceHydration({
         // Debounce network requests to prevent request stampede during rapid
         // conversation switching. When clicking through 5 conversations in
         // quick succession, only the final one fires server requests.
-        // Cached conversations skip the debounce (instant render above, then
-        // immediate background refresh here).
+        // Cached conversations already rendered above; do not run another
+        // initial hydration load on selection because it can contend with
+        // focus-return polling and make previously opened threads look blocked.
         const WORKSPACE_NETWORK_DEBOUNCE_MS = cachedSnapshot ? 0 : 150;
         const networkDebounceTimer = setTimeout(() => {
             if (cancelled || activeIdRef.current !== selectedConversationId) return;
-            void loadWorkspaceCore();
+            if (!cachedSnapshot) {
+                void loadWorkspaceCore();
+            } else {
+                trackClientRequest("workspace_core_cache_reuse", {
+                    conversationId: selectedConversationId,
+                    requestedInitialLimit: cachedSnapshot.hydration?.requestedLimit || null,
+                    message_count: Array.isArray(cachedSnapshot.messages) ? cachedSnapshot.messages.length : 0,
+                });
+            }
             if (cachedSidebarSnapshot) {
                 trackClientMetric("sidebar_contact_ready_ms", 0, {
                     conversationId: selectedConversationId,
