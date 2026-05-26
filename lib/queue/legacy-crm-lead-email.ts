@@ -54,7 +54,7 @@ export async function initLegacyCrmLeadEmailWorker() {
         const worker = new Worker<LegacyCrmLeadEmailJobData>(
             QUEUE_NAME,
             async (job: any) => {
-                const { processLegacyCrmLeadEmailForLocation } = await import('@/app/(main)/admin/conversations/actions');
+                const { processLegacyCrmLeadEmailForLocation } = await import('@/lib/conversations/legacy-crm-lead-email-processing');
 
                 const result = await processLegacyCrmLeadEmailForLocation({
                     locationId: job.data.locationId,
@@ -119,7 +119,7 @@ export async function enqueueLegacyCrmLeadEmailProcessing(data: LegacyCrmLeadEma
         console.warn('[Queue] Failed to enqueue legacy CRM lead email job, falling back to inline processing:', queueError);
 
         try {
-            const { processLegacyCrmLeadEmailForLocation } = await import('@/app/(main)/admin/conversations/actions');
+            const { processLegacyCrmLeadEmailForLocation } = await import('@/lib/conversations/legacy-crm-lead-email-processing');
             const result = await processLegacyCrmLeadEmailForLocation({
                 locationId: data.locationId,
                 messageId: data.messageId,
