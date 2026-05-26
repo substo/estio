@@ -420,7 +420,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [loadedChatId, setLoadedChatId] = useState<string | null>(null);
 
     const isDealLoading = loadingDealContext || (!!activeDealId && activeDealId !== loadedDealId);
-    const isChatLoading = loadingMessages || (!!activeId && activeId !== loadedChatId);
+    const isChatLoading = (loadingMessages && messages.length === 0) || (!!activeId && activeId !== loadedChatId);
 
     useEffect(() => {
         activeDealIdRef.current = activeDealId;
