@@ -9,7 +9,7 @@ import { createWorkspaceCoreSnapshot, createWorkspaceHydrationState, type Worksp
 import { createDealWorkspaceCoreSnapshot, createDealWorkspaceHydrationState, type DealWorkspaceCoreSnapshot } from './use-deal-workspace-hydration';
 import type { WorkspaceSidebarSnapshot } from './use-chat-workspace-hydration';
 
-const BACKGROUND_PREFETCH_LIMIT = 3;
+const BACKGROUND_PREFETCH_LIMIT = 1;
 
 type UseConversationWorkspacePrefetchArgs = {
     viewMode: 'chats' | 'deals';
@@ -104,6 +104,7 @@ export function useConversationWorkspacePrefetch({
                 messageLimit: prefetchedLimit,
                 activityLimit: workspaceActivityLimit,
                 messageMetadataMode: "firstPaint",
+                refreshMode: "prefetch",
             });
             if (!workspace?.success) return;
 
@@ -214,6 +215,8 @@ export function useConversationWorkspacePrefetch({
 
     useEffect(() => {
         if (viewMode !== 'chats') return;
+        if (activeId && !getCachedWorkspaceCoreSnapshot(activeId)) return;
+        if (activeId && isActiveChatWorkspaceBusy()) return;
 
         const candidateIds = conversations
             .filter((conversation) => conversation.id !== activeId)
@@ -247,7 +250,7 @@ export function useConversationWorkspacePrefetch({
                 (window as any).cancelIdleCallback(idleHandle);
             }
         };
-    }, [activeId, conversations, prefetchWorkspaceCore, prefetchWorkspaceSidebar, viewMode]);
+    }, [activeId, conversations, getCachedWorkspaceCoreSnapshot, isActiveChatWorkspaceBusy, prefetchWorkspaceCore, prefetchWorkspaceSidebar, viewMode]);
 
     useEffect(() => {
         if (viewMode !== 'deals') return;

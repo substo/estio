@@ -1714,7 +1714,7 @@ const MAX_LIST_DELTA_LIMIT = 400;
 type ConversationWorkspaceCoreOptions = Pick<ConversationWorkspaceOptions, "includeMessages" | "includeActivity" | "messageLimit" | "activityLimit"> & {
     activityBeforeCursor?: string | null;
     messageMetadataMode?: "full" | "firstPaint";
-    refreshMode?: "initial_hydration" | "active_refresh" | "deferred_activity" | "default";
+    refreshMode?: "initial_hydration" | "active_refresh" | "deferred_activity" | "prefetch" | "default";
 };
 
 export async function getConversationWorkspaceCore(

@@ -57,7 +57,7 @@ export async function loadConversationWorkspaceCore(args: {
     messageLimit: number;
     activityLimit: number;
     activityBeforeCursor?: string | null;
-    refreshMode: "initial_hydration" | "active_refresh" | "deferred_activity" | "default";
+    refreshMode: "initial_hydration" | "active_refresh" | "deferred_activity" | "prefetch" | "default";
     messageMetadataMode: "full" | "firstPaint";
     dependencies: WorkspaceCoreLoadingDependencies;
 }) {
@@ -65,7 +65,10 @@ export async function loadConversationWorkspaceCore(args: {
     const activityRefreshMode = args.includeActivity
         ? (args.includeMessages ? "with_messages" : "activity_only")
         : "skipped";
-    const transcriptEligibilityDeferred = args.refreshMode === "initial_hydration"
+    const transcriptEligibilityDeferred = (
+        args.refreshMode === "initial_hydration"
+        || args.refreshMode === "prefetch"
+    )
         && args.messageMetadataMode === "firstPaint"
         && !args.includeActivity;
 
