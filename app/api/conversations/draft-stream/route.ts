@@ -60,11 +60,7 @@ export async function POST(req: NextRequest) {
         hasToken: !!location.ghlAccessToken,
     });
 
-    if (!location.ghlAccessToken) {
-        return NextResponse.json({ success: false, error: "Unauthorized or GHL not connected" }, { status: 401 });
-    }
-
-    if (!location.ghlLocationId) {
+    if (location.ghlAccessToken && !location.ghlLocationId) {
         return NextResponse.json({ success: false, error: "Misconfigured: Location has no GHL Location ID" }, { status: 400 });
     }
 
@@ -87,9 +83,9 @@ export async function POST(req: NextRequest) {
         select: { ghlContactId: true },
     });
 
-    if (existingContact?.ghlContactId) {
+    if (location.ghlAccessToken && existingContact?.ghlContactId) {
         await ensureLocalContactSynced(existingContact.ghlContactId, location.id, location.ghlAccessToken);
-    } else if (!existingContact) {
+    } else if (location.ghlAccessToken && !existingContact) {
         await ensureLocalContactSynced(contactId, location.id, location.ghlAccessToken);
     }
     logDraftStreamTiming("route_stream_contact_sync_end", {
@@ -138,7 +134,7 @@ export async function POST(req: NextRequest) {
                     conversationId,
                     contactId,
                     locationId: location.id,
-                    accessToken: location.ghlAccessToken!,
+                    accessToken: location.ghlAccessToken || "",
                     agentName,
                     businessName: location.name || undefined,
                     instruction,
