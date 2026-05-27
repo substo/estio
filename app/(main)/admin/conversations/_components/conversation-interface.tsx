@@ -201,6 +201,21 @@ function estimateThreadViewportHeightPx(): number | null {
     return Math.max(viewportHeight - 280, 320);
 }
 
+function conversationMatchesSelection(conversation: Conversation | null | undefined, selectedId: string): boolean {
+    if (!conversation || !selectedId) return false;
+    const candidate = conversation as any;
+    return (
+        conversation.id === selectedId
+        || candidate.legacyConversationId === selectedId
+        || candidate.ghlConversationId === selectedId
+        || candidate.providerConversationId === selectedId
+    );
+}
+
+function findConversationForSelection(items: Conversation[], selectedId: string): Conversation | null {
+    return items.find((conversation) => conversationMatchesSelection(conversation, selectedId)) || null;
+}
+
 export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialDeals, featureFlags }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -688,9 +703,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         const header = snapshot.conversationHeader;
         if (header?.id) {
+            selectedConversationCacheRef.current.set(conversationId, header);
+            selectedConversationCacheRef.current.set(header.id, header);
             setConversations((prev) => {
-                if (prev.some((item) => item.id === header.id)) {
-                    return prev.map((item) => item.id === header.id ? { ...item, ...header } : item);
+                if (prev.some((item) => item.id === header.id || conversationMatchesSelection(item, conversationId))) {
+                    return prev.map((item) => (
+                        item.id === header.id || conversationMatchesSelection(item, conversationId)
+                            ? { ...item, ...header }
+                            : item
+                    ));
                 }
                 return [header, ...prev];
             });
@@ -1071,11 +1092,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
     };
 
     // Derived State
+    const activeWorkspaceSnapshot = activeId ? getCachedWorkspaceCoreSnapshot(activeId) : null;
     const activeConversation = activeId
         ? (
-            conversations.find(c => c.id === activeId)
-            || searchResults.find(c => c.id === activeId)
+            findConversationForSelection(conversations, activeId)
+            || findConversationForSelection(searchResults, activeId)
             || selectedConversationCacheRef.current.get(activeId)
+            || activeWorkspaceSnapshot?.conversationHeader
             || null
         )
         : null;
