@@ -2779,6 +2779,7 @@ async function refetchWhatsAppWebBridgeMediaAttachment(params: {
         chatId,
         limit: params.limit || 80,
         includeMedia: true,
+        targetMessageId: params.message.wamId,
     });
     const records = Array.isArray(response?.messages) ? response.messages : [];
     const matched = records.find((item: any) => String(item?.id || item?.messageId || "").trim() === params.message.wamId);

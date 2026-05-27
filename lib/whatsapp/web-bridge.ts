@@ -405,6 +405,7 @@ export async function fetchWhatsAppWebBridgeMessages(input: {
     chatId: string;
     limit?: number;
     includeMedia?: boolean;
+    targetMessageId?: string | null;
 }) {
     const session = await getReadyWhatsAppWebBridgeSession(input.locationId);
     if (!session) {
@@ -417,6 +418,8 @@ export async function fetchWhatsAppWebBridgeMessages(input: {
             chatId: input.chatId,
             limit: input.limit || 30,
             includeMedia: Boolean(input.includeMedia),
+            targetMessageId: input.targetMessageId || null,
         }),
+        timeoutMs: input.includeMedia ? 120_000 : undefined,
     });
 }

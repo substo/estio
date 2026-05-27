@@ -230,8 +230,12 @@ async function withStaleRecovery<T>(session: ManagedSession, operation: () => Pr
     }
 }
 
+function getSerializedMessageId(message: any) {
+    return message?.id?._serialized || message?.id?.id || message?.id || "";
+}
+
 async function serializeMessage(message: any, options?: { includeMedia?: boolean }) {
-    const id = message?.id?._serialized || message?.id?.id || message?.id || "";
+    const id = getSerializedMessageId(message);
     const messageType = String(message?.type || "text");
     const caption = message?._data?.caption || "";
     const remoteJid = String(message?.fromMe ? message?.to : message?.from || "").trim();
@@ -566,6 +570,7 @@ async function fetchMessages(sessionId: string, payload: any) {
 
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
+    const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
     const messages = await withStaleRecovery(session, async () => {
         const chat = await withTimeout(
             session.client.getChatById(chatId),
@@ -578,7 +583,10 @@ async function fetchMessages(sessionId: string, payload: any) {
             `WhatsApp fetch messages ${sessionId}`
         );
     });
-    return Promise.all((messages || []).map((message: any) => withStaleRecovery(session, () => serializeMessage(message, { includeMedia }))));
+    return Promise.all((messages || []).map((message: any) => {
+        const shouldIncludeMedia = includeMedia && (!targetMessageId || getSerializedMessageId(message) === targetMessageId);
+        return withStaleRecovery(session, () => serializeMessage(message, { includeMedia: shouldIncludeMedia }));
+    }));
 }
 
 async function resolveChatForPhone(sessionId: string, payload: any) {
