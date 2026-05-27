@@ -183,6 +183,7 @@ interface ConversationInterfaceProps {
         nextCursor: string | null;
         deltaCursor?: string | null;
     };
+    initialSelectedConversationId?: string | null;
     initialDeals?: any[];
     featureFlags: ConversationFeatureFlags;
 }
@@ -216,7 +217,7 @@ function findConversationForSelection(items: Conversation[], selectedId: string)
     return items.find((conversation) => conversationMatchesSelection(conversation, selectedId)) || null;
 }
 
-export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialDeals, featureFlags }: ConversationInterfaceProps) {
+export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialSelectedConversationId, initialDeals, featureFlags }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -303,7 +304,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     );
 
     // Initialize Active ID from URL
-    const requestedInitialActiveId = getSearchParam('id');
+    const requestedInitialActiveId = getSearchParam('id') || initialSelectedConversationId || null;
     const initialActiveId = requestedInitialActiveId
         ? (initialConversations.find((conversation: any) =>
             conversation.id === requestedInitialActiveId

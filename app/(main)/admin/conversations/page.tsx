@@ -58,6 +58,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
                             nextCursor: initialConversationsData.nextCursor || null,
                             deltaCursor: initialConversationsData.deltaCursor || null,
                         }}
+                        initialSelectedConversationId={selectedConversationId || null}
                         initialDeals={initialDealsData}
                         featureFlags={featureFlags}
                     />
