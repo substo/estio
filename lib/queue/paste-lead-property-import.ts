@@ -4,6 +4,7 @@ import { importOldCrmPropertyToLocalDb } from "@/lib/crm/old-crm-property-import
 import { normalizeOldCrmPropertyPullError, type OldCrmPropertyPullError } from "@/lib/crm/old-crm-property-pull-service";
 import { getOldCrmImportCapabilityForUser, type LegacyCrmRefCandidate } from "@/lib/crm/old-crm-import";
 import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
+import { createPasteLeadStatusRecorder } from "@/lib/conversations/paste-lead-status";
 
 const REDIS_CONNECTION = {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -21,6 +22,7 @@ export interface PasteLeadPropertyImportJobData {
     oldCrmPropertyId: string;
     source: LegacyCrmRefCandidate["source"];
     queuedAt: string;
+    pasteLeadTraceId?: string;
 }
 
 export interface EnqueuePasteLeadPropertyImportInput extends Omit<PasteLeadPropertyImportJobData, "queuedAt"> {}
@@ -68,6 +70,21 @@ async function getQueueInstance() {
 function truncateJobError(error: unknown): string {
     const message = String((error as any)?.message || error || "Unknown error").replace(/\s+/g, " ").trim();
     return message.length > 220 ? `${message.slice(0, 217)}...` : message;
+}
+
+function logQueueStatus(
+    event: Parameters<ReturnType<typeof createPasteLeadStatusRecorder>>[0],
+    state: Parameters<ReturnType<typeof createPasteLeadStatusRecorder>>[1],
+    args: {
+        pasteLeadTraceId?: string;
+        detail?: string;
+        latencyMs?: number;
+    }
+) {
+    return createPasteLeadStatusRecorder({
+        pasteLeadTraceId: args.pasteLeadTraceId,
+        logPrefix: "[PasteLeadPropertyImportStatus]",
+    })(event, state, args.detail, args.latencyMs);
 }
 
 function getFailedImportConversationNoteBody(args: {
@@ -132,6 +149,7 @@ export async function handlePasteLeadPropertyImportJobFailure(args: {
     const terminalFailure = attemptsMade >= attempts || isUnrecoverableQueueError(args.err);
 
     console.error("[Queue] Paste lead property import job failed", {
+        pasteLeadTraceId: data?.pasteLeadTraceId,
         jobId: job?.id,
         attemptsMade,
         attempts,
@@ -143,6 +161,11 @@ export async function handlePasteLeadPropertyImportJobFailure(args: {
         error: errorMessage,
         errorCode: structuredError.code,
         retryable: structuredError.retryable,
+    });
+
+    logQueueStatus(terminalFailure ? "background_task_failed" : "background_task_started", terminalFailure ? "failed" : "running", {
+        pasteLeadTraceId: data?.pasteLeadTraceId,
+        detail: `${data?.publicReference || "property"}: ${errorMessage}`,
     });
 
     if (data?.conversationId && terminalFailure) {
@@ -160,6 +183,10 @@ export async function handlePasteLeadPropertyImportJobFailure(args: {
 
 export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyImportJobData) {
     const startedAt = Date.now();
+    logQueueStatus("background_task_started", "running", {
+        pasteLeadTraceId: job.pasteLeadTraceId,
+        detail: `Old CRM pull ${job.publicReference}`,
+    });
     const capability = await getOldCrmImportCapabilityForUser({
         locationId: job.locationId,
         userId: job.actorUserId,
@@ -167,6 +194,7 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
 
     if (!capability.canImportOldCrmProperties) {
         console.warn("[PasteLeadPropertyImport] Skipping job due to missing CRM capability", {
+            pasteLeadTraceId: job.pasteLeadTraceId,
             conversationId: job.conversationId,
             contactId: job.contactId,
             publicReference: job.publicReference,
@@ -174,9 +202,18 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
             errorCode: "MISSING_CRM_CONFIG",
             retryable: false,
         });
+        logQueueStatus("background_task_failed", "failed", {
+            pasteLeadTraceId: job.pasteLeadTraceId,
+            detail: `Old CRM capability missing for ${job.publicReference}`,
+            latencyMs: Date.now() - startedAt,
+        });
         return { skipped: true, reason: "missing_capability" as const };
     }
 
+    logQueueStatus("property_existing_lookup_started", "running", {
+        pasteLeadTraceId: job.pasteLeadTraceId,
+        detail: job.publicReference,
+    });
     const existingProperty = await db.property.findFirst({
         where: {
             locationId: job.locationId,
@@ -205,10 +242,21 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
             body: `Property ${job.publicReference} linked from existing app record.`,
         });
         console.log("[PasteLeadPropertyImport] Linked existing property", {
+            pasteLeadTraceId: job.pasteLeadTraceId,
             conversationId: job.conversationId,
             contactId: job.contactId,
             propertyId: existingProperty.id,
             publicReference: job.publicReference,
+            latencyMs: Date.now() - startedAt,
+        });
+        logQueueStatus("property_existing_linked", "completed", {
+            pasteLeadTraceId: job.pasteLeadTraceId,
+            detail: job.publicReference,
+            latencyMs: Date.now() - startedAt,
+        });
+        logQueueStatus("background_task_completed", "completed", {
+            pasteLeadTraceId: job.pasteLeadTraceId,
+            detail: `Old CRM pull ${job.publicReference}`,
             latencyMs: Date.now() - startedAt,
         });
         return { skipped: false, propertyId: existingProperty.id };
@@ -225,6 +273,11 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
         });
     } catch (error) {
         const structuredError = normalizeOldCrmPropertyPullError(error);
+        logQueueStatus("background_task_failed", structuredError.retryable ? "running" : "failed", {
+            pasteLeadTraceId: job.pasteLeadTraceId,
+            detail: `${job.publicReference}: ${structuredError.message}`,
+            latencyMs: Date.now() - startedAt,
+        });
         if (!structuredError.retryable) {
             const { UnrecoverableError } = await import("bullmq");
             const unrecoverableError = new UnrecoverableError(structuredError.message);
@@ -259,11 +312,23 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
     });
 
     console.log("[PasteLeadPropertyImport] Imported property in background", {
+        pasteLeadTraceId: job.pasteLeadTraceId,
         conversationId: job.conversationId,
         contactId: job.contactId,
         propertyId: imported.propertyId,
         publicReference: job.publicReference,
         warnings: imported.warnings,
+        latencyMs: Date.now() - startedAt,
+    });
+
+    logQueueStatus("property_existing_linked", "completed", {
+        pasteLeadTraceId: job.pasteLeadTraceId,
+        detail: job.publicReference,
+        latencyMs: Date.now() - startedAt,
+    });
+    logQueueStatus("background_task_completed", "completed", {
+        pasteLeadTraceId: job.pasteLeadTraceId,
+        detail: `Old CRM pull ${job.publicReference}`,
         latencyMs: Date.now() - startedAt,
     });
 
@@ -317,6 +382,10 @@ export async function enqueuePasteLeadPropertyImport(
         const queue = await getQueueInstance();
         const existingJob = await queue.getJob(jobId);
         if (existingJob) {
+            logQueueStatus("property_import_already_queued", "completed", {
+                pasteLeadTraceId: input.pasteLeadTraceId,
+                detail: input.publicReference,
+            });
             return {
                 accepted: true,
                 mode: "already-queued",
@@ -340,6 +409,11 @@ export async function enqueuePasteLeadPropertyImport(
             }
         );
 
+        logQueueStatus("property_import_queued", "completed", {
+            pasteLeadTraceId: input.pasteLeadTraceId,
+            detail: input.publicReference,
+        });
+
         return {
             accepted: true,
             mode: "queued",
@@ -354,9 +428,14 @@ export async function enqueuePasteLeadPropertyImport(
             };
         }
         console.error("[PasteLeadPropertyImport] Queue unavailable", {
+            pasteLeadTraceId: input.pasteLeadTraceId,
             conversationId: input.conversationId,
             publicReference: input.publicReference,
             error: String((error as any)?.message || error),
+        });
+        logQueueStatus("property_import_failed_to_queue", "failed", {
+            pasteLeadTraceId: input.pasteLeadTraceId,
+            detail: `${input.publicReference}: ${String((error as any)?.message || error)}`,
         });
         return {
             accepted: false,

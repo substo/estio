@@ -17,6 +17,10 @@ import {
     inferLeadContactRole,
     buildStructuredLeadDisplayName,
 } from "@/lib/contacts/name-builder";
+import {
+    createPasteLeadStatusRecorder,
+    type PasteLeadImportStatus,
+} from "@/lib/conversations/paste-lead-status";
 
 export type LeadImportParsedData = {
     contact?: {
@@ -50,6 +54,8 @@ export type CreateParsedLeadForLocationOptions = {
     location: LeadImportLocationContext;
     preferredUserId?: string | null;
     parseTrace?: any;
+    pasteLeadTraceId?: string;
+    initialStatuses?: PasteLeadImportStatus[];
     orchestrateImportedLead?: (conversationId: string, contactId: string) => Promise<void>;
 };
 
@@ -62,6 +68,10 @@ export type CreateParsedLeadImportResult =
         action: "replied" | "imported";
         backgroundJobsQueued: string[];
         backgroundJobsSkipped: string[];
+        pasteLeadTraceId?: string;
+        importLatencyMs?: number;
+        totalLatencyMs?: number;
+        statuses?: PasteLeadImportStatus[];
         error?: undefined;
     }
     | {
@@ -73,6 +83,10 @@ export type CreateParsedLeadImportResult =
         action?: "replied" | "imported";
         backgroundJobsQueued?: string[];
         backgroundJobsSkipped?: string[];
+        pasteLeadTraceId?: string;
+        importLatencyMs?: number;
+        totalLatencyMs?: number;
+        statuses?: PasteLeadImportStatus[];
     };
 
 const REQUIREMENT_DISTRICTS = ["Paphos", "Nicosia", "Famagusta", "Limassol", "Larnaca"] as const;
@@ -88,8 +102,16 @@ const PASTE_LEAD_FIRST_OUTREACH_SUGGESTION = [
     "Ask whether they need more details or would like to arrange a viewing only when that fits the lead context, say I am here to help with any questions, and do not mention import/internal notes.",
 ].join(" ");
 
-function runDetachedTask(taskName: string, task: () => Promise<void>) {
-    void task().catch((error) => {
+function runDetachedTask(taskName: string, task: () => Promise<void>, options?: {
+    pasteLeadTraceId?: string;
+    emitStatus?: ReturnType<typeof createPasteLeadStatusRecorder>;
+}) {
+    const startedAt = Date.now();
+    options?.emitStatus?.("background_task_started", "running", taskName);
+    void task().then(() => {
+        options?.emitStatus?.("background_task_completed", "completed", taskName, Date.now() - startedAt);
+    }).catch((error) => {
+        options?.emitStatus?.("background_task_failed", "failed", `${taskName}: ${String(error?.message || error)}`, Date.now() - startedAt);
         console.error(`[DetachedTask:${taskName}] Failed:`, error);
     });
 }
@@ -428,6 +450,13 @@ export async function createParsedLeadForLocation(
     const backgroundJobsQueued: string[] = [];
     const backgroundJobsSkipped: string[] = [];
     const preferredUserId = options.preferredUserId ?? null;
+    const pasteLeadTraceId = options.pasteLeadTraceId;
+    const statuses: PasteLeadImportStatus[] = [...(options.initialStatuses || [])];
+    const emitStatus = createPasteLeadStatusRecorder({
+        pasteLeadTraceId,
+        statuses,
+        logPrefix: "[PasteLeadStatus]",
+    });
 
     try {
         if (data.contact && data.contact.phone) {
@@ -460,6 +489,7 @@ export async function createParsedLeadForLocation(
 
         const preferredChannelType = resolveInitialLeadChannelType(location, data);
 
+        emitStatus("contact_lookup_started", "running");
         if (data.contact?.phone) {
             const phone = data.contact.phone.replace(/\D/g, "");
             const existing = await db.contact.findFirst({
@@ -582,6 +612,7 @@ export async function createParsedLeadForLocation(
 
         if (contactId) {
             await updateExistingContact(contactId);
+            emitStatus("contact_updated", "completed", contactId);
         } else {
             if (data.internalNotes) contactData.notes = data.internalNotes;
             if (data.internalNotes) contactData.requirementOtherDetails = data.internalNotes;
@@ -589,6 +620,7 @@ export async function createParsedLeadForLocation(
                 const newContact = await db.contact.create({ data: contactData });
                 contactId = newContact.id;
                 isNewContact = true;
+                emitStatus("contact_created", "completed", contactId);
             } catch (createErr: any) {
                 const isUniqueConstraint =
                     createErr?.code === 'P2002' ||
@@ -619,6 +651,7 @@ export async function createParsedLeadForLocation(
                 contactId = duplicateContact.id;
                 isNewContact = false;
                 await updateExistingContact(contactId);
+                emitStatus("contact_updated", "completed", contactId);
             }
         }
 
@@ -632,7 +665,7 @@ export async function createParsedLeadForLocation(
                     event: isNewContact ? 'create' : 'update',
                     preferredUserId
                 });
-            });
+            }, { pasteLeadTraceId, emitStatus });
         }
 
         let conversation = await db.conversation.findFirst({
@@ -655,6 +688,7 @@ export async function createParsedLeadForLocation(
                 }
             });
             conversationWasCreated = true;
+            emitStatus("conversation_created", "completed", conversation.id);
         } else {
             const conversationUpdateData: Prisma.ConversationUpdateInput = {};
             if (
@@ -672,6 +706,9 @@ export async function createParsedLeadForLocation(
                     where: { id: conversation.id },
                     data: conversationUpdateData,
                 });
+                emitStatus("conversation_updated", "completed", conversation.id);
+            } else {
+                emitStatus("conversation_updated", "completed", conversation.id);
             }
         }
 
@@ -686,13 +723,20 @@ export async function createParsedLeadForLocation(
                     });
                     console.log(`[PasteLeadFastPath] Adjusted conversation ${conversation.id} channel ${preferredChannelType} -> ${resolvedType}`);
                 }
-            });
+            }, { pasteLeadTraceId, emitStatus });
         }
 
         if (contactId) {
             const parseTrace = options.parseTrace;
             const legacyCrmRefCandidates = extractLegacyCrmRefCandidates(leadResolutionText);
             const legacyImportActorUserId = preferredUserId;
+            if (legacyCrmRefCandidates.length > 0) {
+                emitStatus(
+                    "property_ref_detected",
+                    "completed",
+                    legacyCrmRefCandidates.map((candidate) => candidate.publicReference).join(", ")
+                );
+            }
             const legacyCrmCapability = legacyCrmRefCandidates.length > 0 && legacyImportActorUserId
                 ? await getOldCrmImportCapabilityForUser({
                     locationId: location.id,
@@ -732,6 +776,7 @@ export async function createParsedLeadForLocation(
 
                 if (legacyCrmRefCandidates.length > 0) {
                     const refs = legacyCrmRefCandidates.map((candidate) => candidate.publicReference);
+                    emitStatus("property_existing_lookup_started", "running", refs.join(", "));
                     const existingProperties = await db.property.findMany({
                         where: {
                             locationId: location.id,
@@ -765,6 +810,7 @@ export async function createParsedLeadForLocation(
                             property,
                             inferredStatus,
                         });
+                        emitStatus("property_existing_linked", "completed", property.reference || property.id);
                     }
 
                     const missingCandidates = legacyCrmRefCandidates.filter(
@@ -793,15 +839,21 @@ export async function createParsedLeadForLocation(
                                     publicReference: candidate.publicReference,
                                     oldCrmPropertyId: candidate.oldCrmPropertyId,
                                     source: candidate.source,
+                                    pasteLeadTraceId,
                                 });
 
                                 if (!enqueueResult.accepted) {
+                                    emitStatus("property_import_failed_to_queue", "failed", `${candidate.publicReference}: ${enqueueResult.error || enqueueResult.mode}`);
                                     console.warn("[PasteLeadFastPath] Legacy property import queue rejected job", {
                                         conversationId: conversation.id,
                                         reference: candidate.publicReference,
                                         mode: enqueueResult.mode,
                                         error: enqueueResult.error || null,
                                     });
+                                } else if (enqueueResult.mode === "already-queued") {
+                                    emitStatus("property_import_already_queued", "completed", candidate.publicReference);
+                                } else {
+                                    emitStatus("property_import_queued", "completed", candidate.publicReference);
                                 }
                             }
                         }
@@ -813,7 +865,7 @@ export async function createParsedLeadForLocation(
                     matchedPropertyId: matchedProperty?.id || null,
                     tracePersisted: !!parseTrace,
                 }));
-            });
+            }, { pasteLeadTraceId, emitStatus });
         }
 
         const activityNoteBody = data.internalNotes?.trim();
@@ -829,6 +881,7 @@ export async function createParsedLeadForLocation(
                     source: 'system'
                 }
             });
+            emitStatus("message_created", "completed", "internal note");
         }
 
         if (data.messageContent) {
@@ -844,6 +897,7 @@ export async function createParsedLeadForLocation(
                     source: data.source || 'paste_import'
                 }
             });
+            emitStatus("message_created", "completed", "inbound message");
 
             await updateConversationLastMessage({
                 conversationId: conversation.id,
@@ -855,15 +909,19 @@ export async function createParsedLeadForLocation(
 
             backgroundJobsQueued.push("orchestration");
             if (options.orchestrateImportedLead) {
+                emitStatus("orchestration_queued", "running", conversation.id);
                 runDetachedTask(`paste_lead_orchestrate:${conversation.id}`, async () => {
                     await options.orchestrateImportedLead!(conversation.id, contactId!);
-                });
+                    emitStatus("orchestration_completed", "completed", conversation.id);
+                }, { pasteLeadTraceId, emitStatus });
             } else {
                 backgroundJobsSkipped.push("orchestration:no_callback");
             }
 
             const importLatencyMs = Date.now() - importStartedAt;
+            emitStatus("paste_lead_import_completed", "completed", conversation.id, importLatencyMs);
             console.log("[PasteLeadFastPath] Imported lead with inbound message", JSON.stringify({
+                pasteLeadTraceId,
                 conversationId: conversation.id,
                 ghlConversationId: conversation.ghlConversationId,
                 contactId,
@@ -880,6 +938,9 @@ export async function createParsedLeadForLocation(
                 action: 'replied',
                 backgroundJobsQueued,
                 backgroundJobsSkipped,
+                pasteLeadTraceId,
+                importLatencyMs,
+                statuses,
             };
         }
 
@@ -895,6 +956,7 @@ export async function createParsedLeadForLocation(
                     source: 'system'
                 }
             });
+            emitStatus("message_created", "completed", "internal note");
         }
 
         if (conversationWasCreated && preferredChannelType === 'TYPE_WHATSAPP' && conversation.lastMessageType !== 'TYPE_WHATSAPP') {
@@ -905,7 +967,9 @@ export async function createParsedLeadForLocation(
         }
 
         const importLatencyMs = Date.now() - importStartedAt;
+        emitStatus("paste_lead_import_completed", "completed", conversation.id, importLatencyMs);
         console.log("[PasteLeadFastPath] Imported notes-only lead", JSON.stringify({
+            pasteLeadTraceId,
             conversationId: conversation.id,
             ghlConversationId: conversation.ghlConversationId,
             contactId,
@@ -922,9 +986,21 @@ export async function createParsedLeadForLocation(
             action: 'imported',
             backgroundJobsQueued,
             backgroundJobsSkipped,
+            pasteLeadTraceId,
+            importLatencyMs,
+            statuses,
         };
     } catch (e: any) {
+        emitStatus("paste_lead_import_failed", "failed", e?.message || String(e), Date.now() - importStartedAt);
         console.error("createParsedLead Error:", e);
-        return { success: false, error: e.message };
+        return {
+            success: false,
+            error: e.message,
+            pasteLeadTraceId,
+            importLatencyMs: Date.now() - importStartedAt,
+            backgroundJobsQueued,
+            backgroundJobsSkipped,
+            statuses,
+        };
     }
 }

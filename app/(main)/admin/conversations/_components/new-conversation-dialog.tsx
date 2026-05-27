@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { MessageCirclePlus, Loader2, Phone, Users, Search, CheckCircle2, MessageCircle, ArrowRight } from 'lucide-react';
+import { MessageCirclePlus, Loader2, Phone, Users, Search, CheckCircle2, MessageCircle, ArrowRight, Circle, XCircle } from 'lucide-react';
 import { fetchWhatsAppChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, getPasteLeadImportCapability, type ParsedLeadData } from '../actions';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,6 +18,12 @@ import { AiModelSelect } from '@/components/ai/ai-model-select';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
 import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from './paste-lead-rich-text';
+import {
+    buildPasteLeadProgressSteps,
+    createPasteLeadStatus,
+    type PasteLeadImportStatus,
+    type PasteLeadProgressStep,
+} from '@/lib/conversations/paste-lead-status';
 
 
 interface WhatsAppChat {
@@ -36,6 +42,40 @@ interface NewConversationDialogProps {
     onOpenChange: (open: boolean) => void;
     onConversationCreated?: (conversationId: string) => void;
     locationId?: string; // Needed for Google Import
+}
+
+function PasteLeadProgressList({ steps }: { steps: PasteLeadProgressStep[] }) {
+    return (
+        <div className="rounded-md border bg-slate-50 p-2.5 space-y-1.5">
+            {steps.map((step) => {
+                const Icon = step.state === "completed"
+                    ? CheckCircle2
+                    : step.state === "failed"
+                        ? XCircle
+                        : step.state === "running"
+                            ? Loader2
+                            : Circle;
+                return (
+                    <div key={step.key} className="flex items-start gap-2 text-xs">
+                        <Icon className={cn(
+                            "mt-0.5 h-3.5 w-3.5 shrink-0",
+                            step.state === "completed" && "text-green-600",
+                            step.state === "failed" && "text-red-600",
+                            step.state === "running" && "animate-spin text-blue-600",
+                            step.state === "pending" && "text-slate-300",
+                            step.state === "skipped" && "text-slate-400"
+                        )} />
+                        <div className="min-w-0">
+                            <div className="font-medium text-slate-700">{step.label}</div>
+                            {step.detail && (
+                                <div className="truncate text-slate-500">{step.detail}</div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
 }
 
 export function NewConversationDialog({ open, onOpenChange, onConversationCreated, locationId }: NewConversationDialogProps) {
@@ -57,6 +97,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
     const [pasteLeadCanImportOldCrmProperties, setPasteLeadCanImportOldCrmProperties] = useState(false);
     const [selectedPasteLeadModel, setSelectedPasteLeadModel] = useState('');
+    const [pasteLeadStatuses, setPasteLeadStatuses] = useState<PasteLeadImportStatus[]>([]);
 
     // Google Contacts State
     const [googleSearch, setGoogleSearch] = useState('');
@@ -120,6 +161,33 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         return importLeadFromText(key, selectedPasteLeadModel || undefined);
     }, [selectedPasteLeadModel]);
 
+    const seedPasteLeadStatuses = useCallback((hasPreview: boolean) => {
+        const traceId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? `paste_lead_client_${crypto.randomUUID()}`
+            : `paste_lead_client_${Date.now()}`;
+        setPasteLeadStatuses([
+            createPasteLeadStatus("paste_lead_import_started", "running", { pasteLeadTraceId: traceId }),
+            createPasteLeadStatus(hasPreview ? "lead_parse_completed" : "lead_parse_started", hasPreview ? "completed" : "running", {
+                pasteLeadTraceId: traceId,
+                detail: hasPreview ? "preview cache" : undefined,
+            }),
+        ]);
+    }, []);
+
+    const applyImportResultStatuses = useCallback((res: any) => {
+        if (Array.isArray(res?.statuses) && res.statuses.length > 0) {
+            setPasteLeadStatuses(res.statuses);
+            return;
+        }
+        setPasteLeadStatuses((current) => [
+            ...current,
+            createPasteLeadStatus(res?.success ? "paste_lead_import_completed" : "paste_lead_import_failed", res?.success ? "completed" : "failed", {
+                pasteLeadTraceId: res?.pasteLeadTraceId,
+                detail: res?.error || undefined,
+            }),
+        ]);
+    }, []);
+
     const handleLeadTextareaPaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
         const html = event.clipboardData.getData("text/html");
         if (!html) return;
@@ -136,6 +204,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         );
         setLeadText(nextText);
         setParsedLead(null);
+        setPasteLeadStatuses([]);
         leadParseCacheRef.current = { key: '', result: null, promise: null };
     }, [leadText]);
 
@@ -225,6 +294,11 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         onOpenChange(false);
     };
 
+    const closeAfterStatusSettles = useCallback(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        handleClose();
+    }, [handleClose]);
+
     // Reset state when dialog opens
     useEffect(() => {
         if (open) {
@@ -233,6 +307,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
             setError(null);
             setGoogleSearch('');
             setGoogleResults([]);
+            setPasteLeadStatuses([]);
         }
     }, [open]);
 
@@ -619,12 +694,17 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             if (!leadText.trim()) return;
                                             setIsAnalyzing(true);
                                             setError(null);
-                                            const res = await requestLeadPreview(leadText);
-                                            setIsAnalyzing(false);
-                                            if (res.success && res.data) {
-                                                setParsedLead(res.data);
-                                            } else {
-                                                setError(res.error || "Failed to parse text");
+                                            try {
+                                                const res = await requestLeadPreview(leadText);
+                                                if (res.success && res.data) {
+                                                    setParsedLead(res.data);
+                                                } else {
+                                                    setError(res.error || "Failed to parse text");
+                                                }
+                                            } catch (err: any) {
+                                                setError(err?.message || "Failed to parse text");
+                                            } finally {
+                                                setIsAnalyzing(false);
                                             }
                                         }}
                                         disabled={!leadText.trim() || isAnalyzing}
@@ -640,8 +720,10 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         if (!leadText.trim()) return;
                                         setCreating(true);
                                         setError(null);
+                                        seedPasteLeadStatuses(Boolean(leadParseCacheRef.current.result?.success));
                                         try {
                                             const res = await importLeadUsingPreviewCache(leadText);
+                                            applyImportResultStatuses(res);
                                             if (res.success && res.conversationId) {
                                                 toast({
                                                     title: "Lead imported",
@@ -650,11 +732,17 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                                         : "Conversation is ready.",
                                                 });
                                                 onConversationCreated?.(res.conversationId);
-                                                handleClose();
+                                                await closeAfterStatusSettles();
                                             } else {
                                                 setError(res.error || "Failed to import lead");
                                             }
                                         } catch (err: any) {
+                                            setPasteLeadStatuses((current) => [
+                                                ...current,
+                                                createPasteLeadStatus("paste_lead_import_failed", "failed", {
+                                                    detail: err?.message || "Load failed",
+                                                }),
+                                            ]);
                                             setError(err.message);
                                         } finally {
                                             setCreating(false);
@@ -666,6 +754,9 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
                                     Import Lead
                                 </Button>
+                                {(creating || pasteLeadStatuses.length > 0) && (
+                                    <PasteLeadProgressList steps={buildPasteLeadProgressSteps(pasteLeadStatuses)} />
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -716,9 +807,12 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         size="sm"
                                         onClick={async () => {
                                             setCreating(true);
+                                            setError(null);
+                                            seedPasteLeadStatuses(true);
 
                                             try {
                                                 const res = await createParsedLead(parsedLead, leadText);
+                                                applyImportResultStatuses(res);
                                                 if (res.success && res.conversationId) {
                                                     toast({
                                                         title: "Lead imported",
@@ -727,11 +821,17 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                                             : "Conversation is ready.",
                                                     });
                                                     onConversationCreated?.(res.conversationId);
-                                                    handleClose();
+                                                    await closeAfterStatusSettles();
                                                 } else {
                                                     setError(res.error || "Failed to create conversation");
                                                 }
                                             } catch (err: any) {
+                                                setPasteLeadStatuses((current) => [
+                                                    ...current,
+                                                    createPasteLeadStatus("paste_lead_import_failed", "failed", {
+                                                        detail: err?.message || "Load failed",
+                                                    }),
+                                                ]);
                                                 setError(err.message);
                                             } finally {
                                                 setCreating(false);
@@ -743,6 +843,9 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm & Import"}
                                     </Button>
                                 </div>
+                                {(creating || pasteLeadStatuses.length > 0) && (
+                                    <PasteLeadProgressList steps={buildPasteLeadProgressSteps(pasteLeadStatuses)} />
+                                )}
                             </div>
                         )}
                     </TabsContent>

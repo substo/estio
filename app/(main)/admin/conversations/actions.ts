@@ -22,7 +22,7 @@ import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/a
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { isLocalDateTimeWithoutZone } from "@/lib/tasks/datetime-local";
@@ -148,6 +148,11 @@ import {
     processLegacyCrmLeadEmailForLocation as processLegacyCrmLeadEmailForLocationService,
 } from "@/lib/conversations/legacy-crm-lead-email-processing";
 import { createParsedLeadForLocation } from "@/lib/conversations/lead-import-service";
+import {
+    createPasteLeadStatus,
+    createPasteLeadStatusRecorder,
+    type PasteLeadImportStatus,
+} from "@/lib/conversations/paste-lead-status";
 
 import {
     extractPropertyRefsFromLeadText,
@@ -10046,6 +10051,8 @@ type CreateParsedLeadOptions = {
     skipAuthUserLookup?: boolean;
     preferredUserIdOverride?: string | null;
     parseTrace?: LeadAnalysisTrace;
+    pasteLeadTraceId?: string;
+    initialStatuses?: PasteLeadImportStatus[];
 };
 
 function resolveLeadParserModelId(modelOverride?: string) {
@@ -10329,26 +10336,58 @@ export async function getPasteLeadImportCapability() {
 }
 
 export async function importLeadFromText(text: string, modelOverride?: string) {
+    const pasteLeadTraceId = `paste_lead_${randomUUID()}`;
+    const statuses: PasteLeadImportStatus[] = [];
+    const emitStatus = createPasteLeadStatusRecorder({
+        pasteLeadTraceId,
+        statuses,
+        logPrefix: "[PasteLeadStatus]",
+    });
+
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const totalStartedAt = Date.now();
+    emitStatus("paste_lead_import_started", "running");
+    emitStatus("lead_parse_started", "running");
     const parsed = await parseLeadFromTextInternal(text, modelOverride, location);
     if (!parsed.success) {
-        return parsed;
+        const totalLatencyMs = Date.now() - totalStartedAt;
+        emitStatus("lead_parse_failed", "failed", parsed.error, totalLatencyMs);
+        emitStatus("paste_lead_import_failed", "failed", parsed.error, totalLatencyMs);
+        return {
+            ...parsed,
+            pasteLeadTraceId,
+            totalLatencyMs,
+            backgroundJobsQueued: [],
+            backgroundJobsSkipped: [],
+            statuses,
+        };
     }
+    emitStatus("lead_parse_completed", "completed", parsed.telemetry.model, parsed.telemetry.latencyMs);
 
     const importStartedAt = Date.now();
     const imported = await createParsedLead(parsed.data, parsed.normalizedInput, {
         locationOverride: location,
         parseTrace: parsed.trace,
+        pasteLeadTraceId,
+        initialStatuses: statuses,
     });
     const totalLatencyMs = Date.now() - totalStartedAt;
 
     if (!imported.success) {
-        return imported;
+        return {
+            ...imported,
+            pasteLeadTraceId,
+            parseTelemetry: parsed.telemetry,
+            parseLatencyMs: parsed.telemetry.latencyMs,
+            importLatencyMs: Date.now() - importStartedAt,
+            totalLatencyMs,
+            statuses: imported.statuses || statuses,
+        };
     }
 
     const importLatencyMs = Date.now() - importStartedAt;
     console.log("[PasteLeadFastPath] Parse+import completed", JSON.stringify({
+        pasteLeadTraceId,
         traceId: parsed.telemetry.traceId,
         model: parsed.telemetry.model,
         parseLatencyMs: parsed.telemetry.latencyMs,
@@ -10360,10 +10399,12 @@ export async function importLeadFromText(text: string, modelOverride?: string) {
 
     return {
         ...imported,
+        pasteLeadTraceId,
         parseTelemetry: parsed.telemetry,
         parseLatencyMs: parsed.telemetry.latencyMs,
         importLatencyMs,
         totalLatencyMs,
+        statuses: imported.statuses || statuses,
     };
 }
 
@@ -10372,6 +10413,14 @@ export async function createParsedLead(
     originalText: string,
     options?: CreateParsedLeadOptions
 ) {
+    const pasteLeadTraceId = options?.pasteLeadTraceId || `paste_lead_${randomUUID()}`;
+    const initialStatuses = options?.initialStatuses || [
+        createPasteLeadStatus("paste_lead_import_started", "running", { pasteLeadTraceId }),
+        createPasteLeadStatus("lead_parse_completed", "completed", {
+            pasteLeadTraceId,
+            detail: "preview cache",
+        }),
+    ];
     const location = options?.locationOverride || await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     let preferredUserId: string | null = options?.preferredUserIdOverride ?? null;
@@ -10392,6 +10441,8 @@ export async function createParsedLead(
         location,
         preferredUserId,
         parseTrace: options?.parseTrace,
+        pasteLeadTraceId,
+        initialStatuses,
         orchestrateImportedLead: async (conversationId, contactId) => {
             await orchestrateAction(conversationId, contactId);
         },
