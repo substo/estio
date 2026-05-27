@@ -1242,13 +1242,10 @@ export function ConversationInterface({ locationId, initialConversations, initia
         activeDealId,
         conversations,
         deals,
-        activeIdRef,
         activeDealIdRef,
         workspaceCoreInFlightRef,
         workspaceSidebarInFlightRef,
         dealWorkspaceCoreInFlightRef,
-        isWorkspaceHydrationBusy,
-        isConversationWorkspaceRefreshBusy,
         isDealWorkspaceHydrationBusy,
         isDealWorkspaceRefreshBusy,
         cacheWorkspaceCoreSnapshot,
@@ -1362,9 +1359,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
         setLoadedChatId(null);
         setLoadingMessages(true);
-        setMessages([]);
-        setActivityLog([]);
-        setTranscriptOnDemandEnabled(false);
         trackClientMetric("thread_shell_paint_ms", (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt, {
             conversationId: id,
             cache_hit: !!getCachedWorkspaceCoreSnapshot(id),

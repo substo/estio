@@ -16,13 +16,10 @@ type UseConversationWorkspacePrefetchArgs = {
     activeDealId: string | null;
     conversations: Conversation[];
     deals: any[];
-    activeIdRef: RefObject<string | null>;
     activeDealIdRef: RefObject<string | null>;
     workspaceCoreInFlightRef: RefObject<Set<string>>;
     workspaceSidebarInFlightRef: RefObject<Set<string>>;
     dealWorkspaceCoreInFlightRef: RefObject<Set<string>>;
-    isWorkspaceHydrationBusy: (conversationId?: string | null) => boolean;
-    isConversationWorkspaceRefreshBusy: (conversationId?: string | null) => boolean;
     isDealWorkspaceHydrationBusy: (dealId?: string | null) => boolean;
     isDealWorkspaceRefreshBusy: (dealId?: string | null) => boolean;
     cacheWorkspaceCoreSnapshot: (conversationId: string, snapshot: WorkspaceCoreSnapshot) => void;
@@ -41,13 +38,10 @@ export function useConversationWorkspacePrefetch({
     activeDealId,
     conversations,
     deals,
-    activeIdRef,
     activeDealIdRef,
     workspaceCoreInFlightRef,
     workspaceSidebarInFlightRef,
     dealWorkspaceCoreInFlightRef,
-    isWorkspaceHydrationBusy,
-    isConversationWorkspaceRefreshBusy,
     isDealWorkspaceHydrationBusy,
     isDealWorkspaceRefreshBusy,
     cacheWorkspaceCoreSnapshot,
@@ -60,14 +54,6 @@ export function useConversationWorkspacePrefetch({
     estimateThreadViewportHeightPx,
     workspaceActivityLimit,
 }: UseConversationWorkspacePrefetchArgs) {
-    const isActiveChatWorkspaceBusy = useCallback(() => {
-        const selectedConversationId = activeIdRef.current;
-        return !!selectedConversationId && (
-            isWorkspaceHydrationBusy(selectedConversationId)
-            || isConversationWorkspaceRefreshBusy(selectedConversationId)
-        );
-    }, [activeIdRef, isConversationWorkspaceRefreshBusy, isWorkspaceHydrationBusy]);
-
     const isActiveDealWorkspaceBusy = useCallback(() => {
         const selectedDealId = activeDealIdRef.current;
         return !!selectedDealId && (
@@ -79,10 +65,6 @@ export function useConversationWorkspacePrefetch({
     const prefetchWorkspaceCore = useCallback(async (conversationId: string) => {
         const normalizedConversationId = String(conversationId || "").trim();
         if (!normalizedConversationId) return;
-        if (isActiveChatWorkspaceBusy()) {
-            trackClientRequest("workspace_core_prefetch", { conversationId: normalizedConversationId, reason: "active_workspace_busy" });
-            return;
-        }
         if (getCachedWorkspaceCoreSnapshot(normalizedConversationId)) {
             trackClientRequest("workspace_core_prefetch", { conversationId: normalizedConversationId, reason: "cache_hit" });
             return;
@@ -127,15 +109,11 @@ export function useConversationWorkspacePrefetch({
         } finally {
             workspaceCoreInFlightRef.current.delete(normalizedConversationId);
         }
-    }, [cacheWorkspaceCoreSnapshot, estimateThreadViewportHeightPx, getCachedWorkspaceCoreSnapshot, isActiveChatWorkspaceBusy, trackClientRequest, workspaceActivityLimit, workspaceCoreInFlightRef]);
+    }, [cacheWorkspaceCoreSnapshot, estimateThreadViewportHeightPx, getCachedWorkspaceCoreSnapshot, trackClientRequest, workspaceActivityLimit, workspaceCoreInFlightRef]);
 
     const prefetchWorkspaceSidebar = useCallback(async (conversationId: string) => {
         const normalizedConversationId = String(conversationId || "").trim();
         if (!normalizedConversationId) return;
-        if (isActiveChatWorkspaceBusy()) {
-            trackClientRequest("workspace_sidebar_prefetch", { conversationId: normalizedConversationId, reason: "active_workspace_busy" });
-            return;
-        }
         if (getCachedWorkspaceSidebarSnapshot(normalizedConversationId)) {
             trackClientRequest("workspace_sidebar_prefetch", { conversationId: normalizedConversationId, reason: "cache_hit" });
             return;
@@ -161,7 +139,7 @@ export function useConversationWorkspacePrefetch({
         } finally {
             workspaceSidebarInFlightRef.current.delete(normalizedConversationId);
         }
-    }, [cacheWorkspaceSidebarSnapshot, getCachedWorkspaceSidebarSnapshot, isActiveChatWorkspaceBusy, trackClientRequest, workspaceSidebarInFlightRef]);
+    }, [cacheWorkspaceSidebarSnapshot, getCachedWorkspaceSidebarSnapshot, trackClientRequest, workspaceSidebarInFlightRef]);
 
     const prefetchDealWorkspaceCore = useCallback(async (dealId: string) => {
         const normalizedDealId = String(dealId || "").trim();
