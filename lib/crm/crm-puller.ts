@@ -32,35 +32,6 @@ export interface PullPropertyFromCrmContext {
     actorUserId?: string | null;
 }
 
-export async function pullPropertyFromCrm(oldPropertyId: string, userId: string) {
-    console.log(`[CRM PULL] Starting for old property ID ${oldPropertyId} by user ${userId}`);
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true },
-    });
-
-    if (!user) throw new Error("User not found");
-
-    const location = user.locations[0];
-    const crmUrl = location?.crmUrl;
-    const crmEditUrlPattern = location?.crmEditUrlPattern;
-
-    if (!location?.id || !crmUrl || !user.crmUsername || !user.crmPassword) {
-        throw new Error("Missing CRM configuration. Check location URL and user credentials.");
-    }
-
-    return pullPropertyFromCrmWithContext({
-        oldPropertyId,
-        locationId: location.id,
-        crmUrl,
-        crmUsername: user.crmUsername,
-        crmPassword: user.crmPassword,
-        crmEditUrlPattern,
-        actorUserId: user.id,
-    });
-}
-
 export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCrmContext) {
     const {
         oldPropertyId,

@@ -549,7 +549,7 @@ export async function bulkUpdateFeedInboxPropertiesAction(
 }
 
 import { pushPropertyToCrm } from "@/lib/crm/crm-pusher";
-import { pullPropertyFromCrm } from "@/lib/crm/crm-puller";
+import { pullOldCrmPropertyForManualAction } from "@/lib/crm/old-crm-property-pull-service";
 
 export async function pushToOldCrm(propertyId: string) {
     const user = await currentUser();
@@ -563,16 +563,15 @@ export async function pullFromOldCrm(oldPropertyId: string) {
     const user = await currentUser();
     if (!user) throw new Error("Unauthorized");
 
-    const result = await pullPropertyFromCrm(oldPropertyId, user.id);
+    const result = await pullOldCrmPropertyForManualAction({
+        oldCrmPropertyId,
+        clerkUserId: user.id,
+    });
     if (!result.success || !result.data?.reference) {
         return result;
     }
 
-    const dbUser = await db.user.findUnique({
-        where: { clerkId: user.id },
-        include: { locations: { select: { id: true } } },
-    });
-    const locationId = dbUser?.locations[0]?.id;
+    const locationId = result.locationId;
     if (!locationId) {
         return result;
     }
