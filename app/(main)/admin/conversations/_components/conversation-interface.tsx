@@ -385,7 +385,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [searchQuery]);
 
     const initialDealId = getSearchParam('dealId');
-    const initialUrlConversationId = getSearchParam('id');
+    const initialUrlConversationId = getSearchParam('id') || initialSelectedConversationId || null;
     const [urlConversationId, setUrlConversationId] = useState<string | null>(initialUrlConversationId);
     const urlConversationIdRef = useRef<string | null>(urlConversationId);
     
@@ -485,8 +485,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (viewMode === 'deals') return;
         if (urlConversationId) return;
         if (!activeIdRef.current) return;
+        trackClientRequest("mobile_clear_active_without_url_id", {
+            activeConversationId: activeIdRef.current,
+            initialSelectedConversationId: initialSelectedConversationId || null,
+        });
         setActiveId(null);
-    }, [isMobileViewport, viewMode, urlConversationId]);
+    }, [initialSelectedConversationId, isMobileViewport, trackClientRequest, viewMode, urlConversationId]);
 
     // Sync View Mode & Deal ID to URL
     useEffect(() => {
