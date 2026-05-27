@@ -38,6 +38,15 @@ function getAgentDraftLanguage() {
     return normalizeReplyLanguage(window.navigator.language || "") || DEFAULT_REPLY_LANGUAGE;
 }
 
+function logComposerDraftTiming(event: string, fields: Record<string, unknown> = {}) {
+    if (typeof console === "undefined") return;
+    console.info("[AI Draft Timing]", JSON.stringify({
+        event,
+        ts: new Date().toISOString(),
+        ...fields,
+    }));
+}
+
 export function useConversationComposerAiDraft({
     conversation,
     draft,
@@ -117,6 +126,12 @@ export function useConversationComposerAiDraft({
 
     const handleAiDraft = async (instructionOverride?: string) => {
         if (!onGenerateDraft || generatingDraft || isUnavailable) return;
+        const startedAt = Date.now();
+        let firstChunkMs: number | null = null;
+        logComposerDraftTiming("client_click_start", {
+            conversationId: conversation?.id || null,
+            hasInstructionOverride: !!instructionOverride,
+        });
         setGeneratingDraft(true);
         try {
             const instruction = instructionOverride || draft.trim();
@@ -128,6 +143,13 @@ export function useConversationComposerAiDraft({
                 agentDraftLanguage,
                 (chunk) => {
                     if (!chunk) return;
+                    if (firstChunkMs === null) {
+                        firstChunkMs = Date.now() - startedAt;
+                        logComposerDraftTiming("client_first_chunk", {
+                            conversationId: conversation?.id || null,
+                            firstChunkMs,
+                        });
+                    }
                     streamedBuffer += chunk;
                     onDraftChange(streamedBuffer);
                 }
@@ -137,7 +159,20 @@ export function useConversationComposerAiDraft({
             } else if (streamedBuffer) {
                 onDraftChange(streamedBuffer);
             }
+            logComposerDraftTiming("client_click_end", {
+                conversationId: conversation?.id || null,
+                elapsedMs: Date.now() - startedAt,
+                firstChunkMs,
+                receivedFinalText: !!text,
+                streamedChars: streamedBuffer.length,
+            });
         } catch (e) {
+            logComposerDraftTiming("client_click_failed", {
+                conversationId: conversation?.id || null,
+                elapsedMs: Date.now() - startedAt,
+                firstChunkMs,
+                reason: e instanceof Error ? e.message : String(e || "Unknown error"),
+            });
             console.error("Draft generation failed", e);
         } finally {
             setGeneratingDraft(false);

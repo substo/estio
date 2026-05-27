@@ -13,7 +13,7 @@ import {
     sendReply,
     createWhatsAppMediaUploadUrl,
     sendWhatsAppMediaReply,
-    generateAIDraft,
+    generateComposerAIDraft,
     setConversationReplyLanguageOverride,
     translateConversationMessage,
     translateConversationThread,
@@ -2478,9 +2478,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 mode: "chat",
                 draftLanguage,
                 onChunk,
-                generateDraft: generateAIDraft,
+                generateDraft: generateComposerAIDraft,
                 onStreamError: (streamError) => {
-                    console.warn("[AI Draft] Stream path failed, falling back to server action.", streamError);
+                    console.warn("[AI Draft] Stream path failed, falling back to fast composer action.", streamError);
                 },
             });
             if (res.reasoning) {
@@ -2551,9 +2551,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 dealId: activeDealId || undefined,
                 draftLanguage,
                 onChunk,
-                generateDraft: generateAIDraft,
+                generateDraft: generateComposerAIDraft,
                 onStreamError: (streamError) => {
-                    console.warn("[AI Draft] Deal stream path failed, falling back to server action.", streamError);
+                    console.warn("[AI Draft] Deal stream path failed, falling back to fast composer action.", streamError);
                 },
             });
             if (res.reasoning) {

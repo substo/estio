@@ -27,18 +27,38 @@ function sanitizeString(value: unknown): string | undefined {
     return trimmed || undefined;
 }
 
+function logDraftStreamTiming(event: string, fields: Record<string, unknown> = {}) {
+    console.info("[AI Draft Timing]", JSON.stringify({
+        event,
+        ts: new Date().toISOString(),
+        ...fields,
+    }));
+}
+
 export async function POST(req: NextRequest) {
+    const requestStartedAt = Date.now();
+    logDraftStreamTiming("route_stream_request_start");
+
+    const authStartedAt = Date.now();
     const locationBase = await getLocationContext();
     if (!locationBase) {
         return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
+    logDraftStreamTiming("route_stream_auth_end", {
+        elapsedMs: Date.now() - authStartedAt,
+    });
 
     let location = locationBase;
+    const tokenRefreshStartedAt = Date.now();
     try {
         location = await refreshGhlAccessToken(locationBase);
     } catch (error) {
         console.warn("[AI Draft Stream] Failed to refresh token; using existing location token", error);
     }
+    logDraftStreamTiming("route_stream_token_refresh_end", {
+        elapsedMs: Date.now() - tokenRefreshStartedAt,
+        hasToken: !!location.ghlAccessToken,
+    });
 
     if (!location.ghlAccessToken) {
         return NextResponse.json({ success: false, error: "Unauthorized or GHL not connected" }, { status: 401 });
@@ -61,6 +81,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: "conversationId and contactId are required" }, { status: 400 });
     }
 
+    const contactSyncStartedAt = Date.now();
     const existingContact = await db.contact.findFirst({
         where: { OR: [{ id: contactId }, { ghlContactId: contactId }], locationId: location.id },
         select: { ghlContactId: true },
@@ -71,7 +92,14 @@ export async function POST(req: NextRequest) {
     } else if (!existingContact) {
         await ensureLocalContactSynced(contactId, location.id, location.ghlAccessToken);
     }
+    logDraftStreamTiming("route_stream_contact_sync_end", {
+        conversationId,
+        elapsedMs: Date.now() - contactSyncStartedAt,
+        hadExistingContact: !!existingContact,
+        synced: !!location.ghlAccessToken && (!!existingContact?.ghlContactId || !existingContact),
+    });
 
+    const userLookupStartedAt = Date.now();
     const { userId } = await auth();
     let agentName: string | undefined;
     if (userId) {
@@ -84,10 +112,17 @@ export async function POST(req: NextRequest) {
             agentName = agentUser.name || fullName || agentUser.email || undefined;
         }
     }
+    logDraftStreamTiming("route_stream_user_lookup_end", {
+        conversationId,
+        elapsedMs: Date.now() - userLookupStartedAt,
+        hasAgentName: !!agentName,
+    });
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
         async start(controller) {
+            const generationStartedAt = Date.now();
+            let firstChunkMs: number | null = null;
             const push = (payload: Record<string, unknown>) => {
                 controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
             };
@@ -114,15 +149,38 @@ export async function POST(req: NextRequest) {
                     stream: true,
                     onToken: (chunk) => {
                         if (!chunk) return;
+                        if (firstChunkMs === null) {
+                            firstChunkMs = Date.now() - generationStartedAt;
+                            logDraftStreamTiming("route_stream_first_chunk", {
+                                conversationId,
+                                firstChunkMs,
+                                requestElapsedMs: Date.now() - requestStartedAt,
+                            });
+                        }
                         push({ type: "chunk", text: chunk });
                     },
                 });
 
+                logDraftStreamTiming("route_stream_complete", {
+                    conversationId,
+                    elapsedMs: Date.now() - generationStartedAt,
+                    requestElapsedMs: Date.now() - requestStartedAt,
+                    firstChunkMs,
+                    hasDraft: !!result?.draft,
+                    generateDraftTelemetry: result?.telemetry?.stageMs || null,
+                });
                 push({
                     type: "complete",
                     result,
                 });
             } catch (error: any) {
+                logDraftStreamTiming("route_stream_failure", {
+                    conversationId,
+                    elapsedMs: Date.now() - generationStartedAt,
+                    requestElapsedMs: Date.now() - requestStartedAt,
+                    firstChunkMs,
+                    reason: error?.message || String(error),
+                });
                 console.error("[AI Draft Stream] Error:", error);
                 push({
                     type: "error",

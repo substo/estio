@@ -797,6 +797,7 @@ export async function generateDraft(context: CoordinationContext) {
             mode: requestedTimelineMode,
             requestedModel: requestedModelName,
             resolvedModel: actualModelName,
+            contextAssemblyMs: telemetry.stageMs.contextAssemblyMs,
             promptChars: telemetry.prompt.chars,
             threadMessages: telemetry.prompt.threadMessageCount,
             timelineIncludedEvents: telemetry.prompt.timelineIncludedEvents,
@@ -852,6 +853,12 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                             if (!firstTokenSeen) {
                                 firstTokenSeen = true;
                                 telemetry.stageMs.firstTokenMs = Date.now() - streamStartedAt;
+                                console.info("[AI Draft Timing]", JSON.stringify({
+                                    event: "generateDraft_first_token",
+                                    ts: new Date().toISOString(),
+                                    conversationId: context.conversationId,
+                                    firstTokenMs: telemetry.stageMs.firstTokenMs,
+                                }));
                             }
                             context.onToken(delta);
                         }
@@ -1034,6 +1041,14 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 
         telemetry.stageMs.postProcessingMs = Date.now() - postProcessingStartedAt;
         telemetry.stageMs.totalMs = Date.now() - overallStartedAt;
+        console.info("[AI Draft Timing]", JSON.stringify({
+            event: "generateDraft_complete",
+            ts: new Date().toISOString(),
+            conversationId: context.conversationId,
+            stageMs: telemetry.stageMs,
+            model: telemetry.model,
+            prompt: telemetry.prompt,
+        }));
 
         return {
             draft: text,
@@ -1056,6 +1071,14 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         if (error.message?.includes("API key")) message = "Invalid or missing API Key.";
         if (error.message?.includes("429")) message = "AI Rate limit exceeded. Try again later.";
         telemetry.stageMs.totalMs = Date.now() - overallStartedAt;
+        console.info("[AI Draft Timing]", JSON.stringify({
+            event: "generateDraft_failed",
+            ts: new Date().toISOString(),
+            conversationId: context.conversationId,
+            stageMs: telemetry.stageMs,
+            model: telemetry.model,
+            reason: error?.message || String(error),
+        }));
 
         // Persist error to AgentExecution so it shows in Thinking Trace & Usage Dashboard
         try {

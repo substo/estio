@@ -5000,32 +5000,53 @@ type GenerateAIDraftOptions = {
     draftLanguage?: string | null;
 };
 
-export async function generateAIDraft(
-    conversationId: string,
-    contactId: string,
-    instruction?: string,
-    model?: string,
-    options?: GenerateAIDraftOptions
-) {
+function logAIDraftTiming(event: string, fields: Record<string, unknown> = {}) {
+    console.info("[AI Draft Timing]", JSON.stringify({
+        event,
+        ts: new Date().toISOString(),
+        ...fields,
+    }));
+}
+
+function getElapsedMs(startedAt: number) {
+    return Date.now() - startedAt;
+}
+
+async function prepareAIDraftRequest(args: {
+    eventPrefix: "generateAIDraft" | "generateComposerAIDraft";
+    conversationId: string;
+    contactId: string;
+    model?: string;
+}) {
+    const { eventPrefix, conversationId, contactId, model } = args;
+    const authStartedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    logAIDraftTiming(`${eventPrefix}_auth_end`, {
+        conversationId,
+        elapsedMs: getElapsedMs(authStartedAt),
+    });
 
     const explicitModel = typeof model === "string" && model.trim() ? model.trim() : undefined;
 
-    // [JIT Sync] Ensure contact exists locally before asking AI
-    // Resolve GHL ID if possible, otherwise rely on local data
+    const contactSyncStartedAt = Date.now();
     const existingContact = await db.contact.findFirst({
         where: { OR: [{ id: contactId }, { ghlContactId: contactId }], locationId: location.id },
-        select: { ghlContactId: true }
+        select: { id: true, ghlContactId: true }
     });
 
     if (location.ghlAccessToken && existingContact?.ghlContactId) {
         await ensureLocalContactSynced(existingContact.ghlContactId, location.id, location.ghlAccessToken);
     } else if (location.ghlAccessToken && !existingContact) {
-        // Assume it's a GHL ID and try to sync
         await ensureLocalContactSynced(contactId, location.id, location.ghlAccessToken);
     }
+    logAIDraftTiming(`${eventPrefix}_contact_sync_end`, {
+        conversationId,
+        elapsedMs: getElapsedMs(contactSyncStartedAt),
+        hadExistingContact: !!existingContact,
+        synced: !!location.ghlAccessToken && (!!existingContact?.ghlContactId || !existingContact),
+    });
 
-    // Resolve current agent display name (DB-first; no extra Clerk API calls).
+    const userLookupStartedAt = Date.now();
     const { userId } = await auth();
     let agentName: string | undefined;
     if (userId) {
@@ -5038,7 +5059,13 @@ export async function generateAIDraft(
             agentName = agentUser.name || fullName || agentUser.email || undefined;
         }
     }
+    logAIDraftTiming(`${eventPrefix}_user_lookup_end`, {
+        conversationId,
+        elapsedMs: getElapsedMs(userLookupStartedAt),
+        hasAgentName: !!agentName,
+    });
 
+    const lookupStartedAt = Date.now();
     const conversationRecord = await db.conversation.findFirst({
         where: {
             ...buildConversationReferenceWhere(location.id, conversationId),
@@ -5048,16 +5075,61 @@ export async function generateAIDraft(
             contactId: true,
         },
     });
-    const contactRecord = await db.contact.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [{ id: contactId }, { ghlContactId: contactId }],
-        },
-        select: { id: true },
+    const contactRecord = existingContact?.id
+        ? { id: existingContact.id }
+        : await db.contact.findFirst({
+            where: {
+                locationId: location.id,
+                OR: [{ id: contactId }, { ghlContactId: contactId }],
+            },
+            select: { id: true },
+        });
+    logAIDraftTiming(`${eventPrefix}_record_lookup_end`, {
+        conversationId,
+        elapsedMs: getElapsedMs(lookupStartedAt),
+        hasConversationRecord: !!conversationRecord?.id,
+        hasContactRecord: !!contactRecord?.id,
+    });
+
+    return {
+        location,
+        explicitModel,
+        agentName,
+        conversationRecord,
+        contactRecord,
+    };
+}
+
+export async function generateAIDraft(
+    conversationId: string,
+    contactId: string,
+    instruction?: string,
+    model?: string,
+    options?: GenerateAIDraftOptions
+) {
+    const overallStartedAt = Date.now();
+    logAIDraftTiming("generateAIDraft_start", {
+        conversationId,
+        mode: options?.mode || "chat",
+        backend: "skill_runtime_then_legacy",
+    });
+
+    const {
+        location,
+        explicitModel,
+        agentName,
+        conversationRecord,
+        contactRecord,
+    } = await prepareAIDraftRequest({
+        eventPrefix: "generateAIDraft",
+        conversationId,
+        contactId,
+        model,
     });
 
     if (conversationRecord?.id && contactRecord?.id) {
         try {
+            const runtimeStartedAt = Date.now();
             const runtimeResult = await runAiSkillDecision({
                 locationId: location.id,
                 conversationId: conversationRecord.id,
@@ -5076,8 +5148,20 @@ export async function generateAIDraft(
                 ].filter(Boolean).join("\n\n"),
                 executeImmediately: true,
             });
+            logAIDraftTiming("generateAIDraft_runtime_end", {
+                conversationId,
+                elapsedMs: getElapsedMs(runtimeStartedAt),
+                success: runtimeResult.success,
+                hasDraft: !!runtimeResult.draftBody,
+                traceId: runtimeResult.traceId || null,
+            });
 
             if (runtimeResult.success && runtimeResult.draftBody) {
+                logAIDraftTiming("generateAIDraft_end", {
+                    conversationId,
+                    elapsedMs: getElapsedMs(overallStartedAt),
+                    path: "skill_runtime",
+                });
                 return {
                     draft: runtimeResult.draftBody,
                     reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || "skill"}).`,
@@ -5086,11 +5170,17 @@ export async function generateAIDraft(
                 };
             }
         } catch (skillError: any) {
+            logAIDraftTiming("generateAIDraft_runtime_failed", {
+                conversationId,
+                elapsedMs: getElapsedMs(overallStartedAt),
+                reason: skillError?.message || String(skillError),
+            });
             console.warn("[generateAIDraft] Skill runtime failed, falling back to legacy generateDraft:", skillError?.message || skillError);
         }
     }
 
     // Use internal location.id (for SiteConfig lookup), not ghlLocationId (external GHL ID)
+    const legacyStartedAt = Date.now();
     const result = await generateDraft({
         conversationId: conversationRecord?.id || conversationId,
         contactId,
@@ -5103,6 +5193,64 @@ export async function generateAIDraft(
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
         draftLanguage: options?.draftLanguage || undefined,
+    });
+    logAIDraftTiming("generateAIDraft_legacy_end", {
+        conversationId,
+        elapsedMs: getElapsedMs(legacyStartedAt),
+        totalMs: getElapsedMs(overallStartedAt),
+        hasDraft: !!result?.draft,
+        generateDraftTelemetry: result?.telemetry?.stageMs || null,
+    });
+
+    return result;
+}
+
+export async function generateComposerAIDraft(
+    conversationId: string,
+    contactId: string,
+    instruction?: string,
+    model?: string,
+    options?: GenerateAIDraftOptions
+) {
+    const overallStartedAt = Date.now();
+    logAIDraftTiming("generateComposerAIDraft_start", {
+        conversationId,
+        mode: options?.mode || "chat",
+        backend: "legacy_generateDraft",
+    });
+
+    const {
+        location,
+        explicitModel,
+        agentName,
+        conversationRecord,
+    } = await prepareAIDraftRequest({
+        eventPrefix: "generateComposerAIDraft",
+        conversationId,
+        contactId,
+        model,
+    });
+
+    const legacyStartedAt = Date.now();
+    const result = await generateDraft({
+        conversationId: conversationRecord?.id || conversationId,
+        contactId,
+        locationId: location.id,
+        accessToken: location.ghlAccessToken || "",
+        agentName,
+        businessName: location.name || undefined,
+        instruction,
+        model: explicitModel,
+        mode: options?.mode || "chat",
+        dealId: options?.dealId || undefined,
+        draftLanguage: options?.draftLanguage || undefined,
+    });
+    logAIDraftTiming("generateComposerAIDraft_legacy_end", {
+        conversationId,
+        elapsedMs: getElapsedMs(legacyStartedAt),
+        totalMs: getElapsedMs(overallStartedAt),
+        hasDraft: !!result?.draft,
+        generateDraftTelemetry: result?.telemetry?.stageMs || null,
     });
 
     return result;

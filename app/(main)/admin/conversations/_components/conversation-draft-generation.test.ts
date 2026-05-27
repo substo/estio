@@ -29,6 +29,7 @@ test('generateDraftWithStreamingFallback uses stream result when chunks are supp
 
 test('generateDraftWithStreamingFallback falls back when stream fails', async () => {
     let sawStreamError = false;
+    let fallbackCalls = 0;
 
     const result = await generateDraftWithStreamingFallback({
         conversationId: 'conv-1',
@@ -43,6 +44,7 @@ test('generateDraftWithStreamingFallback falls back when stream fails', async ()
             throw new Error('stream unavailable');
         },
         generateDraft: async (conversationId, contactId, instruction, model, options) => {
+            fallbackCalls += 1;
             assert.equal(conversationId, 'conv-1');
             assert.equal(contactId, 'contact-1');
             assert.equal(instruction, 'short');
@@ -56,7 +58,52 @@ test('generateDraftWithStreamingFallback falls back when stream fails', async ()
     });
 
     assert.equal(sawStreamError, true);
+    assert.equal(fallbackCalls, 1);
     assert.deepEqual(result, { draft: 'fallback draft', reasoning: 'fallback reasoning' });
+});
+
+test('generateDraftWithStreamingFallback times out stream before direct fallback', async () => {
+    let sawStreamError = false;
+    let fallbackCalls = 0;
+
+    const result = await generateDraftWithStreamingFallback({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        streamTimeoutMs: 5,
+        onChunk: () => {},
+        streamDraft: async () => new Promise(() => {}),
+        generateDraft: async () => {
+            fallbackCalls += 1;
+            return { draft: 'fallback after timeout' };
+        },
+        onStreamError: (error) => {
+            sawStreamError = error instanceof Error && error.message.includes('timed out');
+        },
+    });
+
+    assert.equal(sawStreamError, true);
+    assert.equal(fallbackCalls, 1);
+    assert.deepEqual(result, { draft: 'fallback after timeout' });
+});
+
+test('generateDraftWithStreamingFallback falls back when stream completes without final draft', async () => {
+    let fallbackCalls = 0;
+
+    const result = await generateDraftWithStreamingFallback({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        onChunk: () => {},
+        streamDraft: async () => ({ reasoning: 'no draft' }),
+        generateDraft: async () => {
+            fallbackCalls += 1;
+            return { draft: 'fallback for missing final' };
+        },
+    });
+
+    assert.equal(fallbackCalls, 1);
+    assert.deepEqual(result, { draft: 'fallback for missing final' });
 });
 
 test('generateDraftWithStreamingFallback skips stream path without onChunk', async () => {
