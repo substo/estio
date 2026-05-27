@@ -282,6 +282,62 @@ export function useChatWorkspaceHydration({
                 .catch((err) => console.error("[Workspace Background Sync] Error:", err));
         };
 
+        const runMessageMetadataHydration = async (
+            baseSnapshot: WorkspaceCoreSnapshot,
+            requestedLimit: number,
+            initialCount: number,
+        ) => {
+            if (cancelled || activeIdRef.current !== selectedConversationId) return;
+            const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || baseSnapshot;
+            if (!Array.isArray(currentSnapshot.messages) || currentSnapshot.messages.length === 0) return;
+
+            if (workspaceMessageMetadataInFlightRef.current.has(selectedConversationId)) {
+                trackClientRequest("workspace_message_metadata_deferred_skip_inflight", { conversationId: selectedConversationId });
+                return;
+            }
+
+            workspaceMessageMetadataInFlightRef.current.add(selectedConversationId);
+            trackClientRequest("workspace_message_metadata_deferred_load", { conversationId: selectedConversationId });
+            try {
+                const fetchLimit = Math.min(THREAD_TARGET_MESSAGE_COUNT, Math.max(currentSnapshot.messages.length, requestedLimit));
+                const enrichedMessages = await fetchMessages(selectedConversationId, {
+                    take: fetchLimit,
+                    metadataMode: "full",
+                });
+                if (cancelled || activeIdRef.current !== selectedConversationId || !Array.isArray(enrichedMessages) || enrichedMessages.length === 0) {
+                    return;
+                }
+
+                const latestSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || currentSnapshot;
+                const enrichedById = new Map(enrichedMessages.map((message) => [message.id, message]));
+                const latestMessages = Array.isArray(latestSnapshot.messages) ? latestSnapshot.messages : [];
+                const mergedMessages = latestMessages.map((message) => enrichedById.get(message.id) || message);
+                const knownIds = new Set(mergedMessages.map((message) => message.id));
+                for (const message of enrichedMessages) {
+                    if (!knownIds.has(message.id)) {
+                        mergedMessages.push(message);
+                    }
+                }
+
+                const enrichedSnapshot: WorkspaceCoreSnapshot = {
+                    ...latestSnapshot,
+                    messages: mergedMessages,
+                    hydration: createWorkspaceHydrationState({
+                        status: latestSnapshot.hydration?.status || 'full',
+                        messages: mergedMessages,
+                        messageWindow: latestSnapshot.hydration,
+                        initialCount: latestSnapshot.hydration?.initialCount || initialCount,
+                        targetCount: THREAD_TARGET_MESSAGE_COUNT,
+                        requestedLimit: latestSnapshot.hydration?.requestedLimit || requestedLimit,
+                    }),
+                };
+                cacheWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+                applyWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
+            } finally {
+                workspaceMessageMetadataInFlightRef.current.delete(selectedConversationId);
+            }
+        };
+
         const loadWorkspaceCore = async () => {
             const threadOpenStartedAtMs = Date.now();
             const initialMessageLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
@@ -482,45 +538,9 @@ export function useChatWorkspaceHydration({
                     const [resolvedBackfillCount] = await Promise.all([
                         runBackfillHydration(),
                         runDeferredActivityHydration(),
+                        runMessageMetadataHydration(initialSnapshot, initialMessageLimit, initialMessages.length),
                     ]);
                     backfillCount = resolvedBackfillCount;
-
-                    if (cancelled || activeIdRef.current !== selectedConversationId) return;
-
-                    const currentSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || initialSnapshot;
-                    if (Array.isArray(currentSnapshot.messages) && currentSnapshot.messages.length > 0) {
-                        if (workspaceMessageMetadataInFlightRef.current.has(selectedConversationId)) {
-                            trackClientRequest("workspace_message_metadata_deferred_skip_inflight", { conversationId: selectedConversationId });
-                        } else {
-                            workspaceMessageMetadataInFlightRef.current.add(selectedConversationId);
-                            trackClientRequest("workspace_message_metadata_deferred_load", { conversationId: selectedConversationId });
-                            try {
-                                const enrichedMessages = await fetchMessages(selectedConversationId, {
-                                    take: Math.min(THREAD_TARGET_MESSAGE_COUNT, Math.max(currentSnapshot.messages.length, initialMessageLimit)),
-                                    metadataMode: "full",
-                                });
-                                if (!cancelled && activeIdRef.current === selectedConversationId && Array.isArray(enrichedMessages) && enrichedMessages.length > 0) {
-                                    const latestSnapshot = getCachedWorkspaceCoreSnapshot(selectedConversationId) || currentSnapshot;
-                                    const enrichedSnapshot: WorkspaceCoreSnapshot = {
-                                        ...latestSnapshot,
-                                        messages: enrichedMessages,
-                                        hydration: createWorkspaceHydrationState({
-                                            status: latestSnapshot.hydration?.status || 'full',
-                                            messages: enrichedMessages,
-                                            messageWindow: latestSnapshot.hydration,
-                                            initialCount: latestSnapshot.hydration?.initialCount || initialMessages.length,
-                                            targetCount: THREAD_TARGET_MESSAGE_COUNT,
-                                            requestedLimit: latestSnapshot.hydration?.requestedLimit || initialMessageLimit,
-                                        }),
-                                    };
-                                    cacheWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
-                                    applyWorkspaceCoreSnapshot(selectedConversationId, enrichedSnapshot);
-                                }
-                            } finally {
-                                workspaceMessageMetadataInFlightRef.current.delete(selectedConversationId);
-                            }
-                        }
-                    }
 
                     if (cancelled || activeIdRef.current !== selectedConversationId) return;
                     trackClientRequest("thread_open_full", {
@@ -609,6 +629,11 @@ export function useChatWorkspaceHydration({
                     requestedInitialLimit: cachedSnapshot.hydration?.requestedLimit || null,
                     message_count: Array.isArray(cachedSnapshot.messages) ? cachedSnapshot.messages.length : 0,
                 });
+                void runMessageMetadataHydration(
+                    cachedSnapshot,
+                    cachedSnapshot.hydration?.requestedLimit || THREAD_INITIAL_FALLBACK_MESSAGES,
+                    cachedSnapshot.hydration?.initialCount || cachedSnapshot.messages.length,
+                );
             }
             if (cachedSidebarSnapshot) {
                 trackClientMetric("sidebar_contact_ready_ms", 0, {
