@@ -13,7 +13,6 @@ type UseConversationListControlsArgs = {
     hasMore: boolean;
     isLoadingMore: boolean;
     onLoadMore?: () => void;
-    onHoverConversation?: (id: string) => void;
 };
 
 export function useConversationListControls({
@@ -24,7 +23,6 @@ export function useConversationListControls({
     hasMore,
     isLoadingMore,
     onLoadMore,
-    onHoverConversation,
 }: UseConversationListControlsArgs) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSearchExpanded, setIsSearchExpanded] = useState(!!searchQuery);

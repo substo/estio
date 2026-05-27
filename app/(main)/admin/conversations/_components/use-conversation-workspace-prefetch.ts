@@ -13,7 +13,6 @@ const BACKGROUND_PREFETCH_LIMIT = 1;
 
 type UseConversationWorkspacePrefetchArgs = {
     viewMode: 'chats' | 'deals';
-    activeId: string | null;
     activeDealId: string | null;
     conversations: Conversation[];
     deals: any[];
@@ -39,7 +38,6 @@ type UseConversationWorkspacePrefetchArgs = {
 
 export function useConversationWorkspacePrefetch({
     viewMode,
-    activeId,
     activeDealId,
     conversations,
     deals,
@@ -212,15 +210,6 @@ export function useConversationWorkspacePrefetch({
             dealWorkspaceCoreInFlightRef.current.delete(normalizedDealId);
         }
     }, [cacheDealWorkspaceCoreSnapshot, dealWorkspaceCoreInFlightRef, estimateThreadViewportHeightPx, getCachedDealWorkspaceCoreSnapshot, isActiveDealWorkspaceBusy, trackClientRequest]);
-
-    useEffect(() => {
-        if (viewMode !== 'chats') return;
-        if (!activeId) return;
-        trackClientRequest("workspace_core_prefetch", {
-            conversationId: activeId,
-            reason: "automatic_prefetch_disabled",
-        });
-    }, [activeId, trackClientRequest, viewMode]);
 
     useEffect(() => {
         if (viewMode !== 'deals') return;

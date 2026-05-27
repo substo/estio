@@ -106,7 +106,6 @@ export function ConversationList({
         hasMore,
         isLoadingMore,
         onLoadMore,
-        onHoverConversation,
     });
 
     const header = (

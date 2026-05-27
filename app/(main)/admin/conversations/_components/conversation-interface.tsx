@@ -1239,7 +1239,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         prefetchDealWorkspaceCore,
     } = useConversationWorkspacePrefetch({
         viewMode,
-        activeId,
         activeDealId,
         conversations,
         deals,
