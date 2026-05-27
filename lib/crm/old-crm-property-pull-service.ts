@@ -93,6 +93,7 @@ const OPTIONAL_NUMERIC_FIELDS = new Set([
 ]);
 
 const DEFAULT_ZERO_NUMERIC_FIELDS = new Set(["sortOrder"]);
+const BOOLEAN_FIELDS = new Set(["featured"]);
 
 const ALLOWED_PROPERTY_FIELDS = new Set([
     "title",
@@ -188,6 +189,20 @@ function parseLooseNumber(value: unknown): number | null {
     if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return null;
     const parsed = Number(cleaned);
     return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
+function parseLooseBoolean(value: unknown): boolean | null {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") {
+        if (value === 1) return true;
+        if (value === 0) return false;
+    }
+
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+    return null;
 }
 
 export function parseOldCrmPropertyNotFoundError(error: unknown): {
@@ -389,6 +404,17 @@ export function sanitizeOldCrmPropertyData(
             propertyData[key] = Number.isFinite(parsed) ? parsed : null;
             if (!Number.isFinite(parsed) && value.trim()) {
                 warnings.push(`Could not map coordinate field "${key}" from "${value}".`);
+            }
+            continue;
+        }
+
+        if (BOOLEAN_FIELDS.has(key)) {
+            const parsed = parseLooseBoolean(value);
+            propertyData[key] = parsed ?? false;
+            if (parsed === null && value !== undefined && value !== null && String(value).trim() !== "") {
+                warnings.push(`Could not map boolean field "${key}" from "${String(value)}".`);
+            } else if (typeof value !== "boolean") {
+                warnings.push(`Coerced boolean field "${key}" from "${String(value)}" to ${String(propertyData[key])}.`);
             }
             continue;
         }

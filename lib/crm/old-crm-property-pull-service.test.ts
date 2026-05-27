@@ -135,6 +135,21 @@ test("sanitizeOldCrmPropertyData keeps allowed fields and coerces numeric values
     ]);
 });
 
+test("sanitizeOldCrmPropertyData coerces Old CRM boolean flags", () => {
+    const sanitized = sanitizeOldCrmPropertyData({
+        title: "Imported flat",
+        featured: "0",
+    });
+
+    assert.deepEqual(sanitized.propertyData, {
+        title: "Imported flat",
+        featured: false,
+    });
+    assert.deepEqual(sanitized.warnings, [
+        'Coerced boolean field "featured" from "0" to false.',
+    ]);
+});
+
 test("normalizeOldCrmPulledMedia maps images fallback to property media inputs", () => {
     const media = normalizeOldCrmPulledMedia({
         images: [

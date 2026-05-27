@@ -382,15 +382,27 @@ export async function enqueuePasteLeadPropertyImport(
         const queue = await getQueueInstance();
         const existingJob = await queue.getJob(jobId);
         if (existingJob) {
-            logQueueStatus("property_import_already_queued", "completed", {
-                pasteLeadTraceId: input.pasteLeadTraceId,
-                detail: input.publicReference,
-            });
-            return {
-                accepted: true,
-                mode: "already-queued",
-                jobId,
-            };
+            const existingState = await existingJob.getState();
+            if (existingState === "failed") {
+                await existingJob.remove();
+                console.warn("[PasteLeadPropertyImport] Removed failed duplicate job before requeue", {
+                    pasteLeadTraceId: input.pasteLeadTraceId,
+                    jobId,
+                    conversationId: input.conversationId,
+                    publicReference: input.publicReference,
+                    failedReason: truncateJobError(existingJob.failedReason),
+                });
+            } else {
+                logQueueStatus("property_import_already_queued", "completed", {
+                    pasteLeadTraceId: input.pasteLeadTraceId,
+                    detail: input.publicReference,
+                });
+                return {
+                    accepted: true,
+                    mode: "already-queued",
+                    jobId,
+                };
+            }
         }
 
         await queue.add(
