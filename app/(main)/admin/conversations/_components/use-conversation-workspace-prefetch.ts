@@ -215,42 +215,12 @@ export function useConversationWorkspacePrefetch({
 
     useEffect(() => {
         if (viewMode !== 'chats') return;
-        if (activeId && !getCachedWorkspaceCoreSnapshot(activeId)) return;
-        if (activeId && isActiveChatWorkspaceBusy()) return;
-
-        const candidateIds = conversations
-            .filter((conversation) => conversation.id !== activeId)
-            .slice(0, BACKGROUND_PREFETCH_LIMIT)
-            .map((conversation) => conversation.id);
-
-        if (candidateIds.length === 0) return;
-
-        let cancelled = false;
-        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-        let idleHandle: number | null = null;
-
-        const runPrefetch = () => {
-            if (cancelled) return;
-            for (const conversationId of candidateIds) {
-                void prefetchWorkspaceCore(conversationId);
-                void prefetchWorkspaceSidebar(conversationId);
-            }
-        };
-
-        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-            idleHandle = (window as any).requestIdleCallback(runPrefetch, { timeout: 1200 });
-        } else {
-            timeoutHandle = setTimeout(runPrefetch, 350);
-        }
-
-        return () => {
-            cancelled = true;
-            if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-                (window as any).cancelIdleCallback(idleHandle);
-            }
-        };
-    }, [activeId, conversations, getCachedWorkspaceCoreSnapshot, isActiveChatWorkspaceBusy, prefetchWorkspaceCore, prefetchWorkspaceSidebar, viewMode]);
+        if (!activeId) return;
+        trackClientRequest("workspace_core_prefetch", {
+            conversationId: activeId,
+            reason: "automatic_prefetch_disabled",
+        });
+    }, [activeId, trackClientRequest, viewMode]);
 
     useEffect(() => {
         if (viewMode !== 'deals') return;
