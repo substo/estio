@@ -485,12 +485,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (viewMode === 'deals') return;
         if (urlConversationId) return;
         if (!activeIdRef.current) return;
-        trackClientRequest("mobile_clear_active_without_url_id", {
+        console.log("[perf:conversations.client_request]", JSON.stringify({
+            kind: "mobile_clear_active_without_url_id",
             activeConversationId: activeIdRef.current,
             initialSelectedConversationId: initialSelectedConversationId || null,
-        });
+            ts: new Date().toISOString(),
+        }));
         setActiveId(null);
-    }, [initialSelectedConversationId, isMobileViewport, trackClientRequest, viewMode, urlConversationId]);
+    }, [initialSelectedConversationId, isMobileViewport, viewMode, urlConversationId]);
 
     // Sync View Mode & Deal ID to URL
     useEffect(() => {
