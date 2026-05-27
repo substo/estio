@@ -40,6 +40,7 @@ interface CoordinationContext {
     draftLanguage?: string | null;
     stream?: boolean;
     onToken?: (chunk: string) => void;
+    latencyMode?: "fast" | "full";
 }
 
 import { calculateRunCost } from "@/lib/ai/pricing";
@@ -53,8 +54,13 @@ type DraftMessage = {
 
 const NAME_GREETING_LONG_BREAK_HOURS = 3;
 const TIMELINE_RECENT_EVENT_WINDOW = 36;
+const TIMELINE_FAST_RECENT_EVENT_WINDOW = 14;
 const TIMELINE_LINE_MAX_CHARS = 220;
+const TIMELINE_FAST_LINE_MAX_CHARS = 160;
 const TIMELINE_FETCH_TAKE = 96;
+const TIMELINE_FAST_FETCH_TAKE = 32;
+const FAST_CHAT_MAX_OUTPUT_TOKENS = 1200;
+const FAST_EMAIL_MAX_OUTPUT_TOKENS = 2200;
 const MODEL_OUTPUT_TOKEN_LIMITS: Record<string, number> = {
     "gemini-2.5-flash-lite": 65536,
     "gemini-2.5-flash": 65536,
@@ -243,9 +249,11 @@ function getViewingDateFromEvent(event: TimelineEvent): Date | null {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function buildTimelineCompaction(events: TimelineEvent[]) {
-    const recentEvents = events.slice(-TIMELINE_RECENT_EVENT_WINDOW);
-    const olderEvents = events.slice(0, Math.max(0, events.length - TIMELINE_RECENT_EVENT_WINDOW));
+function buildTimelineCompaction(events: TimelineEvent[], options: { recentEventWindow?: number; lineMaxChars?: number } = {}) {
+    const recentEventWindow = options.recentEventWindow ?? TIMELINE_RECENT_EVENT_WINDOW;
+    const lineMaxChars = options.lineMaxChars ?? TIMELINE_LINE_MAX_CHARS;
+    const recentEvents = events.slice(-recentEventWindow);
+    const olderEvents = events.slice(0, Math.max(0, events.length - recentEventWindow));
 
     const totals = emptyTimelineBucketCounts();
     const included = emptyTimelineBucketCounts();
@@ -294,7 +302,7 @@ function buildTimelineCompaction(events: TimelineEvent[]) {
         recentEvents,
         olderEvents,
         olderSummary: olderSummaryLines.join("\n"),
-        recentTimelineText: recentEvents.map((e) => formatTimelineEventForPrompt(e, TIMELINE_LINE_MAX_CHARS)).join("\n"),
+        recentTimelineText: recentEvents.map((e) => formatTimelineEventForPrompt(e, lineMaxChars)).join("\n"),
         stats: {
             total: totals,
             included,
@@ -310,6 +318,7 @@ export async function generateDraft(context: CoordinationContext) {
     let promptTokens = 0;
     let completionTokens = 0;
     const overallStartedAt = Date.now();
+    const isFastDraft = context.latencyMode === "fast";
 
     const telemetry: {
         stageMs: {
@@ -326,6 +335,7 @@ export async function generateDraft(context: CoordinationContext) {
             timelineOmittedEvents: number;
             mode: "chat" | "deal";
             complexDraft: boolean;
+            latencyMode: "fast" | "full";
         };
         usage: {
             promptTokens: number;
@@ -362,6 +372,7 @@ export async function generateDraft(context: CoordinationContext) {
             timelineOmittedEvents: 0,
             mode: context.mode === "deal" && context.dealId ? "deal" : "chat",
             complexDraft: false,
+            latencyMode: isFastDraft ? "fast" : "full",
         },
         usage: {
             promptTokens: 0,
@@ -555,7 +566,7 @@ export async function generateDraft(context: CoordinationContext) {
                     dealId: String(context.dealId),
                     includeMessages: true,
                     includeActivities: true,
-                    take: TIMELINE_FETCH_TAKE,
+                    take: isFastDraft ? TIMELINE_FAST_FETCH_TAKE : TIMELINE_FETCH_TAKE,
                 })
                 : await assembleTimelineEvents({
                     mode: "chat",
@@ -563,7 +574,7 @@ export async function generateDraft(context: CoordinationContext) {
                     conversationId: context.conversationId,
                     includeMessages: true,
                     includeActivities: true,
-                    take: TIMELINE_FETCH_TAKE,
+                    take: isFastDraft ? TIMELINE_FAST_FETCH_TAKE : TIMELINE_FETCH_TAKE,
                 });
 
             timelineEvents = timelineResult.events;
@@ -574,7 +585,12 @@ export async function generateDraft(context: CoordinationContext) {
             console.warn("[AI Draft] Timeline assembly failed:", timelineError?.message || timelineError);
         }
 
-        const timelineCompaction = buildTimelineCompaction(timelineEvents);
+        const timelineCompaction = buildTimelineCompaction(timelineEvents, isFastDraft
+            ? {
+                recentEventWindow: TIMELINE_FAST_RECENT_EVENT_WINDOW,
+                lineMaxChars: TIMELINE_FAST_LINE_MAX_CHARS,
+            }
+            : undefined);
         console.log("[AI Draft] Timeline compaction stats:", JSON.stringify({
             mode: requestedTimelineMode,
             scope: timelineScopeLabel,
@@ -647,12 +663,13 @@ export async function generateDraft(context: CoordinationContext) {
                         : "Recent messages are close together in the same active thread.";
 
         const normalizedInstruction = String(context.instruction || "").trim();
-        const shortInstruction = normalizedInstruction.length > 0 && normalizedInstruction.length <= 180;
         const isComplexDraft =
-            requestedTimelineMode === "deal"
-            || timelineCompaction.stats.totalEvents > 90
-            || normalizedInstruction.length > 220
-            || !shortInstruction;
+            !isFastDraft
+            && (
+                requestedTimelineMode === "deal"
+                || timelineCompaction.stats.totalEvents > 90
+                || normalizedInstruction.length > 220
+            );
         telemetry.prompt.complexDraft = isComplexDraft;
 
         if (!explicitRequestedModel && !configuredDraftModel) {
@@ -663,8 +680,12 @@ export async function generateDraft(context: CoordinationContext) {
             telemetry.model.requested = requestedModelName;
         }
 
-        const maxOutputTokens = getModelMaxOutputTokens(actualModelName);
-        const thinkingBudget = isComplexDraft
+        const maxOutputTokens = isFastDraft
+            ? (isEmail ? FAST_EMAIL_MAX_OUTPUT_TOKENS : FAST_CHAT_MAX_OUTPUT_TOKENS)
+            : getModelMaxOutputTokens(actualModelName);
+        const thinkingBudget = isFastDraft
+            ? DRAFT_THINKING_BUDGET_SIMPLE
+            : isComplexDraft
             ? DRAFT_THINKING_BUDGET_COMPLEX
             : DRAFT_THINKING_BUDGET_SIMPLE;
         const generationConfig: Record<string, unknown> = {
@@ -803,6 +824,7 @@ export async function generateDraft(context: CoordinationContext) {
             timelineIncludedEvents: telemetry.prompt.timelineIncludedEvents,
             timelineOmittedEvents: telemetry.prompt.timelineOmittedEvents,
             isComplexDraft,
+            latencyMode: isFastDraft ? "fast" : "full",
             maxOutputTokens,
             thinkingBudget,
         }));

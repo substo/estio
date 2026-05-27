@@ -119,8 +119,16 @@ export async function POST(req: NextRequest) {
         async start(controller) {
             const generationStartedAt = Date.now();
             let firstChunkMs: number | null = null;
+            let streamWritable = true;
             const push = (payload: Record<string, unknown>) => {
-                controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+                if (!streamWritable) return false;
+                try {
+                    controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+                    return true;
+                } catch {
+                    streamWritable = false;
+                    return false;
+                }
             };
 
             try {
@@ -143,6 +151,7 @@ export async function POST(req: NextRequest) {
                     dealId,
                     draftLanguage,
                     stream: true,
+                    latencyMode: "fast",
                     onToken: (chunk) => {
                         if (!chunk) return;
                         if (firstChunkMs === null) {
@@ -183,7 +192,13 @@ export async function POST(req: NextRequest) {
                     message: error?.message || "Failed to generate draft",
                 });
             } finally {
-                controller.close();
+                if (streamWritable) {
+                    try {
+                        controller.close();
+                    } catch {
+                        streamWritable = false;
+                    }
+                }
             }
         },
     });
