@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { Conversation, Message } from '@/lib/ghl/conversations';
 import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 import {
@@ -26,6 +26,7 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import { buildContactContextShell } from './conversation-workspace-ui-actions';
 import { getMessageSignature } from './conversation-transcript-actions';
+import { fetchConversationMessageWindow } from './conversation-message-window-client';
 
 export type WorkspaceSidebarSnapshot = {
     contactContext: any;
@@ -109,6 +110,8 @@ export function useChatWorkspaceHydration({
     estimateThreadViewportHeightPx,
     workspaceActivityLimit,
 }: UseChatWorkspaceHydrationParams) {
+    const messageWindowRequestTokenRef = useRef(0);
+
     useEffect(() => {
         if (viewMode !== 'chats') return;
         if (!activeId) {
@@ -144,6 +147,14 @@ export function useChatWorkspaceHydration({
             setWorkspaceAgentSummary(null);
         }
         if (cachedSnapshot) {
+            trackClientRequest("chat_switch_cache_hit", {
+                conversationId: selectedConversationId,
+                requestedLimit: cachedSnapshot.hydration?.requestedLimit || null,
+                cacheHit: true,
+                aborted: false,
+                requestToken: messageWindowRequestTokenRef.current,
+                elapsed_ms: 0,
+            });
             applyWorkspaceCoreSnapshot(selectedConversationId, cachedSnapshot);
             initialWorkspaceLoadedAtRef.current[selectedConversationId] = Date.now();
             setLoadingMessages(false);
@@ -211,6 +222,7 @@ export function useChatWorkspaceHydration({
 
         let deferredHydrationTimeout: ReturnType<typeof setTimeout> | null = null;
         let deferredHydrationIdleHandle: number | null = null;
+        let messageWindowAbortController: AbortController | null = null;
 
         const clearDeferredHydrationTimer = () => {
             if (deferredHydrationTimeout) {
@@ -273,61 +285,57 @@ export function useChatWorkspaceHydration({
         const loadWorkspaceCore = async () => {
             const threadOpenStartedAtMs = Date.now();
             const initialMessageLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
+            const requestToken = messageWindowRequestTokenRef.current + 1;
+            messageWindowRequestTokenRef.current = requestToken;
+            const abortController = new AbortController();
+            messageWindowAbortController = abortController;
             workspaceCoreInFlightRef.current.add(selectedConversationId);
             workspaceInitialHydrationInFlightRef.current.add(selectedConversationId);
-            trackClientRequest("workspace_core_load", {
+            trackClientRequest("chat_switch_message_fetch_start", {
                 conversationId: selectedConversationId,
-                mode: "initial_hydration",
-                messageLimit: initialMessageLimit,
+                requestedLimit: initialMessageLimit,
+                cacheHit: false,
+                aborted: false,
+                requestToken,
             });
             try {
-                const workspace = await getConversationWorkspaceCore(selectedConversationId, {
-                    includeMessages: true,
-                    includeActivity: false,
-                    messageLimit: initialMessageLimit,
-                    activityLimit: workspaceActivityLimit,
-                    messageMetadataMode: "firstPaint",
-                    refreshMode: "initial_hydration",
+                const fetchStartedAtMs = Date.now();
+                const workspace = await fetchConversationMessageWindow(selectedConversationId, {
+                    take: initialMessageLimit,
+                    signal: abortController.signal,
                 });
 
-                if (cancelled || activeIdRef.current !== selectedConversationId) return;
+                const fetchElapsedMs = Date.now() - fetchStartedAtMs;
+                const stillCurrent = activeIdRef.current === selectedConversationId
+                    && messageWindowRequestTokenRef.current === requestToken;
+                trackClientRequest("chat_switch_message_fetch_done", {
+                    conversationId: selectedConversationId,
+                    requestedLimit: initialMessageLimit,
+                    cacheHit: false,
+                    aborted: abortController.signal.aborted,
+                    requestToken,
+                    elapsed_ms: fetchElapsedMs,
+                });
+
+                if (cancelled || !stillCurrent) return;
                 if (!workspace?.success) {
-                    throw new Error(workspace?.error || "Failed to load conversation workspace core");
+                    throw new Error(workspace?.error || "Failed to load conversation message window");
                 }
 
                 const initialMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
-                const cachedMessages = Array.isArray(cachedSnapshot?.messages) ? cachedSnapshot.messages : [];
-                const mergedInitialMessages = (() => {
-                    if (cachedMessages.length === 0) return initialMessages;
-                    const byId = new Map<string, Message>();
-                    for (const message of [...cachedMessages, ...initialMessages]) {
-                        if (!message?.id) continue;
-                        byId.set(message.id, message);
-                    }
-                    const sorted = Array.from(byId.values()).sort((a, b) => {
-                        const aTs = Number(new Date(a.dateAdded).getTime());
-                        const bTs = Number(new Date(b.dateAdded).getTime());
-                        if (aTs !== bTs) return aTs - bTs;
-                        return String(a.id).localeCompare(String(b.id));
-                    });
-                    const preserveCount = Math.min(
-                        THREAD_TARGET_MESSAGE_COUNT,
-                        Math.max(cachedMessages.length, initialMessages.length)
-                    );
-                    return preserveCount > 0 ? sorted.slice(-preserveCount) : sorted;
-                })();
                 const initialHydration = createWorkspaceHydrationState({
-                    status: mergedInitialMessages.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
-                    messages: mergedInitialMessages,
+                    status: initialMessages.length >= THREAD_TARGET_MESSAGE_COUNT ? 'full' : 'partial',
+                    messages: initialMessages,
+                    messageWindow: workspace?.messageWindow,
                     initialCount: initialMessages.length,
                     targetCount: THREAD_TARGET_MESSAGE_COUNT,
                     requestedLimit: initialMessageLimit,
                 });
                 const initialSnapshot = createWorkspaceCoreSnapshot({
                     conversationHeader: workspace?.conversationHeader || null,
-                    messages: mergedInitialMessages,
+                    messages: initialMessages,
                     activityTimeline: cachedSnapshot?.activityTimeline || [],
-                    transcriptEligibility: workspace?.transcriptEligibility,
+                    transcriptOnDemandEnabled: cachedSnapshot?.transcriptOnDemandEnabled || false,
                     hydration: initialHydration,
                 });
 
@@ -337,15 +345,23 @@ export function useChatWorkspaceHydration({
                 setLoadingMessages(false);
 
                 const initialOpenMs = Date.now() - threadOpenStartedAtMs;
+                trackClientRequest("chat_switch_messages_applied", {
+                    conversationId: selectedConversationId,
+                    requestedLimit: initialMessageLimit,
+                    cacheHit: false,
+                    aborted: false,
+                    requestToken,
+                    elapsed_ms: initialOpenMs,
+                });
                 trackClientRequest("thread_open_initial", {
                     conversationId: selectedConversationId,
                     selectedConversationId,
                     thread_open_initial_ms: initialOpenMs,
                     initial_message_count: initialMessages.length,
-                    rendered_message_count: mergedInitialMessages.length,
+                    rendered_message_count: initialMessages.length,
                     requested_initial_limit: initialMessageLimit,
                     requestedInitialLimit: initialMessageLimit,
-                    transcriptEligibilityDeferred: !!workspace?.transcriptEligibilityDeferred,
+                    transcriptEligibilityDeferred: true,
                 });
 
                 void markConversationReadInUi(selectedConversationId);
@@ -520,8 +536,18 @@ export function useChatWorkspaceHydration({
                 });
             } catch (err) {
                 if (cancelled) return;
-                console.error("Failed to load conversation workspace core:", err);
-                toast({ title: "Error", description: "Failed to load conversation workspace.", variant: "destructive" });
+                const aborted = abortController.signal.aborted || (err as any)?.name === 'AbortError';
+                trackClientRequest("chat_switch_message_fetch_done", {
+                    conversationId: selectedConversationId,
+                    requestedLimit: initialMessageLimit,
+                    cacheHit: false,
+                    aborted,
+                    requestToken,
+                    elapsed_ms: Date.now() - threadOpenStartedAtMs,
+                });
+                if (aborted) return;
+                console.error("Failed to load conversation message window:", err);
+                toast({ title: "Error", description: "Failed to load conversation messages.", variant: "destructive" });
             } finally {
                 workspaceCoreInFlightRef.current.delete(selectedConversationId);
                 workspaceInitialHydrationInFlightRef.current.delete(selectedConversationId);
@@ -529,6 +555,7 @@ export function useChatWorkspaceHydration({
                     setLoadingMessages(false);
                 }
             }
+
         };
 
         const loadWorkspaceSidebar = async () => {
@@ -601,6 +628,10 @@ export function useChatWorkspaceHydration({
 
         return () => {
             cancelled = true;
+            if (messageWindowAbortController) {
+                messageWindowAbortController.abort();
+                messageWindowAbortController = null;
+            }
             clearTimeout(networkDebounceTimer);
             clearDeferredHydrationTimer();
             workspaceInitialHydrationInFlight.delete(selectedConversationId);

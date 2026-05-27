@@ -1239,6 +1239,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         prefetchDealWorkspaceCore,
     } = useConversationWorkspacePrefetch({
         viewMode,
+        activeConversationId: activeId,
         activeDealId,
         conversations,
         deals,
@@ -1256,7 +1257,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         getCachedDealWorkspaceCoreSnapshot,
         trackClientRequest,
         estimateThreadViewportHeightPx,
-        workspaceActivityLimit: WORKSPACE_ACTIVITY_LIMIT,
     });
 
     useEffect(() => {
@@ -1331,11 +1331,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Handle clicking a conversation in the list
     const handleSelect = (id: string) => {
         const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const cachedCore = getCachedWorkspaceCoreSnapshot(id);
         const selectedConversation =
             conversationsRef.current.find((conversation) => conversation.id === id)
             || searchResults.find((conversation) => conversation.id === id)
             || selectedConversationCacheRef.current.get(id)
             || null;
+        trackClientRequest("chat_switch_click", {
+            conversationId: id,
+            requestedLimit: cachedCore?.hydration?.requestedLimit || null,
+            cacheHit: !!cachedCore,
+            aborted: false,
+            requestToken: null,
+            elapsed_ms: 0,
+        });
         if (selectedConversation) {
             selectedConversationCacheRef.current.set(id, selectedConversation);
             setConversations((prev) => {
@@ -1357,11 +1366,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             setWorkspaceViewingSummary(null);
             setWorkspaceAgentSummary(null);
         }
-        setLoadedChatId(null);
-        setLoadingMessages(true);
+        setLoadedChatId(cachedCore ? id : null);
+        setLoadingMessages(!cachedCore);
         trackClientMetric("thread_shell_paint_ms", (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt, {
             conversationId: id,
-            cache_hit: !!getCachedWorkspaceCoreSnapshot(id),
+            cache_hit: !!cachedCore,
             sidebar_cache_hit: !!cachedSidebar,
         });
         setActiveId(id);

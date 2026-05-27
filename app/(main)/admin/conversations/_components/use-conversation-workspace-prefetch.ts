@@ -2,17 +2,20 @@
 
 import { useCallback, useEffect, type RefObject } from 'react';
 import type { Conversation } from '@/lib/ghl/conversations';
-import { getConversationWorkspaceCore, getConversationWorkspaceSidebar } from '../actions';
+import { getConversationWorkspaceSidebar } from '../actions';
 import { getDealWorkspaceCore } from '../../deals/actions';
 import { THREAD_TARGET_MESSAGE_COUNT, computeInitialMessageLimitFromViewport } from '@/lib/conversations/thread-hydration';
 import { createWorkspaceCoreSnapshot, createWorkspaceHydrationState, type WorkspaceCoreSnapshot } from '@/lib/conversations/workspace-state';
 import { createDealWorkspaceCoreSnapshot, createDealWorkspaceHydrationState, type DealWorkspaceCoreSnapshot } from './use-deal-workspace-hydration';
 import type { WorkspaceSidebarSnapshot } from './use-chat-workspace-hydration';
+import { fetchConversationMessageWindow } from './conversation-message-window-client';
 
 const BACKGROUND_PREFETCH_LIMIT = 1;
+const ADJACENT_CHAT_PREFETCH_LIMIT = 2;
 
 type UseConversationWorkspacePrefetchArgs = {
     viewMode: 'chats' | 'deals';
+    activeConversationId: string | null;
     activeDealId: string | null;
     conversations: Conversation[];
     deals: any[];
@@ -30,11 +33,11 @@ type UseConversationWorkspacePrefetchArgs = {
     getCachedDealWorkspaceCoreSnapshot: (dealId: string) => DealWorkspaceCoreSnapshot | null;
     trackClientRequest: (kind: string, metadata?: Record<string, unknown>) => void;
     estimateThreadViewportHeightPx: () => number | null;
-    workspaceActivityLimit: number;
 };
 
 export function useConversationWorkspacePrefetch({
     viewMode,
+    activeConversationId,
     activeDealId,
     conversations,
     deals,
@@ -52,7 +55,6 @@ export function useConversationWorkspacePrefetch({
     getCachedDealWorkspaceCoreSnapshot,
     trackClientRequest,
     estimateThreadViewportHeightPx,
-    workspaceActivityLimit,
 }: UseConversationWorkspacePrefetchArgs) {
     const isActiveDealWorkspaceBusy = useCallback(() => {
         const selectedDealId = activeDealIdRef.current;
@@ -78,14 +80,7 @@ export function useConversationWorkspacePrefetch({
         try {
             trackClientRequest("workspace_core_prefetch", { conversationId: normalizedConversationId });
             const prefetchedLimit = computeInitialMessageLimitFromViewport(estimateThreadViewportHeightPx());
-            const workspace = await getConversationWorkspaceCore(normalizedConversationId, {
-                includeMessages: true,
-                includeActivity: false,
-                messageLimit: prefetchedLimit,
-                activityLimit: workspaceActivityLimit,
-                messageMetadataMode: "firstPaint",
-                refreshMode: "prefetch",
-            });
+            const workspace = await fetchConversationMessageWindow(normalizedConversationId, { take: prefetchedLimit });
             if (!workspace?.success) return;
 
             const prefetchedMessages = Array.isArray(workspace?.messages) ? workspace.messages : [];
@@ -109,7 +104,7 @@ export function useConversationWorkspacePrefetch({
         } finally {
             workspaceCoreInFlightRef.current.delete(normalizedConversationId);
         }
-    }, [cacheWorkspaceCoreSnapshot, estimateThreadViewportHeightPx, getCachedWorkspaceCoreSnapshot, trackClientRequest, workspaceActivityLimit, workspaceCoreInFlightRef]);
+    }, [cacheWorkspaceCoreSnapshot, estimateThreadViewportHeightPx, getCachedWorkspaceCoreSnapshot, trackClientRequest, workspaceCoreInFlightRef]);
 
     const prefetchWorkspaceSidebar = useCallback(async (conversationId: string) => {
         const normalizedConversationId = String(conversationId || "").trim();
@@ -188,6 +183,46 @@ export function useConversationWorkspacePrefetch({
             dealWorkspaceCoreInFlightRef.current.delete(normalizedDealId);
         }
     }, [cacheDealWorkspaceCoreSnapshot, dealWorkspaceCoreInFlightRef, estimateThreadViewportHeightPx, getCachedDealWorkspaceCoreSnapshot, isActiveDealWorkspaceBusy, trackClientRequest]);
+
+    useEffect(() => {
+        if (viewMode !== 'chats') return;
+        if (!activeConversationId) return;
+
+        const activeIndex = conversations.findIndex((conversation) => conversation?.id === activeConversationId);
+        if (activeIndex < 0) return;
+
+        const candidateIds = [
+            conversations[activeIndex + 1]?.id,
+            conversations[activeIndex - 1]?.id,
+        ].filter((id): id is string => !!id && id !== activeConversationId).slice(0, ADJACENT_CHAT_PREFETCH_LIMIT);
+
+        if (candidateIds.length === 0) return;
+
+        let cancelled = false;
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        let idleHandle: number | null = null;
+
+        const runPrefetch = () => {
+            if (cancelled) return;
+            for (const conversationId of candidateIds) {
+                void prefetchWorkspaceCore(conversationId);
+            }
+        };
+
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            idleHandle = (window as any).requestIdleCallback(runPrefetch, { timeout: 1500 });
+        } else {
+            timeoutHandle = setTimeout(runPrefetch, 500);
+        }
+
+        return () => {
+            cancelled = true;
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (idleHandle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                (window as any).cancelIdleCallback(idleHandle);
+            }
+        };
+    }, [activeConversationId, conversations, prefetchWorkspaceCore, viewMode]);
 
     useEffect(() => {
         if (viewMode !== 'deals') return;
