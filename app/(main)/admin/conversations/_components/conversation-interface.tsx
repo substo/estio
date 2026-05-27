@@ -1360,7 +1360,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             setWorkspaceViewingSummary(null);
             setWorkspaceAgentSummary(null);
         }
-        setLoadedChatId(id);
+        setLoadedChatId(null);
+        setLoadingMessages(true);
+        setMessages([]);
+        setActivityLog([]);
+        setTranscriptOnDemandEnabled(false);
         trackClientMetric("thread_shell_paint_ms", (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt, {
             conversationId: id,
             cache_hit: !!getCachedWorkspaceCoreSnapshot(id),
