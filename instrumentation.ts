@@ -32,6 +32,13 @@ export async function register() {
             } catch (err) {
                 console.error('[QueueBootstrap] Failed to initialize SMS Relay worker:', err);
             }
+
+            try {
+                const { initPasteLeadPropertyImportWorker } = await import('@/lib/queue/paste-lead-property-import');
+                await initPasteLeadPropertyImportWorker();
+            } catch (err) {
+                console.error('[QueueBootstrap] Failed to initialize Paste Lead property import worker:', err);
+            }
         }
 
         if (processRole === 'scrape-worker' || processRole === 'all') {
