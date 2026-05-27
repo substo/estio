@@ -6,7 +6,9 @@ import {
     normalizeOldCrmPropertyPullResult,
     normalizeOldCrmPulledMedia,
     parseOldCrmPropertyNotFoundError,
+    pullOldCrmPropertyWithRetry,
     sanitizeOldCrmPropertyData,
+    type NormalizedOldCrmPropertyPullResult,
 } from "./old-crm-property-pull-service";
 
 test("parseOldCrmPropertyNotFoundError preserves old CRM not-found details", () => {
@@ -158,4 +160,92 @@ test("normalizeOldCrmPulledMedia maps images fallback to property media inputs",
             metadata: { source: "old-crm" },
         },
     ]);
+});
+
+test("pullOldCrmPropertyWithRetry retries transient failure and succeeds on second attempt", async () => {
+    let attempts = 0;
+    const result = await pullOldCrmPropertyWithRetry({
+        oldCrmPropertyId: "2327",
+        maxAttempts: 2,
+        initialBackoffMs: 0,
+        jitterMs: 0,
+        pull: async (): Promise<NormalizedOldCrmPropertyPullResult> => {
+            attempts += 1;
+            if (attempts === 1) {
+                const error = new Error("Navigation timeout of 60000 ms exceeded");
+                error.name = "TimeoutError";
+                throw error;
+            }
+            return {
+                success: true,
+                data: { reference: "DT3327" },
+                warnings: [],
+                notFound: false,
+                verifyUrl: null,
+                locationId: "loc_123",
+            };
+        },
+    });
+
+    assert.equal(attempts, 2);
+    assert.equal(result.success, true);
+    assert.deepEqual(result.warnings, ["Old CRM pull succeeded after 2 attempts."]);
+});
+
+test("pullOldCrmPropertyWithRetry does not retry non-retryable not-found failures", async () => {
+    let attempts = 0;
+    const result = await pullOldCrmPropertyWithRetry({
+        oldCrmPropertyId: "2327",
+        maxAttempts: 3,
+        initialBackoffMs: 0,
+        jitterMs: 0,
+        pull: async (): Promise<NormalizedOldCrmPropertyPullResult> => {
+            attempts += 1;
+            return {
+                success: false,
+                error: 'Property "2327" was not found in the old CRM.',
+                errorCode: "PROPERTY_NOT_FOUND",
+                retryable: false,
+                rawError: 'Property "2327" was not found in the old CRM.',
+                warnings: [],
+                notFound: true,
+                verifyUrl: "https://crm.test/admin/properties/2327/edit",
+                locationId: "loc_123",
+            };
+        },
+    });
+
+    assert.equal(attempts, 1);
+    assert.equal(result.success, false);
+    assert.equal(result.notFound, true);
+    assert.equal(result.verifyUrl, "https://crm.test/admin/properties/2327/edit");
+});
+
+test("pullOldCrmPropertyWithRetry stops after max attempts", async () => {
+    let attempts = 0;
+    const result = await pullOldCrmPropertyWithRetry({
+        oldCrmPropertyId: "2327",
+        maxAttempts: 3,
+        initialBackoffMs: 0,
+        jitterMs: 0,
+        pull: async (): Promise<NormalizedOldCrmPropertyPullResult> => {
+            attempts += 1;
+            return {
+                success: false,
+                error: "net::ERR_CONNECTION_RESET at https://crm.test",
+                errorCode: "TRANSIENT_NETWORK",
+                retryable: true,
+                rawError: "Error: net::ERR_CONNECTION_RESET at https://crm.test",
+                warnings: [],
+                notFound: false,
+                verifyUrl: null,
+                locationId: "loc_123",
+            };
+        },
+    });
+
+    assert.equal(attempts, 3);
+    assert.equal(result.success, false);
+    assert.equal(result.retryable, true);
+    assert.deepEqual(result.warnings, ["Old CRM pull failed after 3 attempts."]);
 });

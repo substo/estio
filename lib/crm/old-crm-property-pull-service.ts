@@ -15,6 +15,15 @@ type OldCrmManualPullArgs = {
     oldCrmPropertyId: string;
 };
 
+type PullOldCrmPropertyWithRetryArgs = {
+    oldCrmPropertyId: string;
+    locationId?: string;
+    maxAttempts?: number;
+    initialBackoffMs?: number;
+    jitterMs?: number;
+    pull: () => Promise<NormalizedOldCrmPropertyPullResult>;
+};
+
 export type NormalizedOldCrmPropertyPullResult =
     | {
         success: true;
@@ -41,6 +50,9 @@ export type NormalizedOldCrmPropertyPullResult =
     };
 
 const PROPERTY_NOT_FOUND_PREFIX = "PROPERTY_NOT_FOUND::";
+const DEFAULT_PULL_RETRY_ATTEMPTS = 2;
+const DEFAULT_PULL_RETRY_BACKOFF_MS = 250;
+const DEFAULT_PULL_RETRY_JITTER_MS = 150;
 
 export type OldCrmPropertyPullErrorCode =
     | "PROPERTY_NOT_FOUND"
@@ -433,6 +445,111 @@ export function normalizeOldCrmPropertyPullResult(args: {
     };
 }
 
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryDelayMs(args: {
+    attempt: number;
+    initialBackoffMs: number;
+    jitterMs: number;
+}): number {
+    const baseDelay = args.initialBackoffMs * Math.max(1, args.attempt);
+    const jitter = args.jitterMs > 0 ? Math.floor(Math.random() * args.jitterMs) : 0;
+    return baseDelay + jitter;
+}
+
+export async function pullOldCrmPropertyWithRetry(
+    args: PullOldCrmPropertyWithRetryArgs
+): Promise<NormalizedOldCrmPropertyPullResult> {
+    const maxAttempts = Math.max(1, Math.floor(args.maxAttempts ?? DEFAULT_PULL_RETRY_ATTEMPTS));
+    const initialBackoffMs = Math.max(0, Math.floor(args.initialBackoffMs ?? DEFAULT_PULL_RETRY_BACKOFF_MS));
+    const jitterMs = Math.max(0, Math.floor(args.jitterMs ?? DEFAULT_PULL_RETRY_JITTER_MS));
+    let lastResult: NormalizedOldCrmPropertyPullResult | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const startedAt = Date.now();
+        let result: NormalizedOldCrmPropertyPullResult;
+        try {
+            result = await args.pull();
+        } catch (error) {
+            const structuredError = normalizeOldCrmPropertyPullError(error);
+            result = {
+                success: false,
+                error: structuredError.message,
+                errorCode: structuredError.code,
+                retryable: structuredError.retryable,
+                rawError: structuredError.rawError,
+                warnings: [],
+                notFound: structuredError.code === "PROPERTY_NOT_FOUND",
+                verifyUrl: structuredError.verifyUrl,
+                locationId: args.locationId,
+            };
+        }
+        const latencyMs = Date.now() - startedAt;
+        lastResult = result;
+
+        console.log("[CRM PULL] Old CRM pull attempt completed", {
+            attempt,
+            maxAttempts,
+            oldCrmPropertyId: args.oldCrmPropertyId,
+            latencyMs,
+            errorCode: result.success ? null : result.errorCode,
+            retryable: result.success ? null : result.retryable,
+        });
+
+        if (result.success) {
+            if (attempt === 1) return result;
+            return {
+                ...result,
+                warnings: [
+                    ...(result.warnings || []),
+                    `Old CRM pull succeeded after ${attempt} attempts.`,
+                ],
+            };
+        }
+
+        if (!result.retryable || attempt >= maxAttempts) {
+            if (result.retryable && attempt >= maxAttempts && attempt > 1) {
+                return {
+                    ...result,
+                    warnings: [
+                        ...(result.warnings || []),
+                        `Old CRM pull failed after ${attempt} attempts.`,
+                    ],
+                };
+            }
+            return result;
+        }
+
+        const delayMs = getRetryDelayMs({ attempt, initialBackoffMs, jitterMs });
+        console.warn("[CRM PULL] Retrying transient Old CRM pull failure", {
+            attempt,
+            nextAttempt: attempt + 1,
+            maxAttempts,
+            oldCrmPropertyId: args.oldCrmPropertyId,
+            errorCode: result.errorCode,
+            retryable: result.retryable,
+            latencyMs,
+            delayMs,
+        });
+        if (delayMs > 0) {
+            await wait(delayMs);
+        }
+    }
+
+    return lastResult || {
+        success: false,
+        error: "Old CRM pull failed",
+        errorCode: "UNKNOWN",
+        retryable: false,
+        rawError: null,
+        warnings: [],
+        notFound: false,
+        verifyUrl: null,
+    };
+}
+
 export async function pullOldCrmProperty(args: OldCrmPullArgs): Promise<NormalizedOldCrmPropertyPullResult> {
     try {
         const context = await resolveOldCrmImportContextForUser({
@@ -488,17 +605,24 @@ export async function pullOldCrmPropertyForManualAction(
             throw new Error("Missing CRM configuration. Check location URL and user credentials.");
         }
 
-        const pullResult = await pullPropertyFromCrmWithContext({
-            oldPropertyId: args.oldCrmPropertyId,
+        return await pullOldCrmPropertyWithRetry({
+            oldCrmPropertyId: args.oldCrmPropertyId,
             locationId: location.id,
-            crmUrl,
-            crmUsername: user.crmUsername,
-            crmPassword: user.crmPassword,
-            crmEditUrlPattern,
-            actorUserId: user.id,
-        });
+            maxAttempts: 2,
+            pull: async () => {
+                const pullResult = await pullPropertyFromCrmWithContext({
+                    oldPropertyId: args.oldCrmPropertyId,
+                    locationId: location.id,
+                    crmUrl,
+                    crmUsername: user.crmUsername,
+                    crmPassword: user.crmPassword,
+                    crmEditUrlPattern,
+                    actorUserId: user.id,
+                });
 
-        return normalizeOldCrmPropertyPullResult({ pullResult, locationId: location.id });
+                return normalizeOldCrmPropertyPullResult({ pullResult, locationId: location.id });
+            },
+        });
     } catch (error) {
         const structuredError = normalizeOldCrmPropertyPullError(error);
         return {

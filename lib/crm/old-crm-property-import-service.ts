@@ -3,6 +3,7 @@ import {
     normalizeOldCrmPropertyPullError,
     normalizeOldCrmPulledMedia,
     pullOldCrmProperty,
+    pullOldCrmPropertyWithRetry,
     sanitizeOldCrmPropertyData,
 } from "@/lib/crm/old-crm-property-pull-service";
 import { savePropertyRecord } from "@/lib/properties/save-property-record";
@@ -12,13 +13,18 @@ type ImportOldCrmPropertyArgs = {
     locationId: string;
     oldCrmPropertyId: string;
     publicReference: string;
+    pullMaxAttempts?: number;
 };
 
 export async function importOldCrmPropertyToLocalDb(args: ImportOldCrmPropertyArgs) {
-    const pullResult = await pullOldCrmProperty({
+    const pullResult = await pullOldCrmPropertyWithRetry({
         oldCrmPropertyId: args.oldCrmPropertyId,
-        locationId: args.locationId,
-        actorUserId: args.actorUserId,
+        maxAttempts: args.pullMaxAttempts ?? 1,
+        pull: () => pullOldCrmProperty({
+            oldCrmPropertyId: args.oldCrmPropertyId,
+            locationId: args.locationId,
+            actorUserId: args.actorUserId,
+        }),
     });
 
     if (!pullResult.success) {

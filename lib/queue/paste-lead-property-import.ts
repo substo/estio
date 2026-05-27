@@ -35,6 +35,15 @@ export type EnqueuePasteLeadPropertyImportResult = {
 let _queuePromise: Promise<any> | null = null;
 let _workerPromise: Promise<any> | null = null;
 
+type PasteLeadPropertyImportFailureJob = {
+    id?: string;
+    attemptsMade?: number;
+    opts?: {
+        attempts?: number;
+    };
+    data?: PasteLeadPropertyImportJobData;
+};
+
 async function getQueueInstance() {
     if (!_queuePromise) {
         _queuePromise = (async () => {
@@ -104,6 +113,51 @@ async function addPropertyImportConversationNote(args: {
     }
 }
 
+function isUnrecoverableQueueError(error: unknown): boolean {
+    return String((error as any)?.name || "") === "UnrecoverableError";
+}
+
+export async function handlePasteLeadPropertyImportJobFailure(args: {
+    job?: PasteLeadPropertyImportFailureJob | null;
+    err: Error;
+    addNote?: typeof addPropertyImportConversationNote;
+}) {
+    const job = args.job;
+    const addNote = args.addNote || addPropertyImportConversationNote;
+    const attemptsMade = Number(job?.attemptsMade || 0);
+    const attempts = Number(job?.opts?.attempts || 1);
+    const data = job?.data as PasteLeadPropertyImportJobData | undefined;
+    const errorMessage = truncateJobError(args.err);
+    const structuredError = normalizeOldCrmPropertyPullError(args.err);
+    const terminalFailure = attemptsMade >= attempts || isUnrecoverableQueueError(args.err);
+
+    console.error("[Queue] Paste lead property import job failed", {
+        jobId: job?.id,
+        attemptsMade,
+        attempts,
+        terminalFailure,
+        publicReference: data?.publicReference,
+        oldCrmPropertyId: data?.oldCrmPropertyId,
+        conversationId: data?.conversationId,
+        contactId: data?.contactId,
+        error: errorMessage,
+        errorCode: structuredError.code,
+        retryable: structuredError.retryable,
+    });
+
+    if (data?.conversationId && terminalFailure) {
+        await addNote({
+            conversationId: data.conversationId,
+            body: getFailedImportConversationNoteBody({
+                publicReference: data.publicReference,
+                oldCrmPropertyId: data.oldCrmPropertyId,
+                errorMessage,
+                structuredError,
+            }),
+        });
+    }
+}
+
 export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyImportJobData) {
     const startedAt = Date.now();
     const capability = await getOldCrmImportCapabilityForUser({
@@ -160,12 +214,25 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
         return { skipped: false, propertyId: existingProperty.id };
     }
 
-    const imported = await importOldCrmPropertyToLocalDb({
-        actorUserId: job.actorUserId,
-        locationId: job.locationId,
-        oldCrmPropertyId: job.oldCrmPropertyId,
-        publicReference: job.publicReference,
-    });
+    let imported;
+    try {
+        imported = await importOldCrmPropertyToLocalDb({
+            actorUserId: job.actorUserId,
+            locationId: job.locationId,
+            oldCrmPropertyId: job.oldCrmPropertyId,
+            publicReference: job.publicReference,
+            pullMaxAttempts: 1,
+        });
+    } catch (error) {
+        const structuredError = normalizeOldCrmPropertyPullError(error);
+        if (!structuredError.retryable) {
+            const { UnrecoverableError } = await import("bullmq");
+            const unrecoverableError = new UnrecoverableError(structuredError.message);
+            (unrecoverableError as any).oldCrmPropertyPullError = structuredError;
+            throw unrecoverableError;
+        }
+        throw error;
+    }
 
     const property = await db.property.findUnique({
         where: { id: imported.propertyId },
@@ -226,34 +293,7 @@ export async function initPasteLeadPropertyImportWorker() {
         });
 
         worker.on("failed", (job: any, err: Error) => {
-            const attemptsMade = Number(job?.attemptsMade || 0);
-            const attempts = Number(job?.opts?.attempts || 1);
-            const data = job?.data as PasteLeadPropertyImportJobData | undefined;
-            const errorMessage = truncateJobError(err);
-            const structuredError = normalizeOldCrmPropertyPullError(err);
-            console.error("[Queue] Paste lead property import job failed", {
-                jobId: job?.id,
-                attemptsMade,
-                attempts,
-                publicReference: data?.publicReference,
-                oldCrmPropertyId: data?.oldCrmPropertyId,
-                conversationId: data?.conversationId,
-                contactId: data?.contactId,
-                error: errorMessage,
-                errorCode: structuredError.code,
-                retryable: structuredError.retryable,
-            });
-            if (data?.conversationId && attemptsMade >= attempts) {
-                void addPropertyImportConversationNote({
-                    conversationId: data.conversationId,
-                    body: getFailedImportConversationNoteBody({
-                        publicReference: data.publicReference,
-                        oldCrmPropertyId: data.oldCrmPropertyId,
-                        errorMessage,
-                        structuredError,
-                    }),
-                });
-            }
+            void handlePasteLeadPropertyImportJobFailure({ job, err });
         });
 
         return worker;
