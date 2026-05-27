@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MediaKind } from "@prisma/client";
 import {
+    normalizeOldCrmPropertyPullError,
+    normalizeOldCrmPropertyPullResult,
     normalizeOldCrmPulledMedia,
     parseOldCrmPropertyNotFoundError,
     sanitizeOldCrmPropertyData,
@@ -27,6 +29,78 @@ test("parseOldCrmPropertyNotFoundError leaves unrelated errors unstructured", ()
         notFound: false,
         message: "Missing CRM configuration.",
         verifyUrl: null,
+    });
+});
+
+test("normalizeOldCrmPropertyPullError classifies prefixed not-found errors with verify URL", () => {
+    const normalized = normalizeOldCrmPropertyPullError(
+        'PROPERTY_NOT_FOUND::Property "2327" was not found in the old CRM. Verify manually: https://crm.test/admin/properties/2327/edit'
+    );
+
+    assert.equal(normalized.code, "PROPERTY_NOT_FOUND");
+    assert.equal(normalized.retryable, false);
+    assert.equal(normalized.verifyUrl, "https://crm.test/admin/properties/2327/edit");
+    assert.equal(
+        normalized.message,
+        'Property "2327" was not found in the old CRM. Verify manually: https://crm.test/admin/properties/2327/edit'
+    );
+});
+
+test("normalizeOldCrmPropertyPullError classifies timeout errors as retryable navigation timeouts", () => {
+    const error = new Error("Navigation timeout of 60000 ms exceeded");
+    error.name = "TimeoutError";
+
+    const normalized = normalizeOldCrmPropertyPullError(error);
+
+    assert.equal(normalized.code, "NAVIGATION_TIMEOUT");
+    assert.equal(normalized.retryable, true);
+});
+
+test("normalizeOldCrmPropertyPullError classifies network and browser disconnect errors as retryable", () => {
+    const network = normalizeOldCrmPropertyPullError(new Error("net::ERR_CONNECTION_RESET at https://crm.test"));
+    const disconnect = normalizeOldCrmPropertyPullError(new Error("Protocol error: Target closed. Browser has disconnected"));
+
+    assert.equal(network.code, "TRANSIENT_NETWORK");
+    assert.equal(network.retryable, true);
+    assert.equal(disconnect.code, "TRANSIENT_NETWORK");
+    assert.equal(disconnect.retryable, true);
+});
+
+test("normalizeOldCrmPropertyPullError classifies missing CRM configuration", () => {
+    const normalized = normalizeOldCrmPropertyPullError(
+        new Error("Missing CRM configuration. Check location URL and user credentials.")
+    );
+
+    assert.equal(normalized.code, "MISSING_CRM_CONFIG");
+    assert.equal(normalized.retryable, false);
+});
+
+test("normalizeOldCrmPropertyPullError falls back to unknown for unclassified errors", () => {
+    const normalized = normalizeOldCrmPropertyPullError(new Error("Something unexpected happened"));
+
+    assert.equal(normalized.code, "UNKNOWN");
+    assert.equal(normalized.retryable, false);
+    assert.equal(normalized.message, "Something unexpected happened");
+});
+
+test("normalizeOldCrmPropertyPullResult passes successful pull data through unchanged", () => {
+    const data = { reference: "DT3327", title: "Imported flat" };
+    const normalized = normalizeOldCrmPropertyPullResult({
+        locationId: "loc_123",
+        pullResult: {
+            success: true,
+            data,
+            warnings: ["Mapped with warning"],
+        },
+    });
+
+    assert.deepEqual(normalized, {
+        success: true,
+        data,
+        warnings: ["Mapped with warning"],
+        notFound: false,
+        verifyUrl: null,
+        locationId: "loc_123",
     });
 });
 

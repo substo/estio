@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { applyPropertyInterestToContact } from "@/lib/leads/contact-property-interest";
 import { importOldCrmPropertyToLocalDb } from "@/lib/crm/old-crm-property-import-service";
+import { normalizeOldCrmPropertyPullError, type OldCrmPropertyPullError } from "@/lib/crm/old-crm-property-pull-service";
 import { getOldCrmImportCapabilityForUser, type LegacyCrmRefCandidate } from "@/lib/crm/old-crm-import";
 import { buildQueueJobId, isDuplicateQueueJobError } from "@/lib/queue/job-id";
 
@@ -60,6 +61,25 @@ function truncateJobError(error: unknown): string {
     return message.length > 220 ? `${message.slice(0, 217)}...` : message;
 }
 
+function getFailedImportConversationNoteBody(args: {
+    publicReference?: string;
+    oldCrmPropertyId?: string;
+    errorMessage: string;
+    structuredError: OldCrmPropertyPullError;
+}): string {
+    const reference = args.publicReference || args.oldCrmPropertyId || "property";
+    if (args.structuredError.code === "PROPERTY_NOT_FOUND") {
+        return `Property ${reference} was not found in Old CRM.`;
+    }
+    if (args.structuredError.code === "MISSING_CRM_CONFIG" || args.structuredError.code === "LOGIN_FAILED") {
+        return "Old CRM credentials need attention.";
+    }
+    if (args.structuredError.retryable) {
+        return "Old CRM pull failed temporarily; retry is safe.";
+    }
+    return `Property ${reference} import failed: ${args.errorMessage}`;
+}
+
 async function addPropertyImportConversationNote(args: {
     conversationId: string;
     body: string;
@@ -97,6 +117,8 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
             contactId: job.contactId,
             publicReference: job.publicReference,
             missing: capability.missing,
+            errorCode: "MISSING_CRM_CONFIG",
+            retryable: false,
         });
         return { skipped: true, reason: "missing_capability" as const };
     }
@@ -208,6 +230,7 @@ export async function initPasteLeadPropertyImportWorker() {
             const attempts = Number(job?.opts?.attempts || 1);
             const data = job?.data as PasteLeadPropertyImportJobData | undefined;
             const errorMessage = truncateJobError(err);
+            const structuredError = normalizeOldCrmPropertyPullError(err);
             console.error("[Queue] Paste lead property import job failed", {
                 jobId: job?.id,
                 attemptsMade,
@@ -217,11 +240,18 @@ export async function initPasteLeadPropertyImportWorker() {
                 conversationId: data?.conversationId,
                 contactId: data?.contactId,
                 error: errorMessage,
+                errorCode: structuredError.code,
+                retryable: structuredError.retryable,
             });
             if (data?.conversationId && attemptsMade >= attempts) {
                 void addPropertyImportConversationNote({
                     conversationId: data.conversationId,
-                    body: `Property ${data.publicReference} import failed: ${errorMessage}`,
+                    body: getFailedImportConversationNoteBody({
+                        publicReference: data.publicReference,
+                        oldCrmPropertyId: data.oldCrmPropertyId,
+                        errorMessage,
+                        structuredError,
+                    }),
                 });
             }
         });
