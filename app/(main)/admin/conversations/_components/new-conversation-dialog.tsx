@@ -1,42 +1,26 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, type ClipboardEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { MessageCirclePlus, Loader2, Phone, Users, Search, CheckCircle2, MessageCircle, ArrowRight, Circle, XCircle } from 'lucide-react';
-import { fetchWhatsAppChats, startNewConversation, parseLeadFromText, createParsedLead, importLeadFromText, getPasteLeadImportCapability, type ParsedLeadData } from '../actions';
 import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Clipboard, BadgeAlert, Sparkles, AlertTriangle } from 'lucide-react';
-import { searchGoogleContactsAction, importNewGoogleContactAction, openOrStartConversationForContact } from '@/app/(main)/admin/contacts/actions';
-import { useToast } from '@/components/ui/use-toast';
 import { AiModelSelect } from '@/components/ai/ai-model-select';
-import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
-import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
-import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from './paste-lead-rich-text';
 import {
     buildPasteLeadProgressSteps,
-    createPasteLeadStatus,
-    type PasteLeadImportStatus,
     type PasteLeadProgressStep,
 } from '@/lib/conversations/paste-lead-status';
 import { canStartContactConversation } from '@/lib/contacts/conversation-start';
-
-
-interface WhatsAppChat {
-    jid: string;
-    phone: string | null;
-    lid?: string | null;
-    name: string;
-    isGroup: boolean;
-    alreadySynced: boolean;
-    identityPending?: boolean;
-    lastMessageTimestamp: number | null;
-}
+import { useNewConversationPhone } from './use-new-conversation-phone';
+import { useNewConversationWhatsAppPicker } from './use-new-conversation-whatsapp-picker';
+import { useNewConversationGoogle } from './use-new-conversation-google';
+import { useNewConversationPasteLead } from './use-new-conversation-paste-lead';
 
 interface NewConversationDialogProps {
     open: boolean;
@@ -80,279 +64,90 @@ function PasteLeadProgressList({ steps }: { steps: PasteLeadProgressStep[] }) {
 }
 
 export function NewConversationDialog({ open, onOpenChange, onConversationCreated, locationId }: NewConversationDialogProps) {
-    const { toast } = useToast();
-    const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
-    const [phoneInput, setPhoneInput] = useState('');
-    const [search, setSearch] = useState('');
-    const [creating, setCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Chat picker state
-    const [chats, setChats] = useState<WhatsAppChat[]>([]);
-    const [loadingChats, setLoadingChats] = useState(false);
-    const [chatsLoaded, setChatsLoaded] = useState(false);
-
-    // Paste Lead State
-    const [leadText, setLeadText] = useState('');
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
-    const [pasteLeadCanImportOldCrmProperties, setPasteLeadCanImportOldCrmProperties] = useState(false);
-    const [selectedPasteLeadModel, setSelectedPasteLeadModel] = useState('');
-    const [pasteLeadStatuses, setPasteLeadStatuses] = useState<PasteLeadImportStatus[]>([]);
-
-    // Google Contacts State
-    const [googleSearch, setGoogleSearch] = useState('');
-    const [googleResults, setGoogleResults] = useState<any[]>([]);
-    const [loadingGoogle, setLoadingGoogle] = useState(false);
-    const [googleNotConnected, setGoogleNotConnected] = useState(false);
-    const [googleAuthExpired, setGoogleAuthExpired] = useState(false);
-    const leadParseCacheRef = useRef<{
-        key: string;
-        result: Awaited<ReturnType<typeof parseLeadFromText>> | null;
-        promise: Promise<Awaited<ReturnType<typeof parseLeadFromText>>> | null;
-    }>({ key: '', result: null, promise: null });
-
-    const requestLeadPreview = useCallback((text: string) => {
-        const key = text.trim();
-        if (!key || key.length < 5) {
-            return Promise.resolve({ success: false as const, error: "Text is too short" });
-        }
-
-        const cached = leadParseCacheRef.current;
-        if (cached.key === key) {
-            if (cached.result) return Promise.resolve(cached.result);
-            if (cached.promise) return cached.promise;
-        }
-
-        const promise = parseLeadFromText(key, selectedPasteLeadModel || undefined)
-            .then((res) => {
-                if (leadParseCacheRef.current.key === key) {
-                    leadParseCacheRef.current.result = res;
-                    leadParseCacheRef.current.promise = null;
-                }
-                return res;
-            })
-            .catch((error) => {
-                if (leadParseCacheRef.current.key === key) {
-                    leadParseCacheRef.current.promise = null;
-                }
-                throw error;
-            });
-
-        leadParseCacheRef.current = {
-            key,
-            result: null,
-            promise,
-        };
-
-        return promise;
-    }, [selectedPasteLeadModel]);
-
-    const importLeadUsingPreviewCache = useCallback(async (text: string) => {
-        const key = text.trim();
-        const cached = leadParseCacheRef.current;
-
-        if (cached.key === key) {
-            const parsed = cached.result || (cached.promise ? await cached.promise : null);
-            if (parsed?.success && parsed.data) {
-                return createParsedLead(parsed.data, key);
-            }
-        }
-
-        return importLeadFromText(key, selectedPasteLeadModel || undefined);
-    }, [selectedPasteLeadModel]);
-
-    const seedPasteLeadStatuses = useCallback((hasPreview: boolean) => {
-        const traceId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-            ? `paste_lead_client_${crypto.randomUUID()}`
-            : `paste_lead_client_${Date.now()}`;
-        setPasteLeadStatuses([
-            createPasteLeadStatus("paste_lead_import_started", "running", { pasteLeadTraceId: traceId }),
-            createPasteLeadStatus(hasPreview ? "lead_parse_completed" : "lead_parse_started", hasPreview ? "completed" : "running", {
-                pasteLeadTraceId: traceId,
-                detail: hasPreview ? "preview cache" : undefined,
-            }),
-        ]);
-    }, []);
-
-    const applyImportResultStatuses = useCallback((res: any) => {
-        if (Array.isArray(res?.statuses) && res.statuses.length > 0) {
-            setPasteLeadStatuses(res.statuses);
-            return;
-        }
-        setPasteLeadStatuses((current) => [
-            ...current,
-            createPasteLeadStatus(res?.success ? "paste_lead_import_completed" : "paste_lead_import_failed", res?.success ? "completed" : "failed", {
-                pasteLeadTraceId: res?.pasteLeadTraceId,
-                detail: res?.error || undefined,
-            }),
-        ]);
-    }, []);
-
-    const handleLeadTextareaPaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
-        const html = event.clipboardData.getData("text/html");
-        if (!html) return;
-
-        const enrichedText = buildLeadTextFromClipboardData(event.clipboardData);
-        if (!enrichedText.trim()) return;
-
-        event.preventDefault();
-        const nextText = insertTextIntoTextareaValue(
-            leadText,
-            enrichedText,
-            event.currentTarget.selectionStart,
-            event.currentTarget.selectionEnd
-        );
-        setLeadText(nextText);
-        setParsedLead(null);
-        setPasteLeadStatuses([]);
-        leadParseCacheRef.current = { key: '', result: null, promise: null };
-    }, [leadText]);
-
-    // Load chats when "Pick from WhatsApp" tab is activated
-    const handleTabChange = async (tab: string) => {
-        if (tab === 'pick' && !chatsLoaded) {
-            setLoadingChats(true);
-            try {
-                const res = await fetchWhatsAppChats();
-                if (res.success && res.chats) {
-                    setChats(res.chats);
-                } else {
-                    setError(res.error || 'Failed to load chats');
-                }
-                setChatsLoaded(true);
-            } catch (err: any) {
-                setError(err.message);
-            } finally {
-                setLoadingChats(false);
-            }
-        }
-    };
-
-    // Start a new conversation by phone number
-    const handleStartByPhone = async () => {
-        if (!phoneInput.trim()) return;
-
-        setCreating(true);
+    function handleClose() {
+        phone.resetPhone();
+        whatsApp.resetWhatsAppPicker();
+        google.resetGoogle();
+        pasteLead.resetPasteLead();
         setError(null);
-
-        try {
-            const res = await startNewConversation(phoneInput.trim());
-            if (res.success && res.conversationId) {
-                onConversationCreated?.(res.conversationId);
-                handleClose();
-            } else {
-                setError(res.error || 'Failed to create conversation');
-            }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setCreating(false);
-        }
-    };
-
-    // Start a conversation from a picked chat
-    const handlePickChat = async (chat: WhatsAppChat) => {
-        setCreating(true);
-        setError(null);
-
-        try {
-            const identity = chat.phone
-                ? (chat.phone.startsWith('+') ? chat.phone : `+${chat.phone}`)
-                : (chat.jid || chat.lid || "");
-            if (!identity) {
-                setError("This WhatsApp chat does not expose a phone or bridge identity yet.");
-                return;
-            }
-            const res = await startNewConversation(identity);
-            if (res.success && res.conversationId) {
-                onConversationCreated?.(res.conversationId);
-                handleClose();
-            } else {
-                setError(res.error || 'Failed to create conversation');
-            }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setCreating(false);
-        }
-    };
-
-    const handleClose = () => {
-        setPhoneInput('');
-        setSearch('');
-        setError(null);
-        setCreating(false);
-        setLeadText('');
-
-        setParsedLead(null);
-        setSelectedPasteLeadModel('');
-        setGoogleSearch('');
-        setGoogleResults([]);
-        setGoogleNotConnected(false);
-        setGoogleAuthExpired(false);
-        leadParseCacheRef.current = { key: '', result: null, promise: null };
         onOpenChange(false);
-    };
+    }
 
     const closeAfterStatusSettles = useCallback(async () => {
         await new Promise((resolve) => window.setTimeout(resolve, 900));
         handleClose();
-    }, [handleClose]);
+    }, []);
+
+    const phone = useNewConversationPhone({
+        onConversationCreated,
+        onClose: handleClose,
+        setError,
+    });
+    const whatsApp = useNewConversationWhatsAppPicker({
+        onConversationCreated,
+        onClose: handleClose,
+        setError,
+    });
+    const google = useNewConversationGoogle({
+        locationId,
+        onConversationCreated,
+        onClose: handleClose,
+        setError,
+    });
+    const pasteLead = useNewConversationPasteLead({
+        open,
+        onConversationCreated,
+        onCloseAfterStatusSettles: closeAfterStatusSettles,
+        setError,
+    });
+
+    const { phoneInput, setPhoneInput, startByPhone } = phone;
+    const { search, setSearch, loadingChats, chatsLoaded, filteredChats, pickChat } = whatsApp;
+    const {
+        googleSearch,
+        setGoogleSearch,
+        googleResults,
+        loadingGoogle,
+        googleNotConnected,
+        googleAuthExpired,
+        searchGoogle,
+        importAndOpenGoogleContact,
+    } = google;
+    const {
+        leadText,
+        setLeadText,
+        parsedLead,
+        setParsedLead,
+        isAnalyzing,
+        pasteLeadCanImportOldCrmProperties,
+        selectedPasteLeadModel,
+        selectPasteLeadModel,
+        pasteLeadStatuses,
+        availableModels,
+        handleLeadTextareaPaste,
+        reviewLeadFirst,
+        importLead,
+        confirmParsedLeadImport,
+    } = pasteLead;
+    const creating = phone.creatingPhone || whatsApp.creatingWhatsApp || google.creatingGoogle || pasteLead.creatingPasteLead;
+
+    // Load chats when "Pick from WhatsApp" tab is activated
+    const handleTabChange = async (tab: string) => {
+        if (tab === 'pick') {
+            await whatsApp.loadChats();
+        }
+    };
 
     // Reset state when dialog opens
     useEffect(() => {
         if (open) {
-            setChatsLoaded(false);
-            setChats([]);
             setError(null);
-            setGoogleSearch('');
-            setGoogleResults([]);
-            setPasteLeadStatuses([]);
+            whatsApp.resetWhatsAppPicker();
+            google.resetGoogle();
         }
     }, [open]);
-
-    useEffect(() => {
-        if (selectedPasteLeadModel) return;
-        setSelectedPasteLeadModel(GEMINI_FLASH_LATEST_ALIAS);
-    }, [selectedPasteLeadModel]);
-
-    useEffect(() => {
-        if (!open || parsedLead) return;
-        const text = leadText.trim();
-        if (text.length < 5) return;
-
-        const timer = window.setTimeout(() => {
-            void requestLeadPreview(text).catch(() => {});
-        }, 250);
-
-        return () => window.clearTimeout(timer);
-    }, [open, leadText, parsedLead, requestLeadPreview]);
-
-    useEffect(() => {
-        if (!open) return;
-        let cancelled = false;
-
-        void getPasteLeadImportCapability()
-            .then((res) => {
-                if (cancelled) return;
-                setPasteLeadCanImportOldCrmProperties(Boolean(res.success && res.capability?.canImportOldCrmProperties));
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setPasteLeadCanImportOldCrmProperties(false);
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [open]);
-
-    // Filter chats by search
-    const filteredChats = chats.filter(c =>
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.phone.includes(search)
-    );
 
     return (
         <Dialog open={open} onOpenChange={handleClose}>
@@ -403,12 +198,12 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         placeholder="+357 99 045 511"
                                         value={phoneInput}
                                         onChange={(e) => setPhoneInput(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleStartByPhone()}
+                                        onKeyDown={(e) => e.key === 'Enter' && startByPhone()}
                                         className="flex-1"
                                         disabled={creating}
                                     />
                                     <Button
-                                        onClick={handleStartByPhone}
+                                        onClick={startByPhone}
                                         disabled={!phoneInput.trim() || creating}
                                         className="bg-green-600 hover:bg-green-700 shrink-0"
                                     >
@@ -463,7 +258,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             "w-full flex items-center gap-3 p-3 text-left hover:bg-slate-50 transition-colors",
                                             creating && "opacity-50 pointer-events-none"
                                         )}
-                                        onClick={() => handlePickChat(chat)}
+                                        onClick={() => pickChat(chat)}
                                         disabled={creating}
                                     >
                                         {/* Avatar */}
@@ -529,20 +324,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             onChange={(e) => setGoogleSearch(e.target.value)}
                                             onKeyDown={async (e) => {
                                                 if (e.key === 'Enter' && googleSearch.trim()) {
-                                                    setLoadingGoogle(true);
-                                                    setGoogleNotConnected(false);
-                                                    try {
-                                                        const res = await searchGoogleContactsAction(googleSearch);
-                                                        if (res.success && res.data) {
-                                                            setGoogleResults(res.data);
-                                                        } else if (res.message === 'GOOGLE_NOT_CONNECTED') {
-                                                            setGoogleNotConnected(true);
-                                                        } else if (res.message === 'GOOGLE_AUTH_EXPIRED') {
-                                                            setGoogleAuthExpired(true);
-                                                        }
-                                                    } finally {
-                                                        setLoadingGoogle(false);
-                                                    }
+                                                    await searchGoogle();
                                                 }
                                             }}
                                             className="pl-9"
@@ -552,22 +334,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     <Button
                                         type="button"
                                         disabled={loadingGoogle || !googleSearch.trim()}
-                                        onClick={async () => {
-                                            setLoadingGoogle(true);
-                                            setGoogleNotConnected(false);
-                                            try {
-                                                const res = await searchGoogleContactsAction(googleSearch);
-                                                if (res.success && res.data) {
-                                                    setGoogleResults(res.data);
-                                                } else if (res.message === 'GOOGLE_NOT_CONNECTED') {
-                                                    setGoogleNotConnected(true);
-                                                } else if (res.message === 'GOOGLE_AUTH_EXPIRED') {
-                                                    setGoogleAuthExpired(true);
-                                                }
-                                            } finally {
-                                                setLoadingGoogle(false);
-                                            }
-                                        }}
+                                        onClick={searchGoogle}
                                     >
                                         <Search className="h-4 w-4" />
                                     </Button>
@@ -617,32 +384,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                                 variant="secondary"
                                                 disabled={creating || !canStartContactConversation(contact)}
                                                 className="shrink-0 ml-2"
-                                                onClick={async () => {
-                                                    setCreating(true);
-                                                    setError(null);
-                                                    try {
-                                                        const res = await importNewGoogleContactAction(contact.resourceName, locationId!);
-                                                        if (res.success && res.contactId) {
-                                                            const startRes = await openOrStartConversationForContact(res.contactId);
-                                                            if (startRes.success && startRes.conversationId) {
-                                                                toast({
-                                                                    title: startRes.isNew ? "Conversation created" : "Conversation opened",
-                                                                    description: res.message || "Using the existing contact record.",
-                                                                });
-                                                                onConversationCreated?.(startRes.conversationId);
-                                                                handleClose();
-                                                            } else {
-                                                                toast({ title: "Contact ready, but chat failed", description: startRes.error, variant: "destructive" });
-                                                            }
-                                                        } else {
-                                                            setError(res.message || 'Failed to import Google contact');
-                                                        }
-                                                    } catch (err: any) {
-                                                        setError(err.message);
-                                                    } finally {
-                                                        setCreating(false);
-                                                    }
-                                                }}
+                                                onClick={() => importAndOpenGoogleContact(contact.resourceName)}
                                             >
                                                 {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <MessageCircle className="h-4 w-4 mr-2" />}
                                                 Message
@@ -662,11 +404,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     <label className="block text-sm font-medium text-gray-700">AI Model</label>
                                     <AiModelSelect
                                         value={selectedPasteLeadModel}
-                                        onValueChange={(value) => {
-                                            setSelectedPasteLeadModel(value);
-                                            setParsedLead(null);
-                                            leadParseCacheRef.current = { key: '', result: null, promise: null };
-                                        }}
+                                        onValueChange={selectPasteLeadModel}
                                         disabled={isAnalyzing || creating}
                                         models={availableModels}
                                         triggerClassName="w-full"
@@ -691,23 +429,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     </span>
                                     <Button
                                         size="sm"
-                                        onClick={async () => {
-                                            if (!leadText.trim()) return;
-                                            setIsAnalyzing(true);
-                                            setError(null);
-                                            try {
-                                                const res = await requestLeadPreview(leadText);
-                                                if (res.success && res.data) {
-                                                    setParsedLead(res.data);
-                                                } else {
-                                                    setError(res.error || "Failed to parse text");
-                                                }
-                                            } catch (err: any) {
-                                                setError(err?.message || "Failed to parse text");
-                                            } finally {
-                                                setIsAnalyzing(false);
-                                            }
-                                        }}
+                                        onClick={reviewLeadFirst}
                                         disabled={!leadText.trim() || isAnalyzing}
                                         variant="outline"
                                         className="gap-2"
@@ -717,38 +439,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     </Button>
                                 </div>
                                 <Button
-                                    onClick={async () => {
-                                        if (!leadText.trim()) return;
-                                        setCreating(true);
-                                        setError(null);
-                                        seedPasteLeadStatuses(Boolean(leadParseCacheRef.current.result?.success));
-                                        try {
-                                            const res = await importLeadUsingPreviewCache(leadText);
-                                            applyImportResultStatuses(res);
-                                            if (res.success && res.conversationId) {
-                                                toast({
-                                                    title: "Lead imported",
-                                                    description: res.backgroundJobsQueued?.length
-                                                        ? "Lead imported, enriching in background."
-                                                        : "Conversation is ready.",
-                                                });
-                                                onConversationCreated?.(res.conversationId);
-                                                await closeAfterStatusSettles();
-                                            } else {
-                                                setError(res.error || "Failed to import lead");
-                                            }
-                                        } catch (err: any) {
-                                            setPasteLeadStatuses((current) => [
-                                                ...current,
-                                                createPasteLeadStatus("paste_lead_import_failed", "failed", {
-                                                    detail: err?.message || "Load failed",
-                                                }),
-                                            ]);
-                                            setError(err.message);
-                                        } finally {
-                                            setCreating(false);
-                                        }
-                                    }}
+                                    onClick={importLead}
                                     disabled={!leadText.trim() || isAnalyzing || creating}
                                     className="w-full bg-green-600 hover:bg-green-700 gap-2"
                                 >
@@ -806,38 +497,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     <Button variant="ghost" size="sm" onClick={() => setParsedLead(null)}>Back to Edit</Button>
                                     <Button
                                         size="sm"
-                                        onClick={async () => {
-                                            setCreating(true);
-                                            setError(null);
-                                            seedPasteLeadStatuses(true);
-
-                                            try {
-                                                const res = await createParsedLead(parsedLead, leadText);
-                                                applyImportResultStatuses(res);
-                                                if (res.success && res.conversationId) {
-                                                    toast({
-                                                        title: "Lead imported",
-                                                        description: res.backgroundJobsQueued?.length
-                                                            ? "Lead imported, enriching in background."
-                                                            : "Conversation is ready.",
-                                                    });
-                                                    onConversationCreated?.(res.conversationId);
-                                                    await closeAfterStatusSettles();
-                                                } else {
-                                                    setError(res.error || "Failed to create conversation");
-                                                }
-                                            } catch (err: any) {
-                                                setPasteLeadStatuses((current) => [
-                                                    ...current,
-                                                    createPasteLeadStatus("paste_lead_import_failed", "failed", {
-                                                        detail: err?.message || "Load failed",
-                                                    }),
-                                                ]);
-                                                setError(err.message);
-                                            } finally {
-                                                setCreating(false);
-                                            }
-                                        }}
+                                        onClick={confirmParsedLeadImport}
                                         disabled={creating}
                                         className="bg-green-600 hover:bg-green-700"
                                     >
