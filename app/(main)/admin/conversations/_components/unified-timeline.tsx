@@ -64,6 +64,8 @@ interface UnifiedTimelineProps {
     onComposerDraftClear: () => void;
     composerInsertSeed?: { key: string; body: string } | null;
     onResendMessage?: (messageId: string) => void | Promise<void>;
+    onSendSmsFallback?: (messageId: string) => void | Promise<void>;
+    smsRelayEnabled?: boolean;
 }
 
 export function UnifiedTimeline({
@@ -95,6 +97,8 @@ export function UnifiedTimeline({
     onComposerDraftClear,
     composerInsertSeed,
     onResendMessage,
+    onSendSmsFallback,
+    smsRelayEnabled,
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState("");
     const lastTimelineCountLogRef = useRef<string | null>(null);
@@ -219,6 +223,8 @@ export function UnifiedTimeline({
                                     contactEmail={message?.senderEmail || message?.contactEmail}
                                     aiModel={selectedModel}
                                     onResendMessage={onResendMessage}
+                                    onSendSmsFallback={onSendSmsFallback}
+                                    smsRelayEnabled={smsRelayEnabled}
                                 />
                             );
                         })}

@@ -2,6 +2,7 @@
 
 import type { Conversation, Message } from '@/lib/ghl/conversations';
 import { matchesByCorrelation } from '@/lib/conversations/outbound-reconciliation';
+import { classifyOutboundSendFailure } from '@/lib/conversations/outbound-send-failure';
 
 export type OutboundMessageType = 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY';
 
@@ -19,6 +20,14 @@ type SendAck = {
     queueAccepted?: unknown;
     dispatchMode?: unknown;
     warning?: unknown;
+};
+
+type FailureFallbackUiState = {
+    showFailureDetail: boolean;
+    label: string | null;
+    canSendSmsFallback: boolean;
+    smsFallbackLabel: string | null;
+    smsFallbackUnavailableLabel: string | null;
 };
 
 export function createOutboundClientMessageId(): string {
@@ -154,6 +163,56 @@ export function normalizeSendError(error: unknown): string {
         return "Page updated. Reload and try again.";
     }
     return raw || "Unknown error occurred";
+}
+
+export function getWhatsAppFailureFallbackUiState(args: {
+    message: {
+        type?: string | null;
+        direction?: string | null;
+        status?: string | null;
+        outboxState?: {
+            status?: string | null;
+            lastError?: string | null;
+        } | null;
+    };
+    smsRelayEnabled?: boolean;
+    contactPhone?: string | null;
+}): FailureFallbackUiState {
+    const type = String(args.message.type || "").toUpperCase();
+    const isFailedOutboundWhatsApp = type.includes("WHATSAPP")
+        && String(args.message.direction || "").toLowerCase() === "outbound"
+        && String(args.message.status || "").toLowerCase() === "failed";
+    if (!isFailedOutboundWhatsApp) {
+        return {
+            showFailureDetail: false,
+            label: null,
+            canSendSmsFallback: false,
+            smsFallbackLabel: null,
+            smsFallbackUnavailableLabel: null,
+        };
+    }
+
+    const classification = classifyOutboundSendFailure(args.message.outboxState || {});
+    if (classification.code !== "WHATSAPP_NUMBER_NOT_FOUND") {
+        return {
+            showFailureDetail: false,
+            label: null,
+            canSendSmsFallback: false,
+            smsFallbackLabel: null,
+            smsFallbackUnavailableLabel: null,
+        };
+    }
+
+    const hasPhone = String(args.contactPhone || "").replace(/\D/g, "").length >= 7;
+    const canSendSmsFallback = !!args.smsRelayEnabled && hasPhone;
+
+    return {
+        showFailureDetail: true,
+        label: classification.label,
+        canSendSmsFallback,
+        smsFallbackLabel: canSendSmsFallback ? "Retry via Android SMS" : null,
+        smsFallbackUnavailableLabel: canSendSmsFallback ? null : "SMS fallback unavailable",
+    };
 }
 
 export function getSendAckState(ack: SendAck, fallbackClientMessageId: string, options?: { media?: boolean }) {

@@ -4,6 +4,7 @@ import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { enqueueGhlMessageMirror } from "@/lib/integrations/provider-outbox-enqueue";
 import { Prisma } from "@prisma/client";
 import { dispatchWhatsAppOutbound } from "@/lib/whatsapp/outbound-dispatch";
+import { classifyOutboundSendFailure } from "@/lib/conversations/outbound-send-failure";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
 const STALE_PROCESSING_LOCK_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
@@ -33,6 +34,9 @@ function computeBackoffMs(attemptCount: number): number {
 }
 
 function isRetryableOutboundError(error: unknown): boolean {
+    const classification = classifyOutboundSendFailure(error);
+    if (classification.code === "WHATSAPP_NUMBER_NOT_FOUND") return false;
+
     const explicitRetryable = (error as any)?.providerClassification?.retryable;
     if (typeof explicitRetryable === "boolean") return explicitRetryable;
 

@@ -29,6 +29,8 @@ interface DealWorkspacePaneProps {
     onComposerDraftChange: UnifiedTimelineProps['onComposerDraftChange'];
     onComposerDraftClear: UnifiedTimelineProps['onComposerDraftClear'];
     onResendMessage: UnifiedTimelineProps['onResendMessage'];
+    onSendSmsFallback: UnifiedTimelineProps['onSendSmsFallback'];
+    smsRelayEnabled?: boolean;
     onSendMedia: NonNullable<UnifiedTimelineProps['onSendMedia']>;
     onPreviewTranslatedReply: NonNullable<UnifiedTimelineProps['onPreviewTranslatedReply']>;
     onGenerateDraft: NonNullable<UnifiedTimelineProps['onGenerateDraft']>;
@@ -59,6 +61,8 @@ export function DealWorkspacePane({
     onComposerDraftChange,
     onComposerDraftClear,
     onResendMessage,
+    onSendSmsFallback,
+    smsRelayEnabled,
     onSendMedia,
     onPreviewTranslatedReply,
     onGenerateDraft,
@@ -90,6 +94,8 @@ export function DealWorkspacePane({
             onComposerDraftChange={onComposerDraftChange}
             onComposerDraftClear={onComposerDraftClear}
             onResendMessage={onResendMessage}
+            onSendSmsFallback={onSendSmsFallback}
+            smsRelayEnabled={smsRelayEnabled}
             onSendMedia={onSendMedia}
             onPreviewTranslatedReply={onPreviewTranslatedReply}
             translationWriteEnabled={translationWriteEnabled}

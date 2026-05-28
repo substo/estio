@@ -110,6 +110,7 @@ interface ChatWindowProps {
     onComposerDraftClear: () => void;
     composerInsertSeed?: { key: string; body: string } | null;
     onResendMessage?: (messageId: string) => void | Promise<void>;
+    onSendSmsFallback?: (messageId: string) => void | Promise<void>;
     smsRelayEnabled?: boolean;
 }
 
@@ -177,6 +178,7 @@ export function ChatWindow({
     composerInsertSeed,
     suggestions = [],
     onResendMessage,
+    onSendSmsFallback,
     smsRelayEnabled,
 }: ChatWindowProps & { suggestions?: string[] }) {
     const {
@@ -762,6 +764,8 @@ export function ChatWindow({
                                     onClearSelectionBatch={handleClearSelectionBatch}
                                     enableMountAnimation={enableMountAnimation}
                                     onResendMessage={onResendMessage}
+                                    onSendSmsFallback={onSendSmsFallback}
+                                    smsRelayEnabled={smsRelayEnabled}
                                     translationReadEnabled={translationReadEnabled}
                                     threadTranslationMode={threadTranslationMode}
                                     preferredDisplayLanguage={resolvedTranslationTargetLanguage}

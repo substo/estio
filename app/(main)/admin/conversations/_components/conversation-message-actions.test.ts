@@ -7,6 +7,7 @@ import {
     applySendAckByCorrelation,
     buildOptimisticTextMessage,
     getSendAckState,
+    getWhatsAppFailureFallbackUiState,
     markMessageFailedById,
     markMessageSendingById,
     normalizeSendError,
@@ -122,4 +123,67 @@ test('normalizeSendError keeps server action reload copy unchanged', () => {
     );
     assert.equal(normalizeSendError(''), 'Unknown error occurred');
     assert.equal(normalizeSendError('No route'), 'No route');
+});
+
+test('failed WhatsApp number-not-found message shows Android SMS fallback action when available', () => {
+    const state = getWhatsAppFailureFallbackUiState({
+        message: {
+            type: 'TYPE_WHATSAPP',
+            direction: 'outbound',
+            status: 'failed',
+            outboxState: {
+                status: 'dead',
+                lastError: 'WhatsApp Web send failed. No LID for user',
+            },
+        },
+        smsRelayEnabled: true,
+        contactPhone: '+35799306050',
+    });
+
+    assert.equal(state.showFailureDetail, true);
+    assert.equal(state.label, 'This number is not available on WhatsApp.');
+    assert.equal(state.canSendSmsFallback, true);
+    assert.equal(state.smsFallbackLabel, 'Retry via Android SMS');
+    assert.equal(state.smsFallbackUnavailableLabel, null);
+});
+
+test('failed WhatsApp number-not-found message shows unavailable fallback when SMS is unavailable', () => {
+    const state = getWhatsAppFailureFallbackUiState({
+        message: {
+            type: 'TYPE_WHATSAPP',
+            direction: 'outbound',
+            status: 'failed',
+            outboxState: {
+                status: 'dead',
+                lastError: 'phone number is not registered on WhatsApp',
+            },
+        },
+        smsRelayEnabled: false,
+        contactPhone: '+35799306050',
+    });
+
+    assert.equal(state.showFailureDetail, true);
+    assert.equal(state.canSendSmsFallback, false);
+    assert.equal(state.smsFallbackLabel, null);
+    assert.equal(state.smsFallbackUnavailableLabel, 'SMS fallback unavailable');
+});
+
+test('unknown WhatsApp failure keeps normal retry behavior without SMS fallback action', () => {
+    const state = getWhatsAppFailureFallbackUiState({
+        message: {
+            type: 'TYPE_WHATSAPP',
+            direction: 'outbound',
+            status: 'failed',
+            outboxState: {
+                status: 'dead',
+                lastError: 'Unexpected provider response',
+            },
+        },
+        smsRelayEnabled: true,
+        contactPhone: '+35799306050',
+    });
+
+    assert.equal(state.showFailureDetail, false);
+    assert.equal(state.canSendSmsFallback, false);
+    assert.equal(state.smsFallbackLabel, null);
 });

@@ -42,6 +42,10 @@ interface MessageBubbleChromeProps {
     contactPhone?: string;
     onExpandToggle: () => void;
     onResendMessage?: (messageId: string) => void | Promise<void>;
+    failureFallbackLabel?: string | null;
+    smsFallbackLabel?: string | null;
+    smsFallbackUnavailableLabel?: string | null;
+    onSendSmsFallback?: (messageId: string) => void | Promise<void>;
 }
 
 export const MessageBubbleChannelHeader = memo(function MessageBubbleChannelHeader({
@@ -142,6 +146,10 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
     isOutbound,
     contactName,
     onResendMessage,
+    failureFallbackLabel,
+    smsFallbackLabel,
+    smsFallbackUnavailableLabel,
+    onSendSmsFallback,
 }: Omit<MessageBubbleChromeProps, "isExpanded" | "contactPhone" | "onExpandToggle">) {
     return (
         <div className="flex items-center gap-1 mt-1 px-1 justify-between select-none min-w-0">
@@ -192,6 +200,28 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
                                 >
                                     Resend
                                 </button>
+                            )}
+                            {failureFallbackLabel && (
+                                <span className="text-[10px] text-red-600 px-1 py-0.5 max-w-[220px] truncate" title={failureFallbackLabel}>
+                                    {failureFallbackLabel}
+                                </span>
+                            )}
+                            {smsFallbackLabel && onSendSmsFallback && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSendSmsFallback(message.id);
+                                    }}
+                                    className="text-[10px] text-green-700 bg-green-50 hover:bg-green-100 border border-green-100 px-1.5 py-0.5 rounded transition-colors"
+                                >
+                                    {smsFallbackLabel}
+                                </button>
+                            )}
+                            {smsFallbackUnavailableLabel && (
+                                <span className="text-[10px] text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
+                                    {smsFallbackUnavailableLabel}
+                                </span>
                             )}
                         </div>
                     )}

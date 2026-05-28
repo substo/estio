@@ -34,6 +34,7 @@ import {
     extractWhatsAppViewingNotes,
     searchConversations,
     addConversationActivityEntry,
+    sendWhatsAppFailureSmsFallback,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
 import {
@@ -2146,6 +2147,48 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     };
 
+    const handleSendSmsFallback = async (messageId: string) => {
+        const conversationTarget = activeConversation;
+        if (!conversationTarget) return;
+
+        try {
+            const res = await sendWhatsAppFailureSmsFallback(messageId);
+            if (!res?.success) {
+                toast({
+                    title: "SMS fallback unavailable",
+                    description: String(res?.error || "Unable to send via Android SMS."),
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            toast({
+                title: "SMS fallback queued",
+                description: "The failed WhatsApp message was queued via Android SMS.",
+            });
+
+            if (viewMode === "chats" && activeIdRef.current === conversationTarget.id) {
+                const refreshed = await fetchMessages(conversationTarget.id, THREAD_REFRESH_MESSAGES_OPTIONS);
+                if (activeIdRef.current === conversationTarget.id) {
+                    applyRefreshedChatMessages(conversationTarget.id, refreshed);
+                }
+            }
+
+            if (viewMode === "deals" && activeDealIdRef.current) {
+                void refreshActiveDealWorkspace(activeDealIdRef.current, {
+                    reason: "sms_fallback",
+                    refreshSidebar: false,
+                });
+            }
+        } catch (error: any) {
+            toast({
+                title: "SMS fallback failed",
+                description: error?.message || "Unknown error",
+                variant: "destructive",
+            });
+        }
+    };
+
     const handleRefetchMedia = async (messageId: string) => {
         if (!activeConversation) return;
 
@@ -2646,6 +2689,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             translationBannerEnabled={featureFlags.conversationTranslationBanner}
             smsRelayEnabled={featureFlags.smsRelayEnabled}
             onResendMessage={handleResendMessage}
+            onSendSmsFallback={handleSendSmsFallback}
             onSendMedia={handleSendMedia}
             onRefetchMedia={handleRefetchMedia}
             onRequestTranscript={handleRequestTranscript}
@@ -2689,6 +2733,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onComposerDraftChange={(draft) => setComposerDraftForConversation(selectedDealConversation?.id, draft)}
             onComposerDraftClear={() => clearComposerDraftForConversation(selectedDealConversation?.id)}
             onResendMessage={handleResendMessage}
+            onSendSmsFallback={handleSendSmsFallback}
+            smsRelayEnabled={featureFlags.smsRelayEnabled}
             onSendMedia={(file, caption) => handleSendMedia(file, caption, selectedDealConversation || undefined)}
             onPreviewTranslatedReply={handleDealPreviewTranslatedReply}
             onGenerateDraft={handleDealGenerateDraft}

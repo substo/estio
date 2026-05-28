@@ -123,6 +123,10 @@ import {
     enqueueGhlStatusSync,
     enqueueGoogleContactSync,
 } from "@/lib/integrations/provider-outbox-enqueue";
+import {
+    classifyOutboundSendFailure,
+    getSmsFallbackAvailability,
+} from "@/lib/conversations/outbound-send-failure";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
 import {
     extractClockTimeFromText,
@@ -6528,6 +6532,92 @@ export async function triggerWhatsAppWebBridgeConnection() {
 
 
 
+
+export async function sendWhatsAppFailureSmsFallback(messageId: string) {
+    const normalizedMessageId = String(messageId || "").trim();
+    if (!normalizedMessageId) {
+        return { success: false as const, error: "Missing message ID." };
+    }
+
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const message = await db.message.findFirst({
+        where: {
+            id: normalizedMessageId,
+            conversation: { locationId: location.id },
+        },
+        include: {
+            outboundWhatsAppOutbox: true,
+            conversation: { include: { contact: true } },
+        },
+    });
+
+    if (!message) {
+        return { success: false as const, error: "Message not found." };
+    }
+    if (message.direction !== "outbound" || !String(message.type || "").toUpperCase().includes("WHATSAPP")) {
+        return { success: false as const, error: "Only failed outbound WhatsApp messages can use SMS fallback." };
+    }
+    if (message.status !== "failed" && message.outboundWhatsAppOutbox?.status !== "dead") {
+        return { success: false as const, error: "WhatsApp message has not reached a final failed state." };
+    }
+
+    const classification = classifyOutboundSendFailure(message.outboundWhatsAppOutbox || {});
+    if (classification.code !== "WHATSAPP_NUMBER_NOT_FOUND") {
+        return { success: false as const, error: classification.label || "This WhatsApp failure is not eligible for SMS fallback." };
+    }
+
+    const contact = message.conversation.contact;
+    if (!contact) {
+        return { success: false as const, error: "Contact not found." };
+    }
+    const device = await (db as any).smsRelayDevice.findFirst({
+        where: { locationId: location.id, paired: true },
+        orderBy: { lastSeenAt: "desc" },
+        select: { id: true, status: true, paired: true },
+    });
+    const availability = getSmsFallbackAvailability({
+        smsRelayEnabled: !!(location as any).smsRelayEnabled,
+        contactPhone: contact?.phone || null,
+        smsRelayDevice: device,
+    });
+    if (!availability.available) {
+        return {
+            success: false as const,
+            error: availability.reason === "sms_relay_offline"
+                ? "SMS fallback unavailable: Android SMS device is offline."
+                : "SMS fallback unavailable: no authenticated Android SMS device is available for this contact.",
+            errorCode: availability.reason || "sms_unavailable",
+        };
+    }
+
+    const { sendSmsRelayMessage } = await import("@/lib/sms-relay/send");
+    const result = await sendSmsRelayMessage({
+        locationId: location.id,
+        conversationId: message.conversation.id,
+        contactId: contact.id,
+        messageBody: message.body || "",
+        clientMessageId: `smsfallback_${message.id}_${randomUUID()}`,
+    });
+
+    if (!result.success) return result;
+
+    await db.message.update({
+        where: { id: result.messageId },
+        data: {
+            source: "sms_relay_whatsapp_fallback",
+            updatedAt: new Date(),
+        },
+    }).catch((error) => {
+        console.warn("[sendWhatsAppFailureSmsFallback] Failed to mark fallback source:", error);
+    });
+
+    invalidateConversationReadCaches(message.conversation.id);
+    return {
+        ...result,
+        fallbackSourceMessageId: message.id,
+        fallbackSource: "whatsapp_number_not_found",
+    };
+}
 
 export async function resendMessage(messageId: string) {
     const location = await getAuthenticatedLocation();

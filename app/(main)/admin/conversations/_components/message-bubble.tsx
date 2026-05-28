@@ -29,6 +29,7 @@ import {
     MessageBubbleEmailExpandFooter,
     MessageBubbleTimestampStatusRow,
 } from "./message-bubble-chrome";
+import { getWhatsAppFailureFallbackUiState } from "./conversation-message-actions";
 
 const EMPTY_ATTACHMENTS: NormalizedMessageAttachment[] = [];
 
@@ -117,6 +118,8 @@ export interface MessageBubbleProps {
     ) => void | Promise<void>;
     onRetryTranscript?: (messageId: string, attachmentId: string) => void | Promise<void>;
     onResendMessage?: (messageId: string) => void | Promise<void>;
+    onSendSmsFallback?: (messageId: string) => void | Promise<void>;
+    smsRelayEnabled?: boolean;
     translationReadEnabled?: boolean;
     threadTranslationMode?: "original" | "translated";
     preferredDisplayLanguage?: string | null;
@@ -144,6 +147,8 @@ export function MessageBubble({
     onExtractViewingNotes,
     onRetryTranscript,
     onResendMessage,
+    onSendSmsFallback,
+    smsRelayEnabled = false,
     translationReadEnabled = false,
     threadTranslationMode = "original",
     preferredDisplayLanguage,
@@ -228,6 +233,11 @@ export function MessageBubble({
     });
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
     const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
+    const failureFallbackUi = useMemo(() => getWhatsAppFailureFallbackUiState({
+        message,
+        smsRelayEnabled,
+        contactPhone,
+    }), [contactPhone, message, smsRelayEnabled]);
 
     const getDownloadUrl = useCallback((url: string) => {
         try {
@@ -486,15 +496,19 @@ export function MessageBubble({
                 />
             </div>
 
-            <MessageBubbleTimestampStatusRow
-                message={message}
+                <MessageBubbleTimestampStatusRow
+                    message={message}
                 isEmail={isEmail}
                 isSMS={isSMS}
                 isWhatsApp={isWhatsApp}
                 isOutbound={isOutbound}
-                contactName={contactName}
-                onResendMessage={onResendMessage}
-            />
+                    contactName={contactName}
+                    onResendMessage={onResendMessage}
+                    failureFallbackLabel={failureFallbackUi.label}
+                    smsFallbackLabel={failureFallbackUi.smsFallbackLabel}
+                    smsFallbackUnavailableLabel={failureFallbackUi.smsFallbackUnavailableLabel}
+                    onSendSmsFallback={onSendSmsFallback}
+                />
 
             {selectionActions}
         </div>
