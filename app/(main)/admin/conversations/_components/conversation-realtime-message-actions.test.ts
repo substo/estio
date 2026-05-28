@@ -56,6 +56,31 @@ test('applyRealtimeMessagePatchToMessages patches by clientMessageId', () => {
     assert.equal((result.messages[0] as any).sendState, 'sending');
 });
 
+test('applyRealtimeMessagePatchToMessages carries outbox state updates', () => {
+    const original = message({
+        id: 'opt-cmid-2',
+        clientMessageId: 'cmid-2',
+        outboxState: { id: 'job-old', status: 'pending' },
+    });
+
+    const result = applyRealtimeMessagePatchToMessages([original], {
+        clientMessageId: 'cmid-2',
+        status: 'sending',
+        outboxJobId: 'job-2',
+        outboxStatus: 'failed',
+        scheduledAt: '2026-05-24T10:00:05.000Z',
+        attemptCount: 2,
+        lastError: 'temporary provider error',
+    });
+
+    assert.equal(result.matched, true);
+    assert.equal((result.messages[0] as any).outboxState.id, 'job-2');
+    assert.equal((result.messages[0] as any).outboxState.status, 'failed');
+    assert.equal((result.messages[0] as any).outboxState.scheduledAt, '2026-05-24T10:00:05.000Z');
+    assert.equal((result.messages[0] as any).outboxState.attemptCount, 2);
+    assert.equal((result.messages[0] as any).outboxState.lastError, 'temporary provider error');
+});
+
 test('applyRealtimeMessagePatchToMessages patches by wamId', () => {
     const original = message({ id: 'local-1', wamId: 'wam-1' });
 

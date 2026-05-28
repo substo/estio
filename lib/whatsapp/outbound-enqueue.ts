@@ -40,11 +40,22 @@ export type EnqueueWhatsAppOutboundResult = {
     outboxJobId: string;
     scheduledAt: string;
     typing: WhatsAppTypingDelayResult;
+    transport: WhatsAppTransport;
+    outboxStatus: string;
     queueAccepted: boolean;
     dispatchMode: "queued" | "inline_fallback_sent" | "inline_fallback_deferred";
     warning?: string;
     errorCode?: "queue_enqueue_failed" | "inline_dispatch_failed";
 };
+
+function logWhatsAppSendLifecycle(event: string, payload: Record<string, unknown>) {
+    console.info(JSON.stringify({
+        scope: "whatsapp_send_lifecycle",
+        event,
+        at: new Date().toISOString(),
+        ...payload,
+    }));
+}
 
 function normalizeClientMessageId(value?: string | null): string {
     const trimmed = String(value || "").trim();
@@ -103,8 +114,10 @@ async function tryResolveExistingByClientMessageId(clientMessageId: string): Pro
             outboundWhatsAppOutbox: {
                 select: {
                     id: true,
+                    status: true,
                     scheduledAt: true,
                     payload: true,
+                    transport: true,
                 },
             },
         },
@@ -123,12 +136,15 @@ async function tryResolveExistingByClientMessageId(clientMessageId: string): Pro
             reason: "length_based",
             snapshot: (existing.outboundWhatsAppOutbox.payload || {})?.typingPolicySnapshot || {},
         },
+        transport: (existing.outboundWhatsAppOutbox.transport || "cloud_api") as WhatsAppTransport,
+        outboxStatus: String(existing.outboundWhatsAppOutbox.status || "pending"),
         queueAccepted: true,
         dispatchMode: "queued",
     };
 }
 
 export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInput): Promise<EnqueueWhatsAppOutboundResult> {
+    const actionStartedAtMs = Date.now();
     const locationId = String(input.locationId || "").trim();
     const conversationInternalId = String(input.conversationInternalId || "").trim();
     const conversationGhlId = String(input.conversationGhlId || "").trim();
@@ -140,6 +156,13 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     const normalizedBody = normalizeBody(input.body) || (kind === "template" && templateName ? `[Template: ${templateName}]` : "");
     const transport = input.transport || "cloud_api";
     const clientMessageId = normalizeClientMessageId(input.clientMessageId);
+    logWhatsAppSendLifecycle("enqueue_started", {
+        clientMessageId,
+        locationId,
+        conversationId: conversationInternalId,
+        kind,
+        transport,
+    });
 
     if (!locationId || !conversationInternalId || !conversationGhlId || !contactId) {
         throw new Error("Missing required WhatsApp enqueue identifiers.");
@@ -169,6 +192,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     };
 
     try {
+        const dbCreateStartedAtMs = Date.now();
         txResult = await db.$transaction(async (tx) => {
             const lastInbound = await tx.message.findFirst({
                 where: {
@@ -259,6 +283,15 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                 typing,
             };
         });
+        logWhatsAppSendLifecycle("db_message_outbox_created", {
+            clientMessageId,
+            messageId: txResult.messageId,
+            outboxJobId: txResult.outboxId,
+            db_create_ms: Date.now() - dbCreateStartedAtMs,
+            typingDelayMs: txResult.typing.delayMs,
+            typingDelayReason: txResult.typing.reason,
+            scheduledAt: txResult.scheduledAt.toISOString(),
+        });
     } catch (error: any) {
         const uniqueTarget = extractUniqueErrorColumns(error);
         if ((error as any)?.code === "P2002" && uniqueTarget.includes("clientMessageId")) {
@@ -282,16 +315,33 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     }
 
     try {
+        const queueEnqueueStartedAtMs = Date.now();
         const queueRes = await enqueueWhatsAppOutboundOutboxJob({
             outboxId: txResult.outboxId,
             delayMs: enqueueDelayMs,
         });
         queueAccepted = !!queueRes.accepted;
+        logWhatsAppSendLifecycle(queueAccepted ? "queue_enqueue_accepted" : "queue_enqueue_rejected", {
+            clientMessageId,
+            messageId: txResult.messageId,
+            outboxJobId: txResult.outboxId,
+            queue_enqueue_ms: Date.now() - queueEnqueueStartedAtMs,
+            scheduled_wait_ms: enqueueDelayMs,
+            queueJobId: (queueRes as any)?.jobId || null,
+            reason: (queueRes as any)?.reason || null,
+        });
         if (!queueAccepted) {
             queueDegradedMessage = `Queue rejected enqueue request (${String((queueRes as any)?.reason || "unknown_reason")}).`;
         }
     } catch (queueError) {
         console.warn("[WhatsApp Outbox] Queue add failed during enqueue; cron sweeper will recover:", queueError);
+        logWhatsAppSendLifecycle("queue_enqueue_failed", {
+            clientMessageId,
+            messageId: txResult.messageId,
+            outboxJobId: txResult.outboxId,
+            scheduled_wait_ms: enqueueDelayMs,
+            error: normalizeErrorMessage(queueError),
+        });
         queueDegradedMessage = normalizeErrorMessage(queueError);
     }
 
@@ -306,6 +356,11 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
         );
 
         try {
+            logWhatsAppSendLifecycle("inline_fallback_started", {
+                clientMessageId,
+                messageId: txResult.messageId,
+                outboxJobId: txResult.outboxId,
+            });
             const inlineResult = await processWhatsAppOutboundOutboxJob({
                 outboxId: txResult.outboxId,
                 workerId: `wa_outbound_inline_${randomUUID()}`,
@@ -314,6 +369,12 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
             if (inlineResult.outcome === "success") {
                 dispatchMode = "inline_fallback_sent";
                 warning = "Queue enqueue degraded; bypassed typing delay and dispatched immediately via inline fallback.";
+                logWhatsAppSendLifecycle("inline_fallback_completed", {
+                    clientMessageId,
+                    messageId: txResult.messageId,
+                    outboxJobId: txResult.outboxId,
+                    outcome: inlineResult.outcome,
+                });
             } else {
                 dispatchMode = "inline_fallback_deferred";
                 warning = "Queue enqueue degraded; inline fallback did not complete send. Durable retry remains active.";
@@ -338,6 +399,17 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
         }
     }
 
+    logWhatsAppSendLifecycle("enqueue_completed", {
+        clientMessageId,
+        messageId: txResult.messageId,
+        outboxJobId: txResult.outboxId,
+        action_total_ms: Date.now() - actionStartedAtMs,
+        typingDelayMs: txResult.typing.delayMs,
+        scheduled_wait_ms: enqueueDelayMs,
+        queueAccepted,
+        dispatchMode,
+    });
+
     return {
         queued: true,
         messageId: txResult.messageId,
@@ -345,6 +417,8 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
         outboxJobId: txResult.outboxId,
         scheduledAt: txResult.scheduledAt.toISOString(),
         typing: txResult.typing,
+        transport,
+        outboxStatus: dispatchMode === "inline_fallback_sent" ? "completed" : (!queueAccepted ? "failed" : "pending"),
         queueAccepted,
         dispatchMode,
         ...(warning ? { warning } : {}),

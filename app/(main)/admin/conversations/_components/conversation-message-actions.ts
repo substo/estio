@@ -5,6 +5,8 @@ import { matchesByCorrelation } from '@/lib/conversations/outbound-reconciliatio
 import { classifyOutboundSendFailure } from '@/lib/conversations/outbound-send-failure';
 
 export type OutboundMessageType = 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY';
+export type OutboundWhatsAppUiTone = "muted" | "info" | "success" | "warning" | "danger";
+export type OutboundWhatsAppUiIcon = "clock" | "send" | "check" | "checkCheck" | "alert";
 
 type TranslationOptions = {
     translationSourceText?: string | null;
@@ -20,6 +22,11 @@ type SendAck = {
     queueAccepted?: unknown;
     dispatchMode?: unknown;
     warning?: unknown;
+    scheduledAt?: unknown;
+    typingDelayMs?: unknown;
+    typingDelayReason?: unknown;
+    transport?: unknown;
+    outboxStatus?: unknown;
 };
 
 type FailureFallbackUiState = {
@@ -29,6 +36,209 @@ type FailureFallbackUiState = {
     smsFallbackLabel: string | null;
     smsFallbackUnavailableLabel: string | null;
 };
+
+export type OutboundWhatsAppUiState = {
+    label: "Queued" | "Scheduled" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "Failed" | "SMS fallback available";
+    tone: OutboundWhatsAppUiTone;
+    icon: OutboundWhatsAppUiIcon;
+    detail: string | null;
+    showSpinner: boolean;
+    canResend: boolean;
+    canSmsFallback: boolean;
+    scheduledAt: string | null;
+    retryAttempt: number | null;
+    lastError: string | null;
+};
+
+function normalizeString(value: unknown): string {
+    return String(value || "").trim();
+}
+
+function normalizeLower(value: unknown): string {
+    return normalizeString(value).toLowerCase();
+}
+
+function isOutboundWhatsAppMessage(message: {
+    type?: string | null;
+    direction?: string | null;
+}): boolean {
+    return normalizeString(message.type).toUpperCase().includes("WHATSAPP")
+        && normalizeLower(message.direction) === "outbound";
+}
+
+function getFutureDelaySeconds(scheduledAt?: string | null, nowMs = Date.now()): number {
+    const parsed = Date.parse(String(scheduledAt || ""));
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.ceil((parsed - nowMs) / 1000));
+}
+
+export function deriveOutboundWhatsAppUiState(message: {
+    type?: string | null;
+    direction?: string | null;
+    status?: string | null;
+    sendState?: string | null;
+    outboxState?: {
+        status?: string | null;
+        scheduledAt?: string | null;
+        attemptCount?: number | null;
+        lastError?: string | null;
+    } | null;
+}, options?: {
+    smsRelayEnabled?: boolean;
+    contactPhone?: string | null;
+    nowMs?: number;
+}): OutboundWhatsAppUiState | null {
+    if (!isOutboundWhatsAppMessage(message)) return null;
+
+    const status = normalizeLower(message.status);
+    const sendState = normalizeLower(message.sendState);
+    const outboxStatus = normalizeLower(message.outboxState?.status);
+    const scheduledAt = normalizeString(message.outboxState?.scheduledAt) || null;
+    const scheduledDelaySeconds = getFutureDelaySeconds(scheduledAt, options?.nowMs);
+    const retryAttempt = Number.isFinite(Number(message.outboxState?.attemptCount))
+        ? Number(message.outboxState?.attemptCount)
+        : null;
+    const lastError = normalizeString(message.outboxState?.lastError) || null;
+
+    const fallbackState = getWhatsAppFailureFallbackUiState({
+        message,
+        smsRelayEnabled: options?.smsRelayEnabled,
+        contactPhone: options?.contactPhone || null,
+    });
+
+    if (fallbackState.canSendSmsFallback) {
+        return {
+            label: "SMS fallback available",
+            tone: "danger",
+            icon: "alert",
+            detail: fallbackState.label,
+            showSpinner: false,
+            canResend: true,
+            canSmsFallback: true,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (status === "read" || status === "played") {
+        return {
+            label: "Read",
+            tone: "success",
+            icon: "checkCheck",
+            detail: null,
+            showSpinner: false,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (status === "delivered") {
+        return {
+            label: "Delivered",
+            tone: "success",
+            icon: "checkCheck",
+            detail: null,
+            showSpinner: false,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (status === "sent" || outboxStatus === "completed" || sendState === "sent") {
+        return {
+            label: "Sent",
+            tone: "muted",
+            icon: "check",
+            detail: null,
+            showSpinner: false,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (status === "failed" || outboxStatus === "dead" || sendState === "failed") {
+        return {
+            label: "Failed",
+            tone: "danger",
+            icon: "alert",
+            detail: lastError,
+            showSpinner: false,
+            canResend: true,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (sendState === "retrying" || outboxStatus === "failed") {
+        return {
+            label: "Retrying",
+            tone: "warning",
+            icon: "alert",
+            detail: scheduledDelaySeconds > 0 ? `Retrying automatically in ${scheduledDelaySeconds}s` : "Retrying automatically",
+            showSpinner: true,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (outboxStatus === "processing" || sendState === "sending") {
+        return {
+            label: "Sending",
+            tone: "info",
+            icon: "send",
+            detail: "Waiting for WhatsApp bridge",
+            showSpinner: true,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (scheduledDelaySeconds > 0) {
+        return {
+            label: "Scheduled",
+            tone: "info",
+            icon: "clock",
+            detail: `Scheduled in ${scheduledDelaySeconds}s`,
+            showSpinner: true,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    return {
+        label: "Queued",
+        tone: "muted",
+        icon: "clock",
+        detail: "Waiting briefly before sending",
+        showSpinner: true,
+        canResend: false,
+        canSmsFallback: false,
+        scheduledAt,
+        retryAttempt,
+        lastError,
+    };
+}
 
 export function createOutboundClientMessageId(): string {
     return (
@@ -227,6 +437,10 @@ export function getSendAckState(ack: SendAck, fallbackClientMessageId: string, o
         ? !queueAccepted && !fallbackSent
         : !queueAccepted && queued && !fallbackSent;
     const warning = String(ack.warning || "").trim();
+    const scheduledAt = String(ack.scheduledAt || "").trim();
+    const typingDelayMs = Number(ack.typingDelayMs);
+    const typingDelayReason = String(ack.typingDelayReason || "").trim();
+    const outboxStatus = String(ack.outboxStatus || "").trim();
 
     return {
         ackMessageId,
@@ -236,6 +450,10 @@ export function getSendAckState(ack: SendAck, fallbackClientMessageId: string, o
         fallbackSent,
         degradedDelivery,
         warning,
+        scheduledAt,
+        typingDelayMs: Number.isFinite(typingDelayMs) ? typingDelayMs : null,
+        typingDelayReason,
+        outboxStatus,
     };
 }
 
@@ -261,7 +479,10 @@ export function applySendAckByCorrelation(messages: Message[], args: {
             sendState: ackState.fallbackSent ? 'sent' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent')),
             outboxState: {
                 id: ackState.outboxJobId || (message as any)?.outboxState?.id || null,
-                status: ackState.fallbackSent ? 'completed' : (ackState.degradedDelivery ? 'failed' : (ackState.queued ? 'pending' : 'completed')),
+                status: ackState.fallbackSent ? 'completed' : (ackState.degradedDelivery ? 'failed' : (ackState.outboxStatus || (ackState.queued ? 'pending' : 'completed'))),
+                ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}),
+                ...(ackState.typingDelayMs !== null ? { typingDelayMs: ackState.typingDelayMs } : {}),
+                ...(ackState.typingDelayReason ? { typingDelayReason: ackState.typingDelayReason } : {}),
             },
         } as Message;
     });
@@ -284,9 +505,9 @@ export function applyResendAckById(messages: Message[], args: {
             outboxState: ackState.fallbackSent
                 ? { id: ackState.outboxJobId || null, status: 'completed' }
                 : ackState.degradedDelivery
-                    ? { id: ackState.outboxJobId || null, status: 'failed' }
+                    ? { id: ackState.outboxJobId || null, status: 'failed', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
                     : ackState.queued
-                        ? { id: ackState.outboxJobId || null, status: 'pending' }
+                        ? { id: ackState.outboxJobId || null, status: ackState.outboxStatus || 'pending', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
                         : { id: ackState.outboxJobId || null, status: 'completed' },
         } as Message;
     });

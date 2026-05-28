@@ -1648,7 +1648,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!conversationTarget) return;
 
         // Optimistic UI update — message appears instantly with 'sending' status
+        const clientSentAt = new Date().toISOString();
         const optimisticClientMessageId = createOutboundClientMessageId();
+        if (type === "WhatsApp") {
+            console.info("[WhatsApp Send Lifecycle]", {
+                event: "client_send_click",
+                clientMessageId: optimisticClientMessageId,
+                conversationId: conversationTarget.id,
+                at: clientSentAt,
+            });
+        }
         const optimisticMessage = buildOptimisticTextMessage({
             clientMessageId: optimisticClientMessageId,
             conversation: conversationTarget,
@@ -1657,6 +1666,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
             options,
         });
         const optimisticMessageId = optimisticMessage.id;
+        if (type === "WhatsApp") {
+            console.info("[WhatsApp Send Lifecycle]", {
+                event: "optimistic_message_created",
+                clientMessageId: optimisticClientMessageId,
+                optimisticMessageId,
+                conversationId: conversationTarget.id,
+                at: new Date().toISOString(),
+            });
+        }
 
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {
             setMessages((prev) => {
@@ -1703,6 +1721,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 })
                 : await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
                     clientMessageId: optimisticClientMessageId,
+                    clientSentAt,
                     translationSourceText: options?.translationSourceText || null,
                     translationTargetLanguage: options?.translationTargetLanguage || null,
                     translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
@@ -1737,6 +1756,17 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         optimisticClientMessageId,
                         ack: res as any,
                     });
+                    if (type === "WhatsApp") {
+                        console.info("[WhatsApp Send Lifecycle]", {
+                            event: "message_reconciled_in_ui",
+                            clientMessageId: optimisticClientMessageId,
+                            messageId: (res as any)?.messageId || null,
+                            outboxJobId: (res as any)?.outboxJobId || null,
+                            dispatchMode: (res as any)?.dispatchMode || null,
+                            scheduledAt: (res as any)?.scheduledAt || null,
+                            at: new Date().toISOString(),
+                        });
+                    }
                     syncPendingMessagesForConversation(capturedConversationId, next);
                     return next;
                 });
@@ -1910,7 +1940,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const conversationTarget = targetConversation || activeConversation;
         if (!conversationTarget) return;
 
+        const clientSentAt = new Date().toISOString();
         const optimisticClientMessageId = createOutboundClientMessageId();
+        console.info("[WhatsApp Send Lifecycle]", {
+            event: "client_send_click",
+            clientMessageId: optimisticClientMessageId,
+            conversationId: conversationTarget.id,
+            kind: "media",
+            at: clientSentAt,
+        });
         const objectUrl = URL.createObjectURL(file);
         const optimisticMessage = buildOptimisticMediaMessage({
             clientMessageId: optimisticClientMessageId,
@@ -1991,7 +2029,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationTarget.id,
                 conversationTarget.contactId,
                 uploadRef,
-                { caption, clientMessageId: optimisticClientMessageId }
+                { caption, clientMessageId: optimisticClientMessageId, clientSentAt }
             );
 
             if (sendRes.success) {
@@ -2010,6 +2048,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
                             optimisticClientMessageId,
                             ack: sendRes as any,
                             media: true,
+                        });
+                        console.info("[WhatsApp Send Lifecycle]", {
+                            event: "message_reconciled_in_ui",
+                            clientMessageId: optimisticClientMessageId,
+                            messageId: (sendRes as any)?.messageId || null,
+                            outboxJobId: (sendRes as any)?.outboxJobId || null,
+                            dispatchMode: (sendRes as any)?.dispatchMode || null,
+                            scheduledAt: (sendRes as any)?.scheduledAt || null,
+                            at: new Date().toISOString(),
                         });
                         syncPendingMessagesForConversation(conversationTarget.id, next);
                         return next;

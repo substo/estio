@@ -3,6 +3,15 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 import { WHATSAPP_CLOUD_PROVIDER, mapWhatsAppCloudStatus } from "@/lib/whatsapp/client";
 import { parseWhatsAppWebhookTimestamp } from "@/lib/whatsapp/webhook-normalizers";
 
+function logWhatsAppSendLifecycle(event: string, payload: Record<string, unknown>) {
+    console.info(JSON.stringify({
+        scope: "whatsapp_send_lifecycle",
+        event,
+        at: new Date().toISOString(),
+        ...payload,
+    }));
+}
+
 export function mapWhatsAppDeliveryStatus(rawStatus: string) {
     const s = rawStatus.toUpperCase();
 
@@ -34,6 +43,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
                 id: true,
                 wamId: true,
                 clientMessageId: true,
+                createdAt: true,
                 conversation: {
                     select: {
                         ghlConversationId: true,
@@ -45,6 +55,16 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
 
         const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
         const locationId = (messageWithConversation as any)?.conversation?.locationId;
+        const createdAtMs = Date.parse(String((messageWithConversation as any)?.createdAt || ""));
+        logWhatsAppSendLifecycle("status_webhook_received", {
+            messageId: (messageWithConversation as any)?.id || null,
+            clientMessageId: (messageWithConversation as any)?.clientMessageId || null,
+            wamId,
+            rawStatus,
+            status,
+            status_webhook_lag_ms: Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
+            total_to_delivered_ms: status === "delivered" && Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
+        });
         if (conversationId && locationId) {
             void publishConversationRealtimeEvent({
                 locationId,
@@ -71,7 +91,7 @@ export async function updateWhatsAppCloudStatus(location: any, statusEvent: any)
 
     let message = await db.message.findUnique({
         where: { wamId },
-        select: { id: true, conversationId: true, clientMessageId: true },
+        select: { id: true, conversationId: true, clientMessageId: true, createdAt: true },
     });
 
     if (!message) {
@@ -85,7 +105,7 @@ export async function updateWhatsAppCloudStatus(location: any, statusEvent: any)
         if (sync?.messageId) {
             message = await db.message.findUnique({
                 where: { id: sync.messageId },
-                select: { id: true, conversationId: true, clientMessageId: true },
+                select: { id: true, conversationId: true, clientMessageId: true, createdAt: true },
             });
         }
     }
@@ -165,5 +185,15 @@ export async function updateWhatsAppCloudStatus(location: any, statusEvent: any)
             status: messageStatus,
             pricing: statusEvent?.pricing || null,
         },
+    });
+    const createdAtMs = Date.parse(String((message as any).createdAt || ""));
+    logWhatsAppSendLifecycle("status_webhook_received", {
+        messageId: message.id,
+        clientMessageId: message.clientMessageId || null,
+        wamId,
+        rawStatus: statusEvent?.status || null,
+        status: messageStatus,
+        status_webhook_lag_ms: Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
+        total_to_delivered_ms: messageStatus === "delivered" && Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
     });
 }

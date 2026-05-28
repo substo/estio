@@ -26,6 +26,15 @@ function normalizeError(error: unknown): string {
     }
 }
 
+function logWhatsAppSendLifecycle(event: string, payload: Record<string, unknown>) {
+    console.info(JSON.stringify({
+        scope: "whatsapp_send_lifecycle",
+        event,
+        at: new Date().toISOString(),
+        ...payload,
+    }));
+}
+
 function computeBackoffMs(attemptCount: number): number {
     const exponent = Math.max(0, attemptCount - 1);
     const baseSeconds = Math.min(30 * 60, Math.pow(2, exponent) * 15);
@@ -88,6 +97,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
     if (!outboxId) return { outcome: "skipped", error: "Missing outbox id." };
 
     const now = new Date();
+    const workerPickupStartedAtMs = Date.now();
     const lockClaim = await (db as any).whatsAppOutboundOutbox.updateMany({
         where: {
             id: outboxId,
@@ -102,6 +112,10 @@ export async function processWhatsAppOutboundOutboxJob(args: {
     });
 
     if (!Number(lockClaim?.count || 0)) {
+        logWhatsAppSendLifecycle("worker_pick_skipped", {
+            outboxJobId: outboxId,
+            workerId: args.workerId,
+        });
         return { outcome: "skipped" };
     }
 
@@ -121,9 +135,57 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
     const payload = (row.payload || {}) as any;
     const attemptCount = Number(row.attemptCount || 0) + 1;
+    const messageCreatedAtMs = Date.parse(String(payload?.messageCreatedAt || row.message?.createdAt || ""));
+    const scheduledAtMs = row.scheduledAt ? new Date(row.scheduledAt).getTime() : NaN;
+    logWhatsAppSendLifecycle("worker_picked_job", {
+        clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+        messageId: row.messageId,
+        outboxJobId: row.id,
+        workerId: args.workerId,
+        attemptCount,
+        worker_pickup_ms: Number.isFinite(scheduledAtMs) ? Math.max(0, workerPickupStartedAtMs - scheduledAtMs) : null,
+        scheduled_wait_ms: Number.isFinite(messageCreatedAtMs) && Number.isFinite(scheduledAtMs) ? Math.max(0, scheduledAtMs - messageCreatedAtMs) : null,
+    });
+
+    void publishConversationRealtimeEvent({
+        locationId: row.locationId,
+        conversationId: row.conversationId || null,
+        type: "message.status",
+        payload: {
+            channel: "whatsapp",
+            mode: row.kind,
+            messageId: row.messageId,
+            clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+            wamId: row.message?.wamId || null,
+            status: "sending",
+            outboxJobId: row.id,
+            outboxStatus: "processing",
+            attemptCount,
+            scheduledAt: row.scheduledAt ? new Date(row.scheduledAt).toISOString() : null,
+        },
+    });
 
     try {
+        const providerSendStartedAtMs = Date.now();
+        logWhatsAppSendLifecycle("provider_dispatch_started", {
+            clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+            messageId: row.messageId,
+            outboxJobId: row.id,
+            transport: row.transport,
+            kind: row.kind,
+        });
         const { transport, provider, providerAccountId, wamId } = await dispatchWhatsAppOutbound(row);
+        const providerSendMs = Date.now() - providerSendStartedAtMs;
+        logWhatsAppSendLifecycle("provider_dispatch_completed", {
+            clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+            messageId: row.messageId,
+            outboxJobId: row.id,
+            transport,
+            provider,
+            wamId,
+            provider_send_ms: providerSendMs,
+            total_to_sent_ms: Number.isFinite(messageCreatedAtMs) ? Date.now() - messageCreatedAtMs : null,
+        });
 
         const messageStatus = "sent";
         try {
@@ -237,6 +299,11 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             clientMessageId: row.message?.clientMessageId || null,
             wamId,
             status: "sent",
+            outboxJobId: row.id,
+            outboxStatus: "completed",
+            attemptCount,
+            provider_send_ms: providerSendMs,
+            total_to_sent_ms: Number.isFinite(messageCreatedAtMs) ? Date.now() - messageCreatedAtMs : null,
         };
 
         void publishConversationRealtimeEvent({
@@ -261,15 +328,42 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
         if (canRetry) {
             const backoffMs = computeBackoffMs(attemptCount);
+            const nextScheduledAt = new Date(Date.now() + backoffMs);
             await (db as any).whatsAppOutboundOutbox.update({
                 where: { id: row.id },
                 data: {
                     status: "failed",
                     attemptCount,
                     lastError: message,
-                    scheduledAt: new Date(Date.now() + backoffMs),
+                    scheduledAt: nextScheduledAt,
                     lockedAt: null,
                     lockedBy: null,
+                },
+            });
+            logWhatsAppSendLifecycle("failure_retry_scheduled", {
+                clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+                messageId: row.messageId,
+                outboxJobId: row.id,
+                attemptCount,
+                retryDelayMs: backoffMs,
+                error: message,
+            });
+            void publishConversationRealtimeEvent({
+                locationId: row.locationId,
+                conversationId: row.conversation?.id || row.conversationId,
+                type: "message.status",
+                payload: {
+                    channel: "whatsapp",
+                    mode: row.kind,
+                    messageId: row.messageId,
+                    clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+                    wamId: row.message?.wamId || null,
+                    status: "sending",
+                    outboxJobId: row.id,
+                    outboxStatus: "failed",
+                    attemptCount,
+                    scheduledAt: nextScheduledAt.toISOString(),
+                    lastError: message,
                 },
             });
             return {
@@ -306,7 +400,18 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             clientMessageId: row.message?.clientMessageId || null,
             wamId: row.message?.wamId || null,
             status: "failed",
+            outboxJobId: row.id,
+            outboxStatus: "dead",
+            attemptCount,
+            lastError: message,
         };
+        logWhatsAppSendLifecycle("failure_dead_lettered", {
+            clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
+            messageId: row.messageId,
+            outboxJobId: row.id,
+            attemptCount,
+            error: message,
+        });
 
         void publishConversationRealtimeEvent({
             locationId: row.locationId,

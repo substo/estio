@@ -11,9 +11,11 @@ import {
     ChevronUp,
     Clock,
     Mail,
+    Send,
     Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { deriveOutboundWhatsAppUiState, type OutboundWhatsAppUiTone } from "./conversation-message-actions";
 
 type MessageBubbleChromeMessage = {
     id: string;
@@ -23,6 +25,9 @@ type MessageBubbleChromeMessage = {
     sendState?: string;
     outboxState?: {
         status?: string | null;
+        scheduledAt?: string | null;
+        attemptCount?: number | null;
+        lastError?: string | null;
     } | null;
     dateAdded: string | Date;
     subject?: string;
@@ -151,6 +156,20 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
     smsFallbackUnavailableLabel,
     onSendSmsFallback,
 }: Omit<MessageBubbleChromeProps, "isExpanded" | "contactPhone" | "onExpandToggle">) {
+    const whatsAppUiState = isWhatsApp && isOutbound
+        ? deriveOutboundWhatsAppUiState(message, {
+            smsRelayEnabled: !!smsFallbackLabel,
+            contactPhone: null,
+        })
+        : null;
+    const toneClassName: Record<OutboundWhatsAppUiTone, string> = {
+        muted: "text-gray-500 bg-gray-50 border-gray-100",
+        info: "text-blue-600 bg-blue-50 border-blue-100",
+        success: "text-blue-600 bg-blue-50 border-blue-100",
+        warning: "text-amber-600 bg-amber-50 border-amber-100",
+        danger: "text-red-500 bg-red-50 border-red-100",
+    };
+
     return (
         <div className="flex items-center gap-1 mt-1 px-1 justify-between select-none min-w-0">
             <span className="text-[10px] text-gray-400 flex gap-1 items-center flex-1 min-w-0 truncate">
@@ -164,26 +183,32 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
 
             {isOutbound && (isSMS || isWhatsApp) && (
                 <span className="flex items-center gap-1 shrink-0 ml-2">
-                    {(message.status === "sending" || message.status === "pending") && (
-                        (String(message.sendState || "").toLowerCase() === "retrying"
-                            || String(message.outboxState?.status || "").toLowerCase() === "failed")
-                            ? (
-                                <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[10px] border border-amber-100 font-medium">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    Retrying
-                                </span>
-                            )
-                            : (
-                                <Clock className="h-3 w-3 text-gray-400" aria-label="Sending" />
-                            )
+                    {whatsAppUiState && (
+                        <span
+                            className={cn(
+                                "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border font-medium max-w-[190px]",
+                                toneClassName[whatsAppUiState.tone]
+                            )}
+                            title={whatsAppUiState.detail || whatsAppUiState.lastError || whatsAppUiState.label}
+                        >
+                            {whatsAppUiState.icon === "alert" && <AlertTriangle className="h-3 w-3 shrink-0" />}
+                            {whatsAppUiState.icon === "clock" && <Clock className={cn("h-3 w-3 shrink-0", whatsAppUiState.showSpinner && "animate-spin")} />}
+                            {whatsAppUiState.icon === "send" && <Send className="h-3 w-3 shrink-0" />}
+                            {whatsAppUiState.icon === "check" && <Check className="h-3 w-3 shrink-0" />}
+                            {whatsAppUiState.icon === "checkCheck" && <CheckCheck className={cn("h-3 w-3 shrink-0", whatsAppUiState.label === "Read" ? "text-blue-500" : "")} />}
+                            <span className="truncate">{whatsAppUiState.detail || whatsAppUiState.label}</span>
+                        </span>
                     )}
-                    {message.status === "sent" && (
+                    {!whatsAppUiState && (message.status === "sending" || message.status === "pending") && (
+                        <Clock className="h-3 w-3 text-gray-400" aria-label="Sending" />
+                    )}
+                    {!whatsAppUiState && message.status === "sent" && (
                         <Check className="h-3 w-3 text-gray-400" aria-label="Sent" />
                     )}
-                    {(message.status === "delivered" || message.status === "read" || message.status === "played") && (
+                    {!whatsAppUiState && (message.status === "delivered" || message.status === "read" || message.status === "played") && (
                         <CheckCheck className={cn("h-3 w-3", message.status === "read" || message.status === "played" ? "text-blue-500" : "text-gray-400")} aria-label={message.status === "read" ? "Read" : "Delivered"} />
                     )}
-                    {message.status === "failed" && (
+                    {(!whatsAppUiState && message.status === "failed") && (
                         <div className="flex items-center gap-1">
                             <span className="flex items-center gap-1 text-red-500 bg-red-50 px-1.5 py-0.5 rounded text-[10px] border border-red-100 font-medium">
                                 <AlertTriangle className="h-3 w-3" />
@@ -224,6 +249,40 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
                                 </span>
                             )}
                         </div>
+                    )}
+                    {whatsAppUiState?.canResend && onResendMessage && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onResendMessage(message.id);
+                            }}
+                            className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline px-1 py-0.5 rounded transition-colors"
+                        >
+                            Resend
+                        </button>
+                    )}
+                    {whatsAppUiState && failureFallbackLabel && (
+                        <span className="text-[10px] text-red-600 px-1 py-0.5 max-w-[220px] truncate" title={failureFallbackLabel}>
+                            {failureFallbackLabel}
+                        </span>
+                    )}
+                    {whatsAppUiState?.canSmsFallback && smsFallbackLabel && onSendSmsFallback && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onSendSmsFallback(message.id);
+                            }}
+                            className="text-[10px] text-green-700 bg-green-50 hover:bg-green-100 border border-green-100 px-1.5 py-0.5 rounded transition-colors"
+                        >
+                            {smsFallbackLabel}
+                        </button>
+                    )}
+                    {whatsAppUiState && smsFallbackUnavailableLabel && (
+                        <span className="text-[10px] text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
+                            {smsFallbackUnavailableLabel}
+                        </span>
                     )}
                 </span>
             )}

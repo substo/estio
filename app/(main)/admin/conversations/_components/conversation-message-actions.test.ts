@@ -6,6 +6,7 @@ import {
     applyResendAckById,
     applySendAckByCorrelation,
     buildOptimisticTextMessage,
+    deriveOutboundWhatsAppUiState,
     getSendAckState,
     getWhatsAppFailureFallbackUiState,
     markMessageFailedById,
@@ -74,12 +75,22 @@ test('text send ack applies queued, degraded, and fallback states by correlation
     const queued = applySendAckByCorrelation([baseMessage], {
         optimisticMessageId: 'msg-1',
         optimisticClientMessageId: 'cmid_1',
-        ack: { messageId: 'server-1', clientMessageId: 'cmid_1', outboxJobId: 'job-1', queued: true },
+        ack: {
+            messageId: 'server-1',
+            clientMessageId: 'cmid_1',
+            outboxJobId: 'job-1',
+            queued: true,
+            scheduledAt: '2026-05-21T10:00:08.000Z',
+            typingDelayMs: 8000,
+            typingDelayReason: 'length_based',
+        },
     })[0] as any;
     assert.equal(queued.id, 'server-1');
     assert.equal(queued.status, 'sending');
     assert.equal(queued.sendState, 'queued');
     assert.equal(queued.outboxState.status, 'pending');
+    assert.equal(queued.outboxState.scheduledAt, '2026-05-21T10:00:08.000Z');
+    assert.equal(queued.outboxState.typingDelayMs, 8000);
 
     const degraded = applySendAckByCorrelation([baseMessage], {
         optimisticMessageId: 'msg-1',
@@ -98,6 +109,78 @@ test('text send ack applies queued, degraded, and fallback states by correlation
     assert.equal(fallback.status, 'sent');
     assert.equal(fallback.sendState, 'sent');
     assert.equal(fallback.outboxState.status, 'completed');
+});
+
+test('deriveOutboundWhatsAppUiState maps queued and scheduled states clearly', () => {
+    const queued = deriveOutboundWhatsAppUiState(baseMessage as any, { nowMs: Date.parse('2026-05-21T10:00:00.000Z') });
+    assert.equal(queued?.label, 'Queued');
+    assert.equal(queued?.detail, 'Waiting briefly before sending');
+    assert.equal(queued?.showSpinner, true);
+
+    const scheduled = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        outboxState: {
+            id: 'job-1',
+            status: 'pending',
+            scheduledAt: '2026-05-21T10:00:07.000Z',
+        },
+    } as any, { nowMs: Date.parse('2026-05-21T10:00:00.000Z') });
+    assert.equal(scheduled?.label, 'Scheduled');
+    assert.equal(scheduled?.detail, 'Scheduled in 7s');
+});
+
+test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, delivered, and read', () => {
+    assert.equal(deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        outboxState: { id: 'job-1', status: 'processing' },
+    } as any)?.label, 'Sending');
+
+    const retrying = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        outboxState: {
+            id: 'job-1',
+            status: 'failed',
+            scheduledAt: '2026-05-21T10:00:05.000Z',
+            attemptCount: 2,
+            lastError: 'temporary provider error',
+        },
+    } as any, { nowMs: Date.parse('2026-05-21T10:00:00.000Z') });
+    assert.equal(retrying?.label, 'Retrying');
+    assert.equal(retrying?.detail, 'Retrying automatically in 5s');
+    assert.equal(retrying?.retryAttempt, 2);
+
+    const failed = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'failed',
+        outboxState: { id: 'job-1', status: 'dead', lastError: 'provider rejected send' },
+    } as any);
+    assert.equal(failed?.label, 'Failed');
+    assert.equal(failed?.canResend, true);
+
+    assert.equal(deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'sent',
+        outboxState: { id: 'job-1', status: 'pending' },
+    } as any)?.label, 'Sent');
+    assert.equal(deriveOutboundWhatsAppUiState({ ...baseMessage, status: 'delivered' } as any)?.label, 'Delivered');
+    assert.equal(deriveOutboundWhatsAppUiState({ ...baseMessage, status: 'read' } as any)?.label, 'Read');
+});
+
+test('deriveOutboundWhatsAppUiState keeps SMS fallback gated to number-not-on-WhatsApp', () => {
+    const fallback = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'failed',
+        outboxState: {
+            id: 'job-1',
+            status: 'dead',
+            lastError: 'phone number is not registered on WhatsApp',
+        },
+    } as any, {
+        smsRelayEnabled: true,
+        contactPhone: '+35799306050',
+    });
+    assert.equal(fallback?.label, 'SMS fallback available');
+    assert.equal(fallback?.canSmsFallback, true);
 });
 
 test('media ack treats queued as true while resend ack preserves exact outbox replacement', () => {

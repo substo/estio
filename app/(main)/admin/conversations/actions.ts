@@ -4192,6 +4192,7 @@ export async function sendWhatsAppMediaReply(
         caption?: string;
         kind?: WhatsAppMediaKind;
         clientMessageId?: string;
+        clientSentAt?: string | null;
     }
 ) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -4199,6 +4200,14 @@ export async function sendWhatsAppMediaReply(
     const cleanCaption = String(options?.caption || "").trim();
 
     try {
+        console.info(JSON.stringify({
+            scope: "whatsapp_send_lifecycle",
+            event: "sendWhatsAppMediaReply_started",
+            at: new Date().toISOString(),
+            clientMessageId: options?.clientMessageId || null,
+            conversationId,
+            kind: options?.kind || (upload as any)?.kind || null,
+        }));
         const transportState = await resolveWhatsAppOutboundTransport(location.id);
         if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
             return { success: false, error: "WhatsApp Web Bridge is selected but not connected. Scan the QR code in WhatsApp settings first." };
@@ -4306,6 +4315,21 @@ export async function sendWhatsAppMediaReply(
                 size,
             },
         });
+        const clientSentAtMs = Date.parse(String(options?.clientSentAt || ""));
+        if (Number.isFinite(clientSentAtMs)) {
+            console.info(JSON.stringify({
+                scope: "whatsapp_send_lifecycle",
+                event: "sendWhatsAppMediaReply_ack_ready",
+                at: new Date().toISOString(),
+                clientMessageId: enqueueResult.clientMessageId,
+                messageId: enqueueResult.messageId,
+                outboxJobId: enqueueResult.outboxJobId,
+                client_to_action_ms: Date.now() - clientSentAtMs,
+                typingDelayMs: enqueueResult.typing.delayMs,
+                scheduledAt: enqueueResult.scheduledAt,
+                dispatchMode: enqueueResult.dispatchMode,
+            }));
+        }
 
         invalidateConversationReadCaches(conversation.id);
         emitConversationRealtimeEvent({
@@ -4321,6 +4345,11 @@ export async function sendWhatsAppMediaReply(
                 outboxJobId: enqueueResult.outboxJobId,
                 queueAccepted: enqueueResult.queueAccepted,
                 dispatchMode: enqueueResult.dispatchMode,
+                scheduledAt: enqueueResult.scheduledAt,
+                typingDelayMs: enqueueResult.typing.delayMs,
+                typingDelayReason: enqueueResult.typing.reason,
+                transport: enqueueResult.transport,
+                outboxStatus: enqueueResult.outboxStatus,
             },
         });
         return {
@@ -4329,6 +4358,11 @@ export async function sendWhatsAppMediaReply(
             messageId: enqueueResult.messageId,
             clientMessageId: enqueueResult.clientMessageId,
             outboxJobId: enqueueResult.outboxJobId,
+            scheduledAt: enqueueResult.scheduledAt,
+            typingDelayMs: enqueueResult.typing.delayMs,
+            typingDelayReason: enqueueResult.typing.reason,
+            transport: enqueueResult.transport,
+            outboxStatus: enqueueResult.outboxStatus,
             queueAccepted: enqueueResult.queueAccepted,
             dispatchMode: enqueueResult.dispatchMode,
             warning: enqueueResult.warning,
@@ -4436,6 +4470,11 @@ export async function sendWhatsAppTemplateReply(
                 outboxJobId: enqueueResult.outboxJobId,
                 queueAccepted: enqueueResult.queueAccepted,
                 dispatchMode: enqueueResult.dispatchMode,
+                scheduledAt: enqueueResult.scheduledAt,
+                typingDelayMs: enqueueResult.typing.delayMs,
+                typingDelayReason: enqueueResult.typing.reason,
+                transport: enqueueResult.transport,
+                outboxStatus: enqueueResult.outboxStatus,
             },
         });
 
@@ -4445,6 +4484,11 @@ export async function sendWhatsAppTemplateReply(
             messageId: enqueueResult.messageId,
             clientMessageId: enqueueResult.clientMessageId,
             outboxJobId: enqueueResult.outboxJobId,
+            scheduledAt: enqueueResult.scheduledAt,
+            typingDelayMs: enqueueResult.typing.delayMs,
+            typingDelayReason: enqueueResult.typing.reason,
+            transport: enqueueResult.transport,
+            outboxStatus: enqueueResult.outboxStatus,
             queueAccepted: enqueueResult.queueAccepted,
             dispatchMode: enqueueResult.dispatchMode,
             warning: enqueueResult.warning,
@@ -4463,6 +4507,7 @@ export async function sendReply(
     type: 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY',
     options?: {
         clientMessageId?: string;
+        clientSentAt?: string | null;
         translationSourceText?: string | null;
         translationTargetLanguage?: string | null;
         translationDetectedSourceLanguage?: string | null;
@@ -4470,6 +4515,13 @@ export async function sendReply(
 ) {
     try {
         if (type === "WhatsApp") {
+            console.info(JSON.stringify({
+                scope: "whatsapp_send_lifecycle",
+                event: "sendReply_started",
+                at: new Date().toISOString(),
+                clientMessageId: options?.clientMessageId || null,
+                conversationId,
+            }));
             const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
             const transportState = await resolveWhatsAppOutboundTransport(location.id);
             if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
@@ -4542,6 +4594,21 @@ export async function sendReply(
                 transport: transportState.transport,
                 clientMessageId: options?.clientMessageId || null,
             });
+            const clientSentAtMs = Date.parse(String(options?.clientSentAt || ""));
+            if (Number.isFinite(clientSentAtMs)) {
+                console.info(JSON.stringify({
+                    scope: "whatsapp_send_lifecycle",
+                    event: "sendReply_ack_ready",
+                    at: new Date().toISOString(),
+                    clientMessageId: enqueueResult.clientMessageId,
+                    messageId: enqueueResult.messageId,
+                    outboxJobId: enqueueResult.outboxJobId,
+                    client_to_action_ms: Date.now() - clientSentAtMs,
+                    typingDelayMs: enqueueResult.typing.delayMs,
+                    scheduledAt: enqueueResult.scheduledAt,
+                    dispatchMode: enqueueResult.dispatchMode,
+                }));
+            }
 
             const translationSourceText = String(options?.translationSourceText || "").trim();
             const translationTargetLanguage = normalizeTranslationTargetLanguage(options?.translationTargetLanguage || null);
@@ -4581,6 +4648,11 @@ export async function sendReply(
                     outboxJobId: enqueueResult.outboxJobId,
                     queueAccepted: enqueueResult.queueAccepted,
                     dispatchMode: enqueueResult.dispatchMode,
+                    scheduledAt: enqueueResult.scheduledAt,
+                    typingDelayMs: enqueueResult.typing.delayMs,
+                    typingDelayReason: enqueueResult.typing.reason,
+                    transport: enqueueResult.transport,
+                    outboxStatus: enqueueResult.outboxStatus,
                 },
             });
 
@@ -4590,6 +4662,11 @@ export async function sendReply(
                 messageId: enqueueResult.messageId,
                 clientMessageId: enqueueResult.clientMessageId,
                 outboxJobId: enqueueResult.outboxJobId,
+                scheduledAt: enqueueResult.scheduledAt,
+                typingDelayMs: enqueueResult.typing.delayMs,
+                typingDelayReason: enqueueResult.typing.reason,
+                transport: enqueueResult.transport,
+                outboxStatus: enqueueResult.outboxStatus,
                 queueAccepted: enqueueResult.queueAccepted,
                 dispatchMode: enqueueResult.dispatchMode,
                 warning: enqueueResult.warning,
