@@ -516,7 +516,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Determine the "Contact" phone number (The external party)
     // If inbound, Contact is "from". If outbound, Contact is "to".
     let contactPhone = direction === "inbound" ? normalizedFrom : normalizedTo;
-    const contactIdentityIsLid = !isGroup && /@lid$/i.test(contactPhone);
+    let contactIdentityIsLid = !isGroup && /@lid$/i.test(contactPhone);
 
     // --- LID RESOLUTION CHECK ---
     // If contactPhone implies an LID (ends with @lid) but we have a resolved phone from webhook/route.ts, use it.
@@ -532,6 +532,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             console.warn(`[WhatsApp Sync] Ignoring low-confidence resolved phone for ${msg.wamId}: +${resolvedDigits}`);
         }
     }
+    contactIdentityIsLid = !isGroup && /@lid$/i.test(contactPhone);
+    const isUnsafeWebBridgeInboundLidOnly = source === "whatsapp_web_bridge"
+        && direction === "inbound"
+        && !isGroup
+        && contactIdentityIsLid
+        && !isHighConfidenceResolvedPhone(normalizeDigits(msg.resolvedPhone));
 
     // If inbound is unresolved LID-only, defer message until mapping is known.
     // This prevents creating a second placeholder contact/conversation immediately.
@@ -646,6 +652,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     let matchedByLid = false;
     const lidMatches = candidates.filter((c: any) => {
         if (!msg.lid || !c.lid) return false;
+        if (isUnsafeWebBridgeInboundLidOnly && c.phone) return false;
         // Normalize both for comparison (strip @lid if present)
         return normalizeLidJid(c.lid) === normalizedMsgLid;
     });
@@ -657,6 +664,24 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     let isNewContact = false;
     if (!contact) {
         contact = phoneMatchCandidate;
+    } else if (matchedByLid && rawInputPhone.length >= 9) {
+        const lidContactPhoneDigits = normalizeDigits(contact.phone);
+        const lidPhoneMatchesResolvedPhone = !!lidContactPhoneDigits && (
+            lidContactPhoneDigits === rawInputPhone
+            || lidContactPhoneDigits.endsWith(rawInputPhone)
+            || rawInputPhone.endsWith(lidContactPhoneDigits)
+        );
+        if (!lidPhoneMatchesResolvedPhone) {
+            if (phoneMatchCandidate) {
+                console.warn(`[WhatsApp Sync] Ignoring stale LID match ${contact.id}; resolved phone matched contact ${phoneMatchCandidate.id}`);
+                contact = phoneMatchCandidate;
+                matchedByLid = false;
+            } else {
+                console.warn(`[WhatsApp Sync] Ignoring stale LID match ${contact.id}; resolved phone +${rawInputPhone} conflicts with contact phone ${contact.phone || "(none)"}`);
+                contact = undefined as any;
+                matchedByLid = false;
+            }
+        }
     }
 
     if (contact && !isGroup && contact.contactType === "Ref-GroupMember") {
@@ -911,14 +936,17 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 // the same WhatsApp Web chat cannot create duplicate placeholder contacts.
                 await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${locationId}), hashtext(${normalizedMsgLid}))`;
 
-                const existingLidContact = await (tx as any).contact.findFirst({
-                    where: buildContactLidLookup(locationId, normalizedMsgLid),
+                const existingLidLookup = buildContactLidLookup(locationId, normalizedMsgLid);
+                const existingLidContact = existingLidLookup ? await (tx as any).contact.findFirst({
+                    where: isUnsafeWebBridgeInboundLidOnly
+                        ? { AND: [existingLidLookup, { phone: null }] }
+                        : existingLidLookup,
                     orderBy: [
                         { phone: "desc" },
                         { createdAt: "asc" },
                         { id: "asc" },
                     ],
-                });
+                }) : null;
                 if (existingLidContact) {
                     return { contact: existingLidContact, created: false };
                 }
@@ -990,7 +1018,10 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     if (source === "whatsapp_web_bridge" && contact?.id) {
-        const mappedPhone = contact?.phone || (msg.resolvedPhone ? `+${normalizeDigits(msg.resolvedPhone)}` : null);
+        const resolvedMappedPhone = msg.resolvedPhone && isHighConfidenceResolvedPhone(normalizeDigits(msg.resolvedPhone))
+            ? `+${normalizeDigits(msg.resolvedPhone)}`
+            : null;
+        const mappedPhone = resolvedMappedPhone || contact?.phone || null;
         if (normalizedMsgLid) {
             await upsertWebBridgeIdentityMap({
                 locationId,

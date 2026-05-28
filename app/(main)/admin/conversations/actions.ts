@@ -101,6 +101,7 @@ import {
     upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
+import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import {
     markWhatsAppWebBridgeMediaRefetchAttemptFailed,
     startWhatsAppWebBridgeMediaRefetchAttempt,
@@ -8157,22 +8158,21 @@ async function importWebBridgeRecentMessagesForContact(args: {
         if (!wamId) continue;
 
         try {
-            const fromMe = Boolean(message?.fromMe);
-            const fromId = String(message?.from || "");
-            const toId = String(message?.to || "");
-            const remoteId = fromMe ? toId : fromId;
-            const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
-            const ownIdentity = parseWhatsAppWebChatIdentity(fromMe ? fromId : toId);
+            const messageIdentity = resolveInboundWhatsAppContactIdentity({ message });
+            const { fromMe, remoteJid: remoteId, contactIdentity, ownIdentity } = messageIdentity;
             const { resolveWebBridgeIdentity } = await import("@/lib/whatsapp/web-bridge-identity");
             const resolvedIdentity = await resolveWebBridgeIdentity({
                 locationId: args.locationId,
-                remoteJid: remoteId,
+                remoteJid: messageIdentity.contactJid,
                 identity: message?.contactIdentity || null,
             });
-            let contactPhone = contactIdentity.phone || resolvedIdentity.phone;
+            const resolvedMessagePhone = resolvedIdentity.source === "web_bridge_contact_metadata"
+                ? resolvedIdentity.phone
+                : "";
+            let contactPhone = contactIdentity.phone || resolvedMessagePhone;
             const contactLid = resolvedIdentity.lid || contactIdentity.lid || "";
             const canonicalPhoneDigits = String(args.canonicalPhone || args.phone || "").replace(/\D/g, "");
-            if (!contactPhone && contactLid && canonicalPhoneDigits.length >= 7) {
+            if (!contactPhone && fromMe && contactLid && canonicalPhoneDigits.length >= 7) {
                 contactPhone = canonicalPhoneDigits;
             }
             const contactAddress = contactPhone || contactLid;
@@ -8243,6 +8243,9 @@ async function importWebBridgeRecentMessagesForContact(args: {
                 lid: contactLid || undefined,
                 remoteJid: remoteId,
                 chatId,
+                isGroup: messageIdentity.isGroup,
+                participant: messageIdentity.isGroup ? messageIdentity.senderJid : undefined,
+                participantJid: messageIdentity.isGroup ? messageIdentity.senderJid : undefined,
                 webBridgeIdentity: {
                     ...resolvedIdentity,
                     rawContactIdentity: message?.contactIdentity || null,

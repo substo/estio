@@ -7,6 +7,7 @@ import {
     WHATSAPP_WEB_BRIDGE_PROVIDER,
 } from "@/lib/whatsapp/web-bridge";
 import { resolveWebBridgeIdentity } from "@/lib/whatsapp/web-bridge-identity";
+import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import {
     normalizeWhatsAppWebBridgeAckStatus,
     normalizeWhatsAppWebBridgeMessage,
@@ -109,10 +110,10 @@ export async function POST(req: NextRequest) {
 
         if (event === "message" || event === "message_create") {
             const message = body?.message || {};
-            const remoteId = message.fromMe ? String(message.to || "") : String(message.from || "");
+            const messageIdentity = resolveInboundWhatsAppContactIdentity({ message, phone: body?.phone });
             const resolvedIdentity = await resolveWebBridgeIdentity({
                 locationId,
-                remoteJid: remoteId,
+                remoteJid: messageIdentity.contactJid,
                 identity: message.contactIdentity || null,
             });
             const normalizedMessage = normalizeWhatsAppWebBridgeMessage({

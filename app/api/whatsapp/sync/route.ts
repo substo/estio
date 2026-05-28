@@ -4,6 +4,7 @@ import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import db from "@/lib/db";
 import { refreshGhlAccessToken } from "@/lib/location";
 import { fetchWhatsAppWebBridgeChats, fetchWhatsAppWebBridgeMessages, parseWhatsAppWebChatIdentity } from "@/lib/whatsapp/web-bridge";
+import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { updateWebBridgeMediaSyncMetadata } from "@/lib/whatsapp/web-bridge-media-refetch";
 
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
                         remoteJid: chatId,
                         identity: chat?.contactIdentity || null,
                     });
-                    const phone = chatIdentity.phone || resolvedIdentity.phone;
+                    const phone = chatIdentity.phone || (resolvedIdentity.source === "web_bridge_contact_metadata" ? resolvedIdentity.phone : "");
                     const lid = resolvedIdentity.lid || chatIdentity.lid || "";
                     const name = resolvedIdentity.displayName || chat?.name || chat?.pushName || (phone ? `+${phone}` : "WhatsApp Contact");
 
@@ -96,18 +97,17 @@ export async function GET(req: NextRequest) {
                             if (!wamId) continue;
 
                             try {
-                                const fromMe = Boolean(message?.fromMe);
-                                const fromId = String(message?.from || "");
-                                const toId = String(message?.to || "");
-                                const remoteId = fromMe ? toId : fromId;
-                                const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
-                                const ownIdentity = parseWhatsAppWebChatIdentity(fromMe ? fromId : toId);
+                                const messageIdentity = resolveInboundWhatsAppContactIdentity({ message });
+                                const { fromMe, remoteJid: remoteId, contactIdentity, ownIdentity } = messageIdentity;
                                 const resolvedMessageIdentity = await resolveWebBridgeIdentity({
                                     locationId: location.id,
-                                    remoteJid: remoteId,
+                                    remoteJid: messageIdentity.contactJid,
                                     identity: message?.contactIdentity || null,
                                 });
-                                const contactPhone = contactIdentity.phone || resolvedMessageIdentity.phone || phone;
+                                const resolvedMessagePhone = resolvedMessageIdentity.source === "web_bridge_contact_metadata"
+                                    ? resolvedMessageIdentity.phone
+                                    : "";
+                                const contactPhone = contactIdentity.phone || resolvedMessagePhone || phone;
                                 const contactLid = resolvedMessageIdentity.lid || contactIdentity.lid || lid;
                                 const contactAddress = contactPhone || contactLid;
                                 const ownPhone = ownIdentity.phone || location.id;
@@ -132,6 +132,9 @@ export async function GET(req: NextRequest) {
                                     lid: contactLid || undefined,
                                     remoteJid: remoteId,
                                     chatId,
+                                    isGroup: messageIdentity.isGroup,
+                                    participant: messageIdentity.isGroup ? messageIdentity.senderJid : undefined,
+                                    participantJid: messageIdentity.isGroup ? messageIdentity.senderJid : undefined,
                                     webBridgeIdentity: {
                                         ...resolvedMessageIdentity,
                                         rawContactIdentity: message?.contactIdentity || null,

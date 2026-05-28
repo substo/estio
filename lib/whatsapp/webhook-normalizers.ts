@@ -1,5 +1,7 @@
 import type { NormalizedMessage } from "@/lib/whatsapp/sync";
+import { normalizeDigits } from "@/lib/whatsapp/identity";
 import { parseWhatsAppWebChatIdentity } from "@/lib/whatsapp/web-bridge";
+import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 
 export function getWhatsAppCloudInboundBody(message: any) {
     const type = String(message?.type || "other");
@@ -91,16 +93,21 @@ export function normalizeWhatsAppWebBridgeMessage(args: {
     resolvedIdentity: any;
 }): { normalized: NormalizedMessage | null; wamId: string; rawMessage: any; ignoreReason?: string } {
     const message = args.message || {};
-    const fromMe = Boolean(message.fromMe);
-    const fromId = String(message.from || "");
-    const toId = String(message.to || "");
-    const remoteId = fromMe ? toId : fromId;
-    const contactIdentity = parseWhatsAppWebChatIdentity(remoteId);
-    const ownIdentity = parseWhatsAppWebChatIdentity(args.phone || (fromMe ? fromId : toId));
+    const identity = resolveInboundWhatsAppContactIdentity({ message, phone: args.phone });
+    const { fromMe, remoteJid: remoteId, contactIdentity, ownIdentity } = identity;
+    const participantIdentity = identity.isGroup
+        ? parseWhatsAppWebChatIdentity(identity.senderJid)
+        : null;
     const contactLid = args.resolvedIdentity.lid || contactIdentity.lid || "";
-    const contactPhone = contactIdentity.phone || args.resolvedIdentity.phone || "";
-    const contactAddress = contactPhone || contactLid;
     const ownPhone = ownIdentity.phone || args.locationId;
+    const resolvedIdentityPhone = args.resolvedIdentity.source === "web_bridge_contact_metadata"
+        ? args.resolvedIdentity.phone
+        : "";
+    const candidateContactPhone = contactIdentity.phone || resolvedIdentityPhone || "";
+    const contactPhone = !fromMe && normalizeDigits(candidateContactPhone) === normalizeDigits(ownPhone)
+        ? ""
+        : candidateContactPhone;
+    const contactAddress = contactPhone || contactLid;
     const wamId = String(message.id || message.messageId || "").trim();
 
     if (!wamId) {
@@ -132,7 +139,13 @@ export function normalizeWhatsAppWebBridgeMessage(args: {
             lid: contactLid || undefined,
             resolvedPhone: contactPhone || undefined,
             remoteJid: remoteId,
-            chatId: contactIdentity.chatId || remoteId,
+            chatId: identity.isGroup ? remoteId : (contactIdentity.chatId || remoteId),
+            isGroup: identity.isGroup,
+            participant: identity.isGroup ? identity.senderJid : undefined,
+            participantJid: identity.isGroup ? identity.senderJid : undefined,
+            participantPhoneJid: participantIdentity?.phone ? `${participantIdentity.phone}@s.whatsapp.net` : undefined,
+            participantLidJid: participantIdentity?.lid || undefined,
+            participantDisplayName: identity.isGroup ? (args.resolvedIdentity.displayName || message.notifyName || undefined) : undefined,
             webBridgeIdentity: {
                 ...args.resolvedIdentity,
                 rawContactIdentity: message.contactIdentity || null,
