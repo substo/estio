@@ -72,6 +72,20 @@ export type OldCrmPropertyPullError = {
     rawError: string | null;
 };
 
+export function buildOldCrmManualPullFailure(error: unknown): NormalizedOldCrmPropertyPullResult {
+    const normalized = normalizeOldCrmPropertyPullError(error);
+    return {
+        success: false,
+        error: normalized.message,
+        errorCode: normalized.code,
+        retryable: normalized.retryable,
+        rawError: normalized.rawError,
+        warnings: [],
+        notFound: normalized.code === "PROPERTY_NOT_FOUND",
+        verifyUrl: normalized.verifyUrl,
+    };
+}
+
 const OPTIONAL_NUMERIC_FIELDS = new Set([
     "price",
     "communalFees",

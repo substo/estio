@@ -549,7 +549,8 @@ export async function bulkUpdateFeedInboxPropertiesAction(
 }
 
 import { pushPropertyToCrm } from "@/lib/crm/crm-pusher";
-import { pullOldCrmPropertyForManualAction } from "@/lib/crm/old-crm-property-pull-service";
+import { buildOldCrmManualPullFailure } from "@/lib/crm/old-crm-property-pull-service";
+import { pullOldCrmPropertyForManualClient } from "@/lib/crm/manual-old-crm-property-pull";
 
 export async function pushToOldCrm(propertyId: string) {
     const user = await currentUser();
@@ -560,46 +561,23 @@ export async function pushToOldCrm(propertyId: string) {
 }
 
 export async function pullFromOldCrm(oldPropertyId: string) {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
+    try {
+        const user = await currentUser();
+        return await pullOldCrmPropertyForManualClient({
+            oldPropertyId,
+            clerkUserId: user?.id,
+        });
+    } catch (error) {
+        const failure = buildOldCrmManualPullFailure(error);
+        console.error("[CRM PULL] Manual Old CRM pull action failed", {
+            oldPropertyId,
+            errorCode: failure.errorCode,
+            retryable: failure.retryable,
+            rawError: failure.rawError,
+        });
 
-    const result = await pullOldCrmPropertyForManualAction({
-        oldCrmPropertyId,
-        clerkUserId: user.id,
-    });
-    if (!result.success || !result.data?.reference) {
-        return result;
+        return failure;
     }
-
-    const locationId = result.locationId;
-    if (!locationId) {
-        return result;
-    }
-
-    const existing = await db.property.findFirst({
-        where: {
-            locationId,
-            reference: {
-                equals: String(result.data.reference),
-                mode: "insensitive",
-            },
-        },
-        select: { id: true, reference: true, title: true },
-    });
-
-    if (!existing) {
-        return result;
-    }
-
-    return {
-        ...result,
-        duplicateProperty: {
-            id: existing.id,
-            reference: existing.reference,
-            title: existing.title,
-            url: `/admin/properties/${existing.id}/view`,
-        },
-    };
 }
 
 export async function linkPropertyCreator(propertyId: string, email: string) {

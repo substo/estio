@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { upsertProperty, pushToOldCrm, pullFromOldCrm, linkPropertyCreator } from "../actions";
+import { upsertProperty, pushToOldCrm, linkPropertyCreator } from "../actions";
 import { useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -469,13 +469,27 @@ export default function PropertyForm({
     const [importId, setImportId] = useState("");
     const [isPulling, setIsPulling] = useState(false);
 
+    const pullFromOldCrmApi = async (oldPropertyId: string) => {
+        const response = await fetch("/api/admin/properties/pull-old-crm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ oldPropertyId }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Old CRM pull request failed (${response.status})`);
+        }
+
+        return response.json();
+    };
+
     const handlePull = async (e: React.MouseEvent) => {
         e.preventDefault();
         if (!importId) return;
 
         setIsPulling(true);
         try {
-            const res = await pullFromOldCrm(importId);
+            const res = await pullFromOldCrmApi(importId);
             if (!res.success) {
                 // Check for "property not found" specific error
                 const errorMsg = res.error || "Unknown error";
