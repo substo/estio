@@ -2,10 +2,13 @@
 
 import { useCallback, useState } from 'react';
 
+import { useToast } from '@/components/ui/use-toast';
+
 import { startNewConversation } from '../actions';
 import {
     buildNewConversationResultError,
     normalizeNewConversationStartInput,
+    shouldShowHistoryBackfillQueuedToast,
 } from './new-conversation-dialog-helpers';
 
 export function useNewConversationPhone(args: {
@@ -13,6 +16,7 @@ export function useNewConversationPhone(args: {
     onClose: () => void;
     setError: (error: string | null) => void;
 }) {
+    const { toast } = useToast();
     const [phoneInput, setPhoneInput] = useState('');
     const [creatingPhone, setCreatingPhone] = useState(false);
 
@@ -26,6 +30,12 @@ export function useNewConversationPhone(args: {
         try {
             const res = await startNewConversation(input);
             if (res.success && res.conversationId) {
+                if (shouldShowHistoryBackfillQueuedToast(res)) {
+                    toast({
+                        title: 'Conversation opened',
+                        description: 'Recent WhatsApp history is syncing in the background.',
+                    });
+                }
                 args.onConversationCreated?.(res.conversationId);
                 args.onClose();
             } else {
@@ -36,7 +46,7 @@ export function useNewConversationPhone(args: {
         } finally {
             setCreatingPhone(false);
         }
-    }, [args, phoneInput]);
+    }, [args, phoneInput, toast]);
 
     const resetPhone = useCallback(() => {
         setPhoneInput('');

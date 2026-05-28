@@ -1331,6 +1331,7 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
         if (!existingContact.name && googleData.name) updates.name = googleData.name;
         if (!existingContact.email && googleData.email) updates.email = googleData.email;
         if (!existingContact.phone && googleData.phone) updates.phone = googleData.phone;
+        const updatedIdentityFields = ['name', 'email', 'phone'].some((field) => field in updates);
 
         await db.$transaction(async (tx) => {
           await tx.contact.update({
@@ -1346,10 +1347,13 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
         revalidatePath('/admin/contacts');
         return {
           success: true,
-          message: 'Existing contact linked to Google.',
+          message: updatedIdentityFields
+            ? 'Existing contact updated and linked to Google.'
+            : 'Existing contact linked to Google.',
           contactId: existingContact.id,
           existing: true,
           linked: true,
+          importOutcome: updatedIdentityFields ? 'updated' : 'linked',
         };
       }
 
@@ -1361,6 +1365,7 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
         contactId: existingContact.id,
         existing: true,
         linked: existingContact.googleContactId === resourceName,
+        importOutcome: 'existing',
       };
     }
 
@@ -1406,7 +1411,7 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
     });
 
     revalidatePath('/admin/contacts');
-    return { success: true, message: 'Contact imported successfully.', contactId: contact.id };
+    return { success: true, message: 'Contact imported successfully.', contactId: contact.id, importOutcome: 'imported' };
 
   } catch (error: any) {
     if (error.message === 'GOOGLE_AUTH_EXPIRED') {

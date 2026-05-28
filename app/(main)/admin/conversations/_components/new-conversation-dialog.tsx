@@ -16,7 +16,11 @@ import {
     buildPasteLeadProgressSteps,
     type PasteLeadProgressStep,
 } from '@/lib/conversations/paste-lead-status';
-import { canStartContactConversation } from '@/lib/contacts/conversation-start';
+import {
+    buildGoogleRowOutcomeLabel,
+    canStartGoogleContactConversation,
+    getGoogleContactDisabledReason,
+} from './new-conversation-dialog-helpers';
 import { useNewConversationPhone } from './use-new-conversation-phone';
 import { useNewConversationWhatsAppPicker } from './use-new-conversation-whatsapp-picker';
 import { useNewConversationGoogle } from './use-new-conversation-google';
@@ -112,6 +116,8 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         loadingGoogle,
         googleNotConnected,
         googleAuthExpired,
+        googleSearched,
+        googleRowOutcomes,
         searchGoogle,
         importAndOpenGoogleContact,
     } = google;
@@ -328,13 +334,12 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                                 }
                                             }}
                                             className="pl-9"
-                                            disabled={loadingGoogle}
                                         />
                                     </div>
                                     <Button
                                         type="button"
                                         disabled={loadingGoogle || !googleSearch.trim()}
-                                        onClick={searchGoogle}
+                                        onClick={() => searchGoogle()}
                                     >
                                         <Search className="h-4 w-4" />
                                     </Button>
@@ -349,9 +354,14 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         </div>
                                     )}
 
-                                    {!loadingGoogle && googleResults.length === 0 && googleSearch && (
+                                    {!loadingGoogle && googleResults.length === 0 && googleSearch && googleSearched && (
                                         <div className="py-8 text-center text-gray-500 text-sm">
-                                            Press enter to search. No results found yet.
+                                            No Google contacts found.
+                                        </div>
+                                    )}
+                                    {!loadingGoogle && googleResults.length === 0 && googleSearch && !googleSearched && (
+                                        <div className="py-8 text-center text-gray-500 text-sm">
+                                            Searching after you stop typing.
                                         </div>
                                     )}
                                     {!loadingGoogle && googleResults.length === 0 && !googleSearch && (
@@ -360,37 +370,59 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         </div>
                                     )}
 
-                                    {!loadingGoogle && googleResults.map((contact) => (
-                                        <div key={contact.resourceName} className="w-full flex items-center justify-between p-3 hover:bg-slate-50 transition-colors">
-                                            <div className="flex items-center gap-3 overflow-hidden">
-                                                {contact.photo ? (
-                                                    <img src={contact.photo} alt={contact.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
-                                                ) : (
-                                                    <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
-                                                        <span className="text-slate-500 font-medium text-xs">{contact.name?.charAt(0) || '?'}</span>
-                                                    </div>
-                                                )}
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-medium truncate">{contact.name || 'Unnamed'}</p>
-                                                    <div className="text-xs text-muted-foreground truncate flex gap-2">
-                                                        {contact.email && <span>{contact.email}</span>}
-                                                        {contact.phone && <span>{contact.phone}</span>}
+                                    {!loadingGoogle && googleResults.map((contact) => {
+                                        const rowOutcome = googleRowOutcomes[contact.resourceName];
+                                        const rowOutcomeLabel = buildGoogleRowOutcomeLabel(rowOutcome);
+                                        const disabledReason = getGoogleContactDisabledReason(contact);
+                                        const canStartConversation = canStartGoogleContactConversation(contact);
+
+                                        return (
+                                            <div key={contact.resourceName} className="w-full flex items-center justify-between gap-3 p-3 hover:bg-slate-50 transition-colors">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                    {contact.photo ? (
+                                                        <img src={contact.photo} alt={contact.name || 'Google contact'} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                                                    ) : (
+                                                        <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
+                                                            <span className="text-slate-500 font-medium text-xs">{contact.name?.charAt(0) || '?'}</span>
+                                                        </div>
+                                                    )}
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-medium truncate">{contact.name || 'Unnamed'}</p>
+                                                        <div className="text-xs text-muted-foreground truncate flex gap-2">
+                                                            {contact.email && <span>{contact.email}</span>}
+                                                            {contact.phone && <span>{contact.phone}</span>}
+                                                            {!contact.email && !contact.phone && <span>No phone or email</span>}
+                                                        </div>
+                                                        {rowOutcomeLabel && (
+                                                            <div className={cn(
+                                                                "mt-1 text-[11px] font-medium",
+                                                                rowOutcome?.error ? "text-red-600" : "text-green-700"
+                                                            )}>
+                                                                {rowOutcomeLabel}
+                                                            </div>
+                                                        )}
+                                                        {!rowOutcomeLabel && disabledReason && (
+                                                            <div className="mt-1 text-[11px] text-amber-700">
+                                                                {disabledReason}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
-                                            </div>
 
-                                            <Button
-                                                size="sm"
-                                                variant="secondary"
-                                                disabled={creating || !canStartContactConversation(contact)}
-                                                className="shrink-0 ml-2"
-                                                onClick={() => importAndOpenGoogleContact(contact.resourceName)}
-                                            >
-                                                {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <MessageCircle className="h-4 w-4 mr-2" />}
-                                                Message
-                                            </Button>
-                                        </div>
-                                    ))}
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    disabled={creating || !canStartConversation}
+                                                    className="shrink-0 ml-2"
+                                                    title={disabledReason || 'Import and open a conversation'}
+                                                    onClick={() => importAndOpenGoogleContact(contact.resourceName)}
+                                                >
+                                                    {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <MessageCircle className="h-4 w-4 mr-2" />}
+                                                    Message
+                                                </Button>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </TabsContent>

@@ -370,6 +370,22 @@ function runDetachedTask(taskName: string, task: () => Promise<void>) {
     });
 }
 
+function createActionTimer(scope: string) {
+    const startedAt = Date.now();
+    let lastAt = startedAt;
+
+    return {
+        mark(label: string) {
+            const now = Date.now();
+            console.log(`[${scope}] timing ${label}: +${now - lastAt}ms (${now - startedAt}ms total)`);
+            lastAt = now;
+        },
+        total() {
+            console.log(`[${scope}] timing total: ${Date.now() - startedAt}ms`);
+        },
+    };
+}
+
 function queueGhlConversationStatusSync(args: {
     locationId: string;
     conversations: Array<{ id: string; contactId?: string | null }>;
@@ -8491,13 +8507,16 @@ export async function fetchWhatsAppChats() {
  * Create a new conversation for a phone number, with history backfill from WhatsApp Web Bridge.
  */
 export async function startNewConversation(phone: string) {
+    const timer = createActionTimer("NewConversation");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
     const { userId: clerkUserId } = await auth();
     const currentUser = clerkUserId
         ? await db.user.findUnique({ where: { clerkId: clerkUserId }, select: { id: true } })
         : null;
     const preferredUserId = currentUser?.id || null;
+    timer.mark("auth/location");
+    const providerMode = await resolveLocationWhatsAppProviderMode(location.id);
+    timer.mark("provider mode");
 
     const requestedIdentity = String(phone || "").trim();
     const isRequestedLid = /@lid$/i.test(requestedIdentity);
@@ -8512,6 +8531,7 @@ export async function startNewConversation(phone: string) {
 
     const rawDigits = normalizedPhone.replace(/\D/g, '');
     if (!isRequestedLid && !isEmail && rawDigits.length < 7) {
+        timer.total();
         return { success: false, error: "Phone number is too short. Please include the country code." };
     }
 
@@ -8522,6 +8542,42 @@ export async function startNewConversation(phone: string) {
         : await resolvePreferredChannelTypeForPhone(location, rawDigits);
 
     try {
+        const backgroundJobsQueued: string[] = [];
+        const queueWebBridgeHistoryBackfill = (args: {
+            conversationId: string;
+            legacyConversationId?: string | null;
+            contactId: string;
+            contactPhone?: string | null;
+            contactName?: string | null;
+        }) => {
+            if (providerMode !== "web_bridge") {
+                return false;
+            }
+
+            backgroundJobsQueued.push("webBridgeHistoryBackfill");
+            runDetachedTask(`new_conversation_web_bridge_history:${args.conversationId}`, async () => {
+                const backfillStartedAt = Date.now();
+                try {
+                    const backfill = await importWebBridgeRecentMessagesForContact({
+                        locationId: location.id,
+                        phone: args.contactPhone || rawDigits,
+                        chatId: requestedLid || undefined,
+                        canonicalContactId: args.contactId,
+                        canonicalConversationId: args.conversationId,
+                        canonicalPhone: args.contactPhone || normalizedPhone || rawDigits,
+                        contactName: args.contactName,
+                        limit: 30,
+                        logPrefix: `[NewConversation][background:${args.legacyConversationId || args.conversationId}]`,
+                    });
+                    console.log(`[NewConversation] timing Web Bridge backfill background: ${Date.now() - backfillStartedAt}ms; imported=${backfill.imported}; skipped=${backfill.skipped}; errors=${backfill.errors}`);
+                } catch (backfillErr) {
+                    console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
+                }
+            });
+            timer.mark("Web Bridge backfill queued");
+            return true;
+        };
+
         // 1. Find or create contact
         const searchSuffix = rawDigits.length > 2 ? rawDigits.slice(-2) : rawDigits;
         const candidates = await db.contact.findMany({
@@ -8565,6 +8621,7 @@ export async function startNewConversation(phone: string) {
         } else {
             console.log(`[NewConversation] Found existing contact: ${contact.name} (${contact.id})`);
         }
+        timer.mark("contact lookup/create");
 
         if (isNewContact && !isRequestedLid) {
             runDetachedTask(`new_conversation_google_autosync:${contact.id}`, async () => {
@@ -8598,26 +8655,18 @@ export async function startNewConversation(phone: string) {
                 contactId: contact.id
             }
         });
+        timer.mark("conversation lookup");
 
         if (existingConv) {
             console.log(`[NewConversation] Existing conversation found: ${existingConv.ghlConversationId}`);
 
-            // Still try to backfill recent messages from the selected linked-device transport.
-            if (providerMode === "web_bridge") {
-                try {
-                    await importWebBridgeRecentMessagesForContact({
-                        locationId: location.id,
-                        phone: contact.phone || rawDigits,
-                        chatId: requestedLid || undefined,
-                        contactName: contact.name,
-                        limit: 30,
-                        logPrefix: `[NewConversation][existing:${existingConv.ghlConversationId || existingConv.id}]`,
-                    });
-                } catch (backfillErr) {
-                    console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
-                }
-            }
-            
+            const historyBackfillQueued = queueWebBridgeHistoryBackfill({
+                conversationId: existingConv.id,
+                legacyConversationId: existingConv.ghlConversationId,
+                contactId: contact.id,
+                contactPhone: contact.phone,
+                contactName: contact.name,
+            });
 
             const seedResult = await seedConversationFromContactLeadText({
                 conversationId: existingConv.id,
@@ -8629,13 +8678,18 @@ export async function startNewConversation(phone: string) {
             if (seedResult.seeded) {
                 console.log(`[NewConversation] Seeded existing conversation ${existingConv.ghlConversationId} from contact.message`);
             }
+            timer.mark("lead-text seeding");
+            timer.total();
 
             return {
                 success: true,
                 conversationId: existingConv.id,
                 legacyConversationId: existingConv.ghlConversationId,
                 isNew: false,
-                contactName: contact.name
+                contactName: contact.name,
+                historyBackfillQueued,
+                messagesImported: 0,
+                backgroundJobsQueued
             };
         }
 
@@ -8654,6 +8708,7 @@ export async function startNewConversation(phone: string) {
         });
 
         console.log(`[NewConversation] Created Estio conversation: ${conversation.id}`);
+        timer.mark("conversation create");
         runDetachedTask(`new_conversation_provider_mirror:${conversation.id}`, async () => {
             await enqueueGhlConversationMirror({
                 locationId: location.id,
@@ -8663,24 +8718,14 @@ export async function startNewConversation(phone: string) {
             });
         });
 
-        // 4. Try to backfill history from the selected linked-device transport.
-        let messagesImported = 0;
-        if (providerMode === "web_bridge") {
-            try {
-                const backfill = await importWebBridgeRecentMessagesForContact({
-                    locationId: location.id,
-                    phone: contact.phone || rawDigits,
-                    chatId: requestedLid || undefined,
-                    contactName: contact.name,
-                    limit: 30,
-                    logPrefix: `[NewConversation][new:${conversation.id}]`,
-                });
-                messagesImported = backfill.imported;
-            } catch (backfillErr) {
-                console.warn("[NewConversation] Web Bridge history backfill failed:", backfillErr);
-            }
-        }
-        
+        // 4. Backfill history from the selected linked-device transport without blocking open.
+        const historyBackfillQueued = queueWebBridgeHistoryBackfill({
+            conversationId: conversation.id,
+            legacyConversationId: conversation.ghlConversationId,
+            contactId: contact.id,
+            contactPhone: contact.phone,
+            contactName: contact.name,
+        });
 
         const seedResult = await seedConversationFromContactLeadText({
             conversationId: conversation.id,
@@ -8692,6 +8737,8 @@ export async function startNewConversation(phone: string) {
         if (seedResult.seeded) {
             console.log(`[NewConversation] Seeded new conversation ${conversation.id} from contact.message`);
         }
+        timer.mark("lead-text seeding");
+        timer.total();
 
         return {
             success: true,
@@ -8699,9 +8746,12 @@ export async function startNewConversation(phone: string) {
             legacyConversationId: conversation.ghlConversationId || null,
             isNew: true,
             contactName: contact.name,
-            messagesImported
+            historyBackfillQueued,
+            messagesImported: 0,
+            backgroundJobsQueued
         };
     } catch (e: any) {
+        timer.total();
         console.error("[NewConversation] Failed:", e);
         return { success: false, error: e.message };
     }

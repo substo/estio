@@ -2,10 +2,13 @@
 
 import { useCallback, useMemo, useState } from 'react';
 
+import { useToast } from '@/components/ui/use-toast';
+
 import { fetchWhatsAppChats, startNewConversation } from '../actions';
 import {
     buildNewConversationResultError,
     resolveWhatsAppChatIdentity,
+    shouldShowHistoryBackfillQueuedToast,
     type WhatsAppChat,
 } from './new-conversation-dialog-helpers';
 
@@ -14,6 +17,7 @@ export function useNewConversationWhatsAppPicker(args: {
     onClose: () => void;
     setError: (error: string | null) => void;
 }) {
+    const { toast } = useToast();
     const [chats, setChats] = useState<WhatsAppChat[]>([]);
     const [search, setSearch] = useState('');
     const [loadingChats, setLoadingChats] = useState(false);
@@ -52,6 +56,12 @@ export function useNewConversationWhatsAppPicker(args: {
 
             const res = await startNewConversation(identity);
             if (res.success && res.conversationId) {
+                if (shouldShowHistoryBackfillQueuedToast(res)) {
+                    toast({
+                        title: 'Conversation opened',
+                        description: 'Recent WhatsApp history is syncing in the background.',
+                    });
+                }
                 args.onConversationCreated?.(res.conversationId);
                 args.onClose();
             } else {
@@ -62,7 +72,7 @@ export function useNewConversationWhatsAppPicker(args: {
         } finally {
             setCreatingWhatsApp(false);
         }
-    }, [args]);
+    }, [args, toast]);
 
     const filteredChats = useMemo(() => chats.filter((chat) =>
         chat.name.toLowerCase().includes(search.toLowerCase()) ||
