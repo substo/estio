@@ -4,37 +4,12 @@ import { AlertTriangle, Download, ExternalLink, Paperclip, RefreshCw, User } fro
 import { memo } from "react";
 import type { MouseEvent } from "react";
 import { cn } from "@/lib/utils";
-import type { NormalizedMessageAttachment } from "./message-bubble-attachment-actions";
-
-type WebBridgeMedia = {
-    status?: string | null;
-    reason?: string | null;
-    error?: string | null;
-    meta?: {
-        mimetype?: string | null;
-        filename?: string | null;
-        size?: number | null;
-        type?: string | null;
-        caption?: string | null;
-        attemptedDownload?: boolean | null;
-        inlined?: boolean | null;
-    } | null;
-    refetch?: {
-        attemptId?: string | null;
-        status?: string | null;
-        stage?: string | null;
-        message?: string | null;
-        error?: string | null;
-        updatedAt?: string | null;
-        finishedAt?: string | null;
-    } | null;
-    updatedAt?: string | null;
-} | null;
+import type { NormalizedMessageAttachment, WebBridgeMediaState } from "./message-bubble-attachment-actions";
 
 type MessageBubbleMediaStatusProps = {
     contactAttachments: NormalizedMessageAttachment[];
     fileAttachments: NormalizedMessageAttachment[];
-    webBridgeMedia: WebBridgeMedia;
+    webBridgeMedia: WebBridgeMediaState;
     hasUnstoredWebBridgeMedia: boolean;
     canRefetchMedia: boolean;
     isRefetchingMedia: boolean;

@@ -32,6 +32,13 @@ export type WhatsAppWebBridgeMediaRefetchJob = {
     limit?: number;
 };
 
+type AttachmentSnapshot = {
+    fileName: string | null;
+    contentType: string;
+    size: number | null;
+    url: string;
+};
+
 function dedupeStrings(values: Array<string | null | undefined>) {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -59,6 +66,29 @@ function resolveRefetchChatCandidates(conversation: any) {
         normalizeWhatsAppWebChatId(contact.lid),
         normalizeWhatsAppWebChatId(normalizeKnownLidJid(contact.lid)),
     ]);
+}
+
+function snapshotAttachments(attachments: any[]): AttachmentSnapshot[] {
+    return (attachments || []).map((attachment: any) => ({
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        url: attachment.url,
+    }));
+}
+
+async function restoreAttachmentSnapshot(messageId: string, snapshot: AttachmentSnapshot[]) {
+    if (snapshot.length === 0) return;
+
+    await db.messageAttachment.createMany({
+        data: snapshot.map((attachment) => ({
+            messageId,
+            fileName: attachment.fileName,
+            contentType: attachment.contentType,
+            size: attachment.size,
+            url: attachment.url,
+        })),
+    }).catch(() => null);
 }
 
 function serializeRefetchAttempt(update: RefetchAttemptUpdate) {
@@ -357,12 +387,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
         },
     });
 
-    const snapshot = (message.attachments || []).map((attachment: any) => ({
-        fileName: attachment.fileName,
-        contentType: attachment.contentType,
-        size: attachment.size,
-        url: attachment.url,
-    }));
+    const snapshot = snapshotAttachments(message.attachments || []);
 
     if (snapshot.length > 0) {
         await db.messageAttachment.deleteMany({ where: { messageId: message.id } });
@@ -378,17 +403,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
             transientBackoffMs: 750,
         });
     } catch (error: any) {
-        if (snapshot.length > 0) {
-            await db.messageAttachment.createMany({
-                data: snapshot.map((attachment: any) => ({
-                    messageId: message.id,
-                    fileName: attachment.fileName,
-                    contentType: attachment.contentType,
-                    size: attachment.size,
-                    url: attachment.url,
-                })),
-            }).catch(() => null);
-        }
+        await restoreAttachmentSnapshot(message.id, snapshot);
         const errorMessage = error?.message || "Failed to ingest Web Bridge media.";
         await updateRefetchProgress({
             locationId: args.locationId,
@@ -413,17 +428,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
     }
 
     if (ingestResult?.status !== "stored") {
-        if (snapshot.length > 0) {
-            await db.messageAttachment.createMany({
-                data: snapshot.map((attachment: any) => ({
-                    messageId: message.id,
-                    fileName: attachment.fileName,
-                    contentType: attachment.contentType,
-                    size: attachment.size,
-                    url: attachment.url,
-                })),
-            }).catch(() => null);
-        }
+        await restoreAttachmentSnapshot(message.id, snapshot);
         const reason = ingestResult?.reason || "unknown";
         await updateRefetchProgress({
             locationId: args.locationId,

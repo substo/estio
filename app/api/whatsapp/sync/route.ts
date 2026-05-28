@@ -5,34 +5,10 @@ import db from "@/lib/db";
 import { refreshGhlAccessToken } from "@/lib/location";
 import { fetchWhatsAppWebBridgeChats, fetchWhatsAppWebBridgeMessages, parseWhatsAppWebChatIdentity } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
+import { updateWebBridgeMediaSyncMetadata } from "@/lib/whatsapp/web-bridge-media-refetch";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
-
-async function updateWebBridgeMediaSyncMetadata(messageId: string, mediaState: Record<string, any>) {
-    const existing = await (db as any).messageSync.findFirst({
-        where: { messageId, provider: "whatsapp_web_bridge" },
-        select: { id: true, metadata: true },
-    }).catch(() => null);
-    if (!existing?.id) return;
-
-    const current = existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {};
-    await (db as any).messageSync.update({
-        where: { id: existing.id },
-        data: {
-            metadata: {
-                ...current,
-                webBridgeMedia: {
-                    ...((current as any).webBridgeMedia || {}),
-                    ...mediaState,
-                    updatedAt: new Date().toISOString(),
-                },
-            },
-        },
-    }).catch((error: any) => {
-        console.warn("[WhatsApp Sync] Failed to update Web Bridge media metadata:", error?.message || error);
-    });
-}
 
 export async function GET(req: NextRequest) {
     const encoder = new TextEncoder();
