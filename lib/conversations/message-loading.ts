@@ -410,6 +410,7 @@ export async function fetchMessagesForResolvedConversation(args: {
                 reason: webBridgeMedia.reason || null,
                 error: webBridgeMedia.error || null,
                 meta: webBridgeMedia.meta || null,
+                refetch: webBridgeMedia.refetch || null,
                 updatedAt: webBridgeMedia.updatedAt || null,
             } : null,
             detectedLanguage,

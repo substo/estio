@@ -82,9 +82,7 @@ import {
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
-    deleteWhatsAppMediaObject,
     headWhatsAppMediaObject,
-    parseR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { processNormalizedMessage } from "@/lib/whatsapp/sync";
 import { enqueueWhatsAppOutbound } from "@/lib/whatsapp/outbound-enqueue";
@@ -102,7 +100,16 @@ import {
     startWhatsAppWebBridgeSession,
     upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
-import { ingestWhatsAppWebBridgeMediaAttachment, formatWhatsAppWebBridgeMediaFailure } from "@/lib/whatsapp/web-bridge-media";
+import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
+import {
+    markWhatsAppWebBridgeMediaRefetchAttemptFailed,
+    startWhatsAppWebBridgeMediaRefetchAttempt,
+    updateWebBridgeMediaSyncMetadata,
+} from "@/lib/whatsapp/web-bridge-media-refetch";
+import {
+    enqueueWhatsAppMediaRefetchJob,
+    initWhatsAppMediaRefetchWorker,
+} from "@/lib/queue/whatsapp-media-refetch";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
 import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
@@ -2700,206 +2707,6 @@ function normalizeStoredLidJid(value: string | null | undefined): string | null 
     return `${raw}@lid`;
 }
 
-function normalizeKnownChatJid(value: string | null | undefined): string | null {
-    const raw = String(value || "").trim();
-    if (!raw) return null;
-    if (raw.endsWith("@s.whatsapp.net") || raw.endsWith("@g.us") || raw.endsWith("@lid")) {
-        return raw;
-    }
-    return null;
-}
-
-function dedupeStrings(values: Array<string | null | undefined>): string[] {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const value of values) {
-        const v = String(value || "").trim();
-        if (!v || seen.has(v)) continue;
-        seen.add(v);
-        out.push(v);
-    }
-    return out;
-}
-
-
-const WHATSAPP_MEDIA_REFETCH_BATCH_SIZE = 50;
-const WHATSAPP_MEDIA_REFETCH_MAX_SCAN = 2500;
-
-function formatMediaRefetchFailureReason(reason: string | undefined) {
-    switch (reason) {
-        case "missing_input":
-            return "missing input";
-        case "unsupported_media_type":
-            return "unsupported media type";
-        case "message_not_found":
-            return "message row missing";
-        case "attachment_exists":
-            return "attachment already exists";
-        case "missing_base64":
-            return "WhatsApp Web no longer provides media payload for this message";
-        default:
-            return reason || "unknown reason";
-    }
-}
-
-async function updateWebBridgeMediaSyncMetadata(messageId: string, mediaState: Record<string, any>) {
-    const existing = await (db as any).messageSync.findFirst({
-        where: {
-            messageId,
-            provider: "whatsapp_web_bridge",
-        },
-        select: { id: true, metadata: true },
-    }).catch(() => null);
-    if (!existing?.id) return;
-
-    const current = existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {};
-    await (db as any).messageSync.update({
-        where: { id: existing.id },
-        data: {
-            metadata: {
-                ...current,
-                webBridgeMedia: {
-                    ...((current as any).webBridgeMedia || {}),
-                    ...mediaState,
-                    updatedAt: new Date().toISOString(),
-                },
-            },
-        },
-    }).catch((error: any) => {
-        console.warn("[refetchWhatsAppMediaAttachment] Failed to update Web Bridge media metadata:", error?.message || error);
-    });
-}
-
-async function refetchWhatsAppWebBridgeMediaAttachment(params: {
-    locationId: string;
-    conversation: any;
-    message: any;
-    deleteStoredObject?: boolean;
-    limit?: number;
-}) {
-    const contactPhone = String(params.conversation?.contact?.phone || "").trim();
-    const chatId = normalizeWhatsAppWebChatId(contactPhone);
-    if (!chatId) {
-        return { success: false as const, error: "Contact phone number is missing or invalid for Web Bridge media re-fetch." };
-    }
-
-    const response = await fetchWhatsAppWebBridgeMessages({
-        locationId: params.locationId,
-        chatId,
-        limit: params.limit || 80,
-        includeMedia: true,
-        targetMessageId: params.message.wamId,
-    });
-    const records = Array.isArray(response?.messages) ? response.messages : [];
-    const matched = records.find((item: any) => String(item?.id || item?.messageId || "").trim() === params.message.wamId);
-    if (!matched) {
-        return { success: false as const, error: `Could not locate this Web Bridge message in recent WhatsApp history. Scanned ${records.length} messages.` };
-    }
-    if (!matched?.media?.data) {
-        await updateWebBridgeMediaSyncMetadata(params.message.id, {
-            status: "failed",
-            reason: matched?.mediaError?.code || "missing_media_payload",
-            error: matched?.mediaError?.message || matched?.mediaError || "WhatsApp Web did not return media data for this message.",
-            meta: matched?.mediaMeta || null,
-        });
-        return {
-            success: false as const,
-            error: matched?.mediaError?.message || matched?.mediaError || "WhatsApp Web did not return media data for this message.",
-        };
-    }
-
-    const snapshot = (params.message.attachments || []).map((attachment: any) => ({
-        fileName: attachment.fileName,
-        contentType: attachment.contentType,
-        size: attachment.size,
-        url: attachment.url,
-    }));
-
-    if (snapshot.length > 0) {
-        await db.messageAttachment.deleteMany({
-            where: { messageId: params.message.id },
-        });
-    }
-
-    let ingestResult: any;
-    try {
-        ingestResult = await ingestWhatsAppWebBridgeMediaAttachment({
-            wamId: params.message.wamId,
-            media: matched.media,
-            messageType: String(matched.type || "text"),
-        });
-    } catch (error: any) {
-        if (snapshot.length > 0) {
-            await db.messageAttachment.createMany({
-                data: snapshot.map((attachment: any) => ({
-                    messageId: params.message.id,
-                    fileName: attachment.fileName,
-                    contentType: attachment.contentType,
-                    size: attachment.size,
-                    url: attachment.url,
-                })),
-            }).catch(() => null);
-        }
-        await updateWebBridgeMediaSyncMetadata(params.message.id, {
-            status: "failed",
-            reason: "ingest_exception",
-            error: error?.message || "Failed to ingest Web Bridge media.",
-            meta: matched?.mediaMeta || null,
-        });
-        return { success: false as const, error: `Failed to store Web Bridge media: ${error?.message || "Unknown error"}` };
-    }
-
-    if (ingestResult?.status !== "stored") {
-        if (snapshot.length > 0) {
-            await db.messageAttachment.createMany({
-                data: snapshot.map((attachment: any) => ({
-                    messageId: params.message.id,
-                    fileName: attachment.fileName,
-                    contentType: attachment.contentType,
-                    size: attachment.size,
-                    url: attachment.url,
-                })),
-            }).catch(() => null);
-        }
-        await updateWebBridgeMediaSyncMetadata(params.message.id, {
-            status: ingestResult?.status || "skipped",
-            reason: ingestResult?.reason || "unknown",
-            error: null,
-            meta: matched?.mediaMeta || null,
-        });
-        return {
-            success: false as const,
-            error: `Web Bridge media re-fetch did not store a new attachment (${formatWhatsAppWebBridgeMediaFailure(ingestResult?.reason)}).`,
-        };
-    }
-
-    if (params.deleteStoredObject !== false && snapshot.length > 0) {
-        for (const attachment of snapshot) {
-            const r2 = parseR2Uri(String(attachment.url || ""));
-            if (!r2) continue;
-            await deleteWhatsAppMediaObject(r2.key).catch(() => null);
-        }
-    }
-
-    await updateWebBridgeMediaSyncMetadata(params.message.id, {
-        status: "stored",
-        key: ingestResult.key || null,
-        error: null,
-        reason: null,
-        meta: matched?.mediaMeta || null,
-    });
-
-    return {
-        success: true as const,
-        mediaType: String(matched.type || "media"),
-        removedAttachmentRows: snapshot.length,
-        remoteJid: chatId,
-        scannedMessages: records.length,
-        warnings: [] as string[],
-    };
-}
-
-
 export async function refetchWhatsAppMediaAttachment(
     conversationId: string,
     messageId: string,
@@ -2941,13 +2748,41 @@ export async function refetchWhatsAppMediaAttachment(
     }
 
     if (String(message.source || "") === "whatsapp_web_bridge") {
-        return refetchWhatsAppWebBridgeMediaAttachment({
+        const job = await startWhatsAppWebBridgeMediaRefetchAttempt({
             locationId: location.id,
-            conversation,
-            message,
+            conversationId: conversation.id,
+            messageId: message.id,
             deleteStoredObject: options?.deleteStoredObject,
             limit: options?.maxScan ? Math.min(Math.max(Number(options.maxScan), 1), 100) : undefined,
         });
+
+        try {
+            await initWhatsAppMediaRefetchWorker();
+            const queued = await enqueueWhatsAppMediaRefetchJob(job);
+            if (!queued.accepted) {
+                await markWhatsAppWebBridgeMediaRefetchAttemptFailed({
+                    ...job,
+                    error: "Media re-fetch queue did not accept the job.",
+                });
+                return { success: false as const, error: "Media re-fetch queue did not accept the job." };
+            }
+
+            return {
+                success: true as const,
+                queued: true as const,
+                attemptId: job.attemptId,
+                jobId: queued.jobId,
+                message: "Media re-fetch started. It will continue in the background.",
+                warnings: [] as string[],
+            };
+        } catch (error: any) {
+            const errorMessage = error?.message || "Failed to queue media re-fetch.";
+            await markWhatsAppWebBridgeMediaRefetchAttemptFailed({
+                ...job,
+                error: errorMessage,
+            });
+            return { success: false as const, error: errorMessage };
+        }
     }
 
     return {

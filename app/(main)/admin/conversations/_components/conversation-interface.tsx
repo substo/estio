@@ -2213,13 +2213,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 applyRefreshedChatMessages(selectedConversationId, refreshed);
             }
 
-            const deletedStorageSuffix = (res.removedStorageObjects || 0) > 0
-                ? ` • removed ${res.removedStorageObjects} old object${res.removedStorageObjects === 1 ? "" : "s"}`
-                : "";
-
             toast({
-                title: "Media Re-fetched",
-                description: `Fetched ${res.mediaType} from WhatsApp again${deletedStorageSuffix}.`,
+                title: "Media re-fetch started",
+                description: "This continues in the background. You can leave the page; the message updates when storage or transcription finishes.",
             });
 
             if (Array.isArray(res.warnings) && res.warnings.length > 0) {

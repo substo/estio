@@ -19,6 +19,15 @@ type WebBridgeMedia = {
         attemptedDownload?: boolean | null;
         inlined?: boolean | null;
     } | null;
+    refetch?: {
+        attemptId?: string | null;
+        status?: string | null;
+        stage?: string | null;
+        message?: string | null;
+        error?: string | null;
+        updatedAt?: string | null;
+        finishedAt?: string | null;
+    } | null;
     updatedAt?: string | null;
 } | null;
 
@@ -49,6 +58,11 @@ function MessageBubbleMediaStatusComponent({
     isOutbound,
     isEmail,
 }: MessageBubbleMediaStatusProps) {
+    const refetchStatus = String(webBridgeMedia?.refetch?.status || "");
+    const isRefetchInProgress = refetchStatus === "queued" || refetchStatus === "processing";
+    const refetchStageLabel = formatMediaRefetchStage(webBridgeMedia?.refetch?.stage);
+    const refetchError = webBridgeMedia?.refetch?.error || null;
+
     return (
         <>
             {contactAttachments.map((attachment, i) => (
@@ -110,6 +124,17 @@ function MessageBubbleMediaStatusComponent({
                                         {[webBridgeMedia.meta?.filename, webBridgeMedia.meta?.mimetype].filter(Boolean).join(" · ")}
                                     </div>
                                 )}
+                                {isRefetchInProgress && (
+                                    <div className={cn("mt-1 inline-flex items-center gap-1.5", isOutbound && !isEmail ? "text-blue-100/90" : "text-amber-800")}>
+                                        <RefreshCw className="h-3 w-3 animate-spin" />
+                                        <span>{refetchStageLabel || "Re-fetching media"} · runs in background</span>
+                                    </div>
+                                )}
+                                {!isRefetchInProgress && refetchStatus === "failed" && refetchError && (
+                                    <div className={cn("mt-1 break-words", isOutbound && !isEmail ? "text-blue-100/90" : "text-amber-800")}>
+                                        Last re-fetch failed: {refetchError}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -140,3 +165,24 @@ function MessageBubbleMediaStatusComponent({
 }
 
 export const MessageBubbleMediaStatus = memo(MessageBubbleMediaStatusComponent);
+
+function formatMediaRefetchStage(stage?: string | null) {
+    switch (stage) {
+        case "queued":
+            return "Queued";
+        case "fetching_from_bridge":
+            return "Fetching from WhatsApp Web";
+        case "storing_media":
+            return "Storing media";
+        case "completed":
+            return "Stored";
+        case "ingest_failed":
+            return "Storage failed";
+        case "missing_media_payload":
+            return "Media payload missing";
+        case "bridge_message_missing":
+            return "Message not found in WhatsApp Web";
+        default:
+            return stage ? stage.replace(/_/g, " ") : null;
+    }
+}

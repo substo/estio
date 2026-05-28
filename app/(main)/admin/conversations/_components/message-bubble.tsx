@@ -71,6 +71,15 @@ export interface MessageBubbleProps {
                 attemptedDownload?: boolean | null;
                 inlined?: boolean | null;
             } | null;
+            refetch?: {
+                attemptId?: string | null;
+                status?: string | null;
+                stage?: string | null;
+                message?: string | null;
+                error?: string | null;
+                updatedAt?: string | null;
+                finishedAt?: string | null;
+            } | null;
             updatedAt?: string | null;
         } | null;
         contactName?: string;
@@ -232,7 +241,8 @@ export function MessageBubble({
         attachments,
     });
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
-    const canRefetchMedia = !!onRefetchMedia && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
+    const isMediaRefetchInProgress = ["queued", "processing"].includes(String(webBridgeMedia?.refetch?.status || ""));
+    const canRefetchMedia = !!onRefetchMedia && !isMediaRefetchInProgress && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
     const failureFallbackUi = useMemo(() => getWhatsAppFailureFallbackUiState({
         message,
         smsRelayEnabled,
@@ -254,7 +264,7 @@ export function MessageBubble({
 
     const handleRefetchMedia = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
-        if (!onRefetchMedia || isRefetchingMedia) return;
+        if (!onRefetchMedia || isRefetchingMedia || isMediaRefetchInProgress) return;
 
         setIsRefetchingMedia(true);
         try {
@@ -262,7 +272,7 @@ export function MessageBubble({
         } finally {
             setIsRefetchingMedia(false);
         }
-    }, [isRefetchingMedia, message.id, onRefetchMedia]);
+    }, [isMediaRefetchInProgress, isRefetchingMedia, message.id, onRefetchMedia]);
 
     const isTranscriptExpanded = useCallback((attachmentId?: string, fallbackIndex?: number) => {
         const key = attachmentId || `${message.id}:audio:${fallbackIndex || 0}`;
