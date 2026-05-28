@@ -2909,7 +2909,7 @@ export async function refetchWhatsAppMediaAttachment(
         batchSize?: number;
     }
 ) {
-    const location = await getAuthenticatedLocation();
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
         where: buildConversationReferenceWhere(location.id, conversationId),
