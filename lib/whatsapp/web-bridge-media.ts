@@ -110,6 +110,7 @@ async function runWithTransientRetry<T>(args: {
     maxAttempts: number;
     backoffMs: number;
     sleep: (ms: number) => Promise<void>;
+    onRetry?: (error: unknown, attempt: number) => void;
     work: () => Promise<T>;
 }) {
     for (let attempt = 1; attempt <= args.maxAttempts; attempt++) {
@@ -118,10 +119,18 @@ async function runWithTransientRetry<T>(args: {
         } catch (error) {
             const isLastAttempt = attempt >= args.maxAttempts;
             if (!isTransientWebBridgeMediaIngestError(error) || isLastAttempt) throw error;
+            args.onRetry?.(error, attempt);
             await args.sleep(args.backoffMs * attempt);
         }
     }
     throw new Error("Transient media ingest retry exhausted.");
+}
+
+function logMediaIngestStage(stage: string, wamId: string, detail?: Record<string, unknown>) {
+    console.log(`[WhatsApp Web Bridge] media ingest ${stage}`, {
+        wamId,
+        ...(detail || {}),
+    });
 }
 
 export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
@@ -193,43 +202,97 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         contentType,
     });
 
-    const stored = await runWithTransientRetry({
+    const uploaded = await runWithTransientRetry({
         maxAttempts: maxTransientAttempts,
         backoffMs: transientBackoffMs,
         sleep,
+        onRetry: (error, attempt) => {
+            logMediaIngestStage("upload_retry", wamId, {
+                attempt,
+                key,
+                error: (error as any)?.message || String(error),
+            });
+        },
         work: async () => {
-            let uploaded: { key: string; r2Uri: string };
+            logMediaIngestStage("upload_start", wamId, { key, contentType, size });
             try {
-                uploaded = await putMediaObject({
+                const result = await putMediaObject({
                     key,
                     body: buffer,
                     contentType,
                     contentLength: size,
                 });
+                logMediaIngestStage("upload_success", wamId, { key });
+                return result;
             } catch (error) {
                 if (!isTransientWebBridgeMediaIngestError(error)) throw error;
 
                 const existing = await headMediaObject(key).catch(() => null);
+                logMediaIngestStage("upload_transient_head_result", wamId, {
+                    key,
+                    exists: Boolean(existing?.exists),
+                    error: (error as any)?.message || String(error),
+                });
                 if (!existing?.exists) throw error;
 
                 console.warn(
                     `[WhatsApp Web Bridge] Media upload reported transient failure, but object exists; continuing attachment ingest for ${wamId}.`,
                     { key, error: (error as any)?.message || String(error) }
                 );
-                uploaded = { key, r2Uri: toMediaUri(key) };
+                return { key, r2Uri: toMediaUri(key) };
             }
+        },
+    });
 
-            const createdAttachment = await dbClient.messageAttachment.create({
-                data: {
-                    messageId: message.id,
-                    fileName,
-                    contentType,
-                    size,
-                    url: uploaded.r2Uri,
-                },
+    const createdAttachment = await runWithTransientRetry({
+        maxAttempts: maxTransientAttempts,
+        backoffMs: transientBackoffMs,
+        sleep,
+        onRetry: (error, attempt) => {
+            logMediaIngestStage("attachment_create_retry", wamId, {
+                attempt,
+                key: uploaded.key,
+                error: (error as any)?.message || String(error),
             });
+        },
+        work: async () => {
+            logMediaIngestStage("attachment_create_start", wamId, { key: uploaded.key });
+            try {
+                const createdAttachment = await dbClient.messageAttachment.create({
+                    data: {
+                        messageId: message.id,
+                        fileName,
+                        contentType,
+                        size,
+                        url: uploaded.r2Uri,
+                    },
+                });
 
-            return { uploaded, createdAttachment };
+                logMediaIngestStage("attachment_create_success", wamId, {
+                    attachmentId: createdAttachment.id,
+                    key: uploaded.key,
+                });
+                return createdAttachment;
+            } catch (error) {
+                if (!isTransientWebBridgeMediaIngestError(error)) throw error;
+
+                const existing = typeof dbClient.messageAttachment.findFirst === "function"
+                    ? await dbClient.messageAttachment.findFirst({
+                        where: {
+                            messageId: message.id,
+                            url: uploaded.r2Uri,
+                        },
+                        orderBy: { createdAt: "desc" },
+                    }).catch(() => null)
+                    : null;
+                logMediaIngestStage("attachment_create_transient_lookup", wamId, {
+                    key: uploaded.key,
+                    found: Boolean(existing?.id),
+                    error: (error as any)?.message || String(error),
+                });
+                if (existing?.id) return existing;
+                throw error;
+            }
         },
     });
 
@@ -247,7 +310,7 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
                 await queue.enqueueWhatsAppAudioTranscription({
                     locationId: message.conversation.locationId,
                     messageId: message.id,
-                    attachmentId: stored.createdAttachment.id,
+                    attachmentId: createdAttachment.id,
                 });
             } catch (error) {
                 console.error(`[WhatsApp Web Bridge] Failed to enqueue audio transcription for ${wamId}:`, error);
@@ -255,5 +318,5 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         })();
     }
 
-    return { status: "stored" as const, key: stored.uploaded.key };
+    return { status: "stored" as const, key: uploaded.key };
 }

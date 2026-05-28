@@ -32,6 +32,12 @@ function createDbMock() {
                 findFirst: async () => message,
             },
             messageAttachment: {
+                findFirst: async ({ where }: any) => {
+                    return createdAttachments.find((row) => {
+                        return (!where?.messageId || row.messageId === where.messageId)
+                            && (!where?.url || row.url === where.url);
+                    }) || null;
+                },
                 create: async ({ data }: any) => {
                     const row = { id: `att_${createdAttachments.length + 1}`, ...data };
                     createdAttachments.push(row);
@@ -116,6 +122,96 @@ test("ambiguous transient upload failure verifies existing object and creates at
     assert.equal(result.status, "stored");
     assert.equal(db.createdAttachments.length, 1);
     assert.equal(db.createdAttachments[0].url.startsWith("r2://"), true);
+    assert.deepEqual(queued, [{
+        locationId: "loc_1",
+        messageId: "msg_1",
+        attachmentId: "att_1",
+    }]);
+});
+
+test("transient attachment create failure is retried without re-uploading media", async () => {
+    const db = createDbMock();
+    const queued: any[] = [];
+    let uploadAttempts = 0;
+    let createAttempts = 0;
+    const originalCreate = db.dbClient.messageAttachment.create;
+
+    db.dbClient.messageAttachment.create = async (input: any) => {
+        createAttempts += 1;
+        if (createAttempts === 1) {
+            throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+        }
+        return originalCreate(input);
+    };
+
+    const result = await ingestWhatsAppWebBridgeMediaAttachment({
+        wamId: "wam_1",
+        media,
+        messageType: "ptt",
+        transientBackoffMs: 0,
+        dependencies: {
+            dbClient: db.dbClient as any,
+            sleep: async () => undefined,
+            putMediaObject: async () => {
+                uploadAttempts += 1;
+                return { key: "media/key.ogg", r2Uri: "r2://bucket/media/key.ogg" };
+            },
+            initAudioTranscriptionWorker: async () => undefined,
+            enqueueAudioTranscription: async (input) => {
+                queued.push(input);
+            },
+        },
+    });
+    await nextTick();
+
+    assert.equal(result.status, "stored");
+    assert.equal(uploadAttempts, 1);
+    assert.equal(createAttempts, 2);
+    assert.equal(db.createdAttachments.length, 1);
+    assert.deepEqual(queued, [{
+        locationId: "loc_1",
+        messageId: "msg_1",
+        attachmentId: "att_1",
+    }]);
+});
+
+test("ambiguous attachment create failure reuses existing attachment row", async () => {
+    const db = createDbMock();
+    const queued: any[] = [];
+    let uploadAttempts = 0;
+    let createAttempts = 0;
+
+    db.dbClient.messageAttachment.create = async ({ data }: any) => {
+        createAttempts += 1;
+        const row = { id: `att_${db.createdAttachments.length + 1}`, ...data };
+        db.createdAttachments.push(row);
+        throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+    };
+
+    const result = await ingestWhatsAppWebBridgeMediaAttachment({
+        wamId: "wam_1",
+        media,
+        messageType: "ptt",
+        transientBackoffMs: 0,
+        dependencies: {
+            dbClient: db.dbClient as any,
+            sleep: async () => undefined,
+            putMediaObject: async () => {
+                uploadAttempts += 1;
+                return { key: "media/key.ogg", r2Uri: "r2://bucket/media/key.ogg" };
+            },
+            initAudioTranscriptionWorker: async () => undefined,
+            enqueueAudioTranscription: async (input) => {
+                queued.push(input);
+            },
+        },
+    });
+    await nextTick();
+
+    assert.equal(result.status, "stored");
+    assert.equal(uploadAttempts, 1);
+    assert.equal(createAttempts, 1);
+    assert.equal(db.createdAttachments.length, 1);
     assert.deepEqual(queued, [{
         locationId: "loc_1",
         messageId: "msg_1",
