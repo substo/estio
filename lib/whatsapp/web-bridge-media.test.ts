@@ -71,6 +71,7 @@ test("transient upload failure is retried and creates an attachment", async () =
                 }
                 return { key: "media/key.ogg", r2Uri: "r2://bucket/media/key.ogg" };
             },
+            headMediaObject: async () => ({ exists: false as const }),
             initAudioTranscriptionWorker: async () => undefined,
             enqueueAudioTranscription: async () => undefined,
         },
@@ -80,6 +81,46 @@ test("transient upload failure is retried and creates an attachment", async () =
     assert.equal(uploadAttempts, 2);
     assert.equal(db.createdAttachments.length, 1);
     assert.equal(db.createdAttachments[0].contentType, "audio/ogg; codecs=opus");
+});
+
+test("ambiguous transient upload failure verifies existing object and creates attachment", async () => {
+    const db = createDbMock();
+    const queued: any[] = [];
+
+    const result = await ingestWhatsAppWebBridgeMediaAttachment({
+        wamId: "wam_1",
+        media,
+        messageType: "ptt",
+        transientBackoffMs: 0,
+        dependencies: {
+            dbClient: db.dbClient as any,
+            sleep: async () => undefined,
+            putMediaObject: async () => {
+                throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+            },
+            headMediaObject: async (key) => ({
+                exists: true as const,
+                contentLength: 10,
+                contentType: "audio/ogg; codecs=opus",
+                etag: `"${key}"`,
+            }),
+            toMediaUri: (key) => `r2://bucket/${key}`,
+            initAudioTranscriptionWorker: async () => undefined,
+            enqueueAudioTranscription: async (input) => {
+                queued.push(input);
+            },
+        },
+    });
+    await nextTick();
+
+    assert.equal(result.status, "stored");
+    assert.equal(db.createdAttachments.length, 1);
+    assert.equal(db.createdAttachments[0].url.startsWith("r2://"), true);
+    assert.deepEqual(queued, [{
+        locationId: "loc_1",
+        messageId: "msg_1",
+        attachmentId: "att_1",
+    }]);
 });
 
 test("successful audio retry queues transcription for the created attachment", async () => {

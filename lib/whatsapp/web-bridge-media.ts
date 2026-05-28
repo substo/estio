@@ -1,8 +1,10 @@
 import db from "@/lib/db";
 import {
     buildWhatsAppInboundAttachmentKey,
+    headWhatsAppMediaObject,
     putWhatsAppMediaObject,
     sanitizeWhatsAppMediaFilename,
+    toR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia } from "@/lib/contacts/vcard";
 
@@ -12,6 +14,8 @@ const DEFAULT_TRANSIENT_INGEST_BACKOFF_MS = 250;
 type WebBridgeMediaIngestDependencies = {
     dbClient?: typeof db;
     putMediaObject?: typeof putWhatsAppMediaObject;
+    headMediaObject?: typeof headWhatsAppMediaObject;
+    toMediaUri?: typeof toR2Uri;
     initAudioTranscriptionWorker?: () => Promise<unknown>;
     enqueueAudioTranscription?: (input: {
         locationId: string;
@@ -135,6 +139,8 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
 }) {
     const dbClient = (params.dependencies?.dbClient || db) as any;
     const putMediaObject = params.dependencies?.putMediaObject || putWhatsAppMediaObject;
+    const headMediaObject = params.dependencies?.headMediaObject || headWhatsAppMediaObject;
+    const toMediaUri = params.dependencies?.toMediaUri || toR2Uri;
     const sleep = params.dependencies?.sleep || defaultSleep;
     const maxTransientAttempts = Math.max(
         1,
@@ -192,12 +198,26 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         backoffMs: transientBackoffMs,
         sleep,
         work: async () => {
-            const uploaded = await putMediaObject({
-                key,
-                body: buffer,
-                contentType,
-                contentLength: size,
-            });
+            let uploaded: { key: string; r2Uri: string };
+            try {
+                uploaded = await putMediaObject({
+                    key,
+                    body: buffer,
+                    contentType,
+                    contentLength: size,
+                });
+            } catch (error) {
+                if (!isTransientWebBridgeMediaIngestError(error)) throw error;
+
+                const existing = await headMediaObject(key).catch(() => null);
+                if (!existing?.exists) throw error;
+
+                console.warn(
+                    `[WhatsApp Web Bridge] Media upload reported transient failure, but object exists; continuing attachment ingest for ${wamId}.`,
+                    { key, error: (error as any)?.message || String(error) }
+                );
+                uploaded = { key, r2Uri: toMediaUri(key) };
+            }
 
             const createdAttachment = await dbClient.messageAttachment.create({
                 data: {
