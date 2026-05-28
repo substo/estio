@@ -9,6 +9,7 @@ import { Loader2, Search, ArrowRight, MessageCircle, AlertTriangle } from "lucid
 import { searchGoogleContactsAction, importNewGoogleContactAction } from "../actions";
 import { useToast } from "@/components/ui/use-toast";
 import { openOrStartConversationForContact } from "@/app/(main)/admin/contacts/actions";
+import { canStartContactConversation } from "@/lib/contacts/conversation-start";
 
 interface GoogleContactImportDialogProps {
     open: boolean;
@@ -167,6 +168,7 @@ export function GoogleContactImportDialog({
                         {searchResults.map((res: any) => {
                             const isImportingThis = importingId === res.resourceName;
                             const hasExisting = !!res.existingContactId;
+                            const canStartConversation = canStartContactConversation(res);
 
                             return (
                                 <div key={res.resourceName} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 border rounded hover:bg-gray-50 gap-2">
@@ -218,10 +220,10 @@ export function GoogleContactImportDialog({
                                                 <Button
                                                     type="button"
                                                     size="sm"
-                                                    disabled={importingId !== null || !res.phone}
+                                                    disabled={importingId !== null || !canStartConversation}
                                                     onClick={() => handleImport(res.resourceName, true)}
                                                     className="flex-1 sm:flex-none"
-                                                    title={res.phone ? "Import and start conversation" : "Phone number required for messaging"}
+                                                    title={canStartConversation ? "Import and start conversation" : "Phone or email required for messaging"}
                                                 >
                                                     {isImportingThis ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <MessageCircle className="h-4 w-4 mr-2" />}
                                                     Message

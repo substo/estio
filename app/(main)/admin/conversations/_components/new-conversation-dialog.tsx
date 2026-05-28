@@ -24,6 +24,7 @@ import {
     type PasteLeadImportStatus,
     type PasteLeadProgressStep,
 } from '@/lib/conversations/paste-lead-status';
+import { canStartContactConversation } from '@/lib/contacts/conversation-start';
 
 
 interface WhatsAppChat {
@@ -614,7 +615,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             <Button
                                                 size="sm"
                                                 variant="secondary"
-                                                disabled={creating || (!contact.phone && !contact.email)}
+                                                disabled={creating || !canStartContactConversation(contact)}
                                                 className="shrink-0 ml-2"
                                                 onClick={async () => {
                                                     setCreating(true);

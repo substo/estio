@@ -49,6 +49,7 @@ import {
     REPLY_LANGUAGE_AUTO_VALUE,
     REPLY_LANGUAGE_OPTIONS,
 } from '@/lib/ai/reply-language-options';
+import { canStartContactConversation } from '@/lib/contacts/conversation-start';
 
 // Types for contact data (used in edit mode)
 export type ContactData = {
@@ -283,7 +284,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const isCreating = initialMode === 'create';
     const latestConversation = contact?.conversations?.[0];
     const hasConversation = !!latestConversation?.id;
-    const canStartConversation = !!contact?.phone;
+    const canStartConversation = canStartContactConversation(contact);
 
     const getConversationHref = useCallback((conversationId: string) => {
         const params = new URLSearchParams({ id: conversationId });
@@ -1281,7 +1282,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                         {conversationError ? (
                                             <p className="text-xs text-red-600">{conversationError}</p>
                                         ) : !hasConversation && !canStartConversation ? (
-                                            <p className="text-xs text-muted-foreground">No phone number to start a conversation</p>
+                                            <p className="text-xs text-muted-foreground">No phone or email to start a conversation</p>
                                         ) : null}
                                     </div>
                                     <Button type="button" variant="outline" size="sm" onClick={() => setManagerOpen(true)}>

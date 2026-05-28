@@ -13,6 +13,7 @@ import { ContactData } from "./contact-form";
 import { openOrStartConversationForContact } from "../actions";
 import { LeadSourceBadge } from "./lead-source-badge";
 import { LeadScoreBadge } from "./lead-score-badge";
+import { canStartContactConversation } from "@/lib/contacts/conversation-start";
 
 interface ContactRowProps {
     contact: ContactData & {
@@ -61,7 +62,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
     const hasError = !!contact.error;
     const conversation = contact.conversations?.[0];
     const hasConversation = !!conversation?.id;
-    const canStartConversation = !!contact.phone || !!contact.email;
+    const canStartConversation = canStartContactConversation(contact);
     const getConversationHref = (conversationId: string) => {
         const params = new URLSearchParams({
             id: conversationId,

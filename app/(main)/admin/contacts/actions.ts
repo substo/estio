@@ -43,6 +43,10 @@ import {
   queueDefaultViewingLeadReminders,
   type ViewingReminderAudience,
 } from '@/lib/viewings/reminders';
+import {
+  canStartContactConversation,
+  resolveContactConversationStartMessageType,
+} from '@/lib/contacts/conversation-start';
 
 async function resolvePreferredChannelTypeForPhone(
   _location: unknown,
@@ -362,7 +366,7 @@ export async function openOrStartConversationForContact(contactId: string) {
 
     const contact = await db.contact.findFirst({
       where: { id: contactId, locationId: location.id },
-      select: { id: true, phone: true, name: true, message: true }
+      select: { id: true, phone: true, email: true, name: true, message: true }
     });
 
     if (!contact) {
@@ -394,13 +398,17 @@ export async function openOrStartConversationForContact(contactId: string) {
       };
     }
 
-    if (!contact.phone && !contact.email) {
+    if (!canStartContactConversation(contact)) {
       return { success: false, error: 'Contact has no phone number or email address' };
     }
 
-    const preferredChannelType = contact.phone
-      ? await resolvePreferredChannelTypeForPhone(location, contact.phone)
-      : 'TYPE_EMAIL';
+    const preferredChannelType = await resolveContactConversationStartMessageType(
+      contact,
+      (phone) => resolvePreferredChannelTypeForPhone(location, phone)
+    );
+    if (!preferredChannelType) {
+      return { success: false, error: 'Contact has no phone number or email address' };
+    }
 
     const conversation = await db.conversation.create({
       data: {
