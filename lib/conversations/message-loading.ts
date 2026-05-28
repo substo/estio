@@ -215,16 +215,14 @@ export async function fetchMessagesForResolvedConversation(args: {
                     lockedAt: true,
                 },
             },
-            ...(includeHeavyMessageMetadata ? {
-                syncRecords: {
-                    where: { provider: "whatsapp_web_bridge" },
-                    select: {
-                        metadata: true,
-                        lastError: true,
-                    },
-                    take: 1,
+            syncRecords: {
+                where: { provider: "whatsapp_web_bridge" },
+                select: {
+                    metadata: true,
+                    lastError: true,
                 },
-            } : {}),
+                take: 1,
+            },
             ...(includeHeavyMessageMetadata ? {
                 translationCaches: {
                     orderBy: [{ updatedAt: "desc" }],
@@ -305,7 +303,7 @@ export async function fetchMessagesForResolvedConversation(args: {
 
     const serializeStartedAtMs = Date.now();
     const serializedMessages = await Promise.all(messages.map(async (m: any) => {
-        const webBridgeSync = includeHeavyMessageMetadata && Array.isArray(m.syncRecords) ? m.syncRecords[0] : null;
+        const webBridgeSync = Array.isArray(m.syncRecords) ? m.syncRecords[0] : null;
         const webBridgeMedia = webBridgeSync?.metadata && typeof webBridgeSync.metadata === "object"
             ? (webBridgeSync.metadata as any).webBridgeMedia || null
             : null;
