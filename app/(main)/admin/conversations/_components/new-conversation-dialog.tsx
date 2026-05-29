@@ -20,6 +20,7 @@ import {
     buildGoogleRowOutcomeLabel,
     canStartGoogleContactConversation,
     getGoogleContactDisabledReason,
+    type NewConversationCreatedResult,
 } from './new-conversation-dialog-helpers';
 import { useNewConversationPhone } from './use-new-conversation-phone';
 import { useNewConversationWhatsAppPicker } from './use-new-conversation-whatsapp-picker';
@@ -29,7 +30,7 @@ import { useNewConversationPasteLead } from './use-new-conversation-paste-lead';
 interface NewConversationDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onConversationCreated?: (conversationId: string) => void;
+    onConversationCreated?: (conversationId: string, result?: NewConversationCreatedResult) => void;
     locationId?: string; // Needed for Google Import
 }
 

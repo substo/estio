@@ -9,11 +9,12 @@ import {
     buildNewConversationResultError,
     resolveWhatsAppChatIdentity,
     shouldShowHistoryBackfillQueuedToast,
+    type NewConversationCreatedResult,
     type WhatsAppChat,
 } from './new-conversation-dialog-helpers';
 
 export function useNewConversationWhatsAppPicker(args: {
-    onConversationCreated?: (conversationId: string) => void;
+    onConversationCreated?: (conversationId: string, result?: NewConversationCreatedResult) => void;
     onClose: () => void;
     setError: (error: string | null) => void;
 }) {
@@ -62,7 +63,7 @@ export function useNewConversationWhatsAppPicker(args: {
                         description: 'Recent WhatsApp history is syncing in the background.',
                     });
                 }
-                args.onConversationCreated?.(res.conversationId);
+                args.onConversationCreated?.(res.conversationId, res);
                 args.onClose();
             } else {
                 args.setError(res.error || 'Failed to create conversation');

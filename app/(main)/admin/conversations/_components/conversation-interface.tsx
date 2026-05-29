@@ -74,6 +74,7 @@ import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
 import { SyncAllChatsDialog } from './sync-all-chats-dialog';
 import { NewConversationDialog } from './new-conversation-dialog';
+import type { NewConversationCreatedResult } from './new-conversation-dialog-helpers';
 import { ConversationWorkspaceLayout } from './conversation-workspace-layout';
 import { useSuggestedResponseQueue } from './use-suggested-response-queue';
 import { useMobileConversationPanes, type MobilePane } from './use-mobile-conversation-panes';
@@ -174,6 +175,30 @@ const CoordinatorPanel = dynamic(
         loading: () => <div className="h-full animate-pulse bg-slate-50" />,
     }
 );
+
+function buildOptimisticNewConversation(result?: NewConversationCreatedResult): Conversation | null {
+    if (!result?.conversationId || !result.contactId || !result.locationId) return null;
+
+    const messageType = result.messageType || 'TYPE_WHATSAPP';
+
+    return {
+        id: result.conversationId,
+        legacyConversationId: result.legacyConversationId || null,
+        ghlConversationId: result.legacyConversationId || null,
+        contactId: result.contactId,
+        locationId: result.locationId,
+        lastMessageBody: result.lastMessageBody || '',
+        lastMessageDate: result.lastMessageDate || 0,
+        lastMessageType: messageType,
+        unreadCount: 0,
+        status: 'open',
+        type: messageType,
+        contactName: result.contactName || 'New conversation',
+        contactPhone: result.contactPhone || undefined,
+        contactEmail: result.contactEmail || undefined,
+        suggestedActions: [],
+    };
+}
 
 
 interface ConversationInterfaceProps {
@@ -3007,13 +3032,28 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 open={newConversationOpen}
                 onOpenChange={setNewConversationOpen}
                 locationId={locationId}
-                onConversationCreated={async (conversationId) => {
-                    // Refresh conversations list
-                    const data = await fetchConversations(viewFilter, conversationId);
-                    replaceConversationListFromResponse(data);
-                    // Select the new conversation
+                onConversationCreated={(conversationId, result) => {
+                    const optimisticConversation = buildOptimisticNewConversation(result);
+                    if (optimisticConversation) {
+                        selectedConversationCacheRef.current.set(conversationId, optimisticConversation);
+                        setConversations((prev) => (
+                            prev.some((conversation) => conversation.id === conversationId)
+                                ? prev.map((conversation) => conversation.id === conversationId ? { ...conversation, ...optimisticConversation } : conversation)
+                                : [optimisticConversation, ...prev]
+                        ));
+                    }
+
                     setActiveId(conversationId);
                     toast({ title: "Conversation Created", description: "You can now send messages." });
+
+                    void fetchConversations(viewFilter, conversationId)
+                        .then((data) => {
+                            replaceConversationListFromResponse(data);
+                        })
+                        .catch((error) => {
+                            console.error("[NewConversation] Conversation list refresh failed:", error);
+                            toast({ title: "Error", description: "Failed to refresh conversations.", variant: "destructive" });
+                        });
                 }}
             />
         </>

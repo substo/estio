@@ -32,6 +32,22 @@ export type GoogleContactRowOutcome = {
     error?: string | null;
 };
 
+export type NewConversationCreatedResult = {
+    conversationId: string;
+    legacyConversationId?: string | null;
+    isNew?: boolean;
+    contactId?: string | null;
+    contactName?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    locationId?: string | null;
+    messageType?: string | null;
+    lastMessageBody?: string | null;
+    lastMessageDate?: number | null;
+    historyBackfillQueued?: boolean;
+    backgroundJobsQueued?: string[];
+};
+
 export function normalizeNewConversationStartInput(input: string) {
     return input.trim();
 }

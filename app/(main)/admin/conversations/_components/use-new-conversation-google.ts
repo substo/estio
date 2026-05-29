@@ -15,11 +15,12 @@ import {
     type GoogleContactImportOutcome,
     type GoogleContactRowOutcome,
     type GoogleContactSearchResult,
+    type NewConversationCreatedResult,
 } from './new-conversation-dialog-helpers';
 
 export function useNewConversationGoogle(args: {
     locationId?: string;
-    onConversationCreated?: (conversationId: string) => void;
+    onConversationCreated?: (conversationId: string, result?: NewConversationCreatedResult) => void;
     onClose: () => void;
     setError: (error: string | null) => void;
 }) {
