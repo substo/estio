@@ -103,6 +103,7 @@ import {
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import { getStaleWhatsAppWebBridgeNonReadyReason } from "@/lib/whatsapp/web-bridge-readiness";
+import { getWhatsAppWebBridgeStatusForLocation } from "@/lib/conversations/whatsapp-web-bridge-status";
 import {
     markWhatsAppWebBridgeMediaRefetchAttemptFailed,
     startWhatsAppWebBridgeMediaRefetchAttempt,
@@ -6248,112 +6249,7 @@ function getStaleWebBridgeNonReadyReason(workerSession: any, lastSeenAt?: Date |
 export async function getWhatsAppWebBridgeStatus() {
     try {
         const location = await getBasicLocationContext();
-        const mode = await resolveLocationWhatsAppProviderMode(location.id);
-
-        const [session, health] = await Promise.all([
-            getWhatsAppWebBridgeSession(location.id),
-            getWhatsAppWebBridgeHealth().catch((error: any) => ({
-                reachable: false,
-                ok: false,
-                baseUrl: "",
-                error: error?.message || "WhatsApp Web Bridge is not reachable.",
-                sessions: [],
-            })),
-        ]);
-        const expectedSessionId = session?.sessionId || buildWhatsAppWebBridgeSessionId(location.id);
-        const workerSession = (health.sessions || []).find((item: any) =>
-            item?.locationId === location.id || item?.sessionId === expectedSessionId
-        );
-
-        if (health.reachable && workerSession?.ready) {
-            const now = new Date();
-            const lastReadyAt = workerSession.lastReadyAt ? new Date(workerSession.lastReadyAt) : now;
-            await upsertWhatsAppWebBridgeSession(location.id, {
-                sessionId: workerSession.sessionId || expectedSessionId,
-                status: "ready",
-                qrCode: null,
-                phone: workerSession.phone || session?.phone || null,
-                lastReadyAt,
-                lastSeenAt: now,
-                lastError: null,
-                isDefaultOutbound: true,
-            }).catch((error: any) => {
-                console.warn("[WhatsApp Web Bridge] Failed to repair ready DB session from worker health:", error?.message || error);
-            });
-            return {
-                provider: "web_bridge" as const,
-                mode,
-                status: "ready",
-                qrcode: null,
-                phone: workerSession.phone || session?.phone || null,
-                sessionId: workerSession.sessionId || expectedSessionId,
-                lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
-                lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
-                error: null as string | null,
-            };
-        }
-
-        if (health.reachable && workerSession) {
-            const workerStatus = String(workerSession.status || "starting");
-            const staleQr = isStaleWebBridgeQrStatus(workerStatus, workerSession.lastEventAt, session?.lastSeenAt || null);
-            const staleNonReadyReason = getStaleWebBridgeNonReadyReason(workerSession, session?.lastSeenAt || null);
-            if (staleQr || staleNonReadyReason) {
-                void restartWhatsAppWebBridgeSession(location.id).catch((error: any) => {
-                    console.warn("[WhatsApp Web Bridge] Background stale session refresh failed:", error?.message || error);
-                });
-                return {
-                    provider: "web_bridge" as const,
-                    mode,
-                    status: "reconnecting",
-                    qrcode: null,
-                    phone: workerSession.phone || session?.phone || null,
-                    sessionId: workerSession.sessionId || expectedSessionId,
-                    lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
-                    lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
-                    error: staleNonReadyReason || "The previous QR expired. Generating a fresh code...",
-                };
-            }
-            return {
-                provider: "web_bridge" as const,
-                mode,
-                status: workerStatus,
-                qrcode: workerStatus === "qr" ? (session?.qrCode || null) : null,
-                phone: workerSession.phone || session?.phone || null,
-                sessionId: workerSession.sessionId || expectedSessionId,
-                lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
-                lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
-                error: workerSession.lastError || null,
-            };
-        }
-
-        if (session?.status === "ready" || session?.status === "authenticated" || session?.status === "starting") {
-            void startWhatsAppWebBridgeSession(location.id).catch((error: any) => {
-                console.warn("[WhatsApp Web Bridge] Background reconnect from status check failed:", error?.message || error);
-            });
-            return {
-                provider: "web_bridge" as const,
-                mode,
-                status: "reconnecting",
-                qrcode: null,
-                phone: session?.phone || null,
-                sessionId: session?.sessionId || expectedSessionId,
-                lastSeenAt: session?.lastSeenAt?.toISOString?.() || null,
-                lastReadyAt: session?.lastReadyAt?.toISOString?.() || null,
-                error: health.error || null,
-            };
-        }
-
-        return {
-            provider: "web_bridge" as const,
-            mode,
-            status: session?.status || "disconnected",
-            qrcode: session?.qrCode || null,
-            phone: session?.phone || null,
-            sessionId: session?.sessionId || null,
-            lastSeenAt: session?.lastSeenAt?.toISOString?.() || null,
-            lastReadyAt: session?.lastReadyAt?.toISOString?.() || null,
-            error: session?.lastError || null,
-        };
+        return getWhatsAppWebBridgeStatusForLocation(location);
     } catch (error: any) {
         console.error("getWhatsAppWebBridgeStatus error:", error);
         return {

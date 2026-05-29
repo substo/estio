@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
-import { getWhatsAppWebBridgeStatus, getEmailSyncProvidersStatus, triggerWhatsAppWebBridgeConnection } from '../actions';
+import { getEmailSyncProvidersStatus, triggerWhatsAppWebBridgeConnection } from '../actions';
 import { CheckCircle2, Loader2, RefreshCw, QrCode as QrIcon, Smartphone, WifiOff } from 'lucide-react';
 import { SiGmail, SiMicrosoftoutlook } from 'react-icons/si';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,18 @@ type EmailProviderStatus = {
     subscriptionExpiry?: string | null;
     subscriptionExpired?: boolean;
     settingsPath: string;
+};
+
+type WhatsAppWebBridgeStatus = {
+    provider: 'web_bridge';
+    mode: string;
+    status: string;
+    qrcode: string | null;
+    phone: string | null;
+    sessionId: string | null;
+    lastSeenAt: string | null;
+    lastReadyAt: string | null;
+    error: string | null;
 };
 
 function healthDotClass(health: ProviderHealth) {
@@ -168,7 +180,7 @@ export function WhatsAppStatus() {
     const [statusError, setStatusError] = useState<string | null>(null);
     const statusPollInFlightRef = useRef(false);
 
-    const applyWhatsAppStatus = (res: Awaited<ReturnType<typeof getWhatsAppWebBridgeStatus>>) => {
+    const applyWhatsAppStatus = (res: WhatsAppWebBridgeStatus) => {
         const nextStatus = String(res.status || 'disconnected');
         const connected = nextStatus === 'ready' || nextStatus === 'open' || nextStatus === 'connected';
 
@@ -191,7 +203,14 @@ export function WhatsAppStatus() {
         if (options?.foreground || status === 'checking') setLoading(true);
 
         try {
-            const res = await getWhatsAppWebBridgeStatus();
+            const response = await fetch('/api/admin/conversations/whatsapp-web-bridge-status', {
+                method: 'GET',
+                cache: 'no-store',
+            });
+            const res = await response.json();
+            if (!response.ok) {
+                throw new Error(res?.error || 'Unable to check WhatsApp status.');
+            }
             return applyWhatsAppStatus(res);
         } catch (e) {
             console.error(e);
