@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Archive, CheckSquare, CloudDownload, Inbox, Layers, Loader2, MessageSquare, MoreHorizontal, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { resolveConversationListWorkflowView } from "./conversation-list-header-state";
 
 interface ConversationListHeaderProps {
     conversations: Conversation[];
@@ -73,7 +74,7 @@ export function ConversationListHeader({
     const isAllSelected = conversations.length > 0 && visibleSelectedCount === conversations.length;
     const isPartiallySelected = visibleSelectedCount > 0 && visibleSelectedCount < conversations.length;
     const selectedIdsList = Array.from(selectedIds || []);
-    const workflowView: 'chats' | 'deals' | 'tasks' = effectiveViewMode === 'deals' ? 'deals' : viewFilter === 'tasks' ? 'tasks' : 'chats';
+    const workflowView = resolveConversationListWorkflowView(effectiveViewMode, viewFilter);
     const showSearch = workflowView === 'chats' && onSearchChange !== undefined;
     const showChatMailboxControls = workflowView === 'chats' && onViewFilterChange;
     const showChatActions = workflowView === 'chats' && onToggleSelectionMode;
@@ -486,8 +487,8 @@ export function ConversationListHeader({
                             if (e.key === 'Enter') {
                                 commitSearch(localQuery);
                             } else if (e.key === 'Escape') {
+                                clearSearch();
                                 setIsSearchExpanded(false);
-                                setLocalQuery(searchQuery || "");
                             }
                         }}
                         onBlur={() => {

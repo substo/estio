@@ -386,7 +386,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
         let isCancelled = false;
         setIsSearching(true);
 
-        searchConversations(normalizedSearchQuery, { limit: 50 })
+        if (viewMode !== 'chats' || viewFilter === 'tasks') {
+            setSearchResults([]);
+            setIsSearching(false);
+            return;
+        }
+
+        searchConversations(normalizedSearchQuery, { limit: 50, status: viewFilter })
             .then(res => {
                 if (isCancelled || searchRequestIdRef.current !== requestId) return;
                 if (res.success) {
@@ -408,7 +414,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         return () => {
             isCancelled = true;
         };
-    }, [searchQuery]);
+    }, [searchQuery, viewFilter, viewMode]);
 
     const initialDealId = getSearchParam('dealId');
     const initialUrlConversationId = getSearchParam('id') || initialSelectedConversationId || null;

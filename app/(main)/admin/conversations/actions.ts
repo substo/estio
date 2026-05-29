@@ -26,7 +26,7 @@ import { createHash, randomUUID } from "crypto";
 import { runGoogleAutoSyncForContact } from "@/lib/google/automation";
 import { createContactTask } from "@/app/(main)/admin/tasks/actions";
 import { isLocalDateTimeWithoutZone } from "@/lib/tasks/datetime-local";
-import { createTraceId, withServerTiming } from "@/lib/observability/performance";
+import { createTraceId, logPerformanceMetric, withServerTiming } from "@/lib/observability/performance";
 import { getConversationFeatureFlags } from "@/lib/feature-flags";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { withResilience } from "@/lib/external/resilience";
@@ -10614,12 +10614,21 @@ export async function processLegacyCrmLeadEmailForLocation(args: {
 }) {
     return processLegacyCrmLeadEmailForLocationService(args);
 }
-export async function searchConversations(query: string, options?: { limit?: number }) {
+type ConversationSearchMode = "auto" | "contact" | "broad";
+
+export async function searchConversations(query: string, options?: {
+    limit?: number;
+    status?: Extract<ConversationListStatus, "active" | "archived" | "trash">;
+    mode?: ConversationSearchMode;
+}) {
     try {
         const location = await getAuthenticatedLocationReadOnly();
         const traceId = createTraceId();
         const MAX_SEARCH_LIMIT = 50;
         const limit = Math.min(Math.max(Number(options?.limit || 20), 1), MAX_SEARCH_LIMIT);
+        const requestedMode: ConversationSearchMode = options?.mode === "broad" || options?.mode === "contact" ? options.mode : "auto";
+        const status = options?.status;
+        const statusLabel = status || "not_trash";
 
         const q = String(query || "").trim().replace(/\s+/g, " ");
         if (!q) {
@@ -10635,13 +10644,47 @@ export async function searchConversations(query: string, options?: { limit?: num
         }
 
         const likeQuery = `%${q}%`;
+        const likePrefixQuery = `${q}%`;
+        const queryDigits = normalizePhoneDigits(q);
+        const digitsLikeQuery = queryDigits ? `%${queryDigits}%` : "";
+        const digitsSuffixQuery = queryDigits ? `%${queryDigits}` : "";
+        const phoneLikeQuery = queryDigits.length >= 4 && queryDigits.length >= Math.max(4, Math.floor(q.length * 0.6));
+        const searchStartedAt = Date.now();
+        let contactHeaderDurationMs = 0;
+        let broadDurationMs: number | null = null;
+        let broadUsed = false;
         let rankedRows: Array<{ conversationId: string; score: number }> = [];
+
+        const statusSql =
+            status === "active"
+                ? Prisma.sql`c."deletedAt" IS NULL AND c."archivedAt" IS NULL`
+                : status === "archived"
+                    ? Prisma.sql`c."deletedAt" IS NULL AND c."archivedAt" IS NOT NULL`
+                    : status === "trash"
+                        ? Prisma.sql`c."deletedAt" IS NOT NULL`
+                        : Prisma.sql`c."deletedAt" IS NULL`;
+
+        const fallbackWhere: any = {
+            locationId: location.id,
+            ...(status === "active"
+                ? { deletedAt: null, archivedAt: null }
+                : status === "archived"
+                    ? { deletedAt: null, archivedAt: { not: null } }
+                    : status === "trash"
+                        ? { deletedAt: { not: null } }
+                        : { deletedAt: null }),
+        };
+
         try {
-            rankedRows = await withServerTiming("conversations.search", {
+            const contactStartedAt = Date.now();
+            rankedRows = await withServerTiming("conversations.search.contact_header", {
                 traceId,
                 locationId: location.id,
                 limit,
                 queryLength: q.length,
+                queryDigitsLength: queryDigits.length,
+                status: statusLabel,
+                mode: requestedMode,
             }, async () => db.$queryRaw<Array<{ conversationId: string; score: number }>>`
             WITH search_term AS (
                 SELECT ${q}::text AS q, plainto_tsquery('simple', ${q}) AS tsq
@@ -10650,7 +10693,25 @@ export async function searchConversations(query: string, options?: { limit?: num
                 SELECT
                     c.id AS "conversationId",
                     GREATEST(
+                        CASE
+                            WHEN ${queryDigits.length >= 4}
+                              AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigits}
+                            THEN 4.0
+                            WHEN ${queryDigits.length >= 4}
+                              AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsSuffixQuery}
+                            THEN 3.5
+                            WHEN ${queryDigits.length >= 4}
+                              AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsLikeQuery}
+                            THEN 2.5
+                            ELSE 0
+                        END,
+                        CASE WHEN COALESCE(ct.name, '') ILIKE ${likePrefixQuery} THEN 2.2 ELSE 0 END,
+                        CASE WHEN COALESCE(ct."firstName", '') ILIKE ${likePrefixQuery} THEN 2.0 ELSE 0 END,
+                        CASE WHEN COALESCE(ct."lastName", '') ILIKE ${likePrefixQuery} THEN 1.8 ELSE 0 END,
+                        CASE WHEN COALESCE(ct.email, '') ILIKE ${likePrefixQuery} THEN 1.8 ELSE 0 END,
                         similarity(COALESCE(ct.name, ''), st.q),
+                        similarity(COALESCE(ct."firstName", ''), st.q),
+                        similarity(COALESCE(ct."lastName", ''), st.q),
                         similarity(COALESCE(ct.email, ''), st.q),
                         similarity(COALESCE(ct.phone, ''), st.q)
                     ) + 0.8 * ts_rank_cd(
@@ -10660,9 +10721,7 @@ export async function searchConversations(query: string, options?: { limit?: num
                             COALESCE(ct."firstName", '') || ' ' ||
                             COALESCE(ct."lastName", '') || ' ' ||
                             COALESCE(ct.email, '') || ' ' ||
-                            COALESCE(ct.phone, '') || ' ' ||
-                            COALESCE(ct.notes, '') || ' ' ||
-                            COALESCE(ct."requirementOtherDetails", '')
+                            COALESCE(ct.phone, '')
                         ),
                         st.tsq
                     ) AS score
@@ -10670,7 +10729,7 @@ export async function searchConversations(query: string, options?: { limit?: num
                 JOIN "Contact" ct ON ct.id = c."contactId"
                 CROSS JOIN search_term st
                 WHERE c."locationId" = ${location.id}
-                  AND c."deletedAt" IS NULL
+                  AND ${statusSql}
                   AND (
                     to_tsvector(
                         'simple',
@@ -10678,13 +10737,14 @@ export async function searchConversations(query: string, options?: { limit?: num
                         COALESCE(ct."firstName", '') || ' ' ||
                         COALESCE(ct."lastName", '') || ' ' ||
                         COALESCE(ct.email, '') || ' ' ||
-                        COALESCE(ct.phone, '') || ' ' ||
-                        COALESCE(ct.notes, '') || ' ' ||
-                        COALESCE(ct."requirementOtherDetails", '')
+                        COALESCE(ct.phone, '')
                     ) @@ st.tsq
                     OR COALESCE(ct.name, '') ILIKE ${likeQuery}
+                    OR COALESCE(ct."firstName", '') ILIKE ${likeQuery}
+                    OR COALESCE(ct."lastName", '') ILIKE ${likeQuery}
                     OR COALESCE(ct.email, '') ILIKE ${likeQuery}
                     OR COALESCE(ct.phone, '') ILIKE ${likeQuery}
+                    OR (${queryDigits.length >= 4} AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsLikeQuery})
                   )
             ),
             conversation_hits AS (
@@ -10695,57 +10755,16 @@ export async function searchConversations(query: string, options?: { limit?: num
                 FROM "Conversation" c
                 CROSS JOIN search_term st
                 WHERE c."locationId" = ${location.id}
-                  AND c."deletedAt" IS NULL
+                  AND ${statusSql}
                   AND (
                     to_tsvector('simple', COALESCE(c."lastMessageBody", '')) @@ st.tsq
                     OR COALESCE(c."lastMessageBody", '') ILIKE ${likeQuery}
                   )
             ),
-            message_hits AS (
-                SELECT
-                    m."conversationId" AS "conversationId",
-                    MAX(
-                        0.6 + similarity(COALESCE(m.body, ''), st.q)
-                        + 0.35 * ts_rank_cd(to_tsvector('simple', COALESCE(m.body, '')), st.tsq)
-                    ) AS score
-                FROM "Message" m
-                JOIN "Conversation" c ON c.id = m."conversationId"
-                CROSS JOIN search_term st
-                WHERE c."locationId" = ${location.id}
-                  AND c."deletedAt" IS NULL
-                  AND (
-                    to_tsvector('simple', COALESCE(m.body, '')) @@ st.tsq
-                    OR COALESCE(m.body, '') ILIKE ${likeQuery}
-                  )
-                GROUP BY m."conversationId"
-            ),
-            transcript_hits AS (
-                SELECT
-                    m."conversationId" AS "conversationId",
-                    MAX(
-                        0.5 + similarity(COALESCE(mt.text, ''), st.q)
-                        + 0.3 * ts_rank_cd(to_tsvector('simple', COALESCE(mt.text, '')), st.tsq)
-                    ) AS score
-                FROM "MessageTranscript" mt
-                JOIN "Message" m ON m.id = mt."messageId"
-                JOIN "Conversation" c ON c.id = m."conversationId"
-                CROSS JOIN search_term st
-                WHERE c."locationId" = ${location.id}
-                  AND c."deletedAt" IS NULL
-                  AND (
-                    to_tsvector('simple', COALESCE(mt.text, '')) @@ st.tsq
-                    OR COALESCE(mt.text, '') ILIKE ${likeQuery}
-                  )
-                GROUP BY m."conversationId"
-            ),
             combined AS (
                 SELECT * FROM contact_hits
                 UNION ALL
                 SELECT * FROM conversation_hits
-                UNION ALL
-                SELECT * FROM message_hits
-                UNION ALL
-                SELECT * FROM transcript_hits
             )
             SELECT
                 "conversationId",
@@ -10755,12 +10774,12 @@ export async function searchConversations(query: string, options?: { limit?: num
             ORDER BY MAX(score) DESC
             LIMIT ${limit};
         `);
+            contactHeaderDurationMs = Date.now() - contactStartedAt;
         } catch (rawSearchError) {
-            console.warn("[searchConversations] Falling back to Prisma search path:", rawSearchError);
+            console.warn("[searchConversations] Falling back to Prisma contact/header search path:", rawSearchError);
             const fallbackRows = await db.conversation.findMany({
                 where: {
-                    locationId: location.id,
-                    deletedAt: null,
+                    ...fallbackWhere,
                     OR: [
                         { lastMessageBody: { contains: q, mode: "insensitive" } },
                         {
@@ -10771,8 +10790,6 @@ export async function searchConversations(query: string, options?: { limit?: num
                                     { lastName: { contains: q, mode: "insensitive" } },
                                     { email: { contains: q, mode: "insensitive" } },
                                     { phone: { contains: q, mode: "insensitive" } },
-                                    { notes: { contains: q, mode: "insensitive" } },
-                                    { requirementOtherDetails: { contains: q, mode: "insensitive" } },
                                 ],
                             },
                         },
@@ -10786,10 +10803,118 @@ export async function searchConversations(query: string, options?: { limit?: num
                 conversationId: row.id,
                 score: limit - index,
             }));
+            contactHeaderDurationMs = Date.now() - searchStartedAt;
+        }
+
+        const shouldRunBroadSearch = requestedMode === "broad"
+            || (
+                requestedMode === "auto"
+                && !phoneLikeQuery
+                && q.length >= 5
+                && rankedRows.length < Math.min(limit, 10)
+            );
+
+        if (shouldRunBroadSearch && rankedRows.length < limit) {
+            broadUsed = true;
+            const broadStartedAt = Date.now();
+            try {
+                const broadRows = await withServerTiming("conversations.search.broad", {
+                    traceId,
+                    locationId: location.id,
+                    limit,
+                    queryLength: q.length,
+                    status: statusLabel,
+                    mode: requestedMode,
+                    contactHeaderResultCount: rankedRows.length,
+                }, async () => db.$queryRaw<Array<{ conversationId: string; score: number }>>`
+                    WITH search_term AS (
+                        SELECT ${q}::text AS q, plainto_tsquery('simple', ${q}) AS tsq
+                    ),
+                    message_hits AS (
+                        SELECT
+                            m."conversationId" AS "conversationId",
+                            MAX(
+                                0.6 + similarity(COALESCE(m.body, ''), st.q)
+                                + 0.35 * ts_rank_cd(to_tsvector('simple', COALESCE(m.body, '')), st.tsq)
+                            ) AS score
+                        FROM "Message" m
+                        JOIN "Conversation" c ON c.id = m."conversationId"
+                        CROSS JOIN search_term st
+                        WHERE c."locationId" = ${location.id}
+                          AND ${statusSql}
+                          AND (
+                            to_tsvector('simple', COALESCE(m.body, '')) @@ st.tsq
+                            OR COALESCE(m.body, '') ILIKE ${likeQuery}
+                          )
+                        GROUP BY m."conversationId"
+                    ),
+                    transcript_hits AS (
+                        SELECT
+                            m."conversationId" AS "conversationId",
+                            MAX(
+                                0.5 + similarity(COALESCE(mt.text, ''), st.q)
+                                + 0.3 * ts_rank_cd(to_tsvector('simple', COALESCE(mt.text, '')), st.tsq)
+                            ) AS score
+                        FROM "MessageTranscript" mt
+                        JOIN "Message" m ON m.id = mt."messageId"
+                        JOIN "Conversation" c ON c.id = m."conversationId"
+                        CROSS JOIN search_term st
+                        WHERE c."locationId" = ${location.id}
+                          AND ${statusSql}
+                          AND (
+                            to_tsvector('simple', COALESCE(mt.text, '')) @@ st.tsq
+                            OR COALESCE(mt.text, '') ILIKE ${likeQuery}
+                          )
+                        GROUP BY m."conversationId"
+                    ),
+                    combined AS (
+                        SELECT * FROM message_hits
+                        UNION ALL
+                        SELECT * FROM transcript_hits
+                    )
+                    SELECT
+                        "conversationId",
+                        MAX(score) AS score
+                    FROM combined
+                    GROUP BY "conversationId"
+                    ORDER BY MAX(score) DESC
+                    LIMIT ${limit};
+                `);
+
+                const rankedById = new Map<string, number>();
+                for (const row of rankedRows) {
+                    rankedById.set(row.conversationId, row.score);
+                }
+                for (const row of broadRows) {
+                    rankedById.set(row.conversationId, Math.max(rankedById.get(row.conversationId) ?? Number.NEGATIVE_INFINITY, row.score));
+                }
+                rankedRows = Array.from(rankedById.entries())
+                    .map(([conversationId, score]) => ({ conversationId, score }))
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, limit);
+            } catch (broadSearchError) {
+                console.warn("[searchConversations] Broad message/transcript search failed; returning contact/header matches:", broadSearchError);
+            } finally {
+                broadDurationMs = Date.now() - broadStartedAt;
+            }
         }
 
         const rankedConversationIds = rankedRows.map((row) => String(row.conversationId));
         if (rankedConversationIds.length === 0) {
+            logPerformanceMetric("conversations.search", {
+                traceId,
+                locationId: location.id,
+                ok: true,
+                durationMs: Date.now() - searchStartedAt,
+                contactHeaderDurationMs,
+                broadDurationMs,
+                broadUsed,
+                resultCount: 0,
+                queryLength: q.length,
+                queryDigitsLength: queryDigits.length,
+                status: statusLabel,
+                mode: requestedMode,
+            });
             return {
                 success: true,
                 traceId,
@@ -10804,6 +10929,21 @@ export async function searchConversations(query: string, options?: { limit?: num
         const conversations = await hydrateRankedConversationRows({
             location,
             rankedConversationIds,
+        });
+
+        logPerformanceMetric("conversations.search", {
+            traceId,
+            locationId: location.id,
+            ok: true,
+            durationMs: Date.now() - searchStartedAt,
+            contactHeaderDurationMs,
+            broadDurationMs,
+            broadUsed,
+            resultCount: conversations.length,
+            queryLength: q.length,
+            queryDigitsLength: queryDigits.length,
+            status: statusLabel,
+            mode: requestedMode,
         });
 
         return {
