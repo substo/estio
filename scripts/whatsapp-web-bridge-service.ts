@@ -4,6 +4,7 @@ import { rm } from "fs/promises";
 import path from "path";
 import qrcode from "qrcode";
 import db from "../lib/db";
+import { prepareWhatsAppWebBridgeWebhookPayload } from "../lib/whatsapp/web-bridge-payload";
 import { isWhatsAppWebBridgeStaleError } from "../lib/whatsapp/web-bridge-stale";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
@@ -138,13 +139,23 @@ async function readJson(req: IncomingMessage) {
 }
 
 async function emitEvent(payload: Record<string, any>) {
+    const prepared = prepareWhatsAppWebBridgeWebhookPayload({
+        payload,
+        maxBodyBytes: APP_WEBHOOK_BODY_LIMIT_BYTES,
+    });
+    if (prepared.omittedInlineMedia) {
+        const messageId = getSerializedMessageId(payload?.message);
+        console.warn(
+            `[WhatsApp Web Bridge] Inline media omitted for ${payload.event || "event"} ${messageId || "unknown message"}: webhook body ${prepared.originalBodyBytes} bytes exceeds ${APP_WEBHOOK_BODY_LIMIT_BYTES}; sending ${prepared.bodyBytes} bytes.`
+        );
+    }
     const response = await fetch(APP_WEBHOOK_URL, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             ...(SECRET ? { "x-whatsapp-web-bridge-secret": SECRET } : {}),
         },
-        body: JSON.stringify(payload),
+        body: prepared.body,
     });
     if (!response.ok) {
         const text = await response.text().catch(() => "");
