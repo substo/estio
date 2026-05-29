@@ -104,9 +104,18 @@ export function normalizeWhatsAppWebBridgeMessage(args: {
         ? args.resolvedIdentity.phone
         : "";
     const candidateContactPhone = contactIdentity.phone || resolvedIdentityPhone || "";
-    const contactPhone = !fromMe && normalizeDigits(candidateContactPhone) === normalizeDigits(ownPhone)
-        ? ""
-        : candidateContactPhone;
+    const candidateIsOwnPhone = !!candidateContactPhone
+        && normalizeDigits(candidateContactPhone) === normalizeDigits(ownPhone);
+    if (candidateIsOwnPhone) {
+        console.warn("[WhatsApp Web Bridge] Ignoring resolved contact phone equal to connected account phone", {
+            wamId: String(message.id || message.messageId || "").trim(),
+            remoteJid: remoteId,
+            contactLid: contactLid || undefined,
+            direction: fromMe ? "outbound" : "inbound",
+            resolvedIdentitySource: args.resolvedIdentity.source,
+        });
+    }
+    const contactPhone = candidateIsOwnPhone ? "" : candidateContactPhone;
     const contactAddress = contactPhone || contactLid;
     const wamId = String(message.id || message.messageId || "").trim();
 

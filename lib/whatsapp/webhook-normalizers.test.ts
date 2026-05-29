@@ -8,6 +8,7 @@ import {
     normalizeWhatsAppWebBridgeMessage,
     parseWhatsAppWebhookTimestamp,
 } from "@/lib/whatsapp/webhook-normalizers";
+import { shouldRejectWebBridgeResolvedPhoneAsOwnPhone } from "@/lib/whatsapp/sync";
 import { extractReliableWebBridgePhone } from "@/lib/whatsapp/web-bridge-identity";
 
 test("getWhatsAppCloudInboundBody preserves provider-specific fallbacks", () => {
@@ -226,6 +227,60 @@ test("normalizeWhatsAppWebBridgeMessage keeps outbound contact as recipient, not
     assert.equal(result.normalized?.to, "353870972075");
     assert.equal(result.normalized?.resolvedPhone, "353870972075");
     assert.notEqual(result.normalized?.to, "35794006663");
+});
+
+test("normalizeWhatsAppWebBridgeMessage rejects connected account phone for outbound LID media", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35794006663@c.us",
+        resolvedIdentity: {
+            phone: "35794006663",
+            lid: "79259527848167@lid",
+            source: "web_bridge_contact_metadata",
+        },
+        message: {
+            fromMe: true,
+            from: "35794006663@c.us",
+            to: "79259527848167@lid",
+            id: "true_79259527848167@lid_A1",
+            body: "",
+            caption: "Photo",
+            type: "image",
+            timestamp: 1779972548,
+        },
+    });
+
+    assert.equal(result.normalized?.direction, "outbound");
+    assert.equal(result.normalized?.from, "35794006663");
+    assert.equal(result.normalized?.to, "79259527848167@lid");
+    assert.equal(result.normalized?.resolvedPhone, undefined);
+    assert.equal(result.normalized?.lid, "79259527848167@lid");
+    assert.notEqual(result.normalized?.to, "35794006663");
+});
+
+test("shouldRejectWebBridgeResolvedPhoneAsOwnPhone protects outbound sync routing", () => {
+    assert.equal(shouldRejectWebBridgeResolvedPhoneAsOwnPhone({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        resolvedPhone: "35794006663",
+        ownPhone: "+35794006663",
+        locationPhone: "35794006663@c.us",
+    }), true);
+
+    assert.equal(shouldRejectWebBridgeResolvedPhoneAsOwnPhone({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        resolvedPhone: "353870972075",
+        ownPhone: "+35794006663",
+        locationPhone: "35794006663@c.us",
+    }), false);
+
+    assert.equal(shouldRejectWebBridgeResolvedPhoneAsOwnPhone({
+        source: "whatsapp_web_bridge",
+        direction: "inbound",
+        resolvedPhone: "35794006663",
+        ownPhone: "+35794006663",
+    }), false);
 });
 
 test("extractReliableWebBridgePhone prefers phone JID and rejects LID number digits", () => {

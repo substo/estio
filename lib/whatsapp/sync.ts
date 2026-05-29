@@ -24,6 +24,22 @@ function getMessageSyncProvider(source: NormalizedMessage["source"]) {
     return "whatsapp_retired";
 }
 
+export function shouldRejectWebBridgeResolvedPhoneAsOwnPhone(args: {
+    source: NormalizedMessage["source"];
+    direction?: NormalizedMessage["direction"];
+    resolvedPhone?: string | null;
+    ownPhone?: string | null;
+    locationPhone?: string | null;
+}) {
+    if (args.source !== "whatsapp_web_bridge" || args.direction !== "outbound") return false;
+    const resolvedDigits = normalizeDigits(args.resolvedPhone);
+    if (!resolvedDigits) return false;
+    return [args.ownPhone, args.locationPhone].some((value) => {
+        const ownDigits = normalizeDigits(value);
+        return !!ownDigits && ownDigits === resolvedDigits;
+    });
+}
+
 export interface NormalizedMessage {
     locationId: string;
     from: string; // E.164 phone number (Sender)
@@ -513,9 +529,24 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // Determine the "Contact" phone number (The external party)
     // If inbound, Contact is "from". If outbound, Contact is "to".
-    // Determine the "Contact" phone number (The external party)
-    // If inbound, Contact is "from". If outbound, Contact is "to".
     let contactPhone = direction === "inbound" ? normalizedFrom : normalizedTo;
+    const ownPhone = direction === "inbound" ? normalizedTo : normalizedFrom;
+    if (shouldRejectWebBridgeResolvedPhoneAsOwnPhone({
+        source,
+        direction,
+        resolvedPhone: msg.resolvedPhone,
+        ownPhone,
+        locationPhone: locationDef.whatsappPhoneNumberId,
+    })) {
+        console.warn(`[WhatsApp Sync] Ignoring Web Bridge resolved phone equal to connected account for outbound message`, {
+            wamId,
+            remoteJid: msg.remoteJid,
+            contactLid: msg.lid,
+            direction,
+            resolvedIdentitySource: msg.webBridgeIdentity?.source,
+        });
+        msg.resolvedPhone = undefined;
+    }
     let contactIdentityIsLid = !isGroup && /@lid$/i.test(contactPhone);
 
     // --- LID RESOLUTION CHECK ---
