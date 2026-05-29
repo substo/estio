@@ -73,10 +73,13 @@ export function ConversationListHeader({
     const isAllSelected = conversations.length > 0 && visibleSelectedCount === conversations.length;
     const isPartiallySelected = visibleSelectedCount > 0 && visibleSelectedCount < conversations.length;
     const selectedIdsList = Array.from(selectedIds || []);
-    const showSearch = effectiveViewMode === 'chats' && onSearchChange !== undefined;
-    const showActiveInboxActions = viewFilter === 'active';
+    const workflowView: 'chats' | 'deals' | 'tasks' = effectiveViewMode === 'deals' ? 'deals' : viewFilter === 'tasks' ? 'tasks' : 'chats';
+    const showSearch = workflowView === 'chats' && onSearchChange !== undefined;
+    const showChatMailboxControls = workflowView === 'chats' && onViewFilterChange;
+    const showChatActions = workflowView === 'chats' && onToggleSelectionMode;
+    const showActiveInboxActions = workflowView === 'chats' && viewFilter === 'active';
 
-    if (isSelectionMode && effectiveViewMode === 'chats') {
+    if (isSelectionMode && workflowView === 'chats') {
         const visibleConversationIds = conversations.map((conversation) => conversation.id);
         const hasActiveSearch = !!searchQuery.trim();
 
@@ -256,52 +259,99 @@ export function ConversationListHeader({
 
     return (
         <div className="border-b bg-slate-50 p-2 min-w-0 flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-1 min-w-0">
-                <div className="flex items-center gap-1 min-w-0">
-                    {showSearch && !isSearchExpanded && (
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-slate-600 hover:text-slate-900 shrink-0"
-                            onClick={() => setIsSearchExpanded(true)}
-                            title="Search Contacts"
-                        >
-                            <Search className="w-4 h-4" />
-                        </Button>
-                    )}
-                    {onViewModeChange && (
-                        <Tabs value={effectiveViewMode} onValueChange={(v: string) => onViewModeChange(v as 'chats' | 'deals')} className="shrink-0">
-                            <TabsList className="h-8">
-                                <TabsTrigger value="chats" className="text-xs px-1.5 sm:px-2 h-7 gap-1" title="Chats">
-                                    <MessageSquare className="w-3 h-3" />
-                                    <span className="hidden sm:inline">Chats</span>
-                                </TabsTrigger>
-                                <TabsTrigger value="deals" className="text-xs px-1.5 sm:px-2 h-7 gap-1" title="Deals">
-                                    <Layers className="w-3 h-3" />
-                                    <span className="hidden sm:inline">Deals</span>
-                                </TabsTrigger>
-                            </TabsList>
-                        </Tabs>
-                    )}
+            <TooltipProvider delayDuration={200}>
+                {onViewModeChange && (
+                    <Tabs
+                        value={workflowView}
+                        onValueChange={(value: string) => {
+                            if (value === 'deals') {
+                                onViewModeChange('deals');
+                                return;
+                            }
 
-                    {effectiveViewMode === 'chats' && onViewFilterChange && (
-                        <TooltipProvider delayDuration={200}>
+                            onViewModeChange('chats');
+                            if (value === 'tasks') {
+                                onViewFilterChange?.('tasks');
+                                return;
+                            }
+
+                            if (viewFilter === 'tasks') {
+                                onViewFilterChange?.('active');
+                            }
+                        }}
+                        className="w-full min-w-0"
+                    >
+                        <TabsList className="grid h-8 w-full grid-cols-3">
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <TabsTrigger value="chats" className="h-7 min-w-0 gap-1 px-1.5 text-xs">
+                                        <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="hidden truncate sm:inline">Chats</span>
+                                    </TabsTrigger>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Chats</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <TabsTrigger value="deals" className="h-7 min-w-0 gap-1 px-1.5 text-xs">
+                                        <Layers className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="hidden truncate sm:inline">Deals</span>
+                                    </TabsTrigger>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Deals</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <TabsTrigger value="tasks" className="h-7 min-w-0 gap-1 px-1.5 text-xs">
+                                        <CheckSquare className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="hidden truncate sm:inline">Tasks</span>
+                                    </TabsTrigger>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Tasks</TooltipContent>
+                            </Tooltip>
+                        </TabsList>
+                    </Tabs>
+                )}
+
+                <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="flex items-center gap-1 min-w-0">
+                        {showSearch && !isSearchExpanded && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-slate-600 hover:text-slate-900 shrink-0"
+                                        onClick={() => setIsSearchExpanded(true)}
+                                    >
+                                        <Search className="w-4 h-4" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Search Contacts</TooltipContent>
+                            </Tooltip>
+                        )}
+
+                        {showChatMailboxControls && (
                             <div
                                 onMouseEnter={handleMouseEnter}
                                 onMouseLeave={handleMouseLeave}
-                                className="flex items-center"
+                                className="flex items-center min-w-0"
                             >
                                 <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
                                     <DropdownMenuTrigger asChild>
                                         <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-7 w-7 text-slate-600 hover:text-slate-900"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 min-w-0 max-w-[8rem] justify-start gap-1.5 px-2 text-xs text-slate-700"
                                         >
-                                            {viewFilter === 'active' && <Inbox className="w-4 h-4" />}
-                                            {viewFilter === 'archived' && <Archive className="w-4 h-4" />}
-                                            {viewFilter === 'trash' && <Trash2 className="w-4 h-4" />}
-                                            {viewFilter === 'tasks' && <CheckSquare className="w-4 h-4 text-emerald-600" />}
+                                            {viewFilter === 'active' && <Inbox className="w-4 h-4 shrink-0" />}
+                                            {viewFilter === 'archived' && <Archive className="w-4 h-4 shrink-0" />}
+                                            {viewFilter === 'trash' && <Trash2 className="w-4 h-4 shrink-0" />}
+                                            <span className="truncate">
+                                                {viewFilter === 'active' && 'Inbox'}
+                                                {viewFilter === 'archived' && 'Archived'}
+                                                {viewFilter === 'trash' && 'Trash'}
+                                            </span>
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent
@@ -313,9 +363,6 @@ export function ConversationListHeader({
                                         <DropdownMenuItem onClick={() => { onViewFilterChange('active'); setIsMenuOpen(false); }} className="gap-2">
                                             <Inbox className="w-4 h-4" /> Inbox
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => { onViewFilterChange('tasks'); setIsMenuOpen(false); }} className="gap-2">
-                                            <CheckSquare className="w-4 h-4 text-emerald-600" /> Tasks
-                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => { onViewFilterChange('archived'); setIsMenuOpen(false); }} className="gap-2">
                                             <Archive className="w-4 h-4" /> Archived
                                         </DropdownMenuItem>
@@ -326,20 +373,18 @@ export function ConversationListHeader({
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             </div>
-                        </TooltipProvider>
-                    )}
-                </div>
+                        )}
+                    </div>
 
-                {effectiveViewMode === 'chats' && onToggleSelectionMode && (
-                    <TooltipProvider delayDuration={200}>
-                        <div className="flex items-center gap-0.5 shrink-0">
+                    {showChatActions && (
+                        <div className="flex items-center gap-1 shrink-0">
                             {viewFilter === 'trash' && onEmptyTrash && conversations.length > 0 && (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-7 text-xs text-red-600 shrink-0 border-red-200 hover:bg-red-50"
+                                            className="h-8 text-xs text-red-600 shrink-0 border-red-200 hover:bg-red-50"
                                             onClick={onEmptyTrash}
                                         >
                                             Empty Trash
@@ -348,95 +393,82 @@ export function ConversationListHeader({
                                     <TooltipContent side="bottom">Permanently delete all items in trash</TooltipContent>
                                 </Tooltip>
                             )}
+
                             {showActiveInboxActions && (
                                 <>
-                                    <div className="hidden sm:flex items-center gap-0.5">
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                                    onClick={onNewConversationClick}
-                                                >
-                                                    <Plus className="w-4 h-4" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="bottom">New Conversation</TooltipContent>
-                                        </Tooltip>
-
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-7 w-7"
-                                                    onClick={onSyncAllClick}
-                                                >
-                                                    <CloudDownload className="w-3.5 h-3.5" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="bottom">Sync All WhatsApp Chats</TooltipContent>
-                                        </Tooltip>
-
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-7 w-7"
-                                                    data-selection-mode-toggle="true"
-                                                    onClick={() => onToggleSelectionMode(true)}
-                                                >
-                                                    <Layers className="w-3.5 h-3.5" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="bottom">Bind to Deal</TooltipContent>
-                                        </Tooltip>
-                                    </div>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="default"
+                                                size="icon"
+                                                className="h-8 w-8 shrink-0 bg-green-600 text-white hover:bg-green-700"
+                                                onClick={onNewConversationClick}
+                                            >
+                                                <Plus className="w-4 h-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">New Conversation</TooltipContent>
+                                    </Tooltip>
 
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon" className="h-7 w-7 sm:hidden">
+                                            <Button variant="ghost" size="icon" className="h-8 w-8">
                                                 <MoreHorizontal className="w-4 h-4" />
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-44">
-                                            <DropdownMenuItem onClick={onNewConversationClick} className="gap-2">
-                                                <Plus className="w-4 h-4" />
-                                                New Conversation
-                                            </DropdownMenuItem>
                                             <DropdownMenuItem onClick={onSyncAllClick} className="gap-2">
                                                 <CloudDownload className="w-4 h-4" />
-                                                Sync All WhatsApp Chats
+                                                Sync WhatsApp
                                             </DropdownMenuItem>
                                             <DropdownMenuItem onClick={() => onToggleSelectionMode(true)} className="gap-2">
                                                 <Layers className="w-4 h-4" />
                                                 Bind to Deal
                                             </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => onToggleSelectionMode(true)} className="gap-2">
+                                                <CheckSquare className="w-4 h-4" />
+                                                Select
+                                            </DropdownMenuItem>
                                         </DropdownMenuContent>
                                     </DropdownMenu>
+
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="hidden h-8 w-8 xl:inline-flex"
+                                                data-selection-mode-toggle="true"
+                                                onClick={() => onToggleSelectionMode(true)}
+                                            >
+                                                <CheckSquare className="w-3.5 h-3.5" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">Select / Delete</TooltipContent>
+                                    </Tooltip>
                                 </>
                             )}
 
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-7 w-7"
-                                        data-selection-mode-toggle="true"
-                                        onClick={() => onToggleSelectionMode(true)}
-                                    >
-                                        <CheckSquare className="w-3.5 h-3.5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom">Select / Delete</TooltipContent>
-                            </Tooltip>
+                            {!showActiveInboxActions && (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8"
+                                            data-selection-mode-toggle="true"
+                                            onClick={() => onToggleSelectionMode(true)}
+                                        >
+                                            <CheckSquare className="w-3.5 h-3.5" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom">Select / Delete</TooltipContent>
+                                </Tooltip>
+                            )}
                         </div>
-                    </TooltipProvider>
-                )}
-            </div>
+                    )}
+                </div>
+            </TooltipProvider>
 
             {showSearch && isSearchExpanded && (
                 <div className="relative animate-in slide-in-from-top-1 fade-in duration-200" data-no-pane-swipe>
