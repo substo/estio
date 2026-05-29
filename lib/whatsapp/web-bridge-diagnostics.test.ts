@@ -123,6 +123,29 @@ test("classifies qr worker status as relink required", () => {
     assert.equal(diagnostics.severity, "warning");
 });
 
+test("classifies stale authenticated worker as stale instead of indefinitely starting", () => {
+    const diagnostics = buildWebBridgeDiagnostics({
+        expectedSessionDir,
+        nowMs: Date.parse("2026-05-29T06:04:00.000Z"),
+        session: { sessionId: "estio_loc_1", status: "authenticated" },
+        health: {
+            reachable: true,
+            ok: true,
+            sessionDir: expectedSessionDir,
+            sessions: [{
+                sessionId: "estio_loc_1",
+                status: "authenticated",
+                ready: false,
+                lastEventAt: "2026-05-29T06:00:00.000Z",
+            }],
+        },
+    });
+
+    assert.equal(diagnostics.status, "stale_worker");
+    assert.equal(diagnostics.severity, "warning");
+    assert.match(diagnostics.message, /stayed authenticated/i);
+});
+
 test("classifies wrong session dir as an error", () => {
     const diagnostics = buildWebBridgeDiagnostics({
         expectedSessionDir,

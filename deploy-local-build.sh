@@ -577,9 +577,11 @@ NODE
     CURRENT_BRIDGE_WEBHOOK_URL=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_SESSION_DIR=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CWD=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.pm_cwd || "");' 2>/dev/null || true)
+    CURRENT_BRIDGE_CODE_HASH=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || "");' 2>/dev/null || true)
+    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-payload.ts lib/whatsapp/web-bridge-readiness.ts lib/whatsapp/web-bridge-stale.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
     BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
 
-    if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ]; then
+    if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ] && [ -n "\$EXPECTED_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_BRIDGE_CODE_HASH" = "\$EXPECTED_BRIDGE_CODE_HASH" ]; then
         echo "✅ WhatsApp Web Bridge service is already reachable; preserving existing browser session"
     else
         if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ -n "\$CURRENT_BRIDGE_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" != "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
@@ -591,10 +593,13 @@ NODE
         if [ -n "\$CURRENT_BRIDGE_CWD" ] && [ "\$CURRENT_BRIDGE_CWD" != "\$SYMLINK_PATH" ]; then
             echo "🔁 WhatsApp Web Bridge cwd changed; restarting from \$SYMLINK_PATH"
         fi
+        if [ -n "\$EXPECTED_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_BRIDGE_CODE_HASH" != "\$EXPECTED_BRIDGE_CODE_HASH" ]; then
+            echo "🔁 WhatsApp Web Bridge code changed; restarting worker while preserving session dir \$WHATSAPP_BRIDGE_SESSION_DIR"
+        fi
         if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
             pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
         fi
-        NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" \
+        NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
             pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
     fi
     echo "📱 WhatsApp Web Bridge app webhook: \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"

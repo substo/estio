@@ -102,6 +102,7 @@ import {
 } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
+import { getStaleWhatsAppWebBridgeNonReadyReason } from "@/lib/whatsapp/web-bridge-readiness";
 import {
     markWhatsAppWebBridgeMediaRefetchAttemptFailed,
     startWhatsAppWebBridgeMediaRefetchAttempt,
@@ -6235,6 +6236,15 @@ function isStaleWebBridgeQrStatus(status: unknown, lastEventAt?: string | Date |
     return Date.now() - timestamp > 90_000;
 }
 
+function getStaleWebBridgeNonReadyReason(workerSession: any, lastSeenAt?: Date | null) {
+    return getStaleWhatsAppWebBridgeNonReadyReason({
+        status: workerSession?.status,
+        ready: workerSession?.ready,
+        lastEventAt: workerSession?.lastEventAt || lastSeenAt || null,
+        startedAt: workerSession?.startedAt || null,
+    });
+}
+
 export async function getWhatsAppWebBridgeStatus() {
     try {
         const location = await getBasicLocationContext();
@@ -6286,9 +6296,10 @@ export async function getWhatsAppWebBridgeStatus() {
         if (health.reachable && workerSession) {
             const workerStatus = String(workerSession.status || "starting");
             const staleQr = isStaleWebBridgeQrStatus(workerStatus, workerSession.lastEventAt, session?.lastSeenAt || null);
-            if (staleQr) {
+            const staleNonReadyReason = getStaleWebBridgeNonReadyReason(workerSession, session?.lastSeenAt || null);
+            if (staleQr || staleNonReadyReason) {
                 void restartWhatsAppWebBridgeSession(location.id).catch((error: any) => {
-                    console.warn("[WhatsApp Web Bridge] Background stale QR refresh failed:", error?.message || error);
+                    console.warn("[WhatsApp Web Bridge] Background stale session refresh failed:", error?.message || error);
                 });
                 return {
                     provider: "web_bridge" as const,
@@ -6299,7 +6310,7 @@ export async function getWhatsAppWebBridgeStatus() {
                     sessionId: workerSession.sessionId || expectedSessionId,
                     lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
                     lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
-                    error: "The previous QR expired. Generating a fresh code...",
+                    error: staleNonReadyReason || "The previous QR expired. Generating a fresh code...",
                 };
             }
             return {
@@ -6415,15 +6426,16 @@ export async function triggerWhatsAppWebBridgeConnection() {
         }
         if (workerSession && ["starting", "authenticated", "qr", "reconnecting", "loading", "restarting"].includes(String(workerSession.status || ""))) {
             const workerStatus = String(workerSession.status || "starting");
-            if (isStaleWebBridgeQrStatus(workerStatus, workerSession.lastEventAt, session?.lastSeenAt || null)) {
+            const staleNonReadyReason = getStaleWebBridgeNonReadyReason(workerSession, session?.lastSeenAt || null);
+            if (isStaleWebBridgeQrStatus(workerStatus, workerSession.lastEventAt, session?.lastSeenAt || null) || staleNonReadyReason) {
                 await restartWhatsAppWebBridgeSession(location.id);
                 const refreshedSession = await getWhatsAppWebBridgeSession(location.id);
                 return {
                     provider: "web_bridge" as const,
                     success: true,
                     qrCode: refreshedSession?.qrCode || null,
-                    status: refreshedSession?.status || "starting",
-                    error: null as string | null,
+                    status: "reconnecting",
+                    error: staleNonReadyReason,
                 };
             }
             return {

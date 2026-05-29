@@ -1,3 +1,5 @@
+import { getStaleWhatsAppWebBridgeNonReadyReason } from "./web-bridge-readiness";
+
 export type WhatsAppWebBridgeOperationalStatus =
     | "healthy"
     | "worker_unreachable"
@@ -50,6 +52,7 @@ export function buildWebBridgeDiagnostics(args: {
     session: any;
     health: any;
     expectedSessionDir?: string | null;
+    nowMs?: number;
 }): WhatsAppWebBridgeDiagnostics {
     const session = args.session;
     const health = args.health;
@@ -74,6 +77,13 @@ export function buildWebBridgeDiagnostics(args: {
         || !workerLastWebhookErrorMs
         || workerLastWebhookErrorMs >= workerLastWebhookSuccessMs
     ));
+    const staleNonReadyReason = getStaleWhatsAppWebBridgeNonReadyReason({
+        status: workerStatus || dbStatus,
+        ready: workerReady,
+        lastEventAt: workerSession?.lastEventAt || session?.lastSeenAt || null,
+        startedAt: workerSession?.startedAt || null,
+        nowMs: args.nowMs,
+    });
     const expectedSessionDir = args.expectedSessionDir || null;
     const sessionDir = health?.sessionDir || null;
     const sessionDirMatchesExpected = expectedSessionDir && sessionDir
@@ -96,6 +106,10 @@ export function buildWebBridgeDiagnostics(args: {
         severity = "warning";
         status = "stale_worker";
         message = "Database session says ready, but the worker does not have a matching ready session. Restart the worker or session.";
+    } else if (staleNonReadyReason) {
+        severity = "warning";
+        status = "stale_worker";
+        message = `${staleNonReadyReason} Restarting the browser session should preserve the WhatsApp pairing files.`;
     } else if (workerReady && workerLastErrorActive) {
         severity = "warning";
         status = "app_webhook_failed";

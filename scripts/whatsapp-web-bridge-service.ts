@@ -5,6 +5,10 @@ import path from "path";
 import qrcode from "qrcode";
 import db from "../lib/db";
 import { prepareWhatsAppWebBridgeWebhookPayload } from "../lib/whatsapp/web-bridge-payload";
+import {
+    DEFAULT_WEB_BRIDGE_NON_READY_STALE_MS,
+    getStaleWhatsAppWebBridgeNonReadyReason,
+} from "../lib/whatsapp/web-bridge-readiness";
 import { isWhatsAppWebBridgeStaleError } from "../lib/whatsapp/web-bridge-stale";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
@@ -41,6 +45,7 @@ const MAX_INLINE_MEDIA_BYTES = Math.min(
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
 const QR_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_QR_STALE_MS || 90_000), 30_000);
+const NON_READY_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_NON_READY_STALE_MS || DEFAULT_WEB_BRIDGE_NON_READY_STALE_MS), 30_000);
 const PROTOCOL_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_PROTOCOL_TIMEOUT_MS || 120_000), 30_000);
 const INITIALIZE_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_INITIALIZE_TIMEOUT_MS || 45_000), 10_000);
 const OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_OPERATION_TIMEOUT_MS || 30_000), 5_000);
@@ -755,6 +760,19 @@ setInterval(() => {
                 });
                 continue;
             }
+        }
+        const staleNonReadyReason = getStaleWhatsAppWebBridgeNonReadyReason({
+            status: session.status,
+            ready: session.ready,
+            lastEventAt: session.lastEventAt,
+            startedAt: session.startedAt,
+            maxAgeMs: NON_READY_STALE_MS,
+        });
+        if (staleNonReadyReason && !session.restarting) {
+            restartStaleSession(session, new Error(staleNonReadyReason)).catch((error: any) => {
+                console.warn(`[WhatsApp Web Bridge] Failed to recover non-ready session ${session.sessionId}:`, error?.message || error);
+            });
+            continue;
         }
         if (!session.ready || session.restarting || !session.client) continue;
         withStaleRecovery(session, async () => {
