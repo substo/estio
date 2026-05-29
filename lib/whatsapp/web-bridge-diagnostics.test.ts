@@ -21,6 +21,75 @@ test("classifies a matching ready worker session as healthy", () => {
     assert.equal(diagnostics.workerReady, true);
 });
 
+test("classifies ready worker with active app webhook failure as warning", () => {
+    const diagnostics = buildWebBridgeDiagnostics({
+        expectedSessionDir,
+        session: { sessionId: "estio_loc_1", status: "ready" },
+        health: {
+            reachable: true,
+            ok: true,
+            sessionDir: expectedSessionDir,
+            sessions: [{
+                sessionId: "estio_loc_1",
+                status: "ready",
+                ready: true,
+                lastError: "App webhook failed 400: malformed json",
+                lastWebhookErrorAt: "2026-05-29T09:01:00.000Z",
+                lastWebhookSuccessAt: "2026-05-29T09:00:00.000Z",
+            }],
+        },
+    });
+
+    assert.equal(diagnostics.status, "app_webhook_failed");
+    assert.equal(diagnostics.severity, "warning");
+    assert.equal(diagnostics.workerLastErrorActive, true);
+});
+
+test("classifies stale app webhook failure as healthy after newer success", () => {
+    const diagnostics = buildWebBridgeDiagnostics({
+        expectedSessionDir,
+        session: { sessionId: "estio_loc_1", status: "ready" },
+        health: {
+            reachable: true,
+            ok: true,
+            sessionDir: expectedSessionDir,
+            sessions: [{
+                sessionId: "estio_loc_1",
+                status: "ready",
+                ready: true,
+                lastError: "App webhook failed 400: malformed json",
+                lastWebhookErrorAt: "2026-05-29T09:00:00.000Z",
+                lastWebhookSuccessAt: "2026-05-29T09:01:00.000Z",
+            }],
+        },
+    });
+
+    assert.equal(diagnostics.status, "healthy");
+    assert.equal(diagnostics.severity, "healthy");
+    assert.equal(diagnostics.workerLastErrorActive, false);
+});
+
+test("does not classify non-webhook worker errors as app webhook failures", () => {
+    const diagnostics = buildWebBridgeDiagnostics({
+        expectedSessionDir,
+        session: { sessionId: "estio_loc_1", status: "ready" },
+        health: {
+            reachable: true,
+            ok: true,
+            sessionDir: expectedSessionDir,
+            sessions: [{
+                sessionId: "estio_loc_1",
+                status: "ready",
+                ready: true,
+                lastError: "WhatsApp Web watchdog failed.",
+            }],
+        },
+    });
+
+    assert.equal(diagnostics.status, "healthy");
+    assert.equal(diagnostics.workerLastErrorActive, false);
+});
+
 test("classifies db-ready but worker-missing state as stale", () => {
     const diagnostics = buildWebBridgeDiagnostics({
         expectedSessionDir,

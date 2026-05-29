@@ -6,6 +6,7 @@ import {
     upsertWhatsAppWebBridgeSession,
     WHATSAPP_WEB_BRIDGE_PROVIDER,
 } from "@/lib/whatsapp/web-bridge";
+import { parseWhatsAppWebBridgeWebhookBody } from "@/lib/whatsapp/web-bridge-webhook-parse";
 import { resolveWebBridgeIdentity } from "@/lib/whatsapp/web-bridge-identity";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import {
@@ -57,13 +58,36 @@ async function updateBridgeMessageMediaMetadata(wamId: string, mediaState: Recor
     });
 }
 
+async function markValidBridgeWebhookReceived(locationId: string, sessionId: string) {
+    await (db as any).whatsAppWebBridgeSession.updateMany({
+        where: { locationId, sessionId },
+        data: {
+            lastSeenAt: new Date(),
+            lastError: null,
+        },
+    }).catch((error: any) => {
+        console.warn(`[WhatsApp Web Bridge Webhook] Failed to mark valid webhook for ${sessionId}:`, error?.message || error);
+    });
+}
+
 export async function POST(req: NextRequest) {
     if (!isAuthorized(req)) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     try {
-        const body = await req.json();
+        const rawBody = await req.text();
+        const parsed = parseWhatsAppWebBridgeWebhookBody({
+            rawBody,
+            contentType: req.headers.get("content-type"),
+            contentLength: req.headers.get("content-length"),
+        });
+        if (!parsed.ok) {
+            console.warn("[WhatsApp Web Bridge Webhook] Malformed JSON payload:", parsed.logMetadata);
+            return NextResponse.json(parsed.responseBody, { status: parsed.status });
+        }
+
+        const body = parsed.body;
         const event = String(body?.event || "").trim();
         const locationId = String(body?.locationId || "").trim();
         const sessionId = String(body?.sessionId || "").trim();
@@ -102,6 +126,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (event === "message_ack") {
+            await markValidBridgeWebhookReceived(locationId, sessionId);
             const wamId = String(body?.messageId || body?.wamId || "").trim();
             const status = normalizeWhatsAppWebBridgeAckStatus(body?.ack);
             if (wamId && status) await processStatusUpdate(wamId, status);
@@ -109,6 +134,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (event === "message" || event === "message_create") {
+            await markValidBridgeWebhookReceived(locationId, sessionId);
             const message = body?.message || {};
             const messageIdentity = resolveInboundWhatsAppContactIdentity({ message, phone: body?.phone });
             const resolvedIdentity = await resolveWebBridgeIdentity({

@@ -2,6 +2,7 @@ export type WhatsAppWebBridgeOperationalStatus =
     | "healthy"
     | "worker_unreachable"
     | "stale_worker"
+    | "app_webhook_failed"
     | "qr_required"
     | "unlinked"
     | "starting"
@@ -29,12 +30,20 @@ export type WhatsAppWebBridgeDiagnostics = {
     stale: boolean;
     workerLastEventAt: string | null;
     workerLastReadyAt: string | null;
+    workerLastWebhookSuccessAt: string | null;
+    workerLastWebhookErrorAt: string | null;
     workerLastError: string | null;
+    workerLastErrorActive: boolean;
     error: string | null;
 };
 
 function normalizeSessionStatus(value: unknown) {
     return String(value || "").trim().toLowerCase();
+}
+
+function parseTimestampMs(value: unknown) {
+    const time = Date.parse(String(value || ""));
+    return Number.isFinite(time) ? time : null;
 }
 
 export function buildWebBridgeDiagnostics(args: {
@@ -54,6 +63,17 @@ export function buildWebBridgeDiagnostics(args: {
     const workerReady = Boolean(workerSession?.ready);
     const reachable = Boolean(health?.reachable);
     const stale = dbReady && (!reachable || !workerReady);
+    const workerLastWebhookSuccessAt = workerSession?.lastWebhookSuccessAt || null;
+    const workerLastWebhookErrorAt = workerSession?.lastWebhookErrorAt || null;
+    const workerLastWebhookSuccessMs = parseTimestampMs(workerLastWebhookSuccessAt);
+    const workerLastWebhookErrorMs = parseTimestampMs(workerLastWebhookErrorAt);
+    const workerLastError = workerSession?.lastError || null;
+    const workerLastErrorLooksLikeWebhookFailure = /^App webhook failed\b/i.test(String(workerLastError || ""));
+    const workerLastErrorActive = Boolean(workerLastError && (workerLastWebhookErrorMs || workerLastErrorLooksLikeWebhookFailure) && (
+        !workerLastWebhookSuccessMs
+        || !workerLastWebhookErrorMs
+        || workerLastWebhookErrorMs >= workerLastWebhookSuccessMs
+    ));
     const expectedSessionDir = args.expectedSessionDir || null;
     const sessionDir = health?.sessionDir || null;
     const sessionDirMatchesExpected = expectedSessionDir && sessionDir
@@ -76,6 +96,10 @@ export function buildWebBridgeDiagnostics(args: {
         severity = "warning";
         status = "stale_worker";
         message = "Database session says ready, but the worker does not have a matching ready session. Restart the worker or session.";
+    } else if (workerReady && workerLastErrorActive) {
+        severity = "warning";
+        status = "app_webhook_failed";
+        message = workerLastError || "Bridge worker is ready, but app webhook ingestion has an active failure.";
     } else if (workerStatus === "qr" || dbStatus === "qr") {
         severity = "warning";
         status = "qr_required";
@@ -119,7 +143,10 @@ export function buildWebBridgeDiagnostics(args: {
         stale,
         workerLastEventAt: workerSession?.lastEventAt || null,
         workerLastReadyAt: workerSession?.lastReadyAt || null,
-        workerLastError: workerSession?.lastError || null,
+        workerLastWebhookSuccessAt,
+        workerLastWebhookErrorAt,
+        workerLastError,
+        workerLastErrorActive,
         error: health?.error || null,
     };
 }

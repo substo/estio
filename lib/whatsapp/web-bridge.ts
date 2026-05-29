@@ -34,6 +34,8 @@ export type WhatsAppWebBridgeHealthSession = {
     startedAt?: string | null;
     lastEventAt?: string | null;
     lastReadyAt?: string | null;
+    lastWebhookSuccessAt?: string | null;
+    lastWebhookErrorAt?: string | null;
     lastError?: string | null;
 };
 

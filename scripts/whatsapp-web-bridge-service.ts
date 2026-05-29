@@ -12,6 +12,8 @@ const PORT = Number(process.env.WHATSAPP_WEB_BRIDGE_PORT || 3218);
 const APP_WEBHOOK_URL = String(process.env.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || "http://127.0.0.1:3000/api/webhooks/whatsapp-web-bridge");
 const SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON_SECRET || "").trim();
 const SESSION_DIR = String(process.env.WHATSAPP_WEB_BRIDGE_SESSION_DIR || path.join(process.cwd(), ".data", "whatsapp-web-sessions"));
+const APP_WEBHOOK_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+const DEFAULT_MAX_INLINE_MEDIA_BYTES = Math.floor(APP_WEBHOOK_BODY_LIMIT_BYTES * 0.6);
 
 type ManagedSession = {
     sessionId: string;
@@ -24,12 +26,17 @@ type ManagedSession = {
     lastEventAt?: Date | null;
     lastReadyAt?: Date | null;
     lastError?: string | null;
+    lastWebhookSuccessAt?: Date | null;
+    lastWebhookErrorAt?: Date | null;
     restarting?: boolean;
 };
 
 const sessions = new Map<string, ManagedSession>();
 const serviceStartedAt = new Date();
-const MAX_INLINE_MEDIA_BYTES = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || 25 * 1024 * 1024), 1024 * 1024);
+const MAX_INLINE_MEDIA_BYTES = Math.min(
+    Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || DEFAULT_MAX_INLINE_MEDIA_BYTES), 1024 * 1024),
+    DEFAULT_MAX_INLINE_MEDIA_BYTES
+);
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
 const QR_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_QR_STALE_MS || 90_000), 30_000);
@@ -154,7 +161,12 @@ function markSessionEvent(session: ManagedSession, status: string, error?: unkno
 async function emitSessionEvent(session: ManagedSession, payload: Record<string, any>) {
     try {
         await emitEvent(payload);
+        session.lastWebhookSuccessAt = new Date();
+        if (session.lastWebhookErrorAt && session.lastWebhookSuccessAt > session.lastWebhookErrorAt) {
+            session.lastError = null;
+        }
     } catch (error: any) {
+        session.lastWebhookErrorAt = new Date();
         session.lastError = error?.message || "Failed to emit bridge webhook event.";
         session.lastEventAt = new Date();
         console.error(`[WhatsApp Web Bridge] Failed to emit ${payload.event || "event"} for ${session.sessionId}:`, error?.message || error);
@@ -172,6 +184,8 @@ function serializeManagedSession(session: ManagedSession) {
         startedAt: session.startedAt.toISOString(),
         lastEventAt: session.lastEventAt?.toISOString?.() || null,
         lastReadyAt: session.lastReadyAt?.toISOString?.() || null,
+        lastWebhookSuccessAt: session.lastWebhookSuccessAt?.toISOString?.() || null,
+        lastWebhookErrorAt: session.lastWebhookErrorAt?.toISOString?.() || null,
         lastError: session.lastError || null,
     };
 }
@@ -400,6 +414,8 @@ async function startSession(sessionId: string, locationId: string) {
         lastEventAt: new Date(),
         lastReadyAt: null,
         lastError: null,
+        lastWebhookSuccessAt: null,
+        lastWebhookErrorAt: null,
     };
     sessions.set(sessionId, managed);
 

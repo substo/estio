@@ -634,8 +634,21 @@ for (const session of sessions) {
     const ready = Boolean(session.ready);
     const phone = session.phone || 'not available';
     const locationId = session.locationId || 'unknown location';
-    const lastError = session.lastError ? ' lastError=' + session.lastError : '';
-    console.log('   - ' + locationId + ': status=' + status + ' ready=' + ready + ' phone=' + phone + lastError);
+    const lastWebhookSuccessMs = Date.parse(String(session.lastWebhookSuccessAt || ''));
+    const lastWebhookErrorMs = Date.parse(String(session.lastWebhookErrorAt || ''));
+    const hasWebhookSuccessAt = Number.isFinite(lastWebhookSuccessMs);
+    const hasWebhookErrorAt = Number.isFinite(lastWebhookErrorMs);
+    const webhookFailure = Boolean(session.lastError && (hasWebhookErrorAt || /^App webhook failed\b/i.test(String(session.lastError || ''))));
+    const activeLastError = Boolean(webhookFailure && (!hasWebhookSuccessAt || !hasWebhookErrorAt || lastWebhookErrorMs >= lastWebhookSuccessMs));
+    const webhookState = webhookFailure
+        ? ' appWebhookLastError=' + (activeLastError ? 'active' : 'historical') + ':' + session.lastError
+        : session.lastError
+            ? ' workerLastError=' + session.lastError
+        : '';
+    const webhookTiming = session.lastWebhookSuccessAt
+        ? ' appWebhookLastSuccessAt=' + session.lastWebhookSuccessAt
+        : '';
+    console.log('   - ' + locationId + ': status=' + status + ' ready=' + ready + ' phone=' + phone + webhookState + webhookTiming);
 }
 
 const needsQr = sessions.some((session) => ['qr', 'disconnected', 'failed'].includes(String(session?.status || '')));
