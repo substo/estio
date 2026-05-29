@@ -14,7 +14,7 @@ import { Clipboard, BadgeAlert, Sparkles, AlertTriangle } from 'lucide-react';
 import { AiModelSelect } from '@/components/ai/ai-model-select';
 import {
     buildPasteLeadProgressSteps,
-    type PasteLeadProgressStep,
+    type PasteLeadImportStatus,
 } from '@/lib/conversations/paste-lead-status';
 import {
     buildGoogleRowOutcomeLabel,
@@ -33,9 +33,17 @@ interface NewConversationDialogProps {
     locationId?: string; // Needed for Google Import
 }
 
-function PasteLeadProgressList({ steps }: { steps: PasteLeadProgressStep[] }) {
+function PasteLeadProgressList({ statuses }: { statuses: PasteLeadImportStatus[] }) {
+    const steps = buildPasteLeadProgressSteps(statuses);
+    const traceId = [...statuses].reverse().find((status) => status.pasteLeadTraceId)?.pasteLeadTraceId;
+
     return (
         <div className="rounded-md border bg-slate-50 p-2.5 space-y-1.5">
+            {traceId && (
+                <div className="truncate border-b border-slate-200 pb-1.5 text-[11px] font-mono text-slate-500">
+                    Trace {traceId}
+                </div>
+            )}
             {steps.map((step) => {
                 const Icon = step.state === "completed"
                     ? CheckCircle2
@@ -479,7 +487,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     Import Lead
                                 </Button>
                                 {(creating || pasteLeadStatuses.length > 0) && (
-                                    <PasteLeadProgressList steps={buildPasteLeadProgressSteps(pasteLeadStatuses)} />
+                                    <PasteLeadProgressList statuses={pasteLeadStatuses} />
                                 )}
                             </div>
                         ) : (
@@ -537,7 +545,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                     </Button>
                                 </div>
                                 {(creating || pasteLeadStatuses.length > 0) && (
-                                    <PasteLeadProgressList steps={buildPasteLeadProgressSteps(pasteLeadStatuses)} />
+                                    <PasteLeadProgressList statuses={pasteLeadStatuses} />
                                 )}
                             </div>
                         )}

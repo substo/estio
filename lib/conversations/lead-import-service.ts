@@ -521,6 +521,7 @@ export async function createParsedLeadForLocation(
                 }
             });
         }
+        emitStatus("contact_lookup_completed", "completed", contactId || "no existing contact");
 
         const contactData: any = {
             locationId: location.id,
@@ -645,6 +646,7 @@ export async function createParsedLeadForLocation(
                     : null;
 
                 if (!duplicateContact?.id) {
+                    emitStatus("contact_create_failed", "failed", createErr?.message || String(createErr));
                     throw createErr;
                 }
 
@@ -657,6 +659,7 @@ export async function createParsedLeadForLocation(
 
         if (contactId) {
             backgroundJobsQueued.push("googleAutoSync");
+            emitStatus("google_autosync_queued", "running", contactId);
             runDetachedTask(`paste_lead_google_autosync:${contactId}`, async () => {
                 await runGoogleAutoSyncForContact({
                     locationId: location.id,
@@ -666,8 +669,12 @@ export async function createParsedLeadForLocation(
                     preferredUserId
                 });
             }, { pasteLeadTraceId, emitStatus });
+        } else {
+            backgroundJobsSkipped.push("googleAutoSync:no_contact");
+            emitStatus("google_autosync_skipped", "skipped", "no contact");
         }
 
+        emitStatus("conversation_lookup_started", "running");
         let conversation = await db.conversation.findFirst({
             where: { locationId: location.id, contactId: contactId! }
         });
@@ -675,18 +682,23 @@ export async function createParsedLeadForLocation(
 
         if (!conversation) {
             const ghlId = `import_${Date.now()}`;
-            conversation = await db.conversation.create({
-                data: {
-                    locationId: location.id,
-                    contactId: contactId!,
-                    ghlConversationId: ghlId,
-                    status: 'open',
-                    lastMessageAt: new Date(),
-                    lastMessageType: preferredChannelType,
-                    unreadCount: 0,
-                    suggestedActions: mergeConversationSuggestedActions([], PASTE_LEAD_FIRST_OUTREACH_SUGGESTION),
-                }
-            });
+            try {
+                conversation = await db.conversation.create({
+                    data: {
+                        locationId: location.id,
+                        contactId: contactId!,
+                        ghlConversationId: ghlId,
+                        status: 'open',
+                        lastMessageAt: new Date(),
+                        lastMessageType: preferredChannelType,
+                        unreadCount: 0,
+                        suggestedActions: mergeConversationSuggestedActions([], PASTE_LEAD_FIRST_OUTREACH_SUGGESTION),
+                    }
+                });
+            } catch (createErr: any) {
+                emitStatus("conversation_create_failed", "failed", createErr?.message || String(createErr));
+                throw createErr;
+            }
             conversationWasCreated = true;
             emitStatus("conversation_created", "completed", conversation.id);
         } else {
@@ -714,6 +726,7 @@ export async function createParsedLeadForLocation(
 
         if (data.contact?.phone && preferredChannelType === 'TYPE_WHATSAPP') {
             backgroundJobsQueued.push("channelVerification");
+            emitStatus("channel_verification_queued", "running", conversation.id);
             runDetachedTask(`paste_lead_channel_verify:${conversation.id}`, async () => {
                 const resolvedType = await resolvePreferredChannelTypeForPhone(location, data.contact?.phone);
                 if (resolvedType !== preferredChannelType) {
@@ -724,6 +737,9 @@ export async function createParsedLeadForLocation(
                     console.log(`[PasteLeadFastPath] Adjusted conversation ${conversation.id} channel ${preferredChannelType} -> ${resolvedType}`);
                 }
             }, { pasteLeadTraceId, emitStatus });
+        } else {
+            backgroundJobsSkipped.push("channelVerification:not_whatsapp_phone");
+            emitStatus("channel_verification_skipped", "skipped", preferredChannelType);
         }
 
         if (contactId) {
@@ -736,6 +752,8 @@ export async function createParsedLeadForLocation(
                     "completed",
                     legacyCrmRefCandidates.map((candidate) => candidate.publicReference).join(", ")
                 );
+            } else {
+                emitStatus("property_ref_skipped", "skipped", "no legacy property refs");
             }
             const legacyCrmCapability = legacyCrmRefCandidates.length > 0 && legacyImportActorUserId
                 ? await getOldCrmImportCapabilityForUser({
@@ -743,16 +761,27 @@ export async function createParsedLeadForLocation(
                     userId: legacyImportActorUserId,
                 })
                 : null;
-            if (parseTrace) backgroundJobsQueued.push("tracePersistence");
+            if (parseTrace) {
+                backgroundJobsQueued.push("tracePersistence");
+                emitStatus("background_enrichment_queued", "running", "trace persistence");
+            }
             backgroundJobsQueued.push("propertyEnrichment");
+            emitStatus("background_enrichment_queued", "running", "property enrichment");
             if (legacyCrmRefCandidates.length > 0) {
                 backgroundJobsQueued.push(`legacyPropertyRefs:${legacyCrmRefCandidates.length}`);
                 if (!legacyImportActorUserId) {
                     backgroundJobsSkipped.push("legacyPropertyImport:no_actor_user");
+                    emitStatus("property_import_skipped", "skipped", "no actor user");
                 } else if (!legacyCrmCapability?.canImportOldCrmProperties) {
                     backgroundJobsSkipped.push("legacyPropertyImport:capability_unavailable");
+                    emitStatus("property_import_skipped", "skipped", "capability unavailable");
                 } else {
                     backgroundJobsQueued.push(`legacyPropertyImportQueue:${legacyCrmRefCandidates.length}`);
+                    emitStatus(
+                        "property_import_queued",
+                        "completed",
+                        `${legacyCrmRefCandidates.length} ref${legacyCrmRefCandidates.length === 1 ? "" : "s"} eligible`
+                    );
                 }
             }
             runDetachedTask(`paste_lead_post_import:${conversation.id}`, async () => {
@@ -845,6 +874,7 @@ export async function createParsedLeadForLocation(
                                 if (!enqueueResult.accepted) {
                                     emitStatus("property_import_failed_to_queue", "failed", `${candidate.publicReference}: ${enqueueResult.error || enqueueResult.mode}`);
                                     console.warn("[PasteLeadFastPath] Legacy property import queue rejected job", {
+                                        pasteLeadTraceId,
                                         conversationId: conversation.id,
                                         reference: candidate.publicReference,
                                         mode: enqueueResult.mode,
@@ -881,7 +911,7 @@ export async function createParsedLeadForLocation(
                     source: 'system'
                 }
             });
-            emitStatus("message_created", "completed", "internal note");
+            emitStatus("note_created", "completed", "internal note");
         }
 
         if (data.messageContent) {
@@ -916,6 +946,7 @@ export async function createParsedLeadForLocation(
                 }, { pasteLeadTraceId, emitStatus });
             } else {
                 backgroundJobsSkipped.push("orchestration:no_callback");
+                emitStatus("orchestration_skipped", "skipped", "no callback");
             }
 
             const importLatencyMs = Date.now() - importStartedAt;
@@ -956,7 +987,7 @@ export async function createParsedLeadForLocation(
                     source: 'system'
                 }
             });
-            emitStatus("message_created", "completed", "internal note");
+            emitStatus("note_created", "completed", "internal note");
         }
 
         if (conversationWasCreated && preferredChannelType === 'TYPE_WHATSAPP' && conversation.lastMessageType !== 'TYPE_WHATSAPP') {

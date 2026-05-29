@@ -10349,15 +10349,55 @@ async function applyMatchedPropertyToContact(args: {
     });
 }
 
-export async function parseLeadFromText(text: string, modelOverride?: string) {
-    const parsed = await parseLeadFromTextInternal(text, modelOverride);
-    if (!parsed.success) {
-        return parsed;
+export async function parseLeadFromText(
+    text: string,
+    modelOverride?: string,
+    options?: { pasteLeadTraceId?: string }
+) {
+    const pasteLeadTraceId = options?.pasteLeadTraceId || `paste_lead_${randomUUID()}`;
+    const statuses: PasteLeadImportStatus[] = [];
+    const emitStatus = createPasteLeadStatusRecorder({
+        pasteLeadTraceId,
+        statuses,
+        logPrefix: "[PasteLeadStatus]",
+    });
+    const totalStartedAt = Date.now();
+    emitStatus("lead_parse_started", "running");
+
+    let parsed: LeadParseWithTraceResult;
+    try {
+        parsed = await parseLeadFromTextInternal(text, modelOverride);
+    } catch (error: any) {
+        const totalLatencyMs = Date.now() - totalStartedAt;
+        const message = error?.message || "Auth/location failed.";
+        emitStatus("auth_location_failed", "failed", message, totalLatencyMs);
+        return {
+            success: false as const,
+            error: message,
+            pasteLeadTraceId,
+            totalLatencyMs,
+            statuses,
+        };
     }
+    if (!parsed.success) {
+        const totalLatencyMs = Date.now() - totalStartedAt;
+        emitStatus("lead_parse_failed", "failed", parsed.error, totalLatencyMs);
+        return {
+            ...parsed,
+            pasteLeadTraceId,
+            totalLatencyMs,
+            statuses,
+        };
+    }
+    emitStatus("lead_parse_completed", "completed", parsed.telemetry.model, parsed.telemetry.latencyMs);
     return {
         success: true as const,
         data: parsed.data,
         telemetry: parsed.telemetry,
+        pasteLeadTraceId,
+        parseLatencyMs: parsed.telemetry.latencyMs,
+        totalLatencyMs: Date.now() - totalStartedAt,
+        statuses,
     };
 }
 
@@ -10390,8 +10430,12 @@ export async function getPasteLeadImportCapability() {
     }
 }
 
-export async function importLeadFromText(text: string, modelOverride?: string) {
-    const pasteLeadTraceId = `paste_lead_${randomUUID()}`;
+export async function importLeadFromText(
+    text: string,
+    modelOverride?: string,
+    options?: { pasteLeadTraceId?: string }
+) {
+    const pasteLeadTraceId = options?.pasteLeadTraceId || `paste_lead_${randomUUID()}`;
     const statuses: PasteLeadImportStatus[] = [];
     const emitStatus = createPasteLeadStatusRecorder({
         pasteLeadTraceId,
@@ -10399,10 +10443,27 @@ export async function importLeadFromText(text: string, modelOverride?: string) {
         logPrefix: "[PasteLeadStatus]",
     });
 
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const totalStartedAt = Date.now();
     emitStatus("paste_lead_import_started", "running");
     emitStatus("lead_parse_started", "running");
+    let location;
+    try {
+        location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    } catch (error: any) {
+        const totalLatencyMs = Date.now() - totalStartedAt;
+        const message = error?.message || "Auth/location failed.";
+        emitStatus("auth_location_failed", "failed", message, totalLatencyMs);
+        emitStatus("paste_lead_import_failed", "failed", message, totalLatencyMs);
+        return {
+            success: false as const,
+            error: message,
+            pasteLeadTraceId,
+            totalLatencyMs,
+            backgroundJobsQueued: [],
+            backgroundJobsSkipped: [],
+            statuses,
+        };
+    }
     const parsed = await parseLeadFromTextInternal(text, modelOverride, location);
     if (!parsed.success) {
         const totalLatencyMs = Date.now() - totalStartedAt;

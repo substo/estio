@@ -20,8 +20,15 @@ import {
 import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from './paste-lead-rich-text';
 import {
     buildInitialPasteLeadStatuses,
+    buildNewConversationResultError,
     mergePasteLeadResultStatuses,
 } from './new-conversation-dialog-helpers';
+
+function createClientPasteLeadTraceId() {
+    return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `paste_lead_client_${crypto.randomUUID()}`
+        : `paste_lead_client_${Date.now()}`;
+}
 
 export function useNewConversationPasteLead(args: {
     open: boolean;
@@ -60,7 +67,8 @@ export function useNewConversationPasteLead(args: {
             if (cached.promise) return cached.promise;
         }
 
-        const promise = parseLeadFromText(key, selectedPasteLeadModel || undefined)
+        const pasteLeadTraceId = createClientPasteLeadTraceId();
+        const promise = parseLeadFromText(key, selectedPasteLeadModel || undefined, { pasteLeadTraceId })
             .then((res) => {
                 if (leadParseCacheRef.current.key === key) {
                     leadParseCacheRef.current.result = res;
@@ -84,25 +92,24 @@ export function useNewConversationPasteLead(args: {
         return promise;
     }, [selectedPasteLeadModel]);
 
-    const importLeadUsingPreviewCache = useCallback(async (text: string) => {
+    const importLeadUsingPreviewCache = useCallback(async (text: string, pasteLeadTraceId: string) => {
         const key = text.trim();
         const cached = leadParseCacheRef.current;
 
         if (cached.key === key) {
             const parsed = cached.result || (cached.promise ? await cached.promise : null);
             if (parsed?.success && parsed.data) {
-                return createParsedLead(parsed.data, key);
+                return createParsedLead(parsed.data, key, { pasteLeadTraceId });
             }
         }
 
-        return importLeadFromText(key, selectedPasteLeadModel || undefined);
+        return importLeadFromText(key, selectedPasteLeadModel || undefined, { pasteLeadTraceId });
     }, [selectedPasteLeadModel]);
 
     const seedPasteLeadStatuses = useCallback((hasPreview: boolean) => {
-        const traceId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? `paste_lead_client_${crypto.randomUUID()}`
-            : `paste_lead_client_${Date.now()}`;
+        const traceId = createClientPasteLeadTraceId();
         setPasteLeadStatuses(buildInitialPasteLeadStatuses({ hasPreview, traceId }));
+        return traceId;
     }, []);
 
     const applyImportResultStatuses = useCallback((res: any) => {
@@ -157,9 +164,9 @@ export function useNewConversationPasteLead(args: {
         if (!leadText.trim()) return;
         setCreatingPasteLead(true);
         args.setError(null);
-        seedPasteLeadStatuses(Boolean(leadParseCacheRef.current.result?.success));
+        const pasteLeadTraceId = seedPasteLeadStatuses(Boolean(leadParseCacheRef.current.result?.success));
         try {
-            const res = await importLeadUsingPreviewCache(leadText);
+            const res = await importLeadUsingPreviewCache(leadText, pasteLeadTraceId);
             applyImportResultStatuses(res);
             if (res.success && res.conversationId) {
                 toast({
@@ -174,13 +181,15 @@ export function useNewConversationPasteLead(args: {
                 args.setError(res.error || 'Failed to import lead');
             }
         } catch (error: any) {
+            const message = buildNewConversationResultError(error, 'Paste Lead import request failed.');
             setPasteLeadStatuses((current) => [
                 ...current,
                 createPasteLeadStatus('paste_lead_import_failed', 'failed', {
-                    detail: error?.message || 'Load failed',
+                    pasteLeadTraceId,
+                    detail: message,
                 }),
             ]);
-            args.setError(error.message);
+            args.setError(message);
         } finally {
             setCreatingPasteLead(false);
         }
@@ -190,10 +199,10 @@ export function useNewConversationPasteLead(args: {
         if (!parsedLead) return;
         setCreatingPasteLead(true);
         args.setError(null);
-        seedPasteLeadStatuses(true);
+        const pasteLeadTraceId = seedPasteLeadStatuses(true);
 
         try {
-            const res = await createParsedLead(parsedLead, leadText);
+            const res = await createParsedLead(parsedLead, leadText, { pasteLeadTraceId });
             applyImportResultStatuses(res);
             if (res.success && res.conversationId) {
                 toast({
@@ -208,13 +217,15 @@ export function useNewConversationPasteLead(args: {
                 args.setError(res.error || 'Failed to create conversation');
             }
         } catch (error: any) {
+            const message = buildNewConversationResultError(error, 'Paste Lead import request failed.');
             setPasteLeadStatuses((current) => [
                 ...current,
                 createPasteLeadStatus('paste_lead_import_failed', 'failed', {
-                    detail: error?.message || 'Load failed',
+                    pasteLeadTraceId,
+                    detail: message,
                 }),
             ]);
-            args.setError(error.message);
+            args.setError(message);
         } finally {
             setCreatingPasteLead(false);
         }
