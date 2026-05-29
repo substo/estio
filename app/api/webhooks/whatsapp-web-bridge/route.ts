@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { processNormalizedMessage, processStatusUpdate } from "@/lib/whatsapp/sync";
 import {
+    getWhatsAppWebBridgeSession,
     getWhatsAppWebBridgeSecret,
     upsertWhatsAppWebBridgeSession,
     WHATSAPP_WEB_BRIDGE_PROVIDER,
@@ -97,21 +98,26 @@ export async function POST(req: NextRequest) {
 
         if (["qr", "ready", "authenticated", "auth_failure", "disconnected", "loading", "stale", "restarting"].includes(event)) {
             const now = new Date();
-            await upsertWhatsAppWebBridgeSession(locationId, {
-                sessionId,
-                status: event === "qr"
-                    ? "qr"
-                    : event === "ready"
-                        ? "ready"
-                        : event === "authenticated"
-                            ? "authenticated"
-                            : event === "loading"
-                                ? "starting"
-                                : event === "stale" || event === "restarting"
-                                    ? "restarting"
+            const currentSession = await getWhatsAppWebBridgeSession(locationId);
+            const eventStatus = event === "qr"
+                ? "qr"
+                : event === "ready"
+                    ? "ready"
+                    : event === "authenticated"
+                        ? "authenticated"
+                        : event === "loading"
+                            ? "starting"
+                            : event === "stale" || event === "restarting"
+                                ? "restarting"
                                 : event === "auth_failure"
                                     ? "failed"
-                                    : "disconnected",
+                                    : "disconnected";
+            const keepReadyForLateStartupEvent = currentSession?.status === "ready"
+                && currentSession.lastReadyAt
+                && (event === "loading" || event === "authenticated");
+            await upsertWhatsAppWebBridgeSession(locationId, {
+                sessionId,
+                status: keepReadyForLateStartupEvent ? "ready" : eventStatus,
                 qrCode: event === "qr" ? String(body?.qrCode || "") : null,
                 phone: body?.phone ? String(body.phone) : undefined,
                 lastReadyAt: event === "ready" ? now : undefined,

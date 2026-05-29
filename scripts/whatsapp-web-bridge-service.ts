@@ -169,7 +169,10 @@ async function emitEvent(payload: Record<string, any>) {
 }
 
 function markSessionEvent(session: ManagedSession, status: string, error?: unknown) {
-    session.status = status;
+    const isLateStartupEvent = session.ready && (status === "starting" || status === "loading" || status === "authenticated");
+    if (!isLateStartupEvent) {
+        session.status = status;
+    }
     session.lastEventAt = new Date();
     session.lastError = error ? String((error as any)?.message || error) : null;
 }
@@ -195,7 +198,7 @@ function serializeManagedSession(session: ManagedSession) {
         locationId: session.locationId,
         ready: Boolean(session.ready),
         phone: session.phone || null,
-        status: session.status || (session.ready ? "ready" : "starting"),
+        status: session.ready ? "ready" : (session.status || "starting"),
         restarting: Boolean(session.restarting),
         startedAt: session.startedAt.toISOString(),
         lastEventAt: session.lastEventAt?.toISOString?.() || null,
