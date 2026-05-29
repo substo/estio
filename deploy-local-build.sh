@@ -275,6 +275,11 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     fi
 
     cd "\$TARGET_DIR"
+    if [ -f .env ]; then
+        set -a
+        . ./.env
+        set +a
+    fi
     PORT="\$TARGET_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$TARGET_APP_NAME" -- start
 
     echo "🩺 Waiting for target health check..."
@@ -364,6 +369,11 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         if [ -n "\$ACTIVE_APP_NAME" ] && [ -n "\$ACTIVE_DIR" ] && [ -n "\$ACTIVE_PORT" ]; then
             if ! pm2 describe "\$ACTIVE_APP_NAME" > /dev/null 2>&1; then
                 cd "\$ACTIVE_DIR"
+                if [ -f .env ]; then
+                    set -a
+                    . ./.env
+                    set +a
+                fi
                 PORT="\$ACTIVE_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$ACTIVE_APP_NAME" -- start
             fi
         fi
