@@ -31,7 +31,7 @@ export async function resolveLocationWhatsAppProviderMode(locationId: string) {
     return mode === "evolution_linked" ? "web_bridge" : mode;
 }
 
-function isStaleWebBridgeQrStatus(status: unknown, lastEventAt?: string | Date | null, lastSeenAt?: Date | null) {
+export function isStaleWebBridgeQrStatus(status: unknown, lastEventAt?: string | Date | null, lastSeenAt?: Date | null) {
     const normalized = String(status || "").toLowerCase();
     if (normalized !== "qr" && normalized !== "qrcode") return false;
     const value = lastEventAt || lastSeenAt;
@@ -41,7 +41,7 @@ function isStaleWebBridgeQrStatus(status: unknown, lastEventAt?: string | Date |
     return Date.now() - timestamp > 90_000;
 }
 
-function getStaleWebBridgeNonReadyReason(workerSession: any, lastSeenAt?: Date | null) {
+export function getStaleWebBridgeNonReadyReason(workerSession: any, lastSeenAt?: Date | null) {
     return getStaleWhatsAppWebBridgeNonReadyReason({
         status: workerSession?.status,
         ready: workerSession?.ready,

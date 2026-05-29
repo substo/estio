@@ -102,8 +102,12 @@ import {
 } from "@/lib/whatsapp/web-bridge";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
-import { getStaleWhatsAppWebBridgeNonReadyReason } from "@/lib/whatsapp/web-bridge-readiness";
-import { getWhatsAppWebBridgeStatusForLocation } from "@/lib/conversations/whatsapp-web-bridge-status";
+import {
+    getStaleWebBridgeNonReadyReason,
+    getWhatsAppWebBridgeStatusForLocation,
+    isStaleWebBridgeQrStatus,
+    resolveLocationWhatsAppProviderMode,
+} from "@/lib/conversations/whatsapp-web-bridge-status";
 import {
     markWhatsAppWebBridgeMediaRefetchAttemptFailed,
     startWhatsAppWebBridgeMediaRefetchAttempt,
@@ -6209,41 +6213,6 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
             reason: error?.message || 'Failed to check WhatsApp eligibility.',
         };
     }
-}
-
-async function resolveLocationWhatsAppProviderMode(locationId: string) {
-    const [doc, row] = await Promise.all([
-        settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
-        }).catch(() => null),
-        db.location.findUnique({
-            where: { id: locationId },
-            select: { whatsappProviderMode: true } as any,
-        }).catch(() => null),
-    ]);
-    const mode = String(doc?.payload?.whatsappProviderMode || (row as any)?.whatsappProviderMode || "web_bridge");
-    return mode === "evolution_linked" ? "web_bridge" : mode;
-}
-
-function isStaleWebBridgeQrStatus(status: unknown, lastEventAt?: string | Date | null, lastSeenAt?: Date | null) {
-    const normalized = String(status || "").toLowerCase();
-    if (normalized !== "qr" && normalized !== "qrcode") return false;
-    const value = lastEventAt || lastSeenAt;
-    if (!value) return false;
-    const timestamp = new Date(value).getTime();
-    if (!Number.isFinite(timestamp)) return false;
-    return Date.now() - timestamp > 90_000;
-}
-
-function getStaleWebBridgeNonReadyReason(workerSession: any, lastSeenAt?: Date | null) {
-    return getStaleWhatsAppWebBridgeNonReadyReason({
-        status: workerSession?.status,
-        ready: workerSession?.ready,
-        lastEventAt: workerSession?.lastEventAt || lastSeenAt || null,
-        startedAt: workerSession?.startedAt || null,
-    });
 }
 
 export async function getWhatsAppWebBridgeStatus() {
