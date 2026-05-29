@@ -491,11 +491,6 @@ export function ConversationListHeader({
                                 setIsSearchExpanded(false);
                             }
                         }}
-                        onBlur={() => {
-                            if (!localQuery && !searchQuery) {
-                                setIsSearchExpanded(false);
-                            }
-                        }}
                     />
                     <button
                         className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
