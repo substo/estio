@@ -12,6 +12,7 @@ import { computeWhatsAppCustomerServiceExpiresAt } from "@/lib/whatsapp/customer
 import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
 import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
+import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/status-updates";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
@@ -83,6 +84,68 @@ export interface NormalizedMessage {
 }
 
 // ... handleWhatsAppMessage ...
+
+async function reconcileExistingWebBridgeMessageBody(args: {
+    message: any;
+    incomingBody: string;
+    source: NormalizedMessage["source"];
+    wamId: string;
+}) {
+    const reconciliation = getWebBridgeDuplicateBodyReconciliation({
+        source: args.source,
+        existingBody: args.message?.body,
+        incomingBody: args.incomingBody,
+    });
+    if (!reconciliation.shouldUpdate || reconciliation.body === null) return false;
+
+    await db.message.update({
+        where: { id: args.message.id },
+        data: {
+            body: reconciliation.body,
+            updatedAt: new Date(),
+        },
+    });
+
+    const conversation = args.message?.conversation;
+    if (conversation?.id) {
+        const existingCreatedAt = args.message?.createdAt instanceof Date
+            ? args.message.createdAt
+            : null;
+        const shouldPatchConversationSummary = (
+            String(conversation.lastMessageBody || "") === String(args.message?.body || "")
+            || (existingCreatedAt && conversation.lastMessageAt instanceof Date && conversation.lastMessageAt.getTime() === existingCreatedAt.getTime())
+        );
+
+        if (shouldPatchConversationSummary) {
+            await db.conversation.update({
+                where: { id: conversation.id },
+                data: {
+                    lastMessageBody: reconciliation.body,
+                    updatedAt: new Date(),
+                },
+            }).catch((error) => {
+                console.warn(`[WhatsApp Sync] Failed to reconcile conversation summary for ${args.wamId}:`, error);
+            });
+        }
+    }
+
+    console.log(`[WhatsApp Sync] Reconciled Web Bridge duplicate body for ${args.wamId}`);
+    return true;
+}
+
+async function reconcileExistingWebBridgeMessageBodySafely(args: {
+    message: any;
+    incomingBody: string;
+    source: NormalizedMessage["source"];
+    wamId: string;
+}) {
+    try {
+        return await reconcileExistingWebBridgeMessageBody(args);
+    } catch (err) {
+        console.error(`[WhatsApp Sync] Failed to reconcile duplicate Web Bridge body for ${args.wamId}:`, err);
+        return false;
+    }
+}
 
 type DeferredLidMessage = {
     msg: NormalizedMessage;
@@ -415,6 +478,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
     if (existing) {
         console.log(`[WhatsApp Sync] Skipped existing message: ${wamId}`);
+        await reconcileExistingWebBridgeMessageBodySafely({
+            message: existing,
+            incomingBody: body,
+            source,
+            wamId,
+        });
 
         // Backfill/heal older generic placeholders when newer parsers can classify the content.
         if ((existing.body || "").trim() === "[Media]" && (body || "").trim() && (body || "").trim() !== "[Media]") {
@@ -1292,9 +1361,15 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         if (error?.code !== "P2002") throw error;
         const existingByWam = await db.message.findUnique({
             where: { wamId },
-            select: { id: true },
+            include: { conversation: { include: { contact: true } } },
         });
         if (existingByWam?.id) {
+            await reconcileExistingWebBridgeMessageBodySafely({
+                message: existingByWam,
+                incomingBody: body,
+                source,
+                wamId,
+            });
             console.log(`[WhatsApp Sync] Duplicate webhook ack detected for ${wamId}; treating as success.`);
             return { status: "processed", id: existingByWam.id };
         }

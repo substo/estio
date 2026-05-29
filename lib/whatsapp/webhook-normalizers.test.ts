@@ -13,6 +13,7 @@ import {
     shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
 } from "@/lib/whatsapp/sync";
 import { extractReliableWebBridgePhone } from "@/lib/whatsapp/web-bridge-identity";
+import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 
 test("getWhatsAppCloudInboundBody preserves provider-specific fallbacks", () => {
     assert.equal(getWhatsAppCloudInboundBody({ type: "text", text: { body: "hello" } }), "hello");
@@ -65,6 +66,38 @@ test("normalizeWhatsAppWebBridgeAckStatus maps bridge ack values", () => {
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(1), "SERVER_ACK");
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(-1), "FAILED");
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(0), "");
+});
+
+test("getWebBridgeDuplicateBodyReconciliation only repairs non-empty Web Bridge body changes", () => {
+    assert.deepEqual(
+        getWebBridgeDuplicateBodyReconciliation({
+            source: "whatsapp_web_bridge",
+            existingBody: "The heating underfloorbisbonlynin the 2 Showers",
+            incomingBody: "The heating under floor is only in the 2 Showers",
+        }),
+        {
+            shouldUpdate: true,
+            body: "The heating under floor is only in the 2 Showers",
+        }
+    );
+
+    assert.equal(getWebBridgeDuplicateBodyReconciliation({
+        source: "whatsapp_web_bridge",
+        existingBody: "Already correct",
+        incomingBody: "Already correct",
+    }).shouldUpdate, false);
+
+    assert.equal(getWebBridgeDuplicateBodyReconciliation({
+        source: "whatsapp_web_bridge",
+        existingBody: "Keep this",
+        incomingBody: "   ",
+    }).shouldUpdate, false);
+
+    assert.equal(getWebBridgeDuplicateBodyReconciliation({
+        source: "whatsapp_native",
+        existingBody: "Keep native body",
+        incomingBody: "Different native body",
+    }).shouldUpdate, false);
 });
 
 test("normalizeWhatsAppWebBridgeMessage preserves Web Bridge normalized fields", () => {
