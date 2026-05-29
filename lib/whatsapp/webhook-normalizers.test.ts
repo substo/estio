@@ -8,7 +8,10 @@ import {
     normalizeWhatsAppWebBridgeMessage,
     parseWhatsAppWebhookTimestamp,
 } from "@/lib/whatsapp/webhook-normalizers";
-import { shouldRejectWebBridgeResolvedPhoneAsOwnPhone } from "@/lib/whatsapp/sync";
+import {
+    shouldRejectWebBridgeOutboundLidForOwnContact,
+    shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
+} from "@/lib/whatsapp/sync";
 import { extractReliableWebBridgePhone } from "@/lib/whatsapp/web-bridge-identity";
 
 test("getWhatsAppCloudInboundBody preserves provider-specific fallbacks", () => {
@@ -280,6 +283,32 @@ test("shouldRejectWebBridgeResolvedPhoneAsOwnPhone protects outbound sync routin
         direction: "inbound",
         resolvedPhone: "35794006663",
         ownPhone: "+35794006663",
+    }), false);
+});
+
+test("shouldRejectWebBridgeOutboundLidForOwnContact protects against own-contact LID pollution", () => {
+    assert.equal(shouldRejectWebBridgeOutboundLidForOwnContact({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        messageLid: "132882144174113@lid",
+        contactPhone: "+35794006663",
+        ownPhone: "35794006663",
+    }), true);
+
+    assert.equal(shouldRejectWebBridgeOutboundLidForOwnContact({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        messageLid: "132882144174113@lid",
+        contactPhone: "+35799442455",
+        ownPhone: "35794006663",
+    }), false);
+
+    assert.equal(shouldRejectWebBridgeOutboundLidForOwnContact({
+        source: "whatsapp_web_bridge",
+        direction: "inbound",
+        messageLid: "132882144174113@lid",
+        contactPhone: "+35794006663",
+        ownPhone: "35794006663",
     }), false);
 });
 

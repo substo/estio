@@ -40,6 +40,21 @@ export function shouldRejectWebBridgeResolvedPhoneAsOwnPhone(args: {
     });
 }
 
+export function shouldRejectWebBridgeOutboundLidForOwnContact(args: {
+    source: NormalizedMessage["source"];
+    direction?: NormalizedMessage["direction"];
+    isGroup?: boolean;
+    messageLid?: string | null;
+    contactPhone?: string | null;
+    ownPhone?: string | null;
+}) {
+    if (args.source !== "whatsapp_web_bridge" || args.direction !== "outbound" || args.isGroup) return false;
+    if (!normalizeLidJid(args.messageLid)) return false;
+    const contactDigits = normalizeDigits(args.contactPhone);
+    const ownDigits = normalizeDigits(args.ownPhone);
+    return !!contactDigits && !!ownDigits && contactDigits === ownDigits;
+}
+
 export interface NormalizedMessage {
     locationId: string;
     from: string; // E.164 phone number (Sender)
@@ -416,6 +431,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         // But the webhook provides the LID (msg.lid). We can use this to map LID -> Real Contact.
         if (msg.lid && existing.conversation?.contact) {
             const realContact = existing.conversation.contact;
+            const existingOwnPhone = msg.direction === "outbound" ? msg.from : msg.to;
+            if (shouldRejectWebBridgeOutboundLidForOwnContact({
+                source: msg.source,
+                direction: msg.direction,
+                isGroup: msg.isGroup,
+                messageLid: msg.lid,
+                contactPhone: realContact.phone,
+                ownPhone: existingOwnPhone,
+            })) {
+                console.warn(`[LID Capture] Refusing to attach outbound Web Bridge LID ${msg.lid} to connected account contact ${realContact.id}`);
+                return { status: 'skipped', id: existing.id };
+            }
+
             const lidRaw = msg.lid.replace('@lid', '');
             const currentLidRaw = (realContact.lid || '').replace('@lid', '');
 
@@ -684,6 +712,14 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const lidMatches = candidates.filter((c: any) => {
         if (!msg.lid || !c.lid) return false;
         if (isUnsafeWebBridgeInboundLidOnly && c.phone) return false;
+        if (shouldRejectWebBridgeOutboundLidForOwnContact({
+            source,
+            direction,
+            isGroup,
+            messageLid: msg.lid,
+            contactPhone: c.phone,
+            ownPhone,
+        })) return false;
         // Normalize both for comparison (strip @lid if present)
         return normalizeLidJid(c.lid) === normalizedMsgLid;
     });
