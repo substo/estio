@@ -3,7 +3,7 @@
 import { AppLogo } from "@/components/app-logo"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { AdminNavigationGroups } from "./admin-navigation"
 import { cn } from "@/lib/utils"
 
@@ -18,18 +18,13 @@ export default function DashboardSideBar({
   lightUrl?: string
   onCollapsedChange: (collapsed: boolean) => void
 }) {
-  const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose
+  const ToggleIcon = collapsed ? ChevronRight : ChevronLeft
   const toggleLabel = collapsed ? "Expand sidebar" : "Collapse sidebar"
 
   return (
-    <div className="hidden h-screen overflow-hidden border-r bg-muted/40 lg:sticky lg:top-0 lg:block">
-      <div className="flex h-full max-h-screen flex-col gap-2 ">
-        <div
-          className={cn(
-            "relative flex h-[55px] w-full items-center justify-between border-b px-2",
-            collapsed ? "gap-1" : "gap-2"
-          )}
-        >
+    <div className="relative hidden h-screen border-r bg-muted/40 lg:sticky lg:top-0 lg:block">
+      <div className="flex h-full max-h-screen flex-col gap-2 overflow-hidden">
+        <div className="flex h-[55px] w-full items-center justify-center border-b px-2">
           <AppLogo
             size="sm"
             showName={true}
@@ -38,29 +33,32 @@ export default function DashboardSideBar({
             iconOnly={collapsed}
             className={collapsed ? "justify-center" : "min-w-0"}
           />
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={toggleLabel}
-                  aria-expanded={!collapsed}
-                  className={cn("h-9 w-9 shrink-0", collapsed && "h-8 w-8")}
-                  onClick={() => onCollapsedChange(!collapsed)}
-                >
-                  <ToggleIcon className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">{toggleLabel}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
         </div>
         <div className="flex-1 overflow-auto py-3">
           <AdminNavigationGroups collapsed={collapsed} />
         </div>
       </div>
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={toggleLabel}
+              aria-expanded={!collapsed}
+              className={cn(
+                "absolute right-0 top-1/2 z-30 h-7 w-6 -translate-y-1/2 translate-x-1/2 rounded-full border bg-background p-0 shadow-sm",
+                "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              )}
+              onClick={() => onCollapsedChange(!collapsed)}
+            >
+              <ToggleIcon className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{toggleLabel}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   )
 }
