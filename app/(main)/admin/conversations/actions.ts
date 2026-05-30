@@ -10517,6 +10517,9 @@ export async function searchConversations(query: string, options?: {
         const digitsSuffixQuery = queryDigits ? `%${queryDigits}` : "";
         const phoneLikeQuery = searchAnalysis.phoneLikeQuery;
         const structuredReferenceQuery = searchAnalysis.structuredReferenceQuery;
+        const phoneE164Query = queryDigits ? `+${queryDigits}` : "";
+        const phoneLast3Query = queryDigits.length >= 3 ? `%${queryDigits.slice(-3)}%` : "";
+        const phoneLast6Query = queryDigits.length >= 6 ? `%${queryDigits.slice(-6)}%` : "";
         const searchStartedAt = Date.now();
         let contactHeaderDurationMs = 0;
         let broadDurationMs: number | null = null;
@@ -10545,7 +10548,83 @@ export async function searchConversations(query: string, options?: {
 
         try {
             const contactStartedAt = Date.now();
-            rankedRows = structuredReferenceQuery
+            rankedRows = phoneLikeQuery
+                ? await withServerTiming("conversations.search.phone", {
+                    traceId,
+                    locationId: location.id,
+                    limit,
+                    queryLength: q.length,
+                    queryDigitsLength: queryDigits.length,
+                    status: statusLabel,
+                    mode: requestedMode,
+                }, async () => db.$queryRaw<Array<{ conversationId: string; score: number }>>`
+                    WITH phone_hits AS (
+                        SELECT
+                            c.id AS "conversationId",
+                            CASE
+                                WHEN REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigits} THEN 5.0
+                                WHEN ct.phone = ${phoneE164Query} OR ct.phone = ${queryDigits} THEN 4.8
+                                WHEN REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsSuffixQuery} THEN 3.8
+                                ELSE 2.8
+                            END AS score
+                        FROM "Contact" ct
+                        JOIN "Conversation" c ON c."contactId" = ct.id
+                        WHERE ct."locationId" = ${location.id}
+                          AND c."locationId" = ${location.id}
+                          AND ${statusSql}
+                          AND ct.phone IS NOT NULL
+                          AND (
+                            REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigits}
+                            OR ct.phone = ${phoneE164Query}
+                            OR ct.phone = ${queryDigits}
+                            OR COALESCE(ct.phone, '') ILIKE ${digitsSuffixQuery}
+                            OR (${queryDigits.length >= 6} AND COALESCE(ct.phone, '') ILIKE ${phoneLast6Query})
+                            OR (${queryDigits.length >= 10} AND COALESCE(ct.phone, '') ILIKE ${phoneLast3Query}
+                              AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsSuffixQuery})
+                          )
+                    ),
+                    identity_hits AS (
+                        SELECT
+                            c.id AS "conversationId",
+                            4.6 AS score
+                        FROM "WhatsAppIdentityMap" wam
+                        JOIN "Contact" ct ON ct.id = wam."contactId"
+                        JOIN "Conversation" c ON c."contactId" = ct.id
+                        WHERE wam."locationId" = ${location.id}
+                          AND c."locationId" = ${location.id}
+                          AND ${statusSql}
+                          AND (
+                            wam.phone = ${queryDigits}
+                            OR wam.phone = ${phoneE164Query}
+                            OR REGEXP_REPLACE(COALESCE(wam.phone, ''), '\\D', '', 'g') = ${queryDigits}
+                          )
+                    ),
+                    participant_hits AS (
+                        SELECT
+                            c.id AS "conversationId",
+                            4.4 AS score
+                        FROM "ConversationParticipant" cp
+                        JOIN "Conversation" c ON c.id = cp."conversationId"
+                        WHERE c."locationId" = ${location.id}
+                          AND ${statusSql}
+                          AND cp."phoneDigits" = ${queryDigits}
+                    ),
+                    combined AS (
+                        SELECT * FROM phone_hits
+                        UNION ALL
+                        SELECT * FROM identity_hits
+                        UNION ALL
+                        SELECT * FROM participant_hits
+                    )
+                    SELECT
+                        "conversationId",
+                        MAX(score) AS score
+                    FROM combined
+                    GROUP BY "conversationId"
+                    ORDER BY MAX(score) DESC
+                    LIMIT ${limit};
+                `)
+                : structuredReferenceQuery
                 ? await withServerTiming("conversations.search.reference", {
                     traceId,
                     locationId: location.id,
