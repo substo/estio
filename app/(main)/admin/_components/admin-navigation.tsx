@@ -136,9 +136,30 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   },
 ]
 
-function AdminNavIcon({ icon: Icon, active, variant }: { icon: LucideIcon; active: boolean; variant: "desktop" | "mobile" }) {
+function AdminNavIcon({
+  icon: Icon,
+  active,
+  variant,
+  collapsed = false,
+}: {
+  icon: LucideIcon
+  active: boolean
+  variant: "desktop" | "mobile"
+  collapsed?: boolean
+}) {
   if (variant === "mobile") {
     return <Icon className="mr-3 h-4 w-4 text-muted-foreground" />
+  }
+
+  if (collapsed) {
+    return (
+      <Icon
+        className={clsx(
+          "h-5 w-5 shrink-0",
+          active ? "text-gray-900 dark:text-gray-50" : "text-gray-500 dark:text-gray-400"
+        )}
+      />
+    )
   }
 
   return (
@@ -178,11 +199,11 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
       aria-label={collapsed ? item.label : undefined}
       className={clsx(
         "flex min-h-10 min-w-0 items-center rounded-lg text-sm font-medium text-gray-500 transition-all hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-50",
-        collapsed ? "justify-center px-2 py-2" : "gap-2 px-2.5 py-2",
+        collapsed ? "h-10 w-10 justify-center p-0" : "gap-2 px-2.5 py-2",
         active && "bg-gray-100 text-gray-900 hover:text-gray-900 dark:bg-gray-800 dark:text-gray-50 dark:hover:text-gray-50"
       )}
     >
-      <AdminNavIcon icon={Icon} active={active} variant="desktop" />
+      <AdminNavIcon icon={Icon} active={active} variant="desktop" collapsed={collapsed} />
       <span className={clsx(collapsed ? "sr-only" : "truncate")}>{item.label}</span>
     </Link>
   )
@@ -204,7 +225,7 @@ export function AdminNavigationGroups({ variant = "desktop", collapsed = false }
 
   return (
     <TooltipProvider delayDuration={150}>
-      <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-2 text-sm" : "space-y-4 px-3 text-sm")}>
+      <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-3.5 text-sm" : "space-y-4 px-3 text-sm")}>
         {ADMIN_NAV_GROUPS.map((group, index) => (
           <div key={group.label || `primary-${index}`} className={clsx(compact ? "space-y-1.5" : "space-y-1")}>
             {group.label && (
