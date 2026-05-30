@@ -48,6 +48,7 @@ import {
     queryConversationListSnapshot,
     type ConversationListStatus,
 } from "@/lib/conversations/conversation-list-loading";
+import { analyzeConversationSearchQuery } from "@/lib/conversations/conversation-search-query";
 import {
     enrichContactContextContact,
     getCachedActiveLeadSourceNames,
@@ -10495,7 +10496,8 @@ export async function searchConversations(query: string, options?: {
         const status = options?.status;
         const statusLabel = status || "not_trash";
 
-        const q = String(query || "").trim().replace(/\s+/g, " ");
+        const searchAnalysis = analyzeConversationSearchQuery(query);
+        const q = searchAnalysis.normalizedQuery;
         if (!q) {
             return {
                 success: true,
@@ -10510,10 +10512,11 @@ export async function searchConversations(query: string, options?: {
 
         const likeQuery = `%${q}%`;
         const likePrefixQuery = `${q}%`;
-        const queryDigits = normalizePhoneDigits(q);
+        const queryDigits = searchAnalysis.queryDigits;
         const digitsLikeQuery = queryDigits ? `%${queryDigits}%` : "";
         const digitsSuffixQuery = queryDigits ? `%${queryDigits}` : "";
-        const phoneLikeQuery = queryDigits.length >= 4 && queryDigits.length >= Math.max(4, Math.floor(q.length * 0.6));
+        const phoneLikeQuery = searchAnalysis.phoneLikeQuery;
+        const structuredReferenceQuery = searchAnalysis.structuredReferenceQuery;
         const searchStartedAt = Date.now();
         let contactHeaderDurationMs = 0;
         let broadDurationMs: number | null = null;
@@ -10542,7 +10545,43 @@ export async function searchConversations(query: string, options?: {
 
         try {
             const contactStartedAt = Date.now();
-            rankedRows = await withServerTiming("conversations.search.contact_header", {
+            rankedRows = structuredReferenceQuery
+                ? await withServerTiming("conversations.search.reference", {
+                    traceId,
+                    locationId: location.id,
+                    limit,
+                    queryLength: q.length,
+                    queryDigitsLength: queryDigits.length,
+                    status: statusLabel,
+                    mode: requestedMode,
+                }, async () => db.$queryRaw<Array<{ conversationId: string; score: number }>>`
+                    SELECT
+                        c.id AS "conversationId",
+                        GREATEST(
+                            CASE WHEN COALESCE(c."lastMessageBody", '') ILIKE ${likePrefixQuery} THEN 4.0 ELSE 0 END,
+                            CASE WHEN COALESCE(c."lastMessageBody", '') ILIKE ${likeQuery} THEN 3.5 ELSE 0 END,
+                            CASE WHEN COALESCE(ct.name, '') ILIKE ${likePrefixQuery} THEN 3.0 ELSE 0 END,
+                            CASE WHEN COALESCE(ct.name, '') ILIKE ${likeQuery} THEN 2.5 ELSE 0 END,
+                            CASE WHEN COALESCE(ct."firstName", '') ILIKE ${likePrefixQuery} THEN 2.0 ELSE 0 END,
+                            CASE WHEN COALESCE(ct."lastName", '') ILIKE ${likePrefixQuery} THEN 2.0 ELSE 0 END,
+                            CASE WHEN COALESCE(ct.email, '') ILIKE ${likePrefixQuery} THEN 1.8 ELSE 0 END,
+                            CASE WHEN COALESCE(ct.email, '') ILIKE ${likeQuery} THEN 1.4 ELSE 0 END
+                        ) AS score
+                    FROM "Conversation" c
+                    JOIN "Contact" ct ON ct.id = c."contactId"
+                    WHERE c."locationId" = ${location.id}
+                      AND ${statusSql}
+                      AND (
+                        COALESCE(c."lastMessageBody", '') ILIKE ${likeQuery}
+                        OR COALESCE(ct.name, '') ILIKE ${likeQuery}
+                        OR COALESCE(ct."firstName", '') ILIKE ${likeQuery}
+                        OR COALESCE(ct."lastName", '') ILIKE ${likeQuery}
+                        OR COALESCE(ct.email, '') ILIKE ${likeQuery}
+                      )
+                    ORDER BY score DESC, c."lastMessageAt" DESC, c.id DESC
+                    LIMIT ${limit};
+                `)
+                : await withServerTiming("conversations.search.contact_header", {
                 traceId,
                 locationId: location.id,
                 limit,
@@ -10559,13 +10598,13 @@ export async function searchConversations(query: string, options?: {
                     c.id AS "conversationId",
                     GREATEST(
                         CASE
-                            WHEN ${queryDigits.length >= 4}
+                            WHEN ${phoneLikeQuery}
                               AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigits}
                             THEN 4.0
-                            WHEN ${queryDigits.length >= 4}
+                            WHEN ${phoneLikeQuery}
                               AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsSuffixQuery}
                             THEN 3.5
-                            WHEN ${queryDigits.length >= 4}
+                            WHEN ${phoneLikeQuery}
                               AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsLikeQuery}
                             THEN 2.5
                             ELSE 0
@@ -10609,7 +10648,7 @@ export async function searchConversations(query: string, options?: {
                     OR COALESCE(ct."lastName", '') ILIKE ${likeQuery}
                     OR COALESCE(ct.email, '') ILIKE ${likeQuery}
                     OR COALESCE(ct.phone, '') ILIKE ${likeQuery}
-                    OR (${queryDigits.length >= 4} AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsLikeQuery})
+                    OR (${phoneLikeQuery} AND REGEXP_REPLACE(COALESCE(ct.phone, ''), '\\D', '', 'g') LIKE ${digitsLikeQuery})
                   )
             ),
             conversation_hits AS (
@@ -10675,6 +10714,7 @@ export async function searchConversations(query: string, options?: {
             || (
                 requestedMode === "auto"
                 && !phoneLikeQuery
+                && !structuredReferenceQuery
                 && q.length >= 5
                 && rankedRows.length < Math.min(limit, 10)
             );
@@ -10777,6 +10817,8 @@ export async function searchConversations(query: string, options?: {
                 resultCount: 0,
                 queryLength: q.length,
                 queryDigitsLength: queryDigits.length,
+                phoneLikeQuery,
+                structuredReferenceQuery,
                 status: statusLabel,
                 mode: requestedMode,
             });
@@ -10807,6 +10849,8 @@ export async function searchConversations(query: string, options?: {
             resultCount: conversations.length,
             queryLength: q.length,
             queryDigitsLength: queryDigits.length,
+            phoneLikeQuery,
+            structuredReferenceQuery,
             status: statusLabel,
             mode: requestedMode,
         });
