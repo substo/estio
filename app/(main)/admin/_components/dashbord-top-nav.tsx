@@ -2,30 +2,16 @@
 
 import ModeToggle from '@/components/mode-toggle'
 import { AdminNotificationBell } from '@/components/notifications/admin-notification-bell'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { UserProfile } from '@/components/user-profile'
 import { AICostBadge } from '@/components/ai-cost-badge'
 import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
-import { Home, Settings, List, FileText, MessageSquare, Building, LayoutTemplate, Layers, Languages, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
-
-// A helper for rendering grouped nav items neatly
-const NavItem = ({ href, icon: Icon, label }: { href: string, icon: any, label: string }) => (
-  <SheetClose asChild>
-    <Link href={href}>
-      <Button variant="ghost" className="w-full justify-start font-normal h-10">
-        <Icon className="mr-3 h-4 w-4 text-muted-foreground" />
-        {label}
-      </Button>
-    </Link>
-  </SheetClose>
-);
+import { AdminNavigationGroups } from "./admin-navigation"
 
 export default function DashboardTopNav({ children }: { children: ReactNode }) {
   return (
@@ -47,41 +33,11 @@ export default function DashboardTopNav({ children }: { children: ReactNode }) {
               </Link>
             </SheetHeader>
             
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6">
-              
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4">
               <div className="space-y-1">
                 <QuickAssistStartButton label="Start Quick Assist" variant="default" size="sm" className="w-full justify-start gap-2 h-10 mb-2 font-medium" />
-                <NavItem href="/admin" icon={Home} label="Overview" />
-                <NavItem href="/admin/conversations" icon={MessageSquare} label="Conversations" />
-                <NavItem href="/admin/viewings/sessions" icon={Languages} label="Quick Assist Sessions" />
               </div>
-
-              <div className="space-y-1">
-                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">CRM</h4>
-                <NavItem href="/admin/contacts" icon={FileText} label="Contacts" />
-                <NavItem href="/admin/prospecting" icon={Layers} label="Prospects (People)" />
-                <NavItem href="/admin/companies" icon={Building} label="Companies" />
-                <NavItem href="/admin/projects" icon={Building} label="Projects" />
-              </div>
-
-              <div className="space-y-1">
-                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Listings</h4>
-                <NavItem href="/admin/properties" icon={List} label="Properties" />
-                <NavItem href="/admin/prospecting/listings" icon={Home} label="Listings Inbox" />
-              </div>
-
-              <div className="space-y-1">
-                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Content</h4>
-                <NavItem href="/admin/content/pages" icon={FileText} label="Pages" />
-                <NavItem href="/admin/content/posts" icon={LayoutTemplate} label="Blog" />
-              </div>
-
-              <div className="space-y-1">
-                <h4 className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">System</h4>
-                <NavItem href="/admin/site-settings/navigation" icon={List} label="Menus" />
-                <NavItem href="/admin/settings" icon={Settings} label="Settings" />
-              </div>
-              
+              <AdminNavigationGroups variant="mobile" />
             </div>
           </SheetContent>
         </Sheet>
