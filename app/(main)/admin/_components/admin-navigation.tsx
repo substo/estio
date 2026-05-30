@@ -17,6 +17,7 @@ import {
 import clsx from "clsx"
 import { Button } from "@/components/ui/button"
 import { SheetClose } from "@/components/ui/sheet"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export type AdminNavItem = {
   href: string
@@ -152,7 +153,7 @@ function AdminNavIcon({ icon: Icon, active, variant }: { icon: LucideIcon; activ
   )
 }
 
-function AdminNavLink({ item, variant }: { item: AdminNavItem; variant: "desktop" | "mobile" }) {
+function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem; variant: "desktop" | "mobile"; collapsed?: boolean }) {
   const pathname = usePathname()
   const active = item.activePath(pathname)
   const Icon = item.icon
@@ -170,41 +171,58 @@ function AdminNavLink({ item, variant }: { item: AdminNavItem; variant: "desktop
     )
   }
 
-  return (
+  const desktopLink = (
     <Link
       href={item.href}
       prefetch
+      aria-label={collapsed ? item.label : undefined}
       className={clsx(
-        "flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-gray-500 transition-all hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-50",
+        "flex min-h-10 min-w-0 items-center rounded-lg text-sm font-medium text-gray-500 transition-all hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-50",
+        collapsed ? "justify-center px-2 py-2" : "gap-2 px-2.5 py-2",
         active && "bg-gray-100 text-gray-900 hover:text-gray-900 dark:bg-gray-800 dark:text-gray-50 dark:hover:text-gray-50"
       )}
     >
       <AdminNavIcon icon={Icon} active={active} variant="desktop" />
-      <span className="truncate">{item.label}</span>
+      <span className={clsx(collapsed ? "sr-only" : "truncate")}>{item.label}</span>
     </Link>
+  )
+
+  if (!collapsed) {
+    return desktopLink
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{desktopLink}</TooltipTrigger>
+      <TooltipContent side="right">{item.label}</TooltipContent>
+    </Tooltip>
   )
 }
 
-export function AdminNavigationGroups({ variant = "desktop" }: { variant?: "desktop" | "mobile" }) {
+export function AdminNavigationGroups({ variant = "desktop", collapsed = false }: { variant?: "desktop" | "mobile"; collapsed?: boolean }) {
+  const compact = variant === "desktop" && collapsed
+
   return (
-    <nav className={clsx(variant === "mobile" ? "space-y-6" : "space-y-4 px-3 text-sm")}>
-      {ADMIN_NAV_GROUPS.map((group, index) => (
-        <div key={group.label || `primary-${index}`} className="space-y-1">
-          {group.label && (
-            <h4
-              className={clsx(
-                "px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
-                variant === "mobile" ? "mb-2 px-4" : "mb-1"
-              )}
-            >
-              {group.label}
-            </h4>
-          )}
-          {group.items.map((item) => (
-            <AdminNavLink key={item.href} item={item} variant={variant} />
-          ))}
-        </div>
-      ))}
-    </nav>
+    <TooltipProvider delayDuration={150}>
+      <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-2 text-sm" : "space-y-4 px-3 text-sm")}>
+        {ADMIN_NAV_GROUPS.map((group, index) => (
+          <div key={group.label || `primary-${index}`} className={clsx(compact ? "space-y-1.5" : "space-y-1")}>
+            {group.label && (
+              <h4
+                className={clsx(
+                  "px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+                  variant === "mobile" ? "mb-2 px-4" : compact ? "sr-only" : "mb-1"
+                )}
+              >
+                {group.label}
+              </h4>
+            )}
+            {group.items.map((item) => (
+              <AdminNavLink key={item.href} item={item} variant={variant} collapsed={compact} />
+            ))}
+          </div>
+        ))}
+      </nav>
+    </TooltipProvider>
   )
 }

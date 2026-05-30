@@ -1,6 +1,5 @@
 import { ReactNode } from "react"
-import DashboardSideBar from "./_components/dashboard-side-bar"
-import DashboardTopNav from "./_components/dashbord-top-nav"
+import { AdminShellLayout, AdminSidebarPreferenceScript } from "./_components/admin-shell-layout"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { headers } from "next/headers"
@@ -98,9 +97,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const lightUrl = theme?.logo?.lightUrl;
 
   return (
-    <div className="grid min-h-screen w-full lg:grid-cols-[160px_minmax(0,1fr)]">
-      <DashboardSideBar logoUrl={logoUrl} lightUrl={lightUrl} />
-      <DashboardTopNav>
+    <>
+      <AdminSidebarPreferenceScript />
+      <AdminShellLayout logoUrl={logoUrl} lightUrl={lightUrl}>
         <main className="min-w-0 flex flex-col gap-4 p-4 lg:gap-6">
           {needsOnboarding ? (
             <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
@@ -114,7 +113,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
             children
           )}
         </main>
-      </DashboardTopNav>
+      </AdminShellLayout>
 
       {/* Onboarding Modal */}
       <OnboardingWrapper
@@ -125,6 +124,6 @@ export default async function DashboardLayout({ children }: { children: ReactNod
           phone: userWithLocations.phone || ''
         }}
       />
-    </div>
+    </>
   )
 }

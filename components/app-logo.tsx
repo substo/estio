@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +13,7 @@ interface AppLogoProps {
     className?: string;
     url?: string;
     lightUrl?: string;
+    iconOnly?: boolean;
 }
 
 const sizeConfig = {
@@ -31,6 +31,7 @@ export function AppLogo({
     className,
     url,
     lightUrl,
+    iconOnly = false,
 }: AppLogoProps) {
     const { resolvedTheme } = useTheme();
     const config = sizeConfig[size];
@@ -43,6 +44,7 @@ export function AppLogo({
     // Default Logos (Local 1K Cropped)
     const DEFAULT_DARK_MODE_LOGO = "/images/estio logo/estio logo dark mode 1K.png";  // White Text
     const DEFAULT_LIGHT_MODE_LOGO = "/images/estio logo/estio logo light mode 1K.png"; // Dark Text
+    const DEFAULT_ICON_LOGO = "/images/estio favicon/android-chrome-192x192.png";
 
     // Determine which URL to use
     // 1. Dark Mode: Use lightUrl (if custom) OR Default Dark Mode Logo
@@ -61,14 +63,14 @@ export function AppLogo({
         targetUrl = url || DEFAULT_LIGHT_MODE_LOGO;
     }
 
-    const effectiveUrl = targetUrl;
+    const effectiveUrl = iconOnly ? DEFAULT_ICON_LOGO : targetUrl;
 
     const content = (
         <div className={cn("flex items-center gap-2", className)}>
             <img
                 src={effectiveUrl}
                 alt={APP_NAME}
-                style={{ height: config.height, width: 'auto' }}
+                style={{ height: iconOnly ? Math.min(config.height, 32) : config.height, width: 'auto' }}
                 className="object-contain"
             />
             {/* Logo image already includes text */}
