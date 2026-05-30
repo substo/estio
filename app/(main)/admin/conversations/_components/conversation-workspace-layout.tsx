@@ -62,7 +62,7 @@ export function ConversationWorkspaceLayout({
         <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
             {/* Left: List */}
             <Panel
-                defaultSize={24}
+                defaultSize={20}
                 minSize={18}
                 className="overflow-hidden min-w-0"
             >
@@ -75,7 +75,7 @@ export function ConversationWorkspaceLayout({
             />
 
             {/* Center: Chat */}
-            <Panel defaultSize={52} minSize={36} className="overflow-hidden min-w-0">
+            <Panel defaultSize={60} minSize={36} className="overflow-hidden min-w-0">
                 {conversationMainPane}
             </Panel>
 
@@ -85,7 +85,7 @@ export function ConversationWorkspaceLayout({
             />
 
             {/* Right: AI Coordinator */}
-            <Panel defaultSize={24} minSize={20} className="min-w-0">
+            <Panel defaultSize={20} minSize={20} className="min-w-0">
                 {missionControlPane}
             </Panel>
         </PanelGroup>

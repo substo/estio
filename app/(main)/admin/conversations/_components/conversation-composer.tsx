@@ -223,7 +223,7 @@ export function ConversationComposer({
                 onSelect={(text) => handleAiDraft(text)}
             />
 
-            <div className="px-3 py-2 max-w-4xl mx-auto min-w-0">
+            <div className="mx-auto min-w-0 max-w-5xl px-3 py-2 sm:px-5">
                 {replyingToLabel ? (
                     <div className="px-1 pb-1 text-[11px] text-slate-500">
                         Replying to <span className="font-medium text-slate-700">{replyingToLabel}</span>

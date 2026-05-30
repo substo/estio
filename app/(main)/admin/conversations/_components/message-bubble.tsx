@@ -335,7 +335,7 @@ export function MessageBubble({
     return (
         <div
             className={cn(
-                "flex flex-col max-w-[85%] min-w-0 overflow-hidden",
+                "flex flex-col max-w-[85%] min-w-0 overflow-hidden sm:max-w-[min(88%,52rem)]",
                 enableMountAnimation && "animate-in fade-in slide-in-from-bottom-2 duration-300",
                 isOutbound ? "ml-auto items-end" : "mr-auto items-start"
             )}

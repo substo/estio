@@ -700,11 +700,11 @@ export function ChatWindow({
             )}
 
             {/* Messages Area */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 bg-slate-50/50">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50/50 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
                 <div
                     ref={timelineContentRef}
                     className={cn(
-                        "space-y-4 sm:space-y-6 min-w-0 max-w-full",
+                        "space-y-4 sm:space-y-5 min-w-0 max-w-full",
                         !loading && timelineItems.length > 0 && !isTimelineReady && "opacity-0"
                     )}
                 >
