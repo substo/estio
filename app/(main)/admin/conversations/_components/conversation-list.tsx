@@ -145,7 +145,7 @@ export function ConversationList({
     if (effectiveViewMode === 'deals' && deals && deals.length > 0) {
         // RENDER DEALS LIST
         return (
-            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 {/* Status Bar */}
                 <WhatsAppStatus />
 
@@ -153,7 +153,7 @@ export function ConversationList({
                 {header}
 
 
-                <div className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                     {deals.map(d => (
                         <div
                             key={d.id}
@@ -189,7 +189,7 @@ export function ConversationList({
 
     if (isSearching) {
         return (
-            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
                 {header}
                 <div className="p-8 flex flex-col items-center justify-center text-slate-500">
@@ -202,7 +202,7 @@ export function ConversationList({
 
     if (viewFilter === 'tasks') {
         return (
-            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
                 {header}
                 <GlobalTaskList
@@ -217,7 +217,7 @@ export function ConversationList({
 
     if (conversations.length === 0 && effectiveViewMode === 'chats') {
         return (
-            <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
                 <WhatsAppStatus />
                 {header}
                 <div className="p-4 text-center text-gray-500">No conversations found.</div>
@@ -226,14 +226,14 @@ export function ConversationList({
     }
 
     return (
-        <div className="h-full flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+        <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
             {/* Status Bar */}
             <WhatsAppStatus />
 
             {/* Unified Header with Mode Toggle + Action Buttons */}
             {header}
 
-            <div ref={listScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
+            <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
                 {conversations.map((c) => {
                     const isChecked = selectedIds?.has(c.id) || false;
 

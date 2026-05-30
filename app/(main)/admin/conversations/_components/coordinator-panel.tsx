@@ -180,7 +180,7 @@ export function CoordinatorPanel({
     });
 
     return (
-        <div className="h-full bg-muted/30 border-l p-3 overflow-y-auto space-y-3 min-w-0 flex flex-col">
+        <div className="h-full min-h-0 bg-muted/30 border-l p-3 overflow-y-auto space-y-3 min-w-0 flex flex-col">
             <div className="flex items-center justify-between mb-2 shrink-0">
                 <div className="flex items-center gap-1">
                     {onBackToConversation && (

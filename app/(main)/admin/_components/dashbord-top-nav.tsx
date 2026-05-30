@@ -12,11 +12,18 @@ import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
 import { AdminNavigationGroups } from "./admin-navigation"
+import { cn } from "@/lib/utils"
 
-export default function DashboardTopNav({ children }: { children: ReactNode }) {
+export default function DashboardTopNav({ children, appSurface = false }: { children: ReactNode; appSurface?: boolean }) {
   return (
-    <div className="min-w-0 flex flex-col">
-      <header className="flex h-14 lg:h-[55px] items-center gap-4 border-b px-3 bg-background">
+    <div
+      data-admin-top-nav={appSurface ? "app-surface" : "default"}
+      className={cn(
+        "min-w-0 flex flex-col",
+        appSurface && "h-full min-h-0 overflow-hidden"
+      )}
+    >
+      <header className="flex h-14 lg:h-[55px] shrink-0 items-center gap-4 border-b px-3 bg-background">
         <Sheet>
           <SheetTrigger className="min-[1024px]:hidden p-2 transition">
             <HamburgerMenuIcon className="h-5 w-5" />

@@ -37,14 +37,14 @@ export function ConversationWorkspaceLayout({
         return (
             <div
                 ref={mobilePaneContainerRef}
-                className="relative h-full w-full overflow-hidden touch-pan-y"
+                className="relative h-full min-h-0 w-full overflow-hidden touch-pan-y"
                 onTouchStart={handleMobileTouchStart}
                 onTouchMove={handleMobileTouchMove}
                 onTouchEnd={handleMobileTouchEnd}
             >
                 <div
                     ref={mobilePaneHostRef}
-                    className="h-full w-full min-w-0 max-w-full overflow-x-hidden"
+                    className="h-full min-h-0 w-full min-w-0 max-w-full overflow-x-hidden"
                     data-mobile-pane={currentMobilePane}
                 >
                     {mobilePaneContent[currentMobilePane]}
@@ -59,7 +59,7 @@ export function ConversationWorkspaceLayout({
     }
 
     return (
-        <PanelGroup orientation="horizontal" className="h-full w-full max-w-full overflow-hidden">
+        <PanelGroup orientation="horizontal" className="h-full min-h-0 w-full max-w-full overflow-hidden">
             {/* Left: List */}
             <Panel
                 defaultSize={20}

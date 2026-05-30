@@ -146,7 +146,7 @@ export function UnifiedTimeline({
             data-deal-hydration-status={hydrationStatus}
             data-deal-initial-paint-ready={isTimelineReady ? "true" : "false"}
             data-deal-mounted-timeline-items={events.length}
-            className="flex-1 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full"
+            className="flex-1 min-h-0 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full"
         >
             <div className="h-14 border-b bg-white flex items-center px-3 sm:px-4 justify-between shrink-0 gap-2">
                 <div className="flex items-center gap-2 text-gray-700 min-w-0">
@@ -182,7 +182,7 @@ export function UnifiedTimeline({
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={timelineRef}>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4" ref={timelineRef}>
                 {loading && events.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-gray-400">
                         <Sparkles className="w-5 h-5 animate-spin mr-2" />

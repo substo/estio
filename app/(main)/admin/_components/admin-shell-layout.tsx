@@ -1,8 +1,10 @@
 "use client"
 
 import { ReactNode, useEffect, useState } from "react"
+import { usePathname } from "next/navigation"
 import DashboardSideBar from "./dashboard-side-bar"
 import DashboardTopNav from "./dashbord-top-nav"
+import { cn } from "@/lib/utils"
 
 const SIDEBAR_STORAGE_KEY = "admin-sidebar-collapsed"
 const EXPANDED_SIDEBAR_WIDTH = "160px"
@@ -38,6 +40,7 @@ export function AdminShellLayout({
   lightUrl?: string
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const appSurface = usePathname() === "/admin/conversations"
 
   useEffect(() => {
     try {
@@ -60,14 +63,21 @@ export function AdminShellLayout({
   }
 
   return (
-    <div className="grid min-h-screen w-full lg:[grid-template-columns:var(--admin-sidebar-width,160px)_minmax(0,1fr)]">
+    <div
+      data-admin-shell-layout={appSurface ? "app-surface" : "default"}
+      className={cn(
+        "grid w-full lg:[grid-template-columns:var(--admin-sidebar-width,160px)_minmax(0,1fr)]",
+        appSurface ? "h-dvh overflow-hidden" : "min-h-screen"
+      )}
+    >
       <DashboardSideBar
         collapsed={sidebarCollapsed}
         logoUrl={logoUrl}
         lightUrl={lightUrl}
+        appSurface={appSurface}
         onCollapsedChange={handleSidebarCollapsedChange}
       />
-      <DashboardTopNav>{children}</DashboardTopNav>
+      <DashboardTopNav appSurface={appSurface}>{children}</DashboardTopNav>
     </div>
   )
 }

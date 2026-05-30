@@ -1,5 +1,6 @@
 import { ReactNode } from "react"
 import { AdminShellLayout, AdminSidebarPreferenceScript } from "./_components/admin-shell-layout"
+import { AdminContentFrame } from "./_components/admin-content-frame"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { headers } from "next/headers"
@@ -100,7 +101,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     <>
       <AdminSidebarPreferenceScript />
       <AdminShellLayout logoUrl={logoUrl} lightUrl={lightUrl}>
-        <main className="min-w-0 flex flex-col gap-4 p-4 lg:gap-6">
+        <AdminContentFrame>
           {needsOnboarding ? (
             <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
               <div className="text-center">
@@ -112,7 +113,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
           ) : (
             children
           )}
-        </main>
+        </AdminContentFrame>
       </AdminShellLayout>
 
       {/* Onboarding Modal */}

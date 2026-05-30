@@ -45,10 +45,10 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     const featureFlags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
     return (
-        <div className="h-[calc(100dvh-56px)] lg:h-[calc(100dvh-55px)] w-full max-w-full min-w-0 overflow-hidden flex flex-col">
+        <div className="h-full min-h-0 w-full max-w-full min-w-0 overflow-hidden flex flex-col">
 
 
-            <main className="flex-1 overflow-hidden relative">
+            <main className="flex-1 min-h-0 overflow-hidden relative">
                 <Suspense fallback={<div>Loading Interface...</div>}>
                     <ConversationInterface
                         locationId={location.id}

@@ -11,18 +11,25 @@ export default function DashboardSideBar({
   collapsed,
   logoUrl,
   lightUrl,
+  appSurface = false,
   onCollapsedChange,
 }: {
   collapsed: boolean
   logoUrl?: string
   lightUrl?: string
+  appSurface?: boolean
   onCollapsedChange: (collapsed: boolean) => void
 }) {
   const ToggleIcon = collapsed ? ChevronRight : ChevronLeft
   const toggleLabel = collapsed ? "Expand sidebar" : "Collapse sidebar"
 
   return (
-    <div className="relative hidden h-screen border-r bg-muted/40 lg:sticky lg:top-0 lg:block">
+    <div
+      className={cn(
+        "relative hidden border-r bg-muted/40 lg:sticky lg:top-0 lg:block",
+        appSurface ? "h-dvh" : "h-screen"
+      )}
+    >
       <div className="flex h-full max-h-screen flex-col gap-2 overflow-hidden">
         <div className="flex h-[55px] w-full items-center justify-center border-b px-2">
           <AppLogo

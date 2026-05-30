@@ -316,7 +316,7 @@ export function ChatWindow({
             data-chat-mounted-timeline-items={timelineItems.length}
             data-chat-mounted-messages={messages.length}
             data-chat-mounted-activity-items={activityLog.length}
-            className="h-full flex flex-col bg-white min-w-0 overflow-hidden"
+            className="h-full min-h-0 flex flex-col bg-white min-w-0 overflow-hidden"
         >
             {/* Header */}
             <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
@@ -695,7 +695,7 @@ export function ChatWindow({
             <div
                 ref={scrollRef}
                 className={cn(
-                    "flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-5 sm:py-5 lg:px-6",
+                    "flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-5 sm:py-5 lg:px-6",
                     getConversationTimelineClassName({ isWhatsApp: isWhatsAppConversation })
                 )}
             >
