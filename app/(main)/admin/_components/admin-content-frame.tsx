@@ -1,15 +1,11 @@
 "use client"
 
 import { ReactNode } from "react"
-import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-
-function useAdminAppSurface() {
-  return usePathname() === "/admin/conversations"
-}
+import { useAdminLayoutPolicy } from "./admin-layout-policy"
 
 export function AdminContentFrame({ children }: { children: ReactNode }) {
-  const appSurface = useAdminAppSurface()
+  const { appSurface } = useAdminLayoutPolicy()
 
   return (
     <main

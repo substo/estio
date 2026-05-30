@@ -1,9 +1,9 @@
 "use client"
 
 import { ReactNode, useEffect, useState } from "react"
-import { usePathname } from "next/navigation"
 import DashboardSideBar from "./dashboard-side-bar"
 import DashboardTopNav from "./dashbord-top-nav"
+import { AdminLayoutPolicyProvider, useResolvedAdminLayoutPolicy } from "./admin-layout-policy"
 import { cn } from "@/lib/utils"
 
 const SIDEBAR_STORAGE_KEY = "admin-sidebar-collapsed"
@@ -40,7 +40,8 @@ export function AdminShellLayout({
   lightUrl?: string
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const appSurface = usePathname() === "/admin/conversations"
+  const layoutPolicy = useResolvedAdminLayoutPolicy()
+  const { appSurface } = layoutPolicy
 
   useEffect(() => {
     try {
@@ -70,14 +71,16 @@ export function AdminShellLayout({
         appSurface ? "h-dvh overflow-hidden" : "min-h-screen"
       )}
     >
-      <DashboardSideBar
-        collapsed={sidebarCollapsed}
-        logoUrl={logoUrl}
-        lightUrl={lightUrl}
-        appSurface={appSurface}
-        onCollapsedChange={handleSidebarCollapsedChange}
-      />
-      <DashboardTopNav appSurface={appSurface}>{children}</DashboardTopNav>
+      <AdminLayoutPolicyProvider value={layoutPolicy}>
+        <DashboardSideBar
+          collapsed={sidebarCollapsed}
+          logoUrl={logoUrl}
+          lightUrl={lightUrl}
+          appSurface={appSurface}
+          onCollapsedChange={handleSidebarCollapsedChange}
+        />
+        <DashboardTopNav appSurface={appSurface}>{children}</DashboardTopNav>
+      </AdminLayoutPolicyProvider>
     </div>
   )
 }
