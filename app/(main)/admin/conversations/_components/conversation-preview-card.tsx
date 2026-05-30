@@ -1,7 +1,7 @@
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { getChannelInfo } from "./conversation-channel-info";
+import { getConversationChannelInfo } from "./conversation-channel-info";
 
 interface ConversationPreviewCardProps {
     conversation: Conversation;
@@ -12,7 +12,7 @@ interface ConversationPreviewCardProps {
  * Displays contact name, timestamp, channel, status, and message preview.
  */
 export function ConversationPreviewCard({ conversation }: ConversationPreviewCardProps) {
-    const channel = getChannelInfo(conversation.lastMessageType || conversation.type);
+    const channel = getConversationChannelInfo(conversation);
 
     return (
         <div className="p-4">

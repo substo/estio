@@ -5,6 +5,7 @@ import {
     getWhatsAppChannelEligibility,
 } from "@/app/(main)/admin/conversations/actions";
 import { type ComposerChannel } from "./use-conversation-composer-translation-preview";
+import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 
 export type WhatsAppEligibilityState =
     | { status: "checking" }
@@ -18,32 +19,40 @@ export type SmsEligibilityState =
     | { status: "ineligible"; reason?: string }
     | { status: "unknown"; reason?: string };
 
-function getInitialChannel(conversation: Conversation | null): ComposerChannel {
-    const typeUpper = (conversation?.lastMessageType || conversation?.type || "").toUpperCase();
-    if (typeUpper.includes("EMAIL")) return "Email";
-    if (typeUpper.includes("WHATSAPP")) return "WhatsApp";
-    return "SMS";
+export function getInitialComposerChannel(
+    conversation: Conversation | null,
+    options: { smsRelayEnabled?: boolean } = {},
+): ComposerChannel {
+    return deriveComposerInitialChannel(conversation, options);
 }
 
-function getFallbackChannelWithoutWhatsApp(conversation: Conversation | null): "SMS" | "Email" {
-    return getInitialChannel(conversation) === "Email" ? "Email" : "SMS";
+function getFallbackChannelWithoutWhatsApp(
+    conversation: Conversation | null,
+    options: { smsRelayEnabled?: boolean } = {},
+): "SMS" | "Email" | "SMS_RELAY" {
+    const initialChannel = getInitialComposerChannel(conversation, options);
+    if (initialChannel === "Email") return "Email";
+    if (initialChannel === "SMS_RELAY") return "SMS_RELAY";
+    return "SMS";
 }
 
 interface UseConversationComposerChannelArgs {
     conversation: Conversation | null;
     isUnavailable: boolean;
+    smsRelayEnabled?: boolean;
 }
 
 export function useConversationComposerChannel({
     conversation,
     isUnavailable,
+    smsRelayEnabled = false,
 }: UseConversationComposerChannelArgs) {
-    const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialChannel(conversation));
+    const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialComposerChannel(conversation, { smsRelayEnabled }));
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
 
     useEffect(() => {
-        setSelectedChannel(getInitialChannel(conversation));
+        setSelectedChannel(getInitialComposerChannel(conversation, { smsRelayEnabled }));
     }, [conversation?.id]);
 
     useEffect(() => {
@@ -71,7 +80,7 @@ export function useConversationComposerChannel({
 
                 if (res.status === "ineligible") {
                     setWhatsAppEligibility({ status: "ineligible", reason: res.reason });
-                    setSelectedChannel((prev) => (prev === "WhatsApp" ? getFallbackChannelWithoutWhatsApp(conversation) : prev));
+                    setSelectedChannel((prev) => (prev === "WhatsApp" ? getFallbackChannelWithoutWhatsApp(conversation, { smsRelayEnabled }) : prev));
                     return;
                 }
 
@@ -86,7 +95,7 @@ export function useConversationComposerChannel({
         return () => {
             cancelled = true;
         };
-    }, [conversation?.id]);
+    }, [conversation?.id, smsRelayEnabled]);
 
     useEffect(() => {
         if (!conversation?.id) {

@@ -23,6 +23,8 @@ import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
 import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 import { getConversationTimelineClassName } from "./message-bubble-theme";
+import { getConversationChannelInfo } from "./conversation-channel-info";
+import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -34,7 +36,7 @@ interface ChatWindowProps {
     onOpenMissionControl?: () => void;
     onSendMessage: (
         text: string,
-        type: 'SMS' | 'Email' | 'WhatsApp',
+        type: ComposerChannel,
         options?: {
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
@@ -88,7 +90,7 @@ interface ChatWindowProps {
     }>;
     onPreviewTranslatedReply?: (
         sourceText: string,
-        channel: "SMS" | "Email" | "WhatsApp",
+        channel: ComposerChannel,
         targetLanguage?: string | null
     ) => Promise<{
         success: boolean;
@@ -113,18 +115,6 @@ interface ChatWindowProps {
     onResendMessage?: (messageId: string) => void | Promise<void>;
     onSendSmsFallback?: (messageId: string) => void | Promise<void>;
     smsRelayEnabled?: boolean;
-}
-
-/**
- * Map GHL type codes to friendly channel names
- */
-function getChannelName(type: string): string {
-    const typeUpper = type?.toUpperCase() || '';
-    if (typeUpper.includes('EMAIL')) return 'Email';
-    if (typeUpper.includes('WHATSAPP')) return 'WhatsApp';
-    if (typeUpper.includes('PHONE') || typeUpper.includes('SMS') || typeUpper.includes('CALL')) return 'SMS';
-    if (typeUpper.includes('WEBCHAT') || typeUpper.includes('LIVE')) return 'Live Chat';
-    return type || 'Unknown';
 }
 
 import { MessageBubble } from "./message-bubble";
@@ -311,6 +301,7 @@ export function ChatWindow({
     const conversationType = String(conversation.lastMessageType || conversation.type || "").toUpperCase();
     const isWhatsAppConversation = conversationType.includes("WHATSAPP");
     const isEmailConversation = conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL' || conversationType.includes("EMAIL");
+    const conversationChannelLabel = getConversationChannelInfo(conversation).name;
     const hasMobileMoreActions = (
         selectionBatch.length > 0
         || (!!isWhatsAppConversation && !!onSync)
@@ -346,7 +337,7 @@ export function ChatWindow({
                         <div className="flex items-center gap-2 mt-0.5 min-w-0">
                             <span className="flex h-2 w-2 rounded-full bg-green-500 shrink-0" />
                             <p className="text-xs text-gray-500 font-medium truncate min-w-0 flex-1">
-                                {getChannelName(conversation.lastMessageType || conversation.type)} • {conversation.status}
+                                {conversationChannelLabel} • {conversation.status}
                             </p>
                         </div>
                     </div>

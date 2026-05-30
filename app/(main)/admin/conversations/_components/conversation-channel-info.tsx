@@ -1,4 +1,10 @@
 import { Mail, MessageCircle, MessageSquare } from "lucide-react";
+import type { Conversation } from "@/lib/ghl/conversations";
+import {
+    deriveConversationDisplayChannel,
+    getConversationDisplayChannelLabel,
+    type ConversationDisplayChannel,
+} from "@/lib/conversations/channel-summary";
 
 /**
  * Map GHL conversation type codes to friendly display names
@@ -20,4 +26,25 @@ export function getChannelInfo(type: string): { name: string; icon: React.ReactN
     }
     // Fallback
     return { name: type || 'Unknown', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-gray-50 text-gray-600' };
+}
+
+export function getConversationChannelInfo(
+    conversation: Pick<Conversation, "lastMessageType" | "type" | "lastMessageSource" | "lastMessageChannel">
+): { name: string; icon: React.ReactNode; color: string; channel: ConversationDisplayChannel } {
+    const channel = deriveConversationDisplayChannel(conversation);
+    if (channel === "SMS_RELAY") {
+        return {
+            name: getConversationDisplayChannelLabel(channel),
+            icon: <MessageSquare className="w-3 h-3" />,
+            color: "bg-cyan-50 text-cyan-700",
+            channel,
+        };
+    }
+
+    const fallbackInfo = getChannelInfo(channel === "Unknown" ? conversation.lastMessageType || conversation.type : channel);
+    return {
+        ...fallbackInfo,
+        name: channel === "Unknown" ? fallbackInfo.name : getConversationDisplayChannelLabel(channel),
+        channel,
+    };
 }

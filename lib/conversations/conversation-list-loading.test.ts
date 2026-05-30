@@ -10,6 +10,7 @@ import {
     encodeConversationCursor,
     encodeConversationDeltaCursor,
 } from "./conversation-list-loading";
+import { buildLatestMessageMetadataMap } from "./latest-message-metadata";
 
 test("conversation cursors round trip and reject invalid payloads", () => {
     const listCursor = encodeConversationCursor({
@@ -75,4 +76,20 @@ test("status helpers preserve list filter semantics", () => {
     assert.equal(doesConversationMatchStatus("trash", { deletedAt, archivedAt: null }), true);
     assert.equal(doesConversationMatchStatus("all", { deletedAt, archivedAt }), true);
     assert.equal(doesConversationMatchStatus("tasks", { deletedAt, archivedAt }), true);
+});
+
+test("buildLatestMessageMetadataMap indexes latest message source by conversation id", () => {
+    const map = buildLatestMessageMetadataMap([
+        {
+            id: "msg_1",
+            conversationId: "conv_1",
+            type: "TYPE_SMS",
+            source: "sms_relay",
+            direction: "inbound",
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+        },
+    ]);
+
+    assert.equal(map.get("conv_1")?.source, "sms_relay");
+    assert.equal(map.get("conv_1")?.type, "TYPE_SMS");
 });

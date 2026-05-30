@@ -2,7 +2,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Link as LinkIcon } from "lucide-react";
-import { getChannelInfo } from "./conversation-channel-info";
+import { getConversationChannelInfo } from "./conversation-channel-info";
 
 interface ConversationListRowProps {
     conversation: Conversation;
@@ -23,7 +23,7 @@ export function ConversationListRow({
     onToggleSelect,
     onHoverConversation,
 }: ConversationListRowProps) {
-    const channel = getChannelInfo(conversation.lastMessageType || conversation.type);
+    const channel = getConversationChannelInfo(conversation);
 
     return (
         <div

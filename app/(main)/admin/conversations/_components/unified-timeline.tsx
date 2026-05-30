@@ -10,6 +10,7 @@ import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 import { useUnifiedTimelineScroll } from './use-unified-timeline-scroll';
+import type { ComposerChannel } from './use-conversation-composer-translation-preview';
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -23,7 +24,7 @@ interface UnifiedTimelineProps {
     onInitialPaintReady?: () => void;
     onSendMessage?: (
         text: string,
-        type: 'SMS' | 'Email' | 'WhatsApp',
+        type: ComposerChannel,
         options?: {
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
@@ -40,7 +41,7 @@ interface UnifiedTimelineProps {
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onPreviewTranslatedReply?: (
         sourceText: string,
-        channel: 'SMS' | 'Email' | 'WhatsApp',
+        channel: ComposerChannel,
         targetLanguage?: string | null
     ) => Promise<{
         success: boolean;
@@ -263,6 +264,7 @@ export function UnifiedTimeline({
                 replyingToLabel={replyingToLabel}
                 onModelChange={setSelectedModel}
                 insertDraftSeed={composerInsertSeed}
+                smsRelayEnabled={smsRelayEnabled}
             />
         </div>
     );

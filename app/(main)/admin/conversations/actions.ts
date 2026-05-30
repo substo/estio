@@ -65,6 +65,7 @@ import {
     resolveConversationReference,
 } from "@/lib/conversations/identity";
 import { mapConversationRowToUi } from "@/lib/conversations/conversation-row-mapper";
+import { LATEST_MESSAGE_METADATA_SELECT } from "@/lib/conversations/latest-message-metadata";
 import { collectDealConversationReferences, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
@@ -7427,9 +7428,16 @@ export async function refreshConversation(conversationId: string) {
 
     if (!conversation) return null;
 
-    const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(location.id);
+    const [locationDefaultReplyLanguage, latestMessage] = await Promise.all([
+        getLocationDefaultReplyLanguage(location.id),
+        db.message.findFirst({
+            where: { conversationId: conversation.id },
+            select: LATEST_MESSAGE_METADATA_SELECT,
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        }),
+    ]);
 
-    return mapConversationRowToUi(conversation, location, undefined, locationDefaultReplyLanguage);
+    return mapConversationRowToUi({ ...conversation, latestMessage }, location, undefined, locationDefaultReplyLanguage);
 }
 
 export async function markConversationAsRead(conversationId: string) {

@@ -12,6 +12,8 @@ export interface Conversation {
     lastMessageBody: string;
     lastMessageDate: number;
     lastMessageType?: string; // e.g. "TYPE_SMS", "TYPE_EMAIL"
+    lastMessageSource?: string | null;
+    lastMessageChannel?: "WhatsApp" | "Email" | "SMS" | "SMS_RELAY" | "Unknown";
     unreadCount: number;
     status: 'open' | 'closed' | 'all' | 'starred';
     assignedTo?: string;
@@ -27,7 +29,7 @@ export interface Conversation {
     activeDealId?: string;
     activeDealTitle?: string;
     lastMessageDirection?: 'inbound' | 'outbound';
-    lastMessageId?: string;
+    lastMessageId?: string | null;
     suggestedActions?: string[];
 }
 

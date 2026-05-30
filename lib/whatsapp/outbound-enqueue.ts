@@ -4,6 +4,7 @@ import { enqueueWhatsAppOutboundOutboxJob, initWhatsAppOutboundWorker } from "@/
 import { computeWhatsAppTypingDelay, type WhatsAppTypingDelayResult } from "@/lib/whatsapp/outbound-typing";
 import { processWhatsAppOutboundOutboxJob } from "@/lib/whatsapp/outbound-outbox";
 import type { WhatsAppOutboundKind, WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
+import { updateConversationLastMessage } from "@/lib/conversations/update";
 
 export type { WhatsAppOutboundKind, WhatsAppTransport };
 
@@ -291,6 +292,15 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
             typingDelayMs: txResult.typing.delayMs,
             typingDelayReason: txResult.typing.reason,
             scheduledAt: txResult.scheduledAt.toISOString(),
+        });
+        await updateConversationLastMessage({
+            conversationId: conversationInternalId,
+            messageBody: normalizedBody,
+            messageType: "TYPE_WHATSAPP",
+            messageDate: messageCreatedAt,
+            direction: "outbound",
+        }).catch((error) => {
+            console.error("[WhatsApp Outbox] Failed to update queued conversation summary:", error);
         });
     } catch (error: any) {
         const uniqueTarget = extractUniqueErrorColumns(error);

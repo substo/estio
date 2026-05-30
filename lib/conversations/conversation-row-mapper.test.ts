@@ -78,3 +78,50 @@ test("mapConversationRowToUi converts finite detected confidence and nulls non-n
     assert.equal(numericMapped.detectedThreadLanguageConfidence, 0.82);
     assert.equal(nullMapped.detectedThreadLanguageConfidence, null);
 });
+
+test("mapConversationRowToUi includes latest message source metadata when available", () => {
+    const latestMessageMap = new Map([
+        ["conversation-internal", {
+            id: "message-latest",
+            conversationId: "conversation-internal",
+            type: "TYPE_SMS",
+            source: "sms_relay",
+            direction: "outbound",
+            createdAt: new Date("2026-05-26T10:01:00.000Z"),
+        }],
+    ]);
+
+    const mapped = mapConversationRowToUi(baseRow, { id: "loc-internal" }, undefined, undefined, latestMessageMap);
+
+    assert.equal(mapped.lastMessageId, "message-latest");
+    assert.equal(mapped.lastMessageType, "TYPE_SMS");
+    assert.equal(mapped.lastMessageSource, "sms_relay");
+    assert.equal(mapped.lastMessageDirection, "outbound");
+    assert.equal(mapped.lastMessageChannel, "SMS_RELAY");
+});
+
+test("mapConversationRowToUi ignores stale latest message metadata", () => {
+    const latestMessageMap = new Map([
+        ["conversation-internal", {
+            id: "message-stale",
+            conversationId: "conversation-internal",
+            type: "TYPE_SMS",
+            source: "sms_relay",
+            direction: "inbound",
+            createdAt: new Date("2026-05-26T09:00:00.000Z"),
+        }],
+    ]);
+
+    const mapped = mapConversationRowToUi(
+        { ...baseRow, lastMessageType: "TYPE_EMAIL", lastMessageAt: "2026-05-26T10:00:00.000Z" },
+        { id: "loc-internal" },
+        undefined,
+        undefined,
+        latestMessageMap,
+    );
+
+    assert.equal(mapped.lastMessageId, null);
+    assert.equal(mapped.lastMessageType, "TYPE_EMAIL");
+    assert.equal(mapped.lastMessageSource, null);
+    assert.equal(mapped.lastMessageChannel, "Email");
+});

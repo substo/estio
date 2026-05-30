@@ -6,6 +6,7 @@ import {
     buildConversationReferenceWhere,
 } from "@/lib/conversations/identity";
 import { mapConversationRowToUi } from "@/lib/conversations/conversation-row-mapper";
+import { LATEST_MESSAGE_METADATA_SELECT } from "@/lib/conversations/latest-message-metadata";
 import { unstable_cache } from "next/cache";
 
 export type ConversationWorkspaceTaskSummary = {
@@ -278,7 +279,7 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
         }),
         db.message.findFirst({
             where: { conversationId: conversation.id },
-            select: { createdAt: true, updatedAt: true },
+            select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
         db.contactHistory.findFirst({
@@ -304,7 +305,7 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
 
     return {
         conversationHeader: mapConversationRowToUi(
-            conversation,
+            { ...conversation, latestMessage },
             { ghlLocationId: args.locationGhlId || null },
             dealMap,
             locationDefaultReplyLanguage,
@@ -484,8 +485,8 @@ export async function queryConversationWorkspaceMetadata(args: {
         }),
         db.message.findFirst({
             where: { conversationId: conversation.id },
-            select: { createdAt: true, updatedAt: true },
-            orderBy: { createdAt: "desc" },
+            select: LATEST_MESSAGE_METADATA_SELECT,
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
         db.contactHistory.findFirst({
             where: { contactId: conversation.contactId },
@@ -511,7 +512,7 @@ export async function queryConversationWorkspaceMetadata(args: {
 
     return {
         conversationHeader: mapConversationRowToUi(
-            conversation,
+            { ...conversation, latestMessage },
             { ghlLocationId: args.locationGhlId || null },
             dealMap,
             locationDefaultReplyLanguage,

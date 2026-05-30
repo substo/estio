@@ -5,7 +5,12 @@ import {
     mapConversationRowToUi,
     type ConversationRowMapperLocation,
 } from "@/lib/conversations/conversation-row-mapper";
+import {
+    buildLatestMessageMetadataMap,
+    type ConversationLatestMessageMetadata,
+} from "@/lib/conversations/latest-message-metadata";
 import { unstable_cache } from "next/cache";
+import { Prisma } from "@prisma/client";
 
 export type ConversationListStatus = "active" | "archived" | "trash" | "tasks" | "all";
 export type ConversationCursor = { id: string; lastMessageAtMs: number };
@@ -124,6 +129,28 @@ async function buildActiveDealMapForConversationRows(
     return dealMap;
 }
 
+async function fetchLatestMessageMetadataByConversationId(
+    conversationIds: string[]
+): Promise<Map<string, ConversationLatestMessageMetadata>> {
+    const uniqueIds = Array.from(new Set(conversationIds.map((id) => String(id || "").trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return new Map();
+
+    const latestMessages = await db.$queryRaw<ConversationLatestMessageMetadata[]>(Prisma.sql`
+        SELECT DISTINCT ON ("conversationId")
+            id,
+            "conversationId",
+            type,
+            source,
+            direction,
+            "createdAt"
+        FROM "Message"
+        WHERE "conversationId" IN (${Prisma.join(uniqueIds)})
+        ORDER BY "conversationId", "createdAt" DESC, id DESC
+    `);
+
+    return buildLatestMessageMetadataMap(latestMessages);
+}
+
 export async function queryConversationListSnapshot(args: {
     locationId: string;
     status: ConversationListStatus;
@@ -208,7 +235,8 @@ export async function mapConversationListSnapshotRows(args: {
 }) {
     const dealMap = new Map<string, { id: string; title: string }>(args.dealMapEntries);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id || "");
-    return args.rows.map((row: any) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage));
+    const latestMessageMap = await fetchLatestMessageMetadataByConversationId(args.rows.map((row: any) => row.id));
+    return args.rows.map((row: any) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage, latestMessageMap));
 }
 
 export async function hydrateRankedConversationRows(args: {
@@ -226,6 +254,7 @@ export async function hydrateRankedConversationRows(args: {
 
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, fetchedRows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
+    const latestMessageMap = await fetchLatestMessageMetadataByConversationId(fetchedRows.map((row) => row.id));
 
     const rankIndex = new Map<string, number>();
     args.rankedConversationIds.forEach((id, idx) => rankIndex.set(id, idx));
@@ -237,7 +266,7 @@ export async function hydrateRankedConversationRows(args: {
         return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
     });
 
-    return sortedRows.map((row) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage));
+    return sortedRows.map((row) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage, latestMessageMap));
 }
 
 export async function queryConversationListDelta(args: {
@@ -278,6 +307,7 @@ export async function queryConversationListDelta(args: {
 
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, rows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
+    const latestMessageMap = await fetchLatestMessageMetadataByConversationId(rows.map((row) => row.id));
 
     const deltas = rows.map((row) => {
         const matchesFilter = doesConversationMatchStatus(args.status, row);
@@ -288,7 +318,7 @@ export async function queryConversationListDelta(args: {
             unreadCount: row.unreadCount,
             lastMessageBody: row.lastMessageBody || "",
             lastMessageDate: Math.floor(new Date(row.lastMessageAt).getTime() / 1000),
-            conversation: matchesFilter ? mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage) : null,
+            conversation: matchesFilter ? mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage, latestMessageMap) : null,
         };
     });
 

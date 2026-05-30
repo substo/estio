@@ -1,6 +1,11 @@
 import { DEFAULT_REPLY_LANGUAGE } from "@/lib/ai/reply-language-options";
 import type { Conversation } from "@/lib/ghl/conversations";
 import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
+import { deriveConversationDisplayChannel } from "@/lib/conversations/channel-summary";
+import {
+    resolveCurrentLatestMessageMetadata,
+    type ConversationLatestMessageMetadata,
+} from "@/lib/conversations/latest-message-metadata";
 
 export type ConversationRowMapperLocation = {
     id?: string | null;
@@ -14,7 +19,21 @@ export function mapConversationRowToUi(
     location: ConversationRowMapperLocation,
     dealMap?: ConversationRowActiveDealMap,
     locationDefaultReplyLanguage?: string | null,
+    latestMessageMap?: Map<string, ConversationLatestMessageMetadata>,
 ) {
+    const candidateLatestMessage = latestMessageMap?.get(c.id) || c.latestMessage || null;
+    const latestMessage = resolveCurrentLatestMessageMetadata(c.lastMessageAt, candidateLatestMessage);
+    const lastMessageType = latestMessage?.type || c.lastMessageType || undefined;
+    const lastMessageSource = latestMessage ? latestMessage.source ?? null : null;
+    const lastMessageDirection = latestMessage?.direction === "inbound" || latestMessage?.direction === "outbound"
+        ? latestMessage.direction
+        : undefined;
+    const channelInput = {
+        lastMessageType,
+        type: lastMessageType || c.lastMessageType || "TYPE_SMS",
+        lastMessageSource,
+    };
+
     return {
         id: c.id,
         legacyConversationId: c.ghlConversationId || null,
@@ -37,8 +56,12 @@ export function mapConversationRowToUi(
         lastMessageDate: Math.floor(new Date(c.lastMessageAt).getTime() / 1000),
         unreadCount: c.unreadCount,
         status: c.status as any,
-        type: c.lastMessageType || "TYPE_SMS",
-        lastMessageType: c.lastMessageType || undefined,
+        type: lastMessageType || "TYPE_SMS",
+        lastMessageType,
+        lastMessageSource,
+        lastMessageDirection,
+        lastMessageId: latestMessage?.id || null,
+        lastMessageChannel: deriveConversationDisplayChannel(channelInput),
         locationId: location.id || location.ghlLocationId || "",
         activeDealId: dealMap?.get(c.id)?.id || dealMap?.get(c.ghlConversationId)?.id,
         activeDealTitle: dealMap?.get(c.id)?.title || dealMap?.get(c.ghlConversationId)?.title,

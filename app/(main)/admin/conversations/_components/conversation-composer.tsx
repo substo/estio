@@ -139,6 +139,7 @@ export function ConversationComposer({
     } = useConversationComposerChannel({
         conversation,
         isUnavailable,
+        smsRelayEnabled,
     });
     const {
         previewingTranslation,
