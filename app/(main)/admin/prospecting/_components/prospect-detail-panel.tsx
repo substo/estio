@@ -211,7 +211,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col">
       <ScrapeListingDialog
         isOpen={isScrapeOpen}
         onOpenChange={setIsScrapeOpen}
@@ -235,7 +235,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
       />
 
       {/* Strict Viewport Layout */}
-      <div className="flex-1 overflow-hidden p-3 lg:p-4">
+      <div className="flex-1 min-h-0 overflow-hidden p-3 lg:p-4">
         <div className="flex flex-col lg:grid lg:grid-cols-12 gap-4 h-full min-h-0">
 
           {/* LEFT COLUMN: Details, Seller, Actions */}

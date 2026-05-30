@@ -3,7 +3,10 @@
 import { createContext, ReactNode, useContext } from "react"
 import { usePathname } from "next/navigation"
 
-export const ADMIN_APP_SURFACE_PATHS = ["/admin/conversations"] as const
+export const ADMIN_APP_SURFACE_PATHS = [
+  "/admin/conversations",
+  "/admin/prospecting",
+] as const
 
 export function isAdminAppSurfacePath(pathname: string): boolean {
   return ADMIN_APP_SURFACE_PATHS.some((path) => pathname === path)

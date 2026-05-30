@@ -398,9 +398,9 @@ export function ProspectingTriageView({
         onSubmitSelection={handleConfirmCompanySelection}
         submitLabel="Continue Accept"
       />
-      <div className="flex h-full overflow-hidden">
+      <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
       {/* Left Pane — Feed */}
-      <div className="w-[clamp(320px,24vw,360px)] shrink-0 flex flex-col h-full border-r bg-background">
+      <div className="w-[clamp(320px,24vw,360px)] shrink-0 flex flex-col h-full min-h-0 border-r bg-background">
 
         {/* View Toggle Tabs */}
         <div className="flex border-b shrink-0">
@@ -537,7 +537,7 @@ export function ProspectingTriageView({
         </div>
 
         {/* Feed Cards */}
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           {feedItems.length === 0 ? (
             <div className="p-10 text-center text-muted-foreground">
               <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-15" />
@@ -575,7 +575,7 @@ export function ProspectingTriageView({
       </div>
 
       {/* Right Pane — Detail Panel */}
-      <div className="flex-1 flex flex-col h-full bg-background">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full bg-background">
         {currentView === 'properties' ? (
           <ProspectDetailPanel
             listing={selectedListing}

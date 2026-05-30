@@ -190,7 +190,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
   const linkedCompany = strategicScrape?.companyLink;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col">
       <CompanyLinkDialog
         prospectId={prospect.id}
         open={isCompanyDialogOpen}
@@ -369,7 +369,7 @@ export function ContactDetailPanel({ prospect, onAccept, onReject, isPending, lo
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Properties ({prospect.scrapedListingsCount})</h3>
           {prospect.scrapedListings && prospect.scrapedListings.length > 0 ? (

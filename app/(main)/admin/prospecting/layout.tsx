@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 
 export default function ProspectingLayout({ children }: { children: React.ReactNode }) {
     return (
-        <div className="flex min-h-0 flex-col h-[calc(100dvh-88px)] bg-slate-50/50 dark:bg-slate-950/20">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50/50 dark:bg-slate-950/20">
             {/* Unified Header */}
             <div className="bg-background border-b px-4 py-2 shrink-0">
                 <div className="flex justify-between items-center">
@@ -26,7 +26,7 @@ export default function ProspectingLayout({ children }: { children: React.ReactN
             </div>
 
             {/* Content Area — full bleed for triage layout */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden">
                 {children}
             </div>
         </div>
