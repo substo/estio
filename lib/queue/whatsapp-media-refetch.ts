@@ -60,10 +60,10 @@ export async function enqueueWhatsAppMediaRefetchJob(input: WhatsAppWebBridgeMed
                 queuedAt: new Date().toISOString(),
             },
             {
-                attempts: 2,
+                attempts: 5,
                 backoff: {
                     type: "exponential",
-                    delay: 1500,
+                    delay: 10000,
                 },
                 jobId,
             }
@@ -87,7 +87,11 @@ export async function initWhatsAppMediaRefetchWorker() {
         const worker = new Worker<WhatsAppMediaRefetchJobData>(
             QUEUE_NAME,
             async (job: any) => {
-                await processWhatsAppWebBridgeMediaRefetchAttempt(job.data);
+                await processWhatsAppWebBridgeMediaRefetchAttempt({
+                    ...job.data,
+                    queueAttempt: Number(job.attemptsMade || 0) + 1,
+                    queueMaxAttempts: Number(job.opts?.attempts || 1),
+                });
             },
             {
                 connection: REDIS_CONNECTION,

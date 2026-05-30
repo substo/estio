@@ -6,6 +6,7 @@ import { fetchWhatsAppWebBridgeMessages, normalizeWhatsAppWebChatId } from "@/li
 import {
     formatWhatsAppWebBridgeMediaFailure,
     ingestWhatsAppWebBridgeMediaAttachment,
+    isTransientWebBridgeMediaIngestError,
 } from "@/lib/whatsapp/web-bridge-media";
 
 export type WhatsAppWebBridgeMediaRefetchStatus = "queued" | "processing" | "completed" | "failed";
@@ -30,6 +31,8 @@ export type WhatsAppWebBridgeMediaRefetchJob = {
     messageId: string;
     deleteStoredObject?: boolean;
     limit?: number;
+    queueAttempt?: number;
+    queueMaxAttempts?: number;
 };
 
 type AttachmentSnapshot = {
@@ -180,6 +183,16 @@ async function updateRefetchProgress(args: {
     );
 }
 
+export function shouldRetryTransientMediaRefetchIngest(args: {
+    error: unknown;
+    queueAttempt?: number;
+    queueMaxAttempts?: number;
+}) {
+    const queueAttempt = Math.max(Number(args.queueAttempt || 1), 1);
+    const queueMaxAttempts = Math.max(Number(args.queueMaxAttempts || 1), 1);
+    return isTransientWebBridgeMediaIngestError(args.error) && queueAttempt < queueMaxAttempts;
+}
+
 export async function startWhatsAppWebBridgeMediaRefetchAttempt(args: {
     locationId: string;
     conversationId: string;
@@ -229,6 +242,8 @@ export async function markWhatsAppWebBridgeMediaRefetchAttemptFailed(
 
 export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsAppWebBridgeMediaRefetchJob) {
     const limit = Math.min(Math.max(Number(args.limit || 80), 1), 2500);
+    const queueAttempt = Math.max(Number(args.queueAttempt || 1), 1);
+    const queueMaxAttempts = Math.max(Number(args.queueMaxAttempts || 1), 1);
     const conversation = await db.conversation.findFirst({
         where: { id: args.conversationId, locationId: args.locationId },
         include: {
@@ -405,6 +420,29 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
     } catch (error: any) {
         await restoreAttachmentSnapshot(message.id, snapshot);
         const errorMessage = error?.message || "Failed to ingest Web Bridge media.";
+        if (shouldRetryTransientMediaRefetchIngest({ error, queueAttempt, queueMaxAttempts })) {
+            await updateRefetchProgress({
+                locationId: args.locationId,
+                conversationId: args.conversationId,
+                messageId: args.messageId,
+                update: {
+                    attemptId: args.attemptId,
+                    status: "processing",
+                    stage: "ingest_retrying",
+                    error: errorMessage,
+                    chatId: matchedChatId,
+                    scannedMessages,
+                    message: `Storage failed temporarily; retry ${queueAttempt + 1} of ${queueMaxAttempts} is scheduled.`,
+                },
+                mediaState: {
+                    status: "processing",
+                    reason: "transient_ingest_retry",
+                    error: errorMessage,
+                    meta: matched?.mediaMeta || null,
+                },
+            });
+            throw error;
+        }
         await updateRefetchProgress({
             locationId: args.locationId,
             conversationId: args.conversationId,
