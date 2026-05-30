@@ -22,6 +22,7 @@ import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-sear
 import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
 import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
+import { getConversationTimelineClassName } from "./message-bubble-theme";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -700,7 +701,13 @@ export function ChatWindow({
             )}
 
             {/* Messages Area */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50/50 px-3 py-3 sm:px-5 sm:py-5 lg:px-6">
+            <div
+                ref={scrollRef}
+                className={cn(
+                    "flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-5 sm:py-5 lg:px-6",
+                    getConversationTimelineClassName({ isWhatsApp: isWhatsAppConversation })
+                )}
+            >
                 <div
                     ref={timelineContentRef}
                     className={cn(

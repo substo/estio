@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { deriveOutboundWhatsAppUiState, type OutboundWhatsAppUiTone } from "./conversation-message-actions";
+import type { MessageBubbleTheme } from "./message-bubble-theme";
 
 type MessageBubbleChromeMessage = {
     id: string;
@@ -43,6 +44,7 @@ interface MessageBubbleChromeProps {
     isWhatsApp: boolean;
     isOutbound: boolean;
     isExpanded: boolean;
+    theme: MessageBubbleTheme;
     contactName?: string;
     contactPhone?: string;
     onExpandToggle: () => void;
@@ -60,6 +62,7 @@ export const MessageBubbleChannelHeader = memo(function MessageBubbleChannelHead
     isWhatsApp,
     isOutbound,
     isExpanded,
+    theme,
     contactName,
     contactPhone,
 }: Omit<MessageBubbleChromeProps, "onExpandToggle" | "onResendMessage">) {
@@ -69,9 +72,9 @@ export const MessageBubbleChannelHeader = memo(function MessageBubbleChannelHead
             {(isSMS || isWhatsApp) && (
                 <div className={cn(
                     "px-3 py-1.5 text-[11px] flex items-center gap-2 border-b min-w-0",
-                    isOutbound ? "bg-blue-700/30 text-blue-100 border-blue-500/50" : "bg-gray-50 text-gray-500 border-gray-100"
+                    theme.channelHeaderClassName
                 )}>
-                    <Smartphone className="h-3 w-3 shrink-0" />
+                    <Smartphone className={cn("h-3 w-3 shrink-0", theme.channelHeaderIconClassName)} />
                     <span className="flex-1 w-0 min-w-0 truncate">
                         {isOutbound
                             ? `To: ${contactPhone || contactName || "Contact"}`
@@ -149,6 +152,7 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
     isSMS,
     isWhatsApp,
     isOutbound,
+    theme,
     contactName,
     onResendMessage,
     failureFallbackLabel,
@@ -172,7 +176,7 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
 
     return (
         <div className="flex items-center gap-1 mt-1 px-1 justify-between select-none min-w-0">
-            <span className="text-[10px] text-gray-400 flex gap-1 items-center flex-1 min-w-0 truncate">
+            <span className={cn("text-[10px] flex gap-1 items-center flex-1 min-w-0 truncate", theme.timestampTextClassName)}>
                 {isEmail && <Mail className="h-3 w-3 shrink-0" />}
                 {isSMS && <Smartphone className="h-3 w-3 shrink-0" />}
                 <span className="truncate">

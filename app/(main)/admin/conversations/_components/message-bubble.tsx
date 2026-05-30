@@ -31,6 +31,7 @@ import {
     MessageBubbleTimestampStatusRow,
 } from "./message-bubble-chrome";
 import { getWhatsAppFailureFallbackUiState } from "./conversation-message-actions";
+import { getMessageBubbleTheme } from "./message-bubble-theme";
 
 const EMPTY_ATTACHMENTS: NormalizedMessageAttachment[] = [];
 
@@ -145,6 +146,7 @@ export function MessageBubble({
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
     const isSMS = (message.type || '').toUpperCase().includes('SMS') || (message.type || '').toUpperCase().includes('PHONE');
     const isWhatsApp = (message.type || '').toUpperCase().includes('WHATSAPP');
+    const theme = getMessageBubbleTheme({ isWhatsApp, isSMS, isEmail, isOutbound });
     const [isExpanded, setIsExpanded] = useState(!isEmail); // Emails collapsed by default
     const [isRefetchingMedia, setIsRefetchingMedia] = useState(false);
     const [transcriptActionAttachmentId, setTranscriptActionAttachmentId] = useState<string | null>(null);
@@ -343,9 +345,7 @@ export function MessageBubble({
             <div
                 className={cn(
                     "group relative px-4 py-3 rounded-2xl text-sm shadow-sm overflow-hidden w-full transition-all duration-200",
-                    isOutbound
-                        ? "bg-blue-600 text-white rounded-tr-none"
-                        : "bg-white text-gray-800 border rounded-tl-none",
+                    theme.bubbleClassName,
                     isEmail && "border-l-4 border-l-orange-400 p-0 overflow-hidden", // Email styling distinction
                     isEmail && !isExpanded && "cursor-pointer hover:shadow-md hover:border-l-orange-500" // Clickable indication
                 )}
@@ -372,6 +372,7 @@ export function MessageBubble({
                     isWhatsApp={isWhatsApp}
                     isOutbound={isOutbound}
                     isExpanded={isExpanded}
+                    theme={theme}
                     contactName={contactName}
                     contactPhone={contactPhone}
                 />
@@ -400,6 +401,7 @@ export function MessageBubble({
                             isEmail={isEmail}
                             isExpanded={isExpanded}
                             isOutbound={isOutbound}
+                            theme={theme}
                             activeTranslation={activeTranslation}
                             translationViewMode={translationViewMode}
                             threadTranslationMode={threadTranslationMode}
@@ -411,6 +413,7 @@ export function MessageBubble({
                 <MessageBubbleTranslationActions
                     isEmail={isEmail}
                     isOutbound={isOutbound}
+                    theme={theme}
                     activeTranslation={activeTranslation}
                     translationViewMode={translationViewMode}
                     threadTranslationMode={threadTranslationMode}
@@ -433,8 +436,7 @@ export function MessageBubble({
                                 attachment={attachment}
                                 index={i}
                                 messageId={message.id}
-                                isOutbound={isOutbound}
-                                isEmail={isEmail}
+                                theme={theme}
                                 transcriptActionAttachmentId={transcriptActionAttachmentId}
                                 extractActionAttachmentId={extractActionAttachmentId}
                                 isTranscriptExpanded={isTranscriptExpanded}
@@ -457,8 +459,8 @@ export function MessageBubble({
                             handleRefetchMedia={handleRefetchMedia}
                             getDownloadUrl={getDownloadUrl}
                             attachmentsLength={attachments.length}
-                            isOutbound={isOutbound}
                             isEmail={isEmail}
+                            theme={theme}
                         />
                     </div>
                 )}
@@ -473,8 +475,8 @@ export function MessageBubble({
                     handleRefetchMedia={handleRefetchMedia}
                     getDownloadUrl={getDownloadUrl}
                     attachmentsLength={attachments.length}
-                    isOutbound={isOutbound}
                     isEmail={isEmail}
+                    theme={theme}
                 />
 
                 <MessageBubbleEmailExpandFooter
@@ -484,19 +486,20 @@ export function MessageBubble({
                 />
             </div>
 
-                <MessageBubbleTimestampStatusRow
-                    message={message}
+            <MessageBubbleTimestampStatusRow
+                message={message}
                 isEmail={isEmail}
                 isSMS={isSMS}
                 isWhatsApp={isWhatsApp}
                 isOutbound={isOutbound}
-                    contactName={contactName}
-                    onResendMessage={onResendMessage}
-                    failureFallbackLabel={failureFallbackUi.label}
-                    smsFallbackLabel={failureFallbackUi.smsFallbackLabel}
-                    smsFallbackUnavailableLabel={failureFallbackUi.smsFallbackUnavailableLabel}
-                    onSendSmsFallback={onSendSmsFallback}
-                />
+                theme={theme}
+                contactName={contactName}
+                onResendMessage={onResendMessage}
+                failureFallbackLabel={failureFallbackUi.label}
+                smsFallbackLabel={failureFallbackUi.smsFallbackLabel}
+                smsFallbackUnavailableLabel={failureFallbackUi.smsFallbackUnavailableLabel}
+                onSendSmsFallback={onSendSmsFallback}
+            />
 
             {selectionActions}
         </div>

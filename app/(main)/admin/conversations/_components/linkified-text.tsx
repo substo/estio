@@ -1,9 +1,10 @@
 import React from "react";
+import { cn } from "@/lib/utils";
 
 // Industry-standard URL regex (similar to Gruber's) that avoids capturing trailing punctuation
 const URL_REGEX = /(\b(?:https?):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
 
-export function LinkifiedText({ text }: { text: string }) {
+export function LinkifiedText({ text, linkClassName }: { text: string; linkClassName?: string }) {
     if (!text) return null;
 
     const parts = text.split(URL_REGEX);
@@ -18,7 +19,7 @@ export function LinkifiedText({ text }: { text: string }) {
                             href={part}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="underline hover:opacity-80 break-all"
+                            className={cn("underline hover:opacity-80 break-all", linkClassName)}
                             onClick={(e) => e.stopPropagation()}
                         >
                             {part}

@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { MessageTranslationVariant } from "@/lib/ghl/conversations";
 import { EmailFrame, type EmailFrameSelection } from "./email-frame";
 import { LinkifiedText } from "./linkified-text";
+import type { MessageBubbleTheme } from "./message-bubble-theme";
 
 interface MessageBubbleBodyProps {
     body: string;
@@ -13,6 +14,7 @@ interface MessageBubbleBodyProps {
     activeTranslation: MessageTranslationVariant | null;
     translationViewMode: "thread" | "original" | "translated";
     threadTranslationMode: "original" | "translated";
+    theme: MessageBubbleTheme;
     onEmailSelectionChange: (selection: EmailFrameSelection | null) => void;
 }
 
@@ -24,6 +26,7 @@ interface MessageBubbleTranslationActionsProps {
     threadTranslationMode: "original" | "translated";
     canTranslateMessage: boolean;
     isTranslatingMessage: boolean;
+    theme: MessageBubbleTheme;
     onTranslateMessage: () => void;
     onToggleTranslationViewMode: () => void;
 }
@@ -61,6 +64,7 @@ export function MessageBubbleBody({
     activeTranslation,
     translationViewMode,
     threadTranslationMode,
+    theme,
     onEmailSelectionChange,
 }: MessageBubbleBodyProps) {
     const isRichHtml = body ? isRichHtmlBody(body) : false;
@@ -84,11 +88,11 @@ export function MessageBubbleBody({
             <div className="space-y-1">
                 <div className={cn(
                     "text-[11px] font-medium",
-                    isOutbound ? "text-blue-100" : "text-slate-500"
+                    isOutbound ? theme.translationMetaClassName : "text-slate-500"
                 )}>
                     {isOutbound ? "Sent to client" : `Translated${activeTranslation?.sourceLanguage ? ` from ${activeTranslation.sourceLanguage}` : ""}`}
                 </div>
-                <LinkifiedText text={translatedText} />
+                <LinkifiedText text={translatedText} linkClassName={theme.linkClassName} />
             </div>
         );
     }
@@ -105,15 +109,15 @@ export function MessageBubbleBody({
             <div className="space-y-1">
                 <div className={cn(
                     "text-[11px] font-medium",
-                    isOutbound ? "text-blue-100" : "text-slate-500"
+                    isOutbound ? theme.translationMetaClassName : "text-slate-500"
                 )}>
                     Internal source
                 </div>
-                <LinkifiedText text={sourceText} />
+                <LinkifiedText text={sourceText} linkClassName={theme.linkClassName} />
             </div>
         );
     }
-    return <LinkifiedText text={sourceText || body} />;
+    return <LinkifiedText text={sourceText || body} linkClassName={theme.linkClassName} />;
 }
 
 export function MessageBubbleTranslationActions({
@@ -124,6 +128,7 @@ export function MessageBubbleTranslationActions({
     threadTranslationMode,
     canTranslateMessage,
     isTranslatingMessage,
+    theme,
     onTranslateMessage,
     onToggleTranslationViewMode,
 }: MessageBubbleTranslationActionsProps) {
@@ -141,7 +146,7 @@ export function MessageBubbleTranslationActions({
                         disabled={isTranslatingMessage}
                         className={cn(
                             "rounded px-1.5 py-0.5",
-                            isOutbound ? "text-blue-100 hover:bg-white/20" : "text-blue-600 hover:bg-blue-50"
+                            isOutbound ? theme.translationPrimaryActionClassName : "text-blue-600 hover:bg-blue-50"
                         )}
                     >
                         {isTranslatingMessage ? "Translating..." : "Translate"}
@@ -157,7 +162,7 @@ export function MessageBubbleTranslationActions({
                             }}
                             className={cn(
                                 "rounded px-1.5 py-0.5",
-                                isOutbound ? "text-blue-100 hover:bg-white/20" : "text-slate-600 hover:bg-slate-100"
+                                isOutbound ? theme.translationSecondaryActionClassName : "text-slate-600 hover:bg-slate-100"
                             )}
                         >
                             {getMessageBubbleTranslationToggleLabel({
@@ -176,7 +181,7 @@ export function MessageBubbleTranslationActions({
                                 disabled={isTranslatingMessage}
                                 className={cn(
                                     "rounded px-1.5 py-0.5",
-                                    isOutbound ? "text-blue-100 hover:bg-white/20" : "text-blue-600 hover:bg-blue-50"
+                                    isOutbound ? theme.translationPrimaryActionClassName : "text-blue-600 hover:bg-blue-50"
                                 )}
                             >
                                 {isTranslatingMessage ? "Refreshing..." : "Refresh translation"}
