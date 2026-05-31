@@ -344,9 +344,10 @@ export function MessageBubble({
         >
             <div
                 className={cn(
-                    "group relative px-4 py-3 rounded-2xl text-sm shadow-sm overflow-hidden w-full transition-all duration-200",
+                    "group relative rounded-2xl text-sm shadow-sm overflow-hidden w-full transition-all duration-200",
+                    isEmail ? "p-0" : "px-3 py-2",
                     theme.bubbleClassName,
-                    isEmail && "border-l-4 border-l-orange-400 p-0 overflow-hidden", // Email styling distinction
+                    isEmail && "border-l-4 border-l-orange-400 overflow-hidden", // Email styling distinction
                     isEmail && !isExpanded && "cursor-pointer hover:shadow-md hover:border-l-orange-500" // Clickable indication
                 )}
                 onClick={() => {
@@ -425,7 +426,7 @@ export function MessageBubble({
 
                 {/* Attachments */}
                 {attachments.length > 0 && (
-                    <div className={cn("px-4 pb-2 space-y-1 mt-2", isEmail && "bg-gray-50 pt-2 border-t")}>
+                    <div className={cn("space-y-1 mt-1.5", isEmail ? "bg-gray-50 px-4 pb-2 pt-2 border-t" : "pb-1")}>
                         <MessageImageAttachments
                             imageAttachments={imageAttachments}
                             getDownloadUrl={getDownloadUrl}

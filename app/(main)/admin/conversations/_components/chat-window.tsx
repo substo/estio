@@ -22,7 +22,11 @@ import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-sear
 import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
 import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
-import { getConversationTimelineClassName } from "./message-bubble-theme";
+import {
+    getConversationTimelineClassName,
+    getConversationTimelineContentClassName,
+    getConversationTimelineScrollClassName,
+} from "./message-bubble-theme";
 import { getConversationChannelInfo } from "./conversation-channel-info";
 import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
 
@@ -695,14 +699,15 @@ export function ChatWindow({
             <div
                 ref={scrollRef}
                 className={cn(
-                    "flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-5 sm:py-5 lg:px-6",
+                    "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
+                    getConversationTimelineScrollClassName(),
                     getConversationTimelineClassName({ isWhatsApp: isWhatsAppConversation })
                 )}
             >
                 <div
                     ref={timelineContentRef}
                     className={cn(
-                        "space-y-4 sm:space-y-5 min-w-0 max-w-full",
+                        getConversationTimelineContentClassName(),
                         !loading && timelineItems.length > 0 && !isTimelineReady && "opacity-0"
                     )}
                 >

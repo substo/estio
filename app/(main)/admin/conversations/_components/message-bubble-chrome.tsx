@@ -35,6 +35,7 @@ type MessageBubbleChromeMessage = {
     emailFrom?: string;
     emailTo?: string;
     contactName?: string;
+    source?: string;
 };
 
 interface MessageBubbleChromeProps {
@@ -66,15 +67,18 @@ export const MessageBubbleChannelHeader = memo(function MessageBubbleChannelHead
     contactName,
     contactPhone,
 }: Omit<MessageBubbleChromeProps, "onExpandToggle" | "onResendMessage">) {
+    const shouldShowMessagingHeader = (isSMS || isWhatsApp) && message.status === "failed";
+
     return (
         <>
             {/* SMS/WhatsApp Header */}
-            {(isSMS || isWhatsApp) && (
+            {shouldShowMessagingHeader && (
                 <div className={cn(
-                    "px-3 py-1.5 text-[11px] flex items-center gap-2 border-b min-w-0",
+                    "mb-1.5 rounded-md px-2 py-1 text-[10px] flex items-center gap-1.5 border min-w-0",
                     theme.channelHeaderClassName
                 )}>
                     <Smartphone className={cn("h-3 w-3 shrink-0", theme.channelHeaderIconClassName)} />
+                    <span className="shrink-0 font-medium">{isWhatsApp ? "WhatsApp" : "SMS"}</span>
                     <span className="flex-1 w-0 min-w-0 truncate">
                         {isOutbound
                             ? `To: ${contactPhone || contactName || "Contact"}`
@@ -173,15 +177,23 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
         warning: "text-amber-600 bg-amber-50 border-amber-100",
         danger: "text-red-500 bg-red-50 border-red-100",
     };
+    const compactChannelLabel = isWhatsApp
+        ? "WA"
+        : isSMS
+            ? String(message.source || "").toLowerCase().includes("android")
+                ? "Android SMS"
+                : "SMS"
+            : isEmail
+                ? "Email"
+                : "Message";
 
     return (
-        <div className="flex items-center gap-1 mt-1 px-1 justify-between select-none min-w-0">
+        <div className="flex items-center gap-1 mt-0.5 px-1 justify-between select-none min-w-0 leading-none">
             <span className={cn("text-[10px] flex gap-1 items-center flex-1 min-w-0 truncate", theme.timestampTextClassName)}>
                 {isEmail && <Mail className="h-3 w-3 shrink-0" />}
-                {isSMS && <Smartphone className="h-3 w-3 shrink-0" />}
-                <span className="truncate">
-                    {(message.contactName || contactName) && !isOutbound ? "Contact • " : "You • "}
-                    {format(new Date(message.dateAdded), "PP p")}
+                {(isSMS || isWhatsApp) && <Smartphone className="h-3 w-3 shrink-0" />}
+                <span className="truncate" title={`${compactChannelLabel} • ${format(new Date(message.dateAdded), "PP p")}`}>
+                    {compactChannelLabel} • {(message.contactName || contactName) && !isOutbound ? "Contact" : "You"} • {format(new Date(message.dateAdded), "MMM d, h:mm a")}
                 </span>
             </span>
 

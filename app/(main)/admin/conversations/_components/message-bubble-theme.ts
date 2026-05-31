@@ -152,6 +152,18 @@ export function getConversationTimelineClassName(input: { isWhatsApp: boolean })
         : "bg-slate-50/50";
 }
 
+export function getConversationTimelineScrollClassName() {
+    return "px-2.5 py-2 sm:px-4 sm:py-3 lg:px-5";
+}
+
+export function getConversationTimelineContentClassName() {
+    return "space-y-2 sm:space-y-2.5 min-w-0 max-w-full";
+}
+
+export function getDealTimelineScrollClassName() {
+    return "p-2.5 sm:p-3";
+}
+
 function getLightTranscriptStatusTone(status: TranscriptStatus): string | false {
     if (status === "completed") return "bg-emerald-100 text-emerald-700";
     if (status === "failed") return "bg-red-100 text-red-700";

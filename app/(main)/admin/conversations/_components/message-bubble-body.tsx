@@ -85,7 +85,7 @@ export function MessageBubbleBody({
 
     if (translatedText && showTranslatedText) {
         return (
-            <div className="space-y-1">
+            <div className="space-y-0.5">
                 <div className={cn(
                     "text-[11px] font-medium",
                     isOutbound ? theme.translationMetaClassName : "text-slate-500"
@@ -106,7 +106,7 @@ export function MessageBubbleBody({
     }
     if (sourceText) {
         return (
-            <div className="space-y-1">
+            <div className="space-y-0.5">
                 <div className={cn(
                     "text-[11px] font-medium",
                     isOutbound ? theme.translationMetaClassName : "text-slate-500"
@@ -134,7 +134,7 @@ export function MessageBubbleTranslationActions({
 }: MessageBubbleTranslationActionsProps) {
     if (!canTranslateMessage && !activeTranslation) return null;
     return (
-        <div className={cn("px-4 pb-1", isEmail && "bg-white")}>
+        <div className={cn(isEmail ? "bg-white px-4 pb-1" : "pt-1")}>
             <div className="flex items-center gap-2 text-[11px]">
                 {canTranslateMessage && !activeTranslation && (
                     <button

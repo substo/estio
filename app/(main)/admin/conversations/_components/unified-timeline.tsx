@@ -10,6 +10,8 @@ import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 import { useUnifiedTimelineScroll } from './use-unified-timeline-scroll';
+import { getConversationTimelineContentClassName, getDealTimelineScrollClassName } from './message-bubble-theme';
+import { cn } from '@/lib/utils';
 import type { ComposerChannel } from './use-conversation-composer-translation-preview';
 
 interface UnifiedTimelineProps {
@@ -182,7 +184,7 @@ export function UnifiedTimeline({
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4" ref={timelineRef}>
+            <div className={cn("flex-1 min-h-0 overflow-y-auto", getDealTimelineScrollClassName())} ref={timelineRef}>
                 {loading && events.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-gray-400">
                         <Sparkles className="w-5 h-5 animate-spin mr-2" />
@@ -196,7 +198,10 @@ export function UnifiedTimeline({
                 ) : (
                     <div
                         ref={timelineContentRef}
-                        className={!loading && events.length > 0 && !isTimelineReady ? "opacity-0" : ""}
+                        className={cn(
+                            getConversationTimelineContentClassName(),
+                            !loading && events.length > 0 && !isTimelineReady && "opacity-0"
+                        )}
                     >
                         {events.map((event) => {
                             if (event?.kind === "activity") {
