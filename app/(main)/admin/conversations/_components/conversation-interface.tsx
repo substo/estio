@@ -1343,7 +1343,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     useConversationRealtimeEvents({
         featureRealtimeSse: featureFlags.realtimeSse,
-        isTabVisible,
         searchQuery,
         viewFilter,
         activeDealId,

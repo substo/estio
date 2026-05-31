@@ -296,12 +296,15 @@ export function useConversationRefreshOrchestration({
         workspaceActivityLimit,
     ]);
 
-    const runRealtimeRefresh = useCallback((conversationId?: string | null) => {
+    const runRealtimeRefresh = useCallback((
+        conversationId?: string | null,
+        options?: { allowHidden?: boolean }
+    ) => {
         if (realtimeRefreshTimerRef.current) return;
         realtimeRefreshTimerRef.current = setTimeout(async () => {
             realtimeRefreshTimerRef.current = null;
             if (viewMode !== 'chats' || viewFilter === 'tasks') return;
-            if (!isTabVisible) return;
+            if (!isTabVisible && !options?.allowHidden) return;
             if (searchQuery.trim()) return;
 
             try {

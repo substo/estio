@@ -25,7 +25,7 @@ type RealtimeEnvelopeRoutingArgs = {
     activeDealIdRef: RefObject<string | null>;
     mergeState: RealtimeEventMergeState;
     setMessages: Dispatch<SetStateAction<Message[]>>;
-    runRealtimeRefresh: (conversationId?: string | null) => void;
+    runRealtimeRefresh: (conversationId?: string | null, options?: { allowHidden?: boolean }) => void;
     refreshActiveDealWorkspace: (dealId: string, options?: {
         reason?: string;
         take?: number;
@@ -42,7 +42,6 @@ type RealtimeEnvelopeRoutingArgs = {
 
 type UseConversationRealtimeEventsArgs = Omit<RealtimeEnvelopeRoutingArgs, 'rawData' | 'mergeState'> & {
     featureRealtimeSse: boolean;
-    isTabVisible: boolean;
     searchQuery: string;
     viewFilter: 'active' | 'archived' | 'trash' | 'tasks';
     activeDealId: string | null;
@@ -71,6 +70,10 @@ export function routeConversationRealtimeEnvelope({
     cacheWorkspaceCoreSnapshot,
     workspaceCoreInFlightRef,
 }: RealtimeEnvelopeRoutingArgs): void {
+    const runEventDrivenRefresh = (targetConversationId?: string | null) => {
+        runRealtimeRefresh(targetConversationId, { allowHidden: true });
+    };
+
     const event = JSON.parse(rawData || "{}");
     const conversationId = event?.conversationId ? String(event.conversationId) : null;
     const eventType = String(event?.type || "");
@@ -103,7 +106,7 @@ export function routeConversationRealtimeEnvelope({
         if (patched) return;
 
         // Fallback consistency repair for unknown message ids.
-        runRealtimeRefresh(conversationId);
+        runEventDrivenRefresh(conversationId);
         return;
     }
 
@@ -118,7 +121,7 @@ export function routeConversationRealtimeEnvelope({
             return;
         }
 
-        runRealtimeRefresh(conversationId);
+        runEventDrivenRefresh(conversationId);
         return;
     }
 
@@ -144,7 +147,7 @@ export function routeConversationRealtimeEnvelope({
                 }
             }
 
-            runRealtimeRefresh(conversationId);
+            runEventDrivenRefresh(conversationId);
             return;
         }
 
@@ -153,16 +156,15 @@ export function routeConversationRealtimeEnvelope({
             workspaceCoreInFlightRef.current.delete(conversationId);
         }
         void prefetchWorkspaceCore(conversationId);
-        runRealtimeRefresh(conversationId);
+        runEventDrivenRefresh(conversationId);
         return;
     }
 
-    runRealtimeRefresh(conversationId);
+    runEventDrivenRefresh(conversationId);
 }
 
 export function useConversationRealtimeEvents({
     featureRealtimeSse,
-    isTabVisible,
     searchQuery,
     viewFilter,
     activeDealId,
@@ -194,8 +196,7 @@ export function useConversationRealtimeEvents({
         }
 
         const shouldDisableRealtime = (
-            !isTabVisible
-            || (viewMode === 'chats' && searchQuery.trim().length > 0)
+            (viewMode === 'chats' && searchQuery.trim().length > 0)
             || (viewMode === 'chats' && viewFilter === 'tasks')
             || (viewMode !== 'chats' && viewMode !== 'deals')
         );
@@ -300,7 +301,6 @@ export function useConversationRealtimeEvents({
         searchQuery,
         featureRealtimeSse,
         getCachedWorkspaceCoreSnapshot,
-        isTabVisible,
         prefetchWorkspaceCore,
         refreshActiveDealWorkspace,
         runRealtimeRefresh,
