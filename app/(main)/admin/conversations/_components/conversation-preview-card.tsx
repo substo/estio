@@ -2,6 +2,7 @@ import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { getConversationChannelInfo } from "./conversation-channel-info";
+import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
 
 interface ConversationPreviewCardProps {
     conversation: Conversation;
@@ -13,6 +14,7 @@ interface ConversationPreviewCardProps {
  */
 export function ConversationPreviewCard({ conversation }: ConversationPreviewCardProps) {
     const channel = getConversationChannelInfo(conversation);
+    const lifecycle = getConversationLifecycleUi(conversation.status);
 
     return (
         <div className="p-4">
@@ -32,9 +34,9 @@ export function ConversationPreviewCard({ conversation }: ConversationPreviewCar
             <div className="flex items-center gap-2 mb-3">
                 <span className={cn(
                     "text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase",
-                    conversation.status === 'open' ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
+                    lifecycle.badgeClassName
                 )}>
-                    {conversation.status}
+                    {lifecycle.label}
                 </span>
                 <span className={cn("text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1", channel.color)}>
                     {channel.icon}

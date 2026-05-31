@@ -97,7 +97,7 @@ export function getConversationFeatureFlags(locationId?: string | null, opts?: {
 
     const smsRelayMode = parseMode(
         readEnv("SMS_RELAY_ENABLED", "sms_relay_enabled"),
-        "off"
+        "on"
     );
 
     return {

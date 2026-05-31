@@ -28,6 +28,7 @@ import {
     getConversationTimelineScrollClassName,
 } from "./message-bubble-theme";
 import { getConversationChannelInfo } from "./conversation-channel-info";
+import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
 import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
 
 interface ChatWindowProps {
@@ -306,6 +307,7 @@ export function ChatWindow({
     const isWhatsAppConversation = conversationType.includes("WHATSAPP");
     const isEmailConversation = conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL' || conversationType.includes("EMAIL");
     const conversationChannelLabel = getConversationChannelInfo(conversation).name;
+    const conversationLifecycle = getConversationLifecycleUi(conversation.status);
     const hasMobileMoreActions = (
         selectionBatch.length > 0
         || (!!isWhatsAppConversation && !!onSync)
@@ -339,9 +341,9 @@ export function ChatWindow({
                     <div className="w-0 flex-1 min-w-0 overflow-hidden">
                         <h3 className="block w-full truncate font-bold text-gray-900">{conversation.contactName || "Unknown Contact"}</h3>
                         <div className="flex items-center gap-2 mt-0.5 min-w-0">
-                            <span className="flex h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                            <span className={cn("flex h-2 w-2 rounded-full shrink-0", conversationLifecycle.dotClassName)} />
                             <p className="text-xs text-gray-500 font-medium truncate min-w-0 flex-1">
-                                {conversationChannelLabel} • {conversation.status}
+                                {conversationChannelLabel} • {conversationLifecycle.label}
                             </p>
                         </div>
                     </div>

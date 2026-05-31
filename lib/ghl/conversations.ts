@@ -13,7 +13,7 @@ export interface Conversation {
     lastMessageDate: number;
     lastMessageType?: string; // e.g. "TYPE_SMS", "TYPE_EMAIL"
     lastMessageSource?: string | null;
-    lastMessageChannel?: "WhatsApp" | "Email" | "SMS" | "SMS_RELAY" | "Unknown";
+    lastMessageChannel?: "WhatsApp" | "Email" | "SMS" | "SMS_RELAY" | "Note" | "Unknown";
     unreadCount: number;
     status: 'open' | 'closed' | 'all' | 'starred';
     assignedTo?: string;

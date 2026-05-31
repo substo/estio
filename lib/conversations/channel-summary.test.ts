@@ -56,6 +56,22 @@ test("deriveConversationDisplayChannel falls back to conversation type", () => {
     }), "Email");
 });
 
+test("deriveConversationDisplayChannel maps internal notes to Note", () => {
+    const channel = deriveConversationDisplayChannel({
+        lastMessageType: "TYPE_NOTE",
+        type: "TYPE_SMS",
+        lastMessageSource: null,
+    });
+
+    assert.equal(channel, "Note");
+    assert.equal(getConversationDisplayChannelLabel(channel), "Note");
+    assert.equal(deriveComposerInitialChannel({
+        lastMessageType: "TYPE_NOTE",
+        type: "TYPE_SMS",
+        lastMessageSource: null,
+    }), "SMS");
+});
+
 test("deriveComposerInitialChannel can default to SMS relay when enabled", () => {
     const conversation = {
         lastMessageType: "TYPE_SMS",

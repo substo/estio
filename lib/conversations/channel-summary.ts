@@ -1,6 +1,6 @@
 import type { Conversation } from "@/lib/ghl/conversations";
 
-export type ConversationDisplayChannel = "WhatsApp" | "Email" | "SMS" | "SMS_RELAY" | "Unknown";
+export type ConversationDisplayChannel = "WhatsApp" | "Email" | "SMS" | "SMS_RELAY" | "Note" | "Unknown";
 
 type ConversationChannelInput = Pick<Conversation,
     "lastMessageType" | "type" | "lastMessageSource" | "lastMessageChannel"
@@ -30,6 +30,7 @@ export function deriveConversationDisplayChannel(
 
     if (type.includes("WHATSAPP")) return "WhatsApp";
     if (type.includes("EMAIL")) return "Email";
+    if (type.includes("NOTE")) return "Note";
     if (type.includes("SMS") || type.includes("PHONE") || type.includes("CALL")) {
         return source === "sms_relay" || source === "sms_relay_manual" ? "SMS_RELAY" : "SMS";
     }

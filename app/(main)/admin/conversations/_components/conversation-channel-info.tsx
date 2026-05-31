@@ -15,6 +15,9 @@ export function getChannelInfo(type: string): { name: string; icon: React.ReactN
     if (typeUpper.includes('EMAIL')) {
         return { name: 'Email', icon: <Mail className="w-3 h-3" />, color: 'bg-purple-50 text-purple-600' };
     }
+    if (typeUpper.includes('NOTE')) {
+        return { name: 'Note', icon: <MessageSquare className="w-3 h-3" />, color: 'bg-slate-50 text-slate-600' };
+    }
     if (typeUpper.includes('WHATSAPP')) {
         return { name: 'WhatsApp', icon: <MessageCircle className="w-3 h-3" />, color: 'bg-green-50 text-green-600' };
     }
