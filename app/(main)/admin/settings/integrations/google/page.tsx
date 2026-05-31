@@ -12,8 +12,10 @@ import { GoogleTasklistSettings } from "./tasklist-settings";
 import { GoogleCalendarSettings } from "./calendar-settings";
 import { listGoogleTasklists, DEFAULT_GOOGLE_TASKLIST_ID } from "@/lib/tasks/providers/google";
 import { listGoogleCalendars } from "@/lib/viewings/providers/google-calendar";
-import { settingsService } from "@/lib/settings/service";
-import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
+import {
+    getGoogleIntegrationSettingsForRead,
+    googleIntegrationSettingsSelect,
+} from "@/lib/google/settings";
 
 export default async function GoogleIntegrationPage({
     searchParams,
@@ -29,18 +31,7 @@ export default async function GoogleIntegrationPage({
             id: true,
             googleAccessToken: true,
             googleRefreshToken: true,
-            googleSyncEnabled: true,
-            googleSyncDirection: true,
-            googleAutoSyncEnabled: true,
-            googleAutoSyncLeadCapture: true,
-            googleAutoSyncContactForm: true,
-            googleAutoSyncWhatsAppInbound: true,
-            googleAutoSyncMode: true,
-            googleAutoSyncPushUpdates: true,
-            googleTasklistId: true,
-            googleTasklistTitle: true,
-            googleCalendarId: true,
-            googleCalendarTitle: true,
+            ...googleIntegrationSettingsSelect,
         }
     });
 
@@ -48,47 +39,7 @@ export default async function GoogleIntegrationPage({
         return <div>User not found</div>;
     }
 
-    const googleSettingsDoc = await settingsService.getDocument<any>({
-        scopeType: "USER",
-        scopeId: user.id,
-        domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-    });
-    const googleSettings = googleSettingsDoc?.payload || {};
-    const useNewReadPath = isSettingsReadFromNewEnabled();
-
-    const resolvedGoogleSyncDirection =
-        (useNewReadPath ? googleSettings.googleSyncDirection : undefined) ??
-        user.googleSyncDirection;
-    const resolvedGoogleAutoSyncEnabled =
-        (useNewReadPath ? googleSettings.googleAutoSyncEnabled : undefined) ??
-        user.googleAutoSyncEnabled;
-    const resolvedGoogleAutoSyncLeadCapture =
-        (useNewReadPath ? googleSettings.googleAutoSyncLeadCapture : undefined) ??
-        user.googleAutoSyncLeadCapture;
-    const resolvedGoogleAutoSyncContactForm =
-        (useNewReadPath ? googleSettings.googleAutoSyncContactForm : undefined) ??
-        user.googleAutoSyncContactForm;
-    const resolvedGoogleAutoSyncWhatsAppInbound =
-        (useNewReadPath ? googleSettings.googleAutoSyncWhatsAppInbound : undefined) ??
-        user.googleAutoSyncWhatsAppInbound;
-    const resolvedGoogleAutoSyncMode =
-        (useNewReadPath ? googleSettings.googleAutoSyncMode : undefined) ??
-        user.googleAutoSyncMode;
-    const resolvedGoogleAutoSyncPushUpdates =
-        (useNewReadPath ? googleSettings.googleAutoSyncPushUpdates : undefined) ??
-        user.googleAutoSyncPushUpdates;
-    const resolvedGoogleTasklistId =
-        (useNewReadPath ? googleSettings.googleTasklistId : undefined) ??
-        user.googleTasklistId;
-    const resolvedGoogleTasklistTitle =
-        (useNewReadPath ? googleSettings.googleTasklistTitle : undefined) ??
-        user.googleTasklistTitle;
-    const resolvedGoogleCalendarId =
-        (useNewReadPath ? googleSettings.googleCalendarId : undefined) ??
-        user.googleCalendarId;
-    const resolvedGoogleCalendarTitle =
-        (useNewReadPath ? googleSettings.googleCalendarTitle : undefined) ??
-        user.googleCalendarTitle;
+    const googleSettings = await getGoogleIntegrationSettingsForRead(user);
 
     const isConnected = !!user.googleAccessToken;
     const resolvedParams = await searchParams;
@@ -125,9 +76,9 @@ export default async function GoogleIntegrationPage({
         } catch (error: any) {
             tasklistLoadError = error?.message || "Could not load Google tasklists. Reconnect Google to refresh permissions.";
             googleTasklists = [{
-                id: resolvedGoogleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID,
-                title: resolvedGoogleTasklistTitle || "Default",
-                isDefault: (resolvedGoogleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID) === DEFAULT_GOOGLE_TASKLIST_ID,
+                id: googleSettings.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID,
+                title: googleSettings.googleTasklistTitle || "Default",
+                isDefault: (googleSettings.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID) === DEFAULT_GOOGLE_TASKLIST_ID,
             }];
         }
 
@@ -140,10 +91,10 @@ export default async function GoogleIntegrationPage({
             }));
         } catch (error: any) {
             calendarLoadError = error?.message || "Could not load Google calendars. Reconnect Google to refresh calendar permissions.";
-            if (resolvedGoogleCalendarId) {
+            if (googleSettings.googleCalendarId) {
                 googleCalendars = [{
-                    id: resolvedGoogleCalendarId,
-                    title: resolvedGoogleCalendarTitle || "Default Calendar",
+                    id: googleSettings.googleCalendarId,
+                    title: googleSettings.googleCalendarTitle || "Default Calendar",
                     isPrimary: false,
                 }];
             }
@@ -229,35 +180,35 @@ export default async function GoogleIntegrationPage({
                 </Card>
 
                 <SyncDirectionSettings
-                    currentDirection={resolvedGoogleSyncDirection}
+                    currentDirection={googleSettings.googleSyncDirection}
                     isConnected={isConnected}
                 />
 
                 <GoogleAutomationSettings
                     isConnected={isConnected}
                     initialSettings={{
-                        googleAutoSyncEnabled: resolvedGoogleAutoSyncEnabled,
-                        googleAutoSyncLeadCapture: resolvedGoogleAutoSyncLeadCapture,
-                        googleAutoSyncContactForm: resolvedGoogleAutoSyncContactForm,
-                        googleAutoSyncWhatsAppInbound: resolvedGoogleAutoSyncWhatsAppInbound,
-                        googleAutoSyncMode: resolvedGoogleAutoSyncMode || "LINK_ONLY",
-                        googleAutoSyncPushUpdates: resolvedGoogleAutoSyncPushUpdates
+                        googleAutoSyncEnabled: googleSettings.googleAutoSyncEnabled,
+                        googleAutoSyncLeadCapture: googleSettings.googleAutoSyncLeadCapture,
+                        googleAutoSyncContactForm: googleSettings.googleAutoSyncContactForm,
+                        googleAutoSyncWhatsAppInbound: googleSettings.googleAutoSyncWhatsAppInbound,
+                        googleAutoSyncMode: googleSettings.googleAutoSyncMode,
+                        googleAutoSyncPushUpdates: googleSettings.googleAutoSyncPushUpdates
                     }}
                 />
 
                 <GoogleTasklistSettings
                     isConnected={isConnected}
                     tasklists={googleTasklists}
-                    currentTasklistId={resolvedGoogleTasklistId}
-                    currentTasklistTitle={resolvedGoogleTasklistTitle}
+                    currentTasklistId={googleSettings.googleTasklistId}
+                    currentTasklistTitle={googleSettings.googleTasklistTitle}
                     loadError={tasklistLoadError}
                 />
 
                 <GoogleCalendarSettings
                     isConnected={isConnected}
                     calendars={googleCalendars}
-                    currentCalendarId={resolvedGoogleCalendarId}
-                    currentCalendarTitle={resolvedGoogleCalendarTitle}
+                    currentCalendarId={googleSettings.googleCalendarId}
+                    currentCalendarTitle={googleSettings.googleCalendarTitle}
                     loadError={calendarLoadError}
                 />
             </div>
