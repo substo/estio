@@ -6,6 +6,7 @@ import {
 import { type ComposerChannel } from "./use-conversation-composer-translation-preview";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 import {
+    availableChannel,
     createDefaultChannelCapabilities,
     getConversationContactIdentity,
     getFirstAvailableChannel,
@@ -46,6 +47,30 @@ function getDefaultCapabilitiesForConversation(conversation: Conversation | null
         defaults.Email = unavailableChannel("missing_email", "Contact does not have an email address.");
     }
     return defaults;
+}
+
+export function deriveProvisionalConversationChannelCapabilities(
+    conversation: Conversation | null,
+    options: { smsRelayEnabled?: boolean } = {}
+): ConversationChannelCapabilities {
+    const capabilities = getDefaultCapabilitiesForConversation(conversation);
+    const identity = getConversationContactIdentity(conversation);
+
+    if (identity.hasEmail) {
+        capabilities.Email = availableChannel();
+    }
+
+    if (identity.hasPhone && options.smsRelayEnabled) {
+        capabilities.SMS_RELAY = availableChannel();
+    }
+
+    const hasActualLatestWhatsAppMessage = !!conversation?.lastMessageId
+        && conversation.lastMessageChannel === "WhatsApp";
+    if (hasActualLatestWhatsAppMessage) {
+        capabilities.WhatsApp = availableChannel();
+    }
+
+    return capabilities;
 }
 
 export function buildConversationChannelCapabilityCacheKey(
@@ -117,7 +142,7 @@ export function useConversationComposerChannel({
     const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialComposerChannel(conversation, { smsRelayEnabled }));
     const [capabilities, setCapabilities] = useState<ConversationChannelCapabilities>(() =>
         readCachedCapabilities(buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled }))
-        || getDefaultCapabilitiesForConversation(conversation)
+        || deriveProvisionalConversationChannelCapabilities(conversation, { smsRelayEnabled })
     );
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
@@ -137,6 +162,7 @@ export function useConversationComposerChannel({
         let cancelled = false;
         const cacheKey = buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled });
         const cachedCapabilities = readCachedCapabilities(cacheKey);
+        const provisionalCapabilities = deriveProvisionalConversationChannelCapabilities(conversation, { smsRelayEnabled });
         if (cachedCapabilities) {
             setCapabilities(cachedCapabilities);
             setSmsEligibility(
@@ -153,12 +179,8 @@ export function useConversationComposerChannel({
         } else {
             setSmsEligibility({ status: "checking" });
             setWhatsAppEligibility({ status: "checking" });
-            setCapabilities((prev) => ({
-                ...getDefaultCapabilitiesForConversation(conversation),
-                Email: getConversationContactIdentity(conversation).hasEmail
-                    ? prev.Email
-                    : unavailableChannel("missing_email", "Contact does not have an email address."),
-            }));
+            setCapabilities(provisionalCapabilities);
+            setSelectedChannel((prev) => getFirstAvailableChannel(prev, provisionalCapabilities) || prev);
         }
 
         getConversationChannelCapabilities(conversation.id)
@@ -192,6 +214,7 @@ export function useConversationComposerChannel({
                 if (cancelled) return;
                 console.error("Failed to check channel eligibility:", err);
                 if (cachedCapabilities) return;
+                if (getFirstAvailableChannel("SMS", provisionalCapabilities)) return;
                 setSmsEligibility({ status: "unknown", reason: "Could not verify SMS availability." });
                 setWhatsAppEligibility({ status: "unknown", reason: "Could not verify WhatsApp availability." });
             });
@@ -210,7 +233,10 @@ export function useConversationComposerChannel({
         selectedCapability?.available
             ? undefined
             : selectedCapability?.label || `${selectedChannel} is unavailable for this contact.`;
-    const noAvailableChannelReason = getFirstAvailableChannel(selectedChannel, capabilities)
+    const hasPendingChannelVerification = Object.values(capabilities).some((capability) =>
+        capability.status === "checking"
+    );
+    const noAvailableChannelReason = getFirstAvailableChannel(selectedChannel, capabilities) || hasPendingChannelVerification
         ? null
         : "No send channel is available for this contact.";
 

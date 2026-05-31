@@ -5,6 +5,7 @@ import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summar
 import type { Conversation } from "@/lib/ghl/conversations";
 import {
     buildConversationChannelCapabilityCacheKey,
+    deriveProvisionalConversationChannelCapabilities,
     isConversationChannelCapabilityCacheFresh,
 } from "./use-conversation-composer-channel";
 
@@ -42,4 +43,38 @@ test("channel capability cache freshness has a hard max age", () => {
     assert.equal(isConversationChannelCapabilityCacheFresh(now - 60_000, now, 120_000), true);
     assert.equal(isConversationChannelCapabilityCacheFresh(now - 180_000, now, 120_000), false);
     assert.equal(isConversationChannelCapabilityCacheFresh(0, now, 120_000), false);
+});
+
+test("provisional channel state allows Android SMS from local evidence", () => {
+    const capabilities = deriveProvisionalConversationChannelCapabilities({
+        id: "conv_1",
+        contactPhone: "+35797428827",
+        contactEmail: null,
+        lastMessageType: "TYPE_WHATSAPP",
+        lastMessageChannel: "WhatsApp",
+        lastMessageId: null,
+    } as Conversation, { smsRelayEnabled: true });
+
+    assert.equal(capabilities.SMS_RELAY.available, true);
+    assert.equal(capabilities.WhatsApp.available, false);
+});
+
+test("provisional channel state trusts actual WhatsApp message evidence", () => {
+    const capabilities = deriveProvisionalConversationChannelCapabilities({
+        id: "conv_1",
+        contactPhone: "+35797428827",
+        lastMessageChannel: "WhatsApp",
+        lastMessageId: "msg_1",
+    } as Conversation, { smsRelayEnabled: false });
+
+    assert.equal(capabilities.WhatsApp.available, true);
+});
+
+test("provisional channel state allows email from local address", () => {
+    const capabilities = deriveProvisionalConversationChannelCapabilities({
+        id: "conv_1",
+        contactEmail: "lead@example.com",
+    } as Conversation);
+
+    assert.equal(capabilities.Email.available, true);
 });
