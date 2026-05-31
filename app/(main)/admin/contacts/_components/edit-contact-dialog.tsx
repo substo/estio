@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -281,6 +282,7 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
 }
 
 export function EditContactDialog({ contact, leadSources = [], trigger, isOutlookConnected = false, isGoogleConnected = false, isGhlConnected = false, onContactSaved, onMergeSuccess, skipRouterRefresh = false }: { contact: ContactData; leadSources?: string[]; trigger?: React.ReactNode; isOutlookConnected?: boolean; isGoogleConnected?: boolean; isGhlConnected?: boolean; onContactSaved?: (patch: ContactIdentityPatch) => void; onMergeSuccess?: (targetContactId: string, targetConversationId?: string | null) => void; skipRouterRefresh?: boolean }) {
+    const router = useRouter();
     const [open, setOpen] = useState(false);
     const openedAtRef = useRef<number | null>(null);
     const normalizedContact: ContactData = {
@@ -295,6 +297,17 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
             openedAtRef.current = null;
         }
         setOpen(nextOpen);
+    };
+
+    const handleMergeSuccess = (targetContactId: string, targetConversationId?: string | null) => {
+        if (onMergeSuccess) {
+            onMergeSuccess(targetContactId, targetConversationId);
+            return;
+        }
+
+        setOpen(false);
+        router.push(`/admin/contacts/${encodeURIComponent(targetContactId)}/view`);
+        router.refresh();
     };
 
     return (
@@ -326,7 +339,7 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                     contact={normalizedContact}
                     onSuccess={() => setOpen(false)}
                     onContactSaved={onContactSaved}
-                    onMergeSuccess={onMergeSuccess}
+                    onMergeSuccess={handleMergeSuccess}
                     leadSources={leadSources || []}
                     isOutlookConnected={isOutlookConnected}
                     isGoogleConnected={isGoogleConnected}

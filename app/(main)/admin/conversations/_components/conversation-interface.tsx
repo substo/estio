@@ -126,6 +126,8 @@ import {
 import {
     removeMergedSourceConversation,
     resolvePostMergeActiveConversationId,
+    shouldRemoveMergedSourceConversation,
+    upsertPostMergeTargetConversation,
 } from './conversation-merge-ui-actions';
 import {
     buildContactContextShell,
@@ -1903,24 +1905,39 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const normalizedConversationId = String(conversationId || "").trim();
         if (!normalizedConversationId || !targetContactId) return;
 
-        // 1. Remove the old (source) conversation from the list — it's been deleted/merged
-        setConversations(prev => removeMergedSourceConversation(prev, normalizedConversationId));
-        setSearchResults(prev => removeMergedSourceConversation(prev, normalizedConversationId));
+        const targetConvId = resolvePostMergeActiveConversationId(targetConversationId);
+        const shouldRemoveSource = shouldRemoveMergedSourceConversation(normalizedConversationId, targetConvId);
+
+        // 1. Remove the old source conversation only when it was merged into a different target conversation.
+        if (shouldRemoveSource) {
+            setConversations(prev => removeMergedSourceConversation(prev, normalizedConversationId));
+            setSearchResults(prev => removeMergedSourceConversation(prev, normalizedConversationId));
+        }
 
         // 2. Invalidate workspace cache for the old conversation
         workspaceCoreCacheRef.current.delete(normalizedConversationId);
+        if (targetConvId) {
+            workspaceCoreCacheRef.current.delete(targetConvId);
+        }
 
-        // 3. Keep local state coherent while we navigate away from the merged source contact
-        const targetConvId = resolvePostMergeActiveConversationId(targetConversationId);
+        // 3. Stay in the conversations workspace and open the kept/merged conversation.
         if (targetConvId) {
             setActiveId(targetConvId);
         } else {
             setActiveId(null);
         }
 
-        // 4. Refresh the target conversation's sidebar in background
+        // 4. Refresh the target conversation shell/sidebar in background so it reflects the kept contact.
         if (targetConvId) {
             try {
+                const freshConversation = await refreshConversation(targetConvId);
+                if (freshConversation) {
+                    selectedConversationCacheRef.current.set(targetConvId, freshConversation);
+                    setConversations((prev) => upsertPostMergeTargetConversation(prev, targetConvId, freshConversation, { insertIfMissing: true }));
+                    setSearchResults((prev) => upsertPostMergeTargetConversation(prev, targetConvId, freshConversation));
+                    setActiveDealParticipants((prev) => upsertPostMergeTargetConversation(prev, targetConvId, freshConversation));
+                }
+
                 const sidebar = await getConversationWorkspaceSidebar(targetConvId);
                 if (sidebar?.success) {
                     setWorkspaceContactContext(sidebar.contactContext);
@@ -1931,9 +1948,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 console.error("Failed to refresh sidebar after merge", e);
             }
         }
-
-        router.push(`/admin/contacts/${encodeURIComponent(targetContactId)}/view?locationId=${encodeURIComponent(locationId)}`);
-    }, [locationId, router]);
+    }, []);
 
     const handleConversationContactSaved = useCallback(async (conversationId: string, patch: ContactIdentityPatch) => {
         const normalizedPatch = normalizeConversationContactIdentityPatch(conversationId, patch);

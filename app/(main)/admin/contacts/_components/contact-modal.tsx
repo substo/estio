@@ -61,6 +61,13 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
         }
     };
 
+    const handleMergeSuccess = (targetContactId: string) => {
+        setData(null);
+        setLoading(true);
+        router.replace(`/admin/contacts/${encodeURIComponent(targetContactId)}/view`);
+        router.refresh();
+    };
+
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className={`${mode === 'edit' ? 'sm:max-w-[700px]' : 'sm:max-w-[1000px]'} max-h-[85vh] flex flex-col p-6`}>
@@ -86,6 +93,7 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                             isOutlookConnected={data.isOutlookConnected}
                             isGoogleConnected={data.isGoogleConnected}
                             isGhlConnected={data.isGhlConnected}
+                            onMergeSuccess={handleMergeSuccess}
                         />
                     </div>
                 ) : (
