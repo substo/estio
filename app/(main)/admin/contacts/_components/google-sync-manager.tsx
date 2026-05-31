@@ -106,8 +106,9 @@ export function GoogleSyncManager({
             fetchLinkedContact(contact.googleContactId);
         }
         else {
-            // Not linked: Auto-search by Phone (Priority) or Email
-            const initialQuery = contact.phone || contact.email;
+            // Email search is indexed and fast. Phone fallback can scan the
+            // address book, so keep it as the secondary automatic option.
+            const initialQuery = contact.email || contact.phone;
             if (initialQuery) {
                 setSearchQuery(initialQuery);
                 handleSearch(initialQuery, true); // true = auto-fetch
@@ -135,7 +136,7 @@ export function GoogleSyncManager({
                 // 404 or error - Link broken. Auto-recover UI.
                 toast({ title: "Sync Issue", description: "Linked contact not found. Searching for match...", variant: "default" });
                 setGoogleData(null);
-                const fallbackQuery = contact.phone || contact.email;
+                const fallbackQuery = contact.email || contact.phone;
                 if (fallbackQuery) {
                     setSearchQuery(fallbackQuery);
                     handleSearch(fallbackQuery, true);

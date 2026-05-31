@@ -610,6 +610,14 @@ function arePhoneNumbersEquivalent(p1: string, p2: string): boolean {
     return suffix1 === suffix2;
 }
 
+function personHasEquivalentPhone(person: people_v1.Schema$Person | null | undefined, phone: string): boolean {
+    return !!person?.phoneNumbers?.some(pn =>
+        getGooglePhoneCandidates(pn).some(candidate =>
+            arePhoneNumbersEquivalent(candidate, phone)
+        )
+    );
+}
+
 /**
  * Fallback: Search contacts by phone using connections.list + local filtering.
  * Google People API searchContacts has a known bug where phone number queries
@@ -764,11 +772,13 @@ export async function searchGoogleContacts(userId: string, query: string) {
             };
         }).filter((r): r is NonNullable<typeof r> => r !== null);
 
-        // FALLBACK: Google searchContacts has a known bug where phone number
-        // queries return empty results. 
-        // ALWAYS run fallback for phone queries to ensure we catch format mismatches (+49 vs 0)
-        // and failures of the search API.
-        if (phoneQuery) {
+        // FALLBACK: Google searchContacts can miss phone-number queries.
+        // Only pay for the expensive connections.list scan when the indexed
+        // search did not already return a phone-equivalent match.
+        const hasPhoneMatch = phoneQuery && response.data.results?.some(r =>
+            personHasEquivalentPhone(r.person, query)
+        );
+        if (phoneQuery && !hasPhoneMatch) {
             const phoneDigits = query.replace(/\D/g, '');
             const fallbackMatches = await searchByPhoneFallback(
                 people, phoneDigits,
