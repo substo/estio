@@ -39,6 +39,14 @@ export function buildContactContextShell(
     };
 }
 
+export function isShellContactContext(contactContext: any): boolean {
+    return !!contactContext?.shell;
+}
+
+export function hasFullContactContext(contactContext: any): boolean {
+    return !!contactContext?.contact && !isShellContactContext(contactContext);
+}
+
 export function mergeActivityTimelineEntries(
     currentEntries: ActivityTimelineItem[],
     incomingEntry: ActivityTimelineItem

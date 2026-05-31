@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 import { getContactContext } from "../actions";
+import { hasFullContactContext, isShellContactContext } from "./conversation-workspace-ui-actions";
 
 export type CoordinatorSidebarTab = "overview" | "tasks" | "viewings";
 
@@ -65,13 +66,15 @@ export function useCoordinatorContactContext({
             setContactContext(null);
             return;
         }
-        if (initialContactContext?.contact) {
+        if (hasFullContactContext(initialContactContext)) {
             setContactContext(initialContactContext);
             return;
         }
 
-        // Clear previous state explicitly when changing contacts
-        setContactContext(null);
+        // Keep a shell visible while fetching full contact metadata; clear only when there is no shell.
+        if (!isShellContactContext(initialContactContext)) {
+            setContactContext(null);
+        }
 
         let cancelled = false;
         const fetchTimer = setTimeout(() => {

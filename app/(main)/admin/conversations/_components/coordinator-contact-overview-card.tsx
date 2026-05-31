@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 import { GroupMembersList } from "./group-members-list";
+import { hasFullContactContext } from "./conversation-workspace-ui-actions";
 
 const EditContactDialog = dynamic(
     () => import("../../contacts/_components/edit-contact-dialog").then((mod) => mod.EditContactDialog),
@@ -100,6 +101,8 @@ export function CoordinatorContactOverviewCard({
     onContactSaved,
     onContactMerged,
 }: CoordinatorContactOverviewCardProps) {
+    const canEditContact = hasFullContactContext(contactContext);
+
     return (
         <div className={cn(hidden ? 'hidden' : 'block')}>
             {(contactContext?.contact?.contactType === 'WhatsAppGroup' || contactContext?.contact?.phone?.includes('@g.us')) ? (
@@ -109,7 +112,7 @@ export function CoordinatorContactOverviewCard({
                     <CardHeader className="p-3 pb-1.5">
                         <div className="flex justify-between items-center pr-4">
                             <CardTitle className="text-xs font-semibold">Details</CardTitle>
-                            {contactContext?.contact && !contactContext?.shell && (
+                            {canEditContact && (
                                 <EditContactDialog
                                     contact={contactContext.contact}
                                     leadSources={contactContext.leadSources || []}
@@ -125,7 +128,7 @@ export function CoordinatorContactOverviewCard({
                             <>
                                 <div className="flex flex-col gap-0.5">
                                     <div className="font-medium text-sm text-primary hover:underline cursor-pointer">
-                                        {!contactContext?.shell ? (
+                                        {canEditContact ? (
                                             <EditContactDialog
                                                 contact={contactContext.contact}
                                                 leadSources={contactContext.leadSources || []}

@@ -5,6 +5,8 @@ import type { Conversation } from '@/lib/ghl/conversations';
 import type { WorkspaceCoreSnapshot } from '@/lib/conversations/workspace-state';
 import {
     buildContactContextShell,
+    hasFullContactContext,
+    isShellContactContext,
     mergeActivityTimelineEntries,
     patchWorkspaceCoreSnapshotActivityEntry,
     type ActivityTimelineItem,
@@ -46,6 +48,26 @@ test('buildContactContextShell preserves the sidebar shell shape and defaults', 
         leadSources: [],
         shell: true,
     });
+});
+
+test('contact context helpers distinguish shells from full editable contexts', () => {
+    const shell = buildContactContextShell({
+        id: 'conv-1',
+        contactId: 'contact-1',
+        contactName: 'Shell Lead',
+    } as Conversation, 'loc-1');
+
+    assert.equal(isShellContactContext(shell), true);
+    assert.equal(hasFullContactContext(shell), false);
+
+    const fullContext = {
+        contact: { id: 'contact-1', name: 'Full Lead' },
+        leadSources: ['Website'],
+    };
+
+    assert.equal(isShellContactContext(fullContext), false);
+    assert.equal(hasFullContactContext(fullContext), true);
+    assert.equal(hasFullContactContext(null), false);
 });
 
 test('mergeActivityTimelineEntries appends new entries and sorts by createdAt', () => {
