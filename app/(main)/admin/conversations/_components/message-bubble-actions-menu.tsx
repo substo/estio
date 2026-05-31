@@ -246,7 +246,7 @@ export function MessageBubbleActionsMenu({
                         <MoreHorizontal className="h-3.5 w-3.5" />
                     </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align={isOutbound ? "start" : "end"} className="w-44" data-no-pane-swipe>
+                <DropdownMenuContent align={isOutbound ? "start" : "end"} className="w-44">
                     <DropdownMenuItem onClick={() => onContextMenuAction("pasteLead")} className="gap-2 text-xs">
                         <Clipboard className="h-3.5 w-3.5" />
                         Paste Lead

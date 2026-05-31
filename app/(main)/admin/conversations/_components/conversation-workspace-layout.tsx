@@ -1,19 +1,14 @@
 'use client';
 
-import type { ReactNode, RefObject, TouchEventHandler } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import type { MobilePane } from './use-mobile-conversation-panes';
 
 interface ConversationWorkspaceLayoutProps {
     isMobileViewport: boolean;
-    mobilePaneContainerRef: RefObject<HTMLDivElement | null>;
     mobilePaneHostRef: RefObject<HTMLDivElement | null>;
     currentMobilePane: MobilePane;
-    mobilePaneHint: string | null;
     mobilePaneContent: Record<MobilePane, ReactNode>;
-    handleMobileTouchStart: TouchEventHandler<HTMLDivElement>;
-    handleMobileTouchMove: TouchEventHandler<HTMLDivElement>;
-    handleMobileTouchEnd: TouchEventHandler<HTMLDivElement>;
     conversationListPane: ReactNode;
     conversationMainPane: ReactNode;
     missionControlPane: ReactNode;
@@ -21,27 +16,16 @@ interface ConversationWorkspaceLayoutProps {
 
 export function ConversationWorkspaceLayout({
     isMobileViewport,
-    mobilePaneContainerRef,
     mobilePaneHostRef,
     currentMobilePane,
-    mobilePaneHint,
     mobilePaneContent,
-    handleMobileTouchStart,
-    handleMobileTouchMove,
-    handleMobileTouchEnd,
     conversationListPane,
     conversationMainPane,
     missionControlPane,
 }: ConversationWorkspaceLayoutProps) {
     if (isMobileViewport) {
         return (
-            <div
-                ref={mobilePaneContainerRef}
-                className="relative h-full min-h-0 w-full overflow-hidden touch-pan-y"
-                onTouchStart={handleMobileTouchStart}
-                onTouchMove={handleMobileTouchMove}
-                onTouchEnd={handleMobileTouchEnd}
-            >
+            <div className="relative h-full min-h-0 w-full overflow-hidden">
                 <div
                     ref={mobilePaneHostRef}
                     className="h-full min-h-0 w-full min-w-0 max-w-full overflow-x-hidden"
@@ -49,11 +33,6 @@ export function ConversationWorkspaceLayout({
                 >
                     {mobilePaneContent[currentMobilePane]}
                 </div>
-                {mobilePaneHint && (
-                    <div className="pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] font-medium text-white">
-                        {mobilePaneHint}
-                    </div>
-                )}
             </div>
         );
     }

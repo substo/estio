@@ -452,12 +452,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         mobilePane,
         setMobilePane,
         currentMobilePane,
-        mobilePaneHint,
-        mobilePaneContainerRef,
         mobilePaneHostRef,
-        handleMobileTouchStart,
-        handleMobileTouchMove,
-        handleMobileTouchEnd,
     } = useMobileConversationPanes({
         viewMode,
         activeId,
@@ -2924,8 +2919,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 className: culpritElement.className,
                 clientWidth: culpritElement.clientWidth,
                 scrollWidth: culpritElement.scrollWidth,
-                noPaneSwipe: culpritElement.hasAttribute('data-no-pane-swipe'),
-                horizontalScroll: culpritElement.hasAttribute('data-horizontal-scroll'),
             } : null;
 
             console.warn('[Conversations Mobile Overflow]', {
@@ -2958,14 +2951,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
         <>
             <ConversationWorkspaceLayout
                 isMobileViewport={isMobileViewport}
-                mobilePaneContainerRef={mobilePaneContainerRef}
                 mobilePaneHostRef={mobilePaneHostRef}
                 currentMobilePane={currentMobilePane}
-                mobilePaneHint={mobilePaneHint}
                 mobilePaneContent={mobilePaneContent}
-                handleMobileTouchStart={handleMobileTouchStart}
-                handleMobileTouchMove={handleMobileTouchMove}
-                handleMobileTouchEnd={handleMobileTouchEnd}
                 conversationListPane={conversationListPane}
                 conversationMainPane={conversationMainPane}
                 missionControlPane={missionControlPane}

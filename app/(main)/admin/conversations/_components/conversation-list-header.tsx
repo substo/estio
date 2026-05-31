@@ -218,7 +218,7 @@ export function ConversationListHeader({
                 </div>
 
                 {showSearch && (
-                    <div className="relative" data-no-pane-swipe>
+                    <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
                             {isSearching ? (
                                 <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
@@ -472,7 +472,7 @@ export function ConversationListHeader({
             </TooltipProvider>
 
             {showSearch && isSearchExpanded && (
-                <div className="relative animate-in slide-in-from-top-1 fade-in duration-200" data-no-pane-swipe>
+                <div className="relative animate-in slide-in-from-top-1 fade-in duration-200">
                     <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
                         <Search className="h-3 w-3 text-slate-400" />
                     </div>

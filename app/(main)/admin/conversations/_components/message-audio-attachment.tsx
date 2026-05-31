@@ -71,7 +71,6 @@ export function MessageAudioAttachment({
 
     return (
         <div
-            data-horizontal-scroll
             className={cn(
                 "rounded-lg border border-black/10 bg-black/5 p-2 overflow-x-auto w-full max-w-full min-w-0",
                 theme.attachmentShellClassName

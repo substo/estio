@@ -223,7 +223,7 @@ export function ConversationComposer({
             : "Android SMS segment estimate.";
 
     return (
-        <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]" data-no-pane-swipe>
+        <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]">
             <SuggestionBubbles
                 suggestions={suggestions}
                 onSelect={(text) => handleAiDraft(text)}
