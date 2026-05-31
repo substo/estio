@@ -184,8 +184,8 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                     )}
                 </DialogTrigger>
             ) : null}
-            <DialogContent className="sm:max-w-[560px]">
-                <DialogHeader>
+            <DialogContent className="!flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden sm:max-w-[560px]">
+                <DialogHeader className="shrink-0">
                     <DialogTitle>Merge Contact</DialogTitle>
                     <DialogDescription>
                         Merge <strong>{sourceName || 'Unknown'}</strong> into another contact.
@@ -195,68 +195,70 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                         </div>
                     </DialogDescription>
                 </DialogHeader>
-                <div className="grid gap-4 py-4">
-                    <div className="grid gap-2">
-                        <Label>Target Contact</Label>
-                        <Popover open={searchOpen} onOpenChange={setSearchOpen} modal={true}>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    role="combobox"
-                                    aria-expanded={searchOpen}
-                                    className="w-full justify-between min-w-0"
-                                >
-                                    <span className="truncate">
-                                        {targetContactId
-                                            ? results.find((c) => c.id === targetContactId)?.name || results.find((c) => c.id === targetContactId)?.phone || "Selected Contact"
-                                            : "Search contact..."}
-                                    </span>
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[300px] p-0">
-                                <Command shouldFilter={false}>
-                                    <CommandInput placeholder="Search name or phone..." value={query} onValueChange={setQuery} />
-                                    <CommandList>
-                                        {loading && <div className="py-6 text-center text-sm">Searching...</div>}
-                                        {!loading && results.length === 0 && <CommandEmpty>No contact found.</CommandEmpty>}
-                                        {results.map((contact) => (
-                                            <CommandItem
-                                                key={contact.id}
-                                                value={contact.id}
-                                                onSelect={(currentValue) => {
-                                                    setTargetContactId(currentValue === targetContactId ? null : currentValue)
-                                                    setSearchOpen(false)
-                                                }}
-                                                className="cursor-pointer"
-                                            >
-                                                <Check
-                                                    className={cn(
-                                                        "mr-2 h-4 w-4",
-                                                        targetContactId === contact.id ? "opacity-100" : "opacity-0"
-                                                    )}
-                                                />
-                                                <div className="flex flex-col">
-                                                    <span>{contact.name || 'Unnamed'}</span>
-                                                    <span className="text-xs text-muted-foreground">{contact.phone}</span>
-                                                    <span className="text-xs text-muted-foreground">{contact.email}</span>
-                                                </div>
-                                            </CommandItem>
-                                        ))}
-                                    </CommandList>
-                                </Command>
-                            </PopoverContent>
-                        </Popover>
+                <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-1">
+                    <div className="grid gap-4">
+                        <div className="grid gap-2">
+                            <Label>Target Contact</Label>
+                            <Popover open={searchOpen} onOpenChange={setSearchOpen} modal={true}>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        role="combobox"
+                                        aria-expanded={searchOpen}
+                                        className="w-full justify-between min-w-0"
+                                    >
+                                        <span className="truncate">
+                                            {targetContactId
+                                                ? results.find((c) => c.id === targetContactId)?.name || results.find((c) => c.id === targetContactId)?.phone || "Selected Contact"
+                                                : "Search contact..."}
+                                        </span>
+                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[min(300px,calc(100vw-2rem))] p-0">
+                                    <Command shouldFilter={false}>
+                                        <CommandInput placeholder="Search name or phone..." value={query} onValueChange={setQuery} />
+                                        <CommandList>
+                                            {loading && <div className="py-6 text-center text-sm">Searching...</div>}
+                                            {!loading && results.length === 0 && <CommandEmpty>No contact found.</CommandEmpty>}
+                                            {results.map((contact) => (
+                                                <CommandItem
+                                                    key={contact.id}
+                                                    value={contact.id}
+                                                    onSelect={(currentValue) => {
+                                                        setTargetContactId(currentValue === targetContactId ? null : currentValue)
+                                                        setSearchOpen(false)
+                                                    }}
+                                                    className="cursor-pointer"
+                                                >
+                                                    <Check
+                                                        className={cn(
+                                                            "mr-2 h-4 w-4",
+                                                            targetContactId === contact.id ? "opacity-100" : "opacity-0"
+                                                        )}
+                                                    />
+                                                    <div className="flex flex-col">
+                                                        <span>{contact.name || 'Unnamed'}</span>
+                                                        <span className="text-xs text-muted-foreground">{contact.phone}</span>
+                                                        <span className="text-xs text-muted-foreground">{contact.email}</span>
+                                                    </div>
+                                                </CommandItem>
+                                            ))}
+                                        </CommandList>
+                                    </Command>
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                        {targetContactId && (
+                            <MergePreviewPanel
+                                preview={preview}
+                                loading={previewLoading}
+                                error={previewError}
+                            />
+                        )}
                     </div>
-                    {targetContactId && (
-                        <MergePreviewPanel
-                            preview={preview}
-                            loading={previewLoading}
-                            error={previewError}
-                        />
-                    )}
                 </div>
-                <DialogFooter>
+                <DialogFooter className="shrink-0 border-t bg-background pt-4">
                     <Button variant="outline" onClick={() => setOpen(false)} disabled={isMerging}>Cancel</Button>
                     <Button variant="destructive" onClick={handleMerge} disabled={!targetContactId || !hasCurrentPreview || previewLoading || isMerging}>
                         {isMerging ? "Merging..." : "Merge and delete source contact"}
