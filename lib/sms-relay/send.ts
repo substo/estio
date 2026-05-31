@@ -6,7 +6,7 @@ import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { enqueueSmsRelayOutbox } from "@/lib/sms-relay/outbox";
 import { enqueueSmsRelayOutboxQueueJob } from "@/lib/queue/sms-relay-outbox";
-import { checkGHLSMSStatus } from "@/lib/ghl/sms";
+import { resolveSmsRelayAvailabilityForLocation } from "@/lib/sms-relay/availability";
 
 type SmsRelaySendResult =
     | {
@@ -55,20 +55,11 @@ export async function sendSmsRelayMessage(args: {
         where: { id: locationId },
         select: { id: true, smsRelayEnabled: true },
     });
-    if (!location?.smsRelayEnabled) {
+    if (!location) {
         return {
             success: false,
-            error: "Android SMS is disabled for this location.",
-            errorCode: "sms_relay_disabled",
-        };
-    }
-
-    const smsStatus = await checkGHLSMSStatus(locationId);
-    if (smsStatus.status !== "configured") {
-        return {
-            success: false,
-            error: smsStatus.reason || "SMS is not configured for this location.",
-            errorCode: smsStatus.status === "unknown" ? "sms_not_verified" : "sms_not_configured",
+            error: "Location not found.",
+            errorCode: "missing_location",
         };
     }
 
@@ -98,13 +89,22 @@ export async function sendSmsRelayMessage(args: {
         return { success: false, error: "Contact does not have a phone number.", errorCode: "missing_phone" };
     }
 
-    const device = await (db as any).smsRelayDevice.findFirst({
-        where: { locationId, paired: true },
-        orderBy: { lastSeenAt: "desc" },
-        select: { id: true, status: true, lastSeenAt: true },
+    const relayAvailability = await resolveSmsRelayAvailabilityForLocation({
+        locationId,
+        smsRelayEnabled: location.smsRelayEnabled,
+        contactPhone: contact.phone,
     });
-    if (!device) {
-        return { success: false, error: "No paired SIM Relay device found.", errorCode: "no_paired_device" };
+    if (!relayAvailability.available) {
+        return {
+            success: false,
+            error: relayAvailability.label || "Android SMS is unavailable.",
+            errorCode: relayAvailability.reason || "sms_relay_unavailable",
+        };
+    }
+
+    const deviceId = relayAvailability.deviceId;
+    if (!deviceId) {
+        return { success: false, error: "No paired SIM Relay device found.", errorCode: "sms_relay_not_paired" };
     }
 
     const localMessage = await db.message.create({
@@ -132,7 +132,7 @@ export async function sendSmsRelayMessage(args: {
         locationId,
         conversationId: conversation.id,
         messageId: localMessage.id,
-        deviceId: device.id,
+        deviceId,
         toNumber: contact.phone,
         body: normalizedBody,
     });
@@ -155,7 +155,7 @@ export async function sendSmsRelayMessage(args: {
             locationId,
             conversationId: conversation.id,
             contactId: contact.id,
-            deviceId: device.id,
+            deviceId,
             messageId: localMessage.id,
             outboxId: outboxRow.id,
             error: error?.message || String(error),
@@ -171,7 +171,7 @@ export async function sendSmsRelayMessage(args: {
             messageId: localMessage.id,
             conversationId: conversation.id,
             contactId: contact.id,
-            deviceId: device.id,
+            deviceId,
             outboxId: outboxRow.id,
             queueAccepted,
         },
@@ -181,7 +181,7 @@ export async function sendSmsRelayMessage(args: {
         locationId,
         conversationId: conversation.id,
         contactId: contact.id,
-        deviceId: device.id,
+            deviceId,
         messageId: localMessage.id,
         outboxId: outboxRow.id,
         queueAccepted,
@@ -191,7 +191,7 @@ export async function sendSmsRelayMessage(args: {
         success: true,
         messageId: localMessage.id,
         outboxId: outboxRow.id,
-        deviceId: device.id,
+        deviceId,
         queued: true,
         queueAccepted,
         warning,

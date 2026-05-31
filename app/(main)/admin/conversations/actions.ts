@@ -95,6 +95,7 @@ import {
     getWhatsAppWebBridgeHealth,
     getWhatsAppWebBridgeSession,
     getReadyWhatsAppWebBridgeSession,
+    isResolvedWhatsAppWebBridgeChatAvailable,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
     resolveWhatsAppWebBridgeChatForPhone,
@@ -148,6 +149,7 @@ import {
     unavailableChannel,
     type ConversationChannelCapabilities,
 } from "@/lib/conversations/channel-capabilities";
+import { resolveSmsRelayAvailabilityForLocation } from "@/lib/sms-relay/availability";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
 import {
     extractClockTimeFromText,
@@ -4618,7 +4620,7 @@ export async function sendReply(
                         locationId: location.id,
                         phone: contact.phone,
                     });
-                    if (!resolvedChat?.chatId) {
+                    if (!isResolvedWhatsAppWebBridgeChatAvailable(resolvedChat)) {
                         return {
                             success: false,
                             error: "This number is not available on WhatsApp.",
@@ -6156,36 +6158,24 @@ async function resolveConversationChannelCapabilitiesForLocation(
         : unavailableChannel("missing_email", `${contactName} does not have an email address.`);
 
     let smsCapability = phoneFailure || unavailableChannel("ghl_sms_not_configured");
-    let smsRelayCapability = phoneFailure || unavailableChannel("sms_blocked_by_policy");
+    let smsRelayCapability = phoneFailure || unavailableChannel("sms_relay_disabled", "Android SMS is disabled for this location.");
     if (hasUsablePhone) {
         const smsStatus = await checkGHLSMSStatus(location.id);
         if (smsStatus.status === "configured") {
             smsCapability = availableChannel();
-
-            if (!(location as any).smsRelayEnabled) {
-                smsRelayCapability = unavailableChannel("sms_relay_disabled", "Android SMS is disabled for this location.");
-            } else {
-                const device = await (db as any).smsRelayDevice.findFirst({
-                    where: { locationId: location.id, paired: true },
-                    orderBy: { lastSeenAt: "desc" },
-                    select: { id: true, status: true, paired: true },
-                });
-                if (!device?.paired) {
-                    smsRelayCapability = unavailableChannel("sms_relay_not_paired", "No paired Android SMS device is available.");
-                } else if (String(device.status || "").toLowerCase() !== "online") {
-                    smsRelayCapability = unavailableChannel("sms_relay_offline", "Android SMS device is offline.");
-                } else {
-                    smsRelayCapability = availableChannel();
-                }
-            }
         } else {
             const label = smsStatus.reason || "SMS is not configured for this location.";
             smsCapability = unavailableChannel("ghl_sms_not_configured", label);
-            smsRelayCapability = unavailableChannel(
-                "sms_blocked_by_policy",
-                "Android SMS is unavailable because location SMS is not configured."
-            );
         }
+
+        const relayAvailability = await resolveSmsRelayAvailabilityForLocation({
+            locationId: location.id,
+            smsRelayEnabled: (location as any).smsRelayEnabled,
+            contactPhone: phoneValue,
+        });
+        smsRelayCapability = relayAvailability.available
+            ? availableChannel()
+            : unavailableChannel(relayAvailability.reason || "sms_relay_disabled", relayAvailability.label);
     }
 
     let whatsAppCapability = phoneFailure || unavailableChannel("whatsapp_not_connected");
@@ -6197,7 +6187,7 @@ async function resolveConversationChannelCapabilitiesForLocation(
                     locationId: location.id,
                     phone: phoneValue,
                 });
-                whatsAppCapability = resolved?.chatId
+                whatsAppCapability = isResolvedWhatsAppWebBridgeChatAvailable(resolved)
                     ? availableChannel()
                     : unavailableChannel("whatsapp_number_not_found", "This number is not available on WhatsApp.");
             } catch (error: any) {

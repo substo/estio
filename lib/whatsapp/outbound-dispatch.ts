@@ -8,7 +8,12 @@ import {
     sendWhatsAppCloudText,
 } from "@/lib/whatsapp/client";
 import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
-import { sendWhatsAppWebBridgeMessage, WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
+import {
+    isResolvedWhatsAppWebBridgeChatAvailable,
+    resolveWhatsAppWebBridgeChatForPhone,
+    sendWhatsAppWebBridgeMessage,
+    WHATSAPP_WEB_BRIDGE_PROVIDER,
+} from "@/lib/whatsapp/web-bridge";
 import { sendTwilioMessage } from "@/lib/twilio/client";
 
 export type WhatsAppOutboundDispatchResult = {
@@ -46,7 +51,20 @@ async function resolveWebBridgeRecipient(row: any, normalizedPhone: string) {
         }).catch(() => null);
         webBridgeConversationChatId = String(sync?.providerConversationId || "").trim();
     }
-    return webBridgeConversationChatId || normalizedPhone;
+    if (webBridgeConversationChatId) return webBridgeConversationChatId;
+
+    if (normalizedPhone && normalizedPhone.length >= 7) {
+        const resolved = await resolveWhatsAppWebBridgeChatForPhone({
+            locationId: row.locationId,
+            phone: normalizedPhone,
+        });
+        if (!isResolvedWhatsAppWebBridgeChatAvailable(resolved)) {
+            throw new Error("This number is not available on WhatsApp.");
+        }
+        return String(resolved.chatId || "").trim();
+    }
+
+    return "";
 }
 
 async function createSignedMediaUrl(payload: any) {

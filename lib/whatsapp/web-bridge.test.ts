@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
     extractPhoneFromWhatsAppWebId,
+    isResolvedWhatsAppWebBridgeChatAvailable,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
 } from "@/lib/whatsapp/web-bridge";
@@ -49,6 +50,22 @@ test("parseWhatsAppWebChatIdentity accepts LID as internal non-phone identity", 
         reason: "lid_identity",
     });
     assert.equal(normalizeWhatsAppWebChatId("123456789@lid"), "123456789@lid");
+});
+
+test("resolved web bridge availability rejects synthetic phone fallback", () => {
+    assert.equal(isResolvedWhatsAppWebBridgeChatAvailable({
+        chatId: "35797428827@c.us",
+        source: "phone_fallback",
+    }), false);
+    assert.equal(isResolvedWhatsAppWebBridgeChatAvailable({
+        chatId: null,
+        source: "not_found",
+        available: false,
+    }), false);
+    assert.equal(isResolvedWhatsAppWebBridgeChatAvailable({
+        chatId: "35796407286@c.us",
+        source: "getNumberId",
+    }), true);
 });
 
 test("normalizeBridgeMediaType accepts common media and document mimetypes", () => {

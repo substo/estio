@@ -665,7 +665,12 @@ async function resolveChatForPhone(sessionId: string, payload: any) {
         }
     }
 
-    return { chatId: `${digits}@c.us`, source: "phone_fallback" };
+    return {
+        chatId: null,
+        source: "not_found",
+        available: false,
+        reason: "number_not_found",
+    };
 }
 
 const server = createServer(async (req, res) => {

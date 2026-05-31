@@ -41,6 +41,17 @@ test("first available channel skips unavailable email and blocked SMS channels",
     assert.equal(getFirstAvailableChannel("Email", capabilities), "WhatsApp");
 });
 
+test("first available channel can use Android SMS when GHL SMS and email are unavailable", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: unavailableChannel("whatsapp_number_not_found"),
+        SMS: unavailableChannel("ghl_sms_not_configured"),
+        SMS_RELAY: availableChannel(),
+        Email: unavailableChannel("missing_email"),
+    };
+
+    assert.equal(getFirstAvailableChannel("WhatsApp", capabilities), "SMS_RELAY");
+});
+
 test("preferred available channel is preserved", () => {
     const capabilities: ConversationChannelCapabilities = {
         WhatsApp: availableChannel(),

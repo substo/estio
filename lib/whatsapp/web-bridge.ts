@@ -62,6 +62,14 @@ export type WhatsAppWebBridgeChatIdentity = {
     reason?: "missing_id" | "group_unsupported" | "broadcast_unsupported" | "newsletter_unsupported" | "lid_identity" | "invalid_phone";
 };
 
+export type WhatsAppWebBridgeResolvedChat = {
+    chatId?: string | null;
+    source?: string | null;
+    available?: boolean | null;
+    reason?: string | null;
+    contactIdentity?: any;
+};
+
 const DEFAULT_BRIDGE_BASE_URL = "http://127.0.0.1:3218";
 
 export function getWhatsAppWebBridgeBaseUrl() {
@@ -308,7 +316,7 @@ export async function resolveWhatsAppWebBridgeChatForPhone(input: {
     locationId: string;
     phone: string;
     preferredChatId?: string | null;
-}) {
+}): Promise<WhatsAppWebBridgeResolvedChat> {
     const session = await getReadyWhatsAppWebBridgeSession(input.locationId);
     if (!session) {
         throw new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready.");
@@ -328,6 +336,17 @@ export async function resolveWhatsAppWebBridgeChatForPhone(input: {
         method: "POST",
         body: JSON.stringify({ phone: digits }),
     });
+}
+
+export function isResolvedWhatsAppWebBridgeChatAvailable(result: WhatsAppWebBridgeResolvedChat | null | undefined) {
+    const chatId = normalizeWhatsAppWebChatId(result?.chatId);
+    if (!chatId) return false;
+
+    const source = String(result?.source || "").trim();
+    if (source === "not_found" || source === "phone_fallback") return false;
+    if (result?.available === false) return false;
+
+    return true;
 }
 
 export async function stopWhatsAppWebBridgeSession(locationId: string) {
