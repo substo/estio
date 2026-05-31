@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 import type { Conversation } from "@/lib/ghl/conversations";
+import {
+    buildConversationChannelCapabilityCacheKey,
+    isConversationChannelCapabilityCacheFresh,
+} from "./use-conversation-composer-channel";
 
 test("composer initial channel selects Android SMS when latest message is SMS relay and relay is enabled", () => {
     const conversation = {
@@ -13,4 +17,29 @@ test("composer initial channel selects Android SMS when latest message is SMS re
     } as Conversation;
 
     assert.equal(deriveComposerInitialChannel(conversation, { smsRelayEnabled: true }), "SMS_RELAY");
+});
+
+test("channel capability cache key changes when contact identity changes", () => {
+    const conversation = {
+        id: "conv_1",
+        contactPhone: "+357 97 428827",
+        contactEmail: "Lead@Example.com",
+    } as Conversation;
+
+    assert.equal(
+        buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled: true }),
+        "estio:conversation-channel-capabilities:v1:conv_1:35797428827:lead@example.com:relay-on"
+    );
+    assert.notEqual(
+        buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled: true }),
+        buildConversationChannelCapabilityCacheKey({ ...conversation, contactPhone: "+357 99 000000" }, { smsRelayEnabled: true })
+    );
+});
+
+test("channel capability cache freshness has a hard max age", () => {
+    const now = 1_000_000;
+
+    assert.equal(isConversationChannelCapabilityCacheFresh(now - 60_000, now, 120_000), true);
+    assert.equal(isConversationChannelCapabilityCacheFresh(now - 180_000, now, 120_000), false);
+    assert.equal(isConversationChannelCapabilityCacheFresh(0, now, 120_000), false);
 });
