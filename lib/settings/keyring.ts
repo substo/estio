@@ -5,6 +5,53 @@ type ParsedKeyring = {
 
 let cached: ParsedKeyring | null = null;
 
+export function parseSettingsEncryptionKeys(rawKeys: string): unknown {
+    try {
+        return JSON.parse(rawKeys);
+    } catch {
+        const trimmed = rawKeys.trim();
+        const relaxedObjectMatch = trimmed.match(/^\{([\s\S]*)\}$/);
+        if (!relaxedObjectMatch) {
+            throw new Error("SETTINGS_ENCRYPTION_KEYS must be valid JSON.");
+        }
+
+        const entries = relaxedObjectMatch[1]
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+
+        const parsed: Record<string, string> = {};
+        for (const entry of entries) {
+            const separatorIndex = entry.indexOf(":");
+            if (separatorIndex <= 0) {
+                throw new Error("SETTINGS_ENCRYPTION_KEYS must be valid JSON.");
+            }
+
+            const rawKeyId = entry.slice(0, separatorIndex).trim();
+            const rawKeyValue = entry.slice(separatorIndex + 1).trim();
+            const keyId = stripOptionalQuotes(rawKeyId);
+            const keyValue = stripOptionalQuotes(rawKeyValue);
+            if (!keyId || !keyValue) {
+                throw new Error("SETTINGS_ENCRYPTION_KEYS must be valid JSON.");
+            }
+            parsed[keyId] = keyValue;
+        }
+
+        return parsed;
+    }
+}
+
+function stripOptionalQuotes(value: string): string {
+    const trimmed = value.trim();
+    if (
+        (trimmed.startsWith('"') && trimmed.endsWith('"'))
+        || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+        return trimmed.slice(1, -1);
+    }
+    return trimmed;
+}
+
 function parseKeyring(): ParsedKeyring {
     const rawKeys = process.env.SETTINGS_ENCRYPTION_KEYS;
     const primaryKeyId = process.env.SETTINGS_ENCRYPTION_PRIMARY_KEY_ID;
@@ -18,8 +65,9 @@ function parseKeyring(): ParsedKeyring {
 
     let parsed: unknown;
     try {
-        parsed = JSON.parse(rawKeys);
+        parsed = parseSettingsEncryptionKeys(rawKeys);
     } catch (error) {
+        if (error instanceof Error) throw error;
         throw new Error("SETTINGS_ENCRYPTION_KEYS must be valid JSON.");
     }
 
