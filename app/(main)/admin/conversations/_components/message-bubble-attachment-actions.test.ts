@@ -33,6 +33,29 @@ test('normalizeMessageAttachments converts string attachments to the existing ob
     ]);
 });
 
+test('normalizeMessageAttachments dedupes duplicate audio attachments and keeps completed transcript', () => {
+    const result = normalizeMessageAttachments([
+        {
+            id: 'pending-copy',
+            url: '/api/media/attachments/pending-copy',
+            mimeType: 'audio/ogg; codecs=opus',
+            fileName: 'voice.bin',
+            transcript: { status: 'pending' },
+        },
+        {
+            id: 'completed-copy',
+            url: '/api/media/attachments/completed-copy',
+            mimeType: 'audio/ogg; codecs=opus',
+            fileName: 'voice.bin',
+            transcript: { status: 'completed', text: 'Hello' },
+        },
+    ]);
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, 'completed-copy');
+    assert.equal(result[0].transcript?.status, 'completed');
+});
+
 test('classifyMessageAttachments detects images by mime type and url or filename extension', () => {
     const byMime = { url: 'https://example.test/media', mimeType: 'image/jpeg' };
     const byUrl = { url: 'https://example.test/media/photo.PNG?token=1' };

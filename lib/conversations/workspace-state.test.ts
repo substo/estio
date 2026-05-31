@@ -150,6 +150,32 @@ test("mergeLatestMessageWindowIntoCachedMessages reconciles optimistic messages 
     assert.equal(merged[0].body, "sent");
 });
 
+test("mergeLatestMessageWindowIntoCachedMessages preserves transcript metadata omitted by first-paint refresh", () => {
+    const cached = [{
+        id: "m1",
+        dateAdded: "2026-03-24T10:00:00.000Z",
+        attachments: [{
+            id: "att_1",
+            url: "/api/media/attachments/att_1",
+            transcript: { status: "completed", text: "Voice transcript" },
+        }],
+    }] as any[];
+    const latest = [{
+        id: "m1",
+        dateAdded: "2026-03-24T10:00:00.000Z",
+        attachments: [{
+            id: "att_1",
+            url: "/api/media/attachments/att_1",
+            transcript: null,
+        }],
+    }] as any[];
+
+    const merged = mergeLatestMessageWindowIntoCachedMessages(cached, latest);
+
+    assert.equal((merged[0] as any).attachments[0].transcript.status, "completed");
+    assert.equal((merged[0] as any).attachments[0].transcript.text, "Voice transcript");
+});
+
 test("workspace snapshot builders preserve payload shape and defaults", () => {
     const messages = [
         { id: "m1", dateAdded: "2026-03-24T10:00:00.000Z" },

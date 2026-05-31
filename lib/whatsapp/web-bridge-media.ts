@@ -133,7 +133,37 @@ function logMediaIngestStage(stage: string, wamId: string, detail?: Record<strin
     });
 }
 
+const mediaIngestLocks = new Map<string, Promise<any>>();
+
 export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
+    wamId: string;
+    media: {
+        data?: string | null;
+        mimetype?: string | null;
+        filename?: string | null;
+        size?: number | null;
+    };
+    messageType?: string | null;
+    maxTransientAttempts?: number;
+    transientBackoffMs?: number;
+    dependencies?: WebBridgeMediaIngestDependencies;
+}) {
+    const wamId = String(params.wamId || "").trim();
+    if (!wamId) return ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params);
+
+    const existing = mediaIngestLocks.get(wamId);
+    if (existing) return existing;
+
+    const promise = ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params).finally(() => {
+        if (mediaIngestLocks.get(wamId) === promise) {
+            mediaIngestLocks.delete(wamId);
+        }
+    });
+    mediaIngestLocks.set(wamId, promise);
+    return promise;
+}
+
+async function ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params: {
     wamId: string;
     media: {
         data?: string | null;
@@ -244,7 +274,26 @@ export async function ingestWhatsAppWebBridgeMediaAttachment(params: {
         },
     });
 
-    const createdAttachment = await runWithTransientRetry({
+    const existingAttachment = typeof dbClient.messageAttachment.findFirst === "function"
+        ? await dbClient.messageAttachment.findFirst({
+            where: {
+                messageId: message.id,
+                fileName,
+                contentType,
+                size,
+            },
+            orderBy: { createdAt: "desc" },
+        }).catch(() => null)
+        : null;
+
+    if (existingAttachment?.id) {
+        logMediaIngestStage("attachment_create_existing", wamId, {
+            attachmentId: existingAttachment.id,
+            key: uploaded.key,
+        });
+    }
+
+    const createdAttachment = existingAttachment || await runWithTransientRetry({
         maxAttempts: maxTransientAttempts,
         backoffMs: transientBackoffMs,
         sleep,

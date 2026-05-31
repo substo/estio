@@ -78,12 +78,66 @@ export type MediaUnavailableInput = {
     attachments: NormalizedMessageAttachment[];
 };
 
+function isAudioAttachment(attachment: NormalizedMessageAttachment): boolean {
+    const mimeType = (attachment.mimeType || "").toLowerCase();
+    if (mimeType.startsWith("audio/")) return true;
+
+    const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
+    return [".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav", ".aac"].some((ext) => target.endsWith(ext));
+}
+
+function audioAttachmentDedupeKey(attachment: NormalizedMessageAttachment): string | null {
+    if (!isAudioAttachment(attachment)) return null;
+
+    const mimeType = (attachment.mimeType || "").split(";")[0].trim().toLowerCase();
+    const fileName = (attachment.fileName || "").trim().toLowerCase();
+    if (!mimeType || !fileName) return null;
+    return `${mimeType}:${fileName}`;
+}
+
+function transcriptCompletenessScore(attachment: NormalizedMessageAttachment): number {
+    const transcript = attachment.transcript;
+    if (!transcript) return 0;
+    if (transcript.status === "completed" && String(transcript.text || "").trim()) return 4;
+    if (transcript.status === "completed") return 3;
+    if (transcript.status === "processing" || transcript.status === "pending") return 2;
+    return 1;
+}
+
+function dedupeAudioAttachments(attachments: NormalizedMessageAttachment[]): NormalizedMessageAttachment[] {
+    const output: NormalizedMessageAttachment[] = [];
+    const indexByKey = new Map<string, number>();
+
+    for (const attachment of attachments) {
+        const key = audioAttachmentDedupeKey(attachment);
+        if (!key) {
+            output.push(attachment);
+            continue;
+        }
+
+        const existingIndex = indexByKey.get(key);
+        if (existingIndex === undefined) {
+            indexByKey.set(key, output.length);
+            output.push(attachment);
+            continue;
+        }
+
+        const existing = output[existingIndex];
+        if (transcriptCompletenessScore(attachment) > transcriptCompletenessScore(existing)) {
+            output[existingIndex] = attachment;
+        }
+    }
+
+    return output;
+}
+
 export function normalizeMessageAttachments(attachments?: MessageAttachment[] | null): NormalizedMessageAttachment[] {
-    return (attachments || []).map((attachment) =>
+    const normalized = (attachments || []).map((attachment) =>
         typeof attachment === "string"
             ? { id: undefined, url: attachment, mimeType: undefined, fileName: undefined, sharedContacts: null, transcript: null }
             : attachment
     );
+    return dedupeAudioAttachments(normalized);
 }
 
 export function deriveSharedContactsFromMessageBody(body?: string | null): SharedContactInfo[] {
@@ -106,11 +160,7 @@ export function classifyMessageAttachments(attachments: NormalizedMessageAttachm
     });
 
     const audioAttachments = attachments.filter((attachment) => {
-        const mimeType = (attachment.mimeType || "").toLowerCase();
-        if (mimeType.startsWith("audio/")) return true;
-
-        const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
-        return [".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav", ".aac"].some((ext) => target.endsWith(ext));
+        return isAudioAttachment(attachment);
     });
 
     const contactAttachments = attachments.filter((attachment) => {

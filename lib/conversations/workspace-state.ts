@@ -171,6 +171,43 @@ function buildExistingMessageKeyIndex(messages: Message[]): Map<string, number> 
     return keyIndex;
 }
 
+function mergeAttachmentMetadata(existingAttachments: any[] | undefined, latestAttachments: any[] | undefined) {
+    if (!Array.isArray(latestAttachments)) return latestAttachments;
+    if (!Array.isArray(existingAttachments) || existingAttachments.length === 0) return latestAttachments;
+
+    const existingByKey = new Map<string, any>();
+    for (const attachment of existingAttachments) {
+        const id = String(attachment?.id || "").trim();
+        const url = String(attachment?.url || "").trim();
+        if (id) existingByKey.set(`id:${id}`, attachment);
+        if (url) existingByKey.set(`url:${url}`, attachment);
+    }
+
+    return latestAttachments.map((attachment) => {
+        if (attachment?.transcript) return attachment;
+        const id = String(attachment?.id || "").trim();
+        const url = String(attachment?.url || "").trim();
+        const existing = (id ? existingByKey.get(`id:${id}`) : null)
+            || (url ? existingByKey.get(`url:${url}`) : null);
+        if (!existing?.transcript) return attachment;
+
+        return {
+            ...attachment,
+            transcript: existing.transcript,
+        };
+    });
+}
+
+function mergeMessagePreservingDeferredMetadata(existingMessage: Message, latestMessage: Message): Message {
+    return {
+        ...latestMessage,
+        attachments: mergeAttachmentMetadata(
+            (existingMessage as any)?.attachments,
+            (latestMessage as any)?.attachments,
+        ) as any,
+    };
+}
+
 export function mergeLatestMessageWindowIntoCachedMessages(
     cachedMessages: Message[],
     latestMessages: Message[]
@@ -188,7 +225,7 @@ export function mergeLatestMessageWindowIntoCachedMessages(
             .find((index): index is number => typeof index === "number");
 
         if (typeof existingIndex === "number") {
-            merged[existingIndex] = message;
+            merged[existingIndex] = mergeMessagePreservingDeferredMetadata(merged[existingIndex], message);
         } else {
             merged.push(message);
         }

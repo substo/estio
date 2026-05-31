@@ -247,6 +247,50 @@ test("successful audio retry queues transcription for the created attachment", a
     }]);
 });
 
+test("concurrent ingest for the same WhatsApp media creates one attachment", async () => {
+    const db = createDbMock();
+    const queued: any[] = [];
+    let uploadAttempts = 0;
+
+    const dependencies = {
+        dbClient: db.dbClient as any,
+        sleep: async () => undefined,
+        putMediaObject: async () => {
+            uploadAttempts += 1;
+            await new Promise((resolve) => setImmediate(resolve));
+            return { key: "media/key.ogg", r2Uri: "r2://bucket/media/key.ogg" };
+        },
+        initAudioTranscriptionWorker: async () => undefined,
+        enqueueAudioTranscription: async (input: any) => {
+            queued.push(input);
+        },
+    };
+
+    const [first, second] = await Promise.all([
+        ingestWhatsAppWebBridgeMediaAttachment({
+            wamId: "wam_concurrent",
+            media,
+            messageType: "ptt",
+            transientBackoffMs: 0,
+            dependencies,
+        }),
+        ingestWhatsAppWebBridgeMediaAttachment({
+            wamId: "wam_concurrent",
+            media,
+            messageType: "ptt",
+            transientBackoffMs: 0,
+            dependencies,
+        }),
+    ]);
+    await nextTick();
+
+    assert.equal(first.status, "stored");
+    assert.equal(second.status, "stored");
+    assert.equal(uploadAttempts, 1);
+    assert.equal(db.createdAttachments.length, 1);
+    assert.equal(queued.length, 1);
+});
+
 test("permanent upload failure is not retried forever and does not create an attachment", async () => {
     const db = createDbMock();
     let uploadAttempts = 0;
