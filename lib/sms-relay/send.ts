@@ -6,6 +6,7 @@ import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { enqueueSmsRelayOutbox } from "@/lib/sms-relay/outbox";
 import { enqueueSmsRelayOutboxQueueJob } from "@/lib/queue/sms-relay-outbox";
+import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 
 type SmsRelaySendResult =
     | {
@@ -49,6 +50,27 @@ export async function sendSmsRelayMessage(args: {
     if (!conversationId) return { success: false, error: "Missing conversation.", errorCode: "missing_conversation" };
     if (!contactId) return { success: false, error: "Missing contact.", errorCode: "missing_contact" };
     if (!normalizedBody) return { success: false, error: "Message body cannot be empty.", errorCode: "empty_body" };
+
+    const location = await db.location.findUnique({
+        where: { id: locationId },
+        select: { id: true, smsRelayEnabled: true },
+    });
+    if (!location?.smsRelayEnabled) {
+        return {
+            success: false,
+            error: "Android SMS is disabled for this location.",
+            errorCode: "sms_relay_disabled",
+        };
+    }
+
+    const smsStatus = await checkGHLSMSStatus(locationId);
+    if (smsStatus.status !== "configured") {
+        return {
+            success: false,
+            error: smsStatus.reason || "SMS is not configured for this location.",
+            errorCode: smsStatus.status === "unknown" ? "sms_not_verified" : "sms_not_configured",
+        };
+    }
 
     const conversation = await db.conversation.findFirst({
         where: buildConversationReferenceWhere(locationId, conversationId),

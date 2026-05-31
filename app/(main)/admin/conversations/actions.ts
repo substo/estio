@@ -143,6 +143,11 @@ import {
     classifyOutboundSendFailure,
     getSmsFallbackAvailability,
 } from "@/lib/conversations/outbound-send-failure";
+import {
+    availableChannel,
+    unavailableChannel,
+    type ConversationChannelCapabilities,
+} from "@/lib/conversations/channel-capabilities";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
 import {
     extractClockTimeFromText,
@@ -4607,6 +4612,31 @@ export async function sendReply(
             const windowError = requireTemplateWindowForCloud(contact as any, transportState.transport);
             if (windowError) return windowError;
 
+            if (transportState.transport === "web_bridge") {
+                try {
+                    const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
+                        locationId: location.id,
+                        phone: contact.phone,
+                    });
+                    if (!resolvedChat?.chatId) {
+                        return {
+                            success: false,
+                            error: "This number is not available on WhatsApp.",
+                            errorCode: "whatsapp_number_not_found",
+                        };
+                    }
+                } catch (error: any) {
+                    const classification = classifyOutboundSendFailure(error);
+                    return {
+                        success: false,
+                        error: classification.label || error?.message || "Could not verify WhatsApp availability.",
+                        errorCode: classification.code === "WHATSAPP_NUMBER_NOT_FOUND"
+                            ? "whatsapp_number_not_found"
+                            : "whatsapp_unavailable",
+                    };
+                }
+            }
+
             const enqueueResult = await enqueueWhatsAppOutbound({
                 locationId: location.id,
                 conversationInternalId: conversation.id,
@@ -4779,9 +4809,21 @@ export async function sendReply(
                 }
             );
 
-            if (smsEligibility.status === "ineligible") {
-                return { success: false, error: smsEligibility.reason || "SMS is not configured for this location." };
+            if (smsEligibility.status !== "eligible") {
+                return {
+                    success: false,
+                    error: smsEligibility.reason || "SMS is not configured for this location.",
+                    errorCode: smsEligibility.status === "unknown" ? "sms_not_verified" : "sms_not_configured",
+                };
             }
+        }
+
+        if (type === "Email" && !String(localContact.email || "").trim()) {
+            return {
+                success: false,
+                error: `${localContact.name || "This contact"} does not have an email address.`,
+                errorCode: "missing_email",
+            };
         }
 
         const payload: any = {
@@ -6064,6 +6106,160 @@ export async function getPropertyImageEnhancementModelCatalogAction() {
     return getPropertyImageEnhancementModelCatalog(location.id);
 }
 
+async function resolveConversationChannelCapabilitiesForLocation(
+    location: any,
+    conversationId: string
+): Promise<{ capabilities: ConversationChannelCapabilities; contactPhone: string | null; contactEmail: string | null }> {
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
+        select: {
+            contact: {
+                select: {
+                    name: true,
+                    phone: true,
+                    email: true,
+                    contactType: true,
+                },
+            },
+        },
+    });
+
+    if (!conversation?.contact) {
+        return {
+            contactPhone: null,
+            contactEmail: null,
+            capabilities: {
+                SMS: unavailableChannel("missing_phone", "Conversation contact not found."),
+                SMS_RELAY: unavailableChannel("missing_phone", "Conversation contact not found."),
+                Email: unavailableChannel("missing_email", "Conversation contact not found."),
+                WhatsApp: unavailableChannel("missing_phone", "Conversation contact not found."),
+            },
+        };
+    }
+
+    const contact = conversation.contact;
+    const contactName = contact.name || "This contact";
+    const phoneValue = String(contact.phone || "").trim();
+    const rawDigits = phoneValue.replace(/\D/g, "");
+    const hasEmail = String(contact.email || "").trim().length > 0;
+    const hasUsablePhone = !!phoneValue && !phoneValue.includes("*") && rawDigits.length >= 7;
+    const phoneFailure = !phoneValue
+        ? unavailableChannel("missing_phone", `${contactName} does not have a phone number.`)
+        : phoneValue.includes("*")
+            ? unavailableChannel("masked_phone", `${contactName}'s phone number is masked.`)
+            : rawDigits.length < 7
+                ? unavailableChannel("invalid_phone", `${contactName}'s phone number is invalid or too short.`)
+                : null;
+
+    const emailCapability = hasEmail
+        ? availableChannel()
+        : unavailableChannel("missing_email", `${contactName} does not have an email address.`);
+
+    let smsCapability = phoneFailure || unavailableChannel("ghl_sms_not_configured");
+    let smsRelayCapability = phoneFailure || unavailableChannel("sms_blocked_by_policy");
+    if (hasUsablePhone) {
+        const smsStatus = await checkGHLSMSStatus(location.id);
+        if (smsStatus.status === "configured") {
+            smsCapability = availableChannel();
+
+            if (!(location as any).smsRelayEnabled) {
+                smsRelayCapability = unavailableChannel("sms_relay_disabled", "Android SMS is disabled for this location.");
+            } else {
+                const device = await (db as any).smsRelayDevice.findFirst({
+                    where: { locationId: location.id, paired: true },
+                    orderBy: { lastSeenAt: "desc" },
+                    select: { id: true, status: true, paired: true },
+                });
+                if (!device?.paired) {
+                    smsRelayCapability = unavailableChannel("sms_relay_not_paired", "No paired Android SMS device is available.");
+                } else if (String(device.status || "").toLowerCase() !== "online") {
+                    smsRelayCapability = unavailableChannel("sms_relay_offline", "Android SMS device is offline.");
+                } else {
+                    smsRelayCapability = availableChannel();
+                }
+            }
+        } else {
+            const label = smsStatus.reason || "SMS is not configured for this location.";
+            smsCapability = unavailableChannel("ghl_sms_not_configured", label);
+            smsRelayCapability = unavailableChannel(
+                "sms_blocked_by_policy",
+                "Android SMS is unavailable because location SMS is not configured."
+            );
+        }
+    }
+
+    let whatsAppCapability = phoneFailure || unavailableChannel("whatsapp_not_connected");
+    if (hasUsablePhone) {
+        const mode = await resolveLocationWhatsAppProviderMode(location.id);
+        if (mode === "web_bridge") {
+            try {
+                const resolved = await resolveWhatsAppWebBridgeChatForPhone({
+                    locationId: location.id,
+                    phone: phoneValue,
+                });
+                whatsAppCapability = resolved?.chatId
+                    ? availableChannel()
+                    : unavailableChannel("whatsapp_number_not_found", "This number is not available on WhatsApp.");
+            } catch (error: any) {
+                const classification = classifyOutboundSendFailure(error);
+                if (classification.code === "WHATSAPP_NUMBER_NOT_FOUND") {
+                    whatsAppCapability = unavailableChannel("whatsapp_number_not_found", classification.label);
+                } else if (classification.code === "WHATSAPP_AUTH") {
+                    whatsAppCapability = unavailableChannel("whatsapp_not_connected", classification.label);
+                } else {
+                    whatsAppCapability = unavailableChannel("unknown", error?.message || "Could not verify WhatsApp availability.");
+                }
+            }
+        } else {
+            const eligibility = await checkWhatsAppPhoneEligibility(
+                { whatsappProviderMode: mode },
+                contact.phone,
+                { contactName, contactType: contact.contactType, verifyServiceHealth: true }
+            );
+            whatsAppCapability = eligibility.status === "eligible"
+                ? availableChannel()
+                : unavailableChannel(
+                    eligibility.status === "ineligible" ? "whatsapp_number_not_found" : "unknown",
+                    eligibility.reason || "Could not verify WhatsApp availability."
+                );
+        }
+    }
+
+    return {
+        contactPhone: contact.phone || null,
+        contactEmail: contact.email || null,
+        capabilities: {
+            SMS: smsCapability,
+            SMS_RELAY: smsRelayCapability,
+            Email: emailCapability,
+            WhatsApp: whatsAppCapability,
+        },
+    };
+}
+
+export async function getConversationChannelCapabilities(conversationId: string) {
+    try {
+        const location = await getBasicLocationContext();
+        const result = await resolveConversationChannelCapabilitiesForLocation(location, conversationId);
+        return {
+            success: true as const,
+            ...result,
+        };
+    } catch (error: any) {
+        console.error("[getConversationChannelCapabilities] Error:", error);
+        return {
+            success: false as const,
+            reason: error?.message || "Failed to check channel availability.",
+            capabilities: {
+                SMS: unavailableChannel("unknown", "Could not verify SMS availability."),
+                SMS_RELAY: unavailableChannel("unknown", "Could not verify Android SMS availability."),
+                Email: unavailableChannel("unknown", "Could not verify email availability."),
+                WhatsApp: unavailableChannel("unknown", "Could not verify WhatsApp availability."),
+            } satisfies ConversationChannelCapabilities,
+        };
+    }
+}
+
 export async function getSmsChannelEligibility(conversationId: string) {
     try {
         const location = await getBasicLocationContext();
@@ -6090,23 +6286,14 @@ export async function getSmsChannelEligibility(conversationId: string) {
         }
 
         const contact = conversation.contact;
-        const eligibility = await checkSmsPhoneEligibility(
-            {
-                id: location.id,
-                ghlAccessToken: location.ghlAccessToken,
-                ghlLocationId: location.ghlLocationId,
-            },
-            contact.phone,
-            {
-                contactName: contact.name,
-            }
-        );
+        const capabilities = await resolveConversationChannelCapabilitiesForLocation(location, conversationId);
+        const sms = capabilities.capabilities.SMS;
 
         return {
             success: true,
-            eligible: eligibility.status === 'eligible' ? true : eligibility.status === 'ineligible' ? false : null,
-            status: eligibility.status,
-            reason: eligibility.reason,
+            eligible: sms.available,
+            status: sms.available ? "eligible" as const : "ineligible" as const,
+            reason: sms.label || undefined,
             phone: contact.phone || null,
         };
     } catch (error: any) {
@@ -6123,88 +6310,15 @@ export async function getSmsChannelEligibility(conversationId: string) {
 export async function getWhatsAppChannelEligibility(conversationId: string) {
     try {
         const location = await getBasicLocationContext();
-        const mode = await resolveLocationWhatsAppProviderMode(location.id);
-
-        const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
-            select: {
-                contact: {
-                    select: {
-                        name: true,
-                        phone: true,
-                        contactType: true,
-                    }
-                }
-            }
-        });
-
-        if (!conversation?.contact) {
-            return {
-                success: false,
-                eligible: null as boolean | null,
-                status: 'unknown' as const,
-                reason: 'Conversation contact not found.',
-            };
-        }
-
-        const contact = conversation.contact;
-        if (mode === "web_bridge") {
-            const phoneValue = String(contact.phone || "").trim();
-            const rawDigits = phoneValue.replace(/\D/g, "");
-            if (!phoneValue) {
-                return {
-                    success: true,
-                    eligible: false,
-                    status: "ineligible" as const,
-                    reason: `${contact.name || "This contact"} does not have a phone number.`,
-                    phone: contact.phone || null,
-                };
-            }
-            if (phoneValue.includes("*")) {
-                return {
-                    success: true,
-                    eligible: false,
-                    status: "ineligible" as const,
-                    reason: `${contact.name || "This contact"}'s phone number is masked, so WhatsApp cannot be verified.`,
-                    phone: contact.phone || null,
-                };
-            }
-            if (rawDigits.length < 7) {
-                return {
-                    success: true,
-                    eligible: false,
-                    status: "ineligible" as const,
-                    reason: `${contact.name || "This contact"}'s phone number is invalid or too short.`,
-                    phone: contact.phone || null,
-                };
-            }
-            return {
-                success: true,
-                eligible: null as boolean | null,
-                status: "unknown" as const,
-                reason: "WhatsApp Web Bridge will verify this number at send time.",
-                phone: contact.phone || null,
-            };
-        }
-
-        const eligibility = await checkWhatsAppPhoneEligibility(
-            {
-                whatsappProviderMode: mode,
-            },
-            contact.phone,
-            {
-                contactName: contact.name,
-                contactType: contact.contactType,
-                verifyServiceHealth: true,
-            }
-        );
+        const result = await resolveConversationChannelCapabilitiesForLocation(location, conversationId);
+        const whatsApp = result.capabilities.WhatsApp;
 
         return {
             success: true,
-            eligible: eligibility.status === 'eligible' ? true : eligibility.status === 'ineligible' ? false : null,
-            status: eligibility.status,
-            reason: eligibility.reason,
-            phone: contact.phone || null,
+            eligible: whatsApp.available,
+            status: whatsApp.available ? "eligible" as const : "ineligible" as const,
+            reason: whatsApp.label || undefined,
+            phone: result.contactPhone,
         };
     } catch (error: any) {
         console.error('[getWhatsAppChannelEligibility] Error:', error);

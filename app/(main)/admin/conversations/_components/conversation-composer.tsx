@@ -135,12 +135,17 @@ export function ConversationComposer({
         selectChannel,
         isWhatsAppDisabled,
         isSmsDisabled,
+        isSmsRelayDisabled,
+        isEmailDisabled,
         channelSelectorTitle,
+        noAvailableChannelReason,
     } = useConversationComposerChannel({
         conversation,
         isUnavailable,
         smsRelayEnabled,
     });
+    const sendUnavailableReason = disabledReason || noAvailableChannelReason || channelSelectorTitle;
+    const isSendUnavailable = isUnavailable || !!noAvailableChannelReason || !!channelSelectorTitle;
     const {
         previewingTranslation,
         translationPreviewText,
@@ -151,7 +156,7 @@ export function ConversationComposer({
         handlePreviewTranslation,
     } = useConversationComposerTranslationPreview({
         draft,
-        isUnavailable,
+        isUnavailable: isSendUnavailable,
         selectedChannel,
         selectedReplyLanguage,
         autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
@@ -231,9 +236,9 @@ export function ConversationComposer({
                     </div>
                 ) : null}
 
-                {isUnavailable && (
+                {(isUnavailable || sendUnavailableReason) && (
                     <div className="px-1 pb-1 text-[11px] text-amber-700">
-                        {disabledReason || "Composer unavailable until a contact is selected."}
+                        {sendUnavailableReason || "Composer unavailable until a contact is selected."}
                     </div>
                 )}
 
@@ -297,9 +302,9 @@ export function ConversationComposer({
                                 <SelectContent>
                                     <SelectItem value="SMS" className="text-xs" disabled={isSmsDisabled}>SMS</SelectItem>
                                     {smsRelayEnabled && (
-                                        <SelectItem value="SMS_RELAY" className="text-xs">Android SMS</SelectItem>
+                                        <SelectItem value="SMS_RELAY" className="text-xs" disabled={isSmsRelayDisabled}>Android SMS</SelectItem>
                                     )}
-                                    <SelectItem value="Email" className="text-xs">Email</SelectItem>
+                                    <SelectItem value="Email" className="text-xs" disabled={isEmailDisabled}>Email</SelectItem>
                                     <SelectItem value="WhatsApp" className="text-xs" disabled={isWhatsAppDisabled}>WhatsApp</SelectItem>
                                 </SelectContent>
                             </Select>
@@ -440,7 +445,7 @@ export function ConversationComposer({
                                         variant="outline"
                                         className="h-7 rounded-lg px-2.5 text-[11px]"
                                         onClick={() => handleSend("original")}
-                                        disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                        disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     >
                                         Send Original
                                     </Button>
@@ -448,7 +453,7 @@ export function ConversationComposer({
                                         size="sm"
                                         className="h-7 rounded-lg px-3 transition-all duration-150 bg-blue-600 hover:bg-blue-700"
                                         onClick={() => handleSend("translated")}
-                                        disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                        disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     >
                                         {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                                         <span className="ml-1 text-[11px]">Send translated</span>
@@ -462,7 +467,7 @@ export function ConversationComposer({
                                         draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                     )}
                                     onClick={() => handleSend("original")}
-                                    disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                    disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     title={`Message will be auto-translated to ${autoTranslateTargetLabel} before sending`}
                                 >
                                     {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
@@ -476,7 +481,8 @@ export function ConversationComposer({
                                         draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                     )}
                                     onClick={() => handleSend("original")}
-                                    disabled={isUnavailable || sending || isRecording || !draft.trim()}
+                                    disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
+                                    title={sendUnavailableReason || undefined}
                                 >
                                     {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                                 </Button>

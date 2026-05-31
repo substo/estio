@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
-    getSmsChannelEligibility,
-    getWhatsAppChannelEligibility,
+    getConversationChannelCapabilities,
 } from "@/app/(main)/admin/conversations/actions";
 import { type ComposerChannel } from "./use-conversation-composer-translation-preview";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
+import {
+    createDefaultChannelCapabilities,
+    getConversationContactIdentity,
+    getFirstAvailableChannel,
+    unavailableChannel,
+    type ConversationChannelCapabilities,
+} from "@/lib/conversations/channel-capabilities";
 
 export type WhatsAppEligibilityState =
     | { status: "checking" }
@@ -26,16 +32,6 @@ export function getInitialComposerChannel(
     return deriveComposerInitialChannel(conversation, options);
 }
 
-function getFallbackChannelWithoutWhatsApp(
-    conversation: Conversation | null,
-    options: { smsRelayEnabled?: boolean } = {},
-): "SMS" | "Email" | "SMS_RELAY" {
-    const initialChannel = getInitialComposerChannel(conversation, options);
-    if (initialChannel === "Email") return "Email";
-    if (initialChannel === "SMS_RELAY") return "SMS_RELAY";
-    return "SMS";
-}
-
 interface UseConversationComposerChannelArgs {
     conversation: Conversation | null;
     isUnavailable: boolean;
@@ -48,112 +44,94 @@ export function useConversationComposerChannel({
     smsRelayEnabled = false,
 }: UseConversationComposerChannelArgs) {
     const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialComposerChannel(conversation, { smsRelayEnabled }));
+    const [capabilities, setCapabilities] = useState<ConversationChannelCapabilities>(() => {
+        const defaults = createDefaultChannelCapabilities();
+        if (!getConversationContactIdentity(conversation).hasEmail) {
+            defaults.Email = unavailableChannel("missing_email", "Contact does not have an email address.");
+        }
+        return defaults;
+    });
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
 
     useEffect(() => {
         setSelectedChannel(getInitialComposerChannel(conversation, { smsRelayEnabled }));
-    }, [conversation?.id]);
+    }, [conversation?.id, smsRelayEnabled]);
 
     useEffect(() => {
         if (!conversation?.id) {
+            setSmsEligibility({ status: "unknown", reason: "No conversation selected." });
             setWhatsAppEligibility({ status: "unknown", reason: "No conversation selected." });
+            setCapabilities(createDefaultChannelCapabilities());
             return;
         }
 
         let cancelled = false;
+        setSmsEligibility({ status: "checking" });
         setWhatsAppEligibility({ status: "checking" });
+        setCapabilities((prev) => ({
+            ...createDefaultChannelCapabilities(),
+            Email: getConversationContactIdentity(conversation).hasEmail
+                ? prev.Email
+                : unavailableChannel("missing_email", "Contact does not have an email address."),
+        }));
 
-        getWhatsAppChannelEligibility(conversation.id)
+        getConversationChannelCapabilities(conversation.id)
             .then((res) => {
                 if (cancelled) return;
 
                 if (!res?.success) {
+                    if (res?.capabilities) {
+                        setCapabilities(res.capabilities);
+                    }
+                    setSmsEligibility({ status: "unknown", reason: res?.reason });
                     setWhatsAppEligibility({ status: "unknown", reason: res?.reason });
                     return;
                 }
 
-                if (res.status === "eligible") {
-                    setWhatsAppEligibility({ status: "eligible" });
-                    return;
-                }
-
-                if (res.status === "ineligible") {
-                    setWhatsAppEligibility({ status: "ineligible", reason: res.reason });
-                    setSelectedChannel((prev) => (prev === "WhatsApp" ? getFallbackChannelWithoutWhatsApp(conversation, { smsRelayEnabled }) : prev));
-                    return;
-                }
-
-                setWhatsAppEligibility({ status: "unknown", reason: res.reason });
+                setCapabilities(res.capabilities);
+                setSmsEligibility(
+                    res.capabilities.SMS.available
+                        ? { status: "eligible" }
+                        : { status: "ineligible", reason: res.capabilities.SMS.label || undefined }
+                );
+                setWhatsAppEligibility(
+                    res.capabilities.WhatsApp.available
+                        ? { status: "eligible" }
+                        : { status: "ineligible", reason: res.capabilities.WhatsApp.label || undefined }
+                );
+                setSelectedChannel((prev) => getFirstAvailableChannel(prev, res.capabilities) || prev);
             })
             .catch((err) => {
                 if (cancelled) return;
-                console.error("Failed to check WhatsApp eligibility:", err);
+                console.error("Failed to check channel eligibility:", err);
+                setSmsEligibility({ status: "unknown", reason: "Could not verify SMS availability." });
                 setWhatsAppEligibility({ status: "unknown", reason: "Could not verify WhatsApp availability." });
             });
 
         return () => {
             cancelled = true;
         };
-    }, [conversation?.id, smsRelayEnabled]);
+    }, [conversation?.id, conversation?.contactEmail, conversation?.contactPhone, smsRelayEnabled]);
 
-    useEffect(() => {
-        if (!conversation?.id) {
-            setSmsEligibility({ status: "unknown", reason: "No conversation selected." });
-            return;
-        }
-
-        let cancelled = false;
-        setSmsEligibility({ status: "checking" });
-
-        getSmsChannelEligibility(conversation.id)
-            .then((res) => {
-                if (cancelled) return;
-
-                if (!res?.success) {
-                    setSmsEligibility({ status: "unknown", reason: res?.reason });
-                    return;
-                }
-
-                if (res.status === "eligible") {
-                    setSmsEligibility({ status: "eligible" });
-                    return;
-                }
-
-                if (res.status === "ineligible") {
-                    setSmsEligibility({ status: "ineligible", reason: res.reason });
-                    setSelectedChannel((prev) => (prev === "SMS" ? "Email" : prev));
-                    return;
-                }
-
-                setSmsEligibility({ status: "unknown", reason: res.reason });
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                console.error("Failed to check SMS eligibility:", err);
-                setSmsEligibility({ status: "unknown", reason: "Could not verify SMS availability." });
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [conversation?.id]);
-
-    const isWhatsAppDisabled = whatsAppEligibility.status === "ineligible";
-    const isSmsDisabled = smsEligibility.status === "ineligible";
+    const isWhatsAppDisabled = !capabilities.WhatsApp.available;
+    const isSmsDisabled = !capabilities.SMS.available;
+    const isSmsRelayDisabled = !capabilities.SMS_RELAY.available;
+    const isEmailDisabled = !capabilities.Email.available;
+    const selectedCapability = capabilities[selectedChannel];
     const channelSelectorTitle =
-        selectedChannel === "SMS" && isSmsDisabled
-            ? (smsEligibility.reason || "SMS not available for this contact")
-            : isWhatsAppDisabled
-                ? (whatsAppEligibility.reason || "WhatsApp not available for this contact")
-                : undefined;
+        selectedCapability?.available
+            ? undefined
+            : selectedCapability?.label || `${selectedChannel} is unavailable for this contact.`;
+    const noAvailableChannelReason = getFirstAvailableChannel(selectedChannel, capabilities)
+        ? null
+        : "No send channel is available for this contact.";
 
     const selectChannel = useCallback((channel: ComposerChannel) => {
         if (isUnavailable) return;
-        if (channel === "SMS" && isSmsDisabled) return;
-        if (channel === "WhatsApp" && isWhatsAppDisabled) return;
+        if (!capabilities[channel]?.available) return;
         setSelectedChannel(channel);
-    }, [isSmsDisabled, isUnavailable, isWhatsAppDisabled]);
+    }, [capabilities, isUnavailable]);
 
     return {
         selectedChannel,
@@ -162,6 +140,10 @@ export function useConversationComposerChannel({
         smsEligibility,
         isWhatsAppDisabled,
         isSmsDisabled,
+        isSmsRelayDisabled,
+        isEmailDisabled,
+        capabilities,
         channelSelectorTitle,
+        noAvailableChannelReason,
     };
 }

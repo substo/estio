@@ -10,6 +10,12 @@ import { GHLTokenResponse } from './types';
 export async function getAccessToken(locationId: string): Promise<string | null> {
     const location = await db.location.findUnique({
         where: { ghlLocationId: locationId },
+        select: {
+            id: true,
+            ghlAccessToken: true,
+            ghlRefreshToken: true,
+            ghlExpiresAt: true,
+        },
     });
 
     if (!location) {
@@ -46,6 +52,12 @@ async function refreshAccessToken(locationId: string, currentRefreshToken: strin
     // Double-check DB to ensure we aren't overwriting a fresh token from another process
     const freshLocation = await db.location.findUnique({
         where: { ghlLocationId: locationId },
+        select: {
+            id: true,
+            ghlAccessToken: true,
+            ghlRefreshToken: true,
+            ghlExpiresAt: true,
+        },
     });
 
     if (!freshLocation) return null;
@@ -138,7 +150,10 @@ export async function ghlFetchWithAuth<T>(
 
         // Force refresh by passing the *current* refresh token we know about (or just letting the function re-fetch)
         // We'll call refreshAccessToken directly with the current DB state
-        const location = await db.location.findUnique({ where: { ghlLocationId: locationId } });
+        const location = await db.location.findUnique({
+            where: { ghlLocationId: locationId },
+            select: { ghlRefreshToken: true },
+        });
         if (location?.ghlRefreshToken) {
             const newToken = await refreshAccessToken(locationId, location.ghlRefreshToken);
             if (newToken) {
