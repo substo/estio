@@ -39,7 +39,7 @@ process.stdin.on(\"end\", () => {
 match_lines "Systemd units" sh -c "find /etc/systemd/system /lib/systemd/system -maxdepth 2 -type f 2>/dev/null | xargs grep -Ili evolution 2>/dev/null"
 match_lines "Cron entries" sh -c "grep -Rli evolution /etc/cron* /var/spool/cron 2>/dev/null"
 match_lines "Caddy config" sh -c "grep -Rli evolution /etc/caddy 2>/dev/null"
-match_lines "Home runtime files" sh -c "find /home/martin -maxdepth 4 -iname '*evolution*' 2>/dev/null | grep -v '/prisma/migrations/'"
+match_lines "Home runtime files" sh -c "find /home/martin -maxdepth 4 -iname '*evolution*' 2>/dev/null | grep -v '/prisma/migrations/' | grep -v '/scripts/ops/audit-retired-evolution-runtime\\.sh$'"
 
 if [ "$REMOVE" != "true" ]; then
     echo "Run with --remove on the server to remove known retired runtime artifacts."
