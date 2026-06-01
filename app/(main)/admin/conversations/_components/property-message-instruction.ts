@@ -3,6 +3,7 @@ export type PropertyMessageLength = "short" | "medium" | "detailed";
 
 export type PropertyMessageInstructionInput = {
     propertyUrl?: string;
+    propertyUrls?: string[];
     propertyText?: string;
     purpose?: PropertyMessagePurpose;
     length?: PropertyMessageLength;
@@ -32,12 +33,20 @@ function normalizeInstructionField(value: string | undefined, maxLength: number)
 export function buildPropertyMessageInstruction(input: PropertyMessageInstructionInput): string {
     const purpose = input.purpose || "new_listing";
     const length = input.length || "medium";
-    const propertyUrl = normalizeInstructionField(input.propertyUrl, 600);
-    const propertyText = normalizeInstructionField(input.propertyText, 6000);
+    const propertyUrls = [
+        ...(input.propertyUrls || []),
+        input.propertyUrl || "",
+    ]
+        .map((url) => normalizeInstructionField(url, 600))
+        .filter(Boolean)
+        .filter((url, index, urls) => urls.indexOf(url) === index);
+    const propertyText = normalizeInstructionField(input.propertyText, 10000);
     const importantDetails = normalizeInstructionField(input.importantDetails, 1200);
+    const isOptionsMessage = propertyUrls.length > 1;
 
     const sourceLines = [
-        propertyUrl ? `Property URL: ${propertyUrl}` : null,
+        propertyUrls.length === 1 ? `Property URL: ${propertyUrls[0]}` : null,
+        propertyUrls.length > 1 ? `Property URLs:\n${propertyUrls.map((url, index) => `${index + 1}. ${url}`).join("\n")}` : null,
         propertyText ? `Property text:\n${propertyText}` : null,
         importantDetails ? `Agent priority details:\n${importantDetails}` : null,
     ].filter(Boolean);
@@ -47,6 +56,7 @@ export function buildPropertyMessageInstruction(input: PropertyMessageInstructio
         PURPOSE_COPY[purpose],
         LENGTH_COPY[length],
         "Use the existing conversation, contact requirements, language, channel, and recent context to decide what matters.",
+        isOptionsMessage ? "When there are multiple properties, write one natural options message that helps the client compare them without sounding like a report." : null,
         "If the property appears to match the lead's requirements, mention the strongest matching details conversationally.",
         "If the match is uncertain, phrase it softly and invite them to confirm interest.",
         "Do not use bullets, headings, Markdown, or a structured property summary.",

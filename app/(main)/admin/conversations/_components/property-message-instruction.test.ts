@@ -20,7 +20,7 @@ test("buildPropertyMessageInstruction creates conversational property draft inst
 });
 
 test("buildPropertyMessageInstruction trims oversized pasted property source", () => {
-    const longText = "x".repeat(7000);
+    const longText = "x".repeat(12000);
     const instruction = buildPropertyMessageInstruction({
         propertyText: longText,
         purpose: "follow_up",
@@ -29,5 +29,36 @@ test("buildPropertyMessageInstruction trims oversized pasted property source", (
 
     assert.match(instruction, /follow-up message/);
     assert.match(instruction, /still sounding like a human chat message/);
-    assert.equal(instruction.includes("x".repeat(6100)), false);
+    assert.equal(instruction.includes("x".repeat(10100)), false);
+});
+
+test("buildPropertyMessageInstruction creates options instructions for multiple URLs", () => {
+    const instruction = buildPropertyMessageInstruction({
+        propertyUrls: [
+            "https://example.com/listing/a",
+            "https://example.com/listing/b",
+        ],
+        propertyText: "Property option 1\nURL: https://example.com/listing/a\nExtracted text:\nTwo bedrooms",
+        importantDetails: "Client wants two bedrooms and parking.",
+        purpose: "follow_up",
+        length: "medium",
+    });
+
+    assert.match(instruction, /one natural options message/);
+    assert.match(instruction, /Property URLs:\n1\. https:\/\/example.com\/listing\/a\n2\. https:\/\/example.com\/listing\/b/);
+    assert.match(instruction, /Do not use bullets/);
+    assert.match(instruction, /Client wants two bedrooms and parking/);
+});
+
+test("buildPropertyMessageInstruction dedupes legacy and multi URL inputs", () => {
+    const instruction = buildPropertyMessageInstruction({
+        propertyUrl: "https://example.com/listing/a",
+        propertyUrls: [
+            "https://example.com/listing/a",
+            "https://example.com/listing/b",
+        ],
+    });
+
+    assert.match(instruction, /1\. https:\/\/example.com\/listing\/a\n2\. https:\/\/example.com\/listing\/b/);
+    assert.equal((instruction.match(/https:\/\/example.com\/listing\/a/g) || []).length, 1);
 });
