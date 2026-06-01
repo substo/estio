@@ -23,7 +23,7 @@ export function buildContactContextShell(
             phone: conversation.contactPhone || null,
             preferredLang: conversation.contactPreferredLanguage || null,
             locationId: appLocationId,
-            contactType: "Lead",
+            contactType: conversation.contactType || null,
             propertyRoles: [],
             companyRoles: [],
             viewings: [],

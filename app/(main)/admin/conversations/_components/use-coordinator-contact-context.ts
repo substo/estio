@@ -64,17 +64,22 @@ export function useCoordinatorContactContext({
     useEffect(() => {
         if (!contactId) {
             setContactContext(null);
+            setLoadingContext(false);
             return;
         }
         if (hasFullContactContext(initialContactContext)) {
             setContactContext(initialContactContext);
+            setLoadingContext(false);
+            return;
+        }
+        if (isShellContactContext(initialContactContext)) {
+            setContactContext(initialContactContext);
+            setLoadingContext(true);
             return;
         }
 
         // Keep a shell visible while fetching full contact metadata; clear only when there is no shell.
-        if (!isShellContactContext(initialContactContext)) {
-            setContactContext(null);
-        }
+        setContactContext(null);
 
         let cancelled = false;
         const fetchTimer = setTimeout(() => {

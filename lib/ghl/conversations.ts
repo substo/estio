@@ -21,6 +21,7 @@ export interface Conversation {
     contactName?: string; // Often enriched or separate
     contactPhone?: string; // For SMS/WhatsApp display
     contactEmail?: string; // For Email display
+    contactType?: string | null;
     contactPreferredLanguage?: string | null;
     replyLanguageOverride?: string | null;
     locationDefaultReplyLanguage?: string | null;

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 import { GroupMembersList } from "./group-members-list";
-import { hasFullContactContext } from "./conversation-workspace-ui-actions";
+import { hasFullContactContext, isShellContactContext } from "./conversation-workspace-ui-actions";
 import { ContactRequirementProposals } from "./contact-requirement-proposals";
 
 const EditContactDialog = dynamic(
@@ -105,6 +105,7 @@ export function CoordinatorContactOverviewCard({
     onContactContextUpdated,
 }: CoordinatorContactOverviewCardProps) {
     const canEditContact = hasFullContactContext(contactContext);
+    const isShellContact = isShellContactContext(contactContext);
 
     return (
         <div className={cn(hidden ? 'hidden' : 'block')}>
@@ -167,11 +168,11 @@ export function CoordinatorContactOverviewCard({
                                     </div>
                                     <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
                                         <span className="text-muted-foreground block text-[10px] mb-0.5">Type</span>
-                                        <span className="font-medium">{contactContext.contact.contactType || "Lead"}</span>
+                                        <span className="font-medium">{contactContext.contact.contactType || (isShellContact ? "Loading..." : "Lead")}</span>
                                     </div>
                                 </div>
 
-                                {(() => {
+                                {!isShellContact && (() => {
                                     const contact = contactContext.contact;
                                     const normalizedType = normalizeContactValue(
                                         contact.normalizedContactType || contact.contactType || DEFAULT_CONTACT_TYPE

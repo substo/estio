@@ -45,6 +45,7 @@ export function mapConversationRowToUi(
         contactName: c.contact?.name || "Unknown",
         contactPhone: c.contact?.phone || undefined,
         contactEmail: c.contact?.email || undefined,
+        contactType: c.contact?.contactType || null,
         contactPreferredLanguage: c.contact?.preferredLang || null,
         replyLanguageOverride: c.replyLanguageOverride || null,
         locationDefaultReplyLanguage: locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
