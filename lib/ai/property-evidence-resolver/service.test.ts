@@ -130,6 +130,7 @@ test("property evidence timeline note includes stable dedupe key and visible sta
     item: {
       type: "legacy_crm_ref",
       status: "linked_existing",
+      interestSource: "client_inquired_property",
       publicReference: "DT3327",
       propertyId: "prop_123",
       title: "Apartment in Kato Paphos",
@@ -141,5 +142,21 @@ test("property evidence timeline note includes stable dedupe key and visible sta
   assert.match(note, /Evidence key: DT3327/);
   assert.match(note, /Reference: DT3327/);
   assert.match(note, /Status: linked existing/);
+  assert.match(note, /Interest source: client inquired property/);
   assert.match(note, /Linked property: prop_123/);
+});
+
+test("property evidence timeline note distinguishes agent-sent options", () => {
+  const note = formatTimelineNoteBody({
+    key: "DT5001",
+    item: {
+      type: "legacy_crm_ref",
+      status: "linked_existing",
+      interestSource: "agent_sent_option",
+      publicReference: "DT5001",
+      propertyId: "prop_option",
+    },
+  });
+
+  assert.match(note, /Interest source: agent sent option/);
 });

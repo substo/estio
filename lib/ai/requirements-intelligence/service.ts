@@ -5,7 +5,11 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
-import { resolvePropertyEvidenceForContactActivity } from "@/lib/ai/property-evidence-resolver/service";
+import {
+  resolvePropertyEvidenceForContactActivity,
+  type PropertyEvidenceInput,
+  type PropertyEvidenceInterestSource,
+} from "@/lib/ai/property-evidence-resolver/service";
 
 export const REQUIREMENTS_INTELLIGENCE_MODES = [
   "off",
@@ -27,6 +31,15 @@ type RequirementPatch = {
   requirementPropertyLocations?: string[] | null;
   requirementOtherDetails?: string | null;
   requirementSummary?: string | null;
+};
+
+type RequirementEvidenceItem = {
+  id: string;
+  type: "message" | "activity_note" | "transcript";
+  direction?: string | null;
+  propertyInterestSource: PropertyEvidenceInterestSource;
+  createdAt: string | null;
+  text: string;
 };
 
 const STRUCTURED_REQUIREMENT_FIELDS = [
@@ -178,11 +191,23 @@ export function classifyRequirementSignal(text: string): boolean {
   return REQUIREMENT_SIGNAL_PATTERNS.some((pattern) => pattern.test(source));
 }
 
+function propertyInterestSourceForEvidence(input: {
+  type: "message" | "activity_note" | "transcript";
+  direction?: string | null;
+}): PropertyEvidenceInterestSource {
+  if (input.type === "message") {
+    return input.direction === "inbound" ? "client_inquired_property" : "agent_sent_option";
+  }
+  if (input.type === "activity_note") return "agent_note";
+  if (input.type === "transcript") return "transcript";
+  return "unknown";
+}
+
 async function collectRequirementEvidence(args: {
   locationId: string;
   contactId: string;
   conversationId?: string | null;
-}) {
+}): Promise<RequirementEvidenceItem[]> {
   const conversationWhere = args.conversationId
     ? { id: args.conversationId, locationId: args.locationId }
     : { contactId: args.contactId, locationId: args.locationId };
@@ -224,7 +249,12 @@ async function collectRequirementEvidence(args: {
     .reverse()
     .map((message) => ({
       id: message.id,
-      type: "message",
+      type: "message" as const,
+      direction: message.direction,
+      propertyInterestSource: propertyInterestSourceForEvidence({
+        type: "message",
+        direction: message.direction,
+      }),
       createdAt: message.createdAt.toISOString(),
       text: `${message.direction === "inbound" ? "Client" : "Agent"}: ${(message.body || "").trim()}`,
     }))
@@ -234,7 +264,8 @@ async function collectRequirementEvidence(args: {
     .reverse()
     .map((row) => ({
       id: row.id,
-      type: "activity_note",
+      type: "activity_note" as const,
+      propertyInterestSource: propertyInterestSourceForEvidence({ type: "activity_note" }),
       createdAt: row.createdAt.toISOString(),
       text: JSON.stringify(row.changes || {}),
     }))
@@ -244,13 +275,29 @@ async function collectRequirementEvidence(args: {
     .reverse()
     .map((row) => ({
       id: row.id,
-      type: "transcript",
+      type: "transcript" as const,
+      propertyInterestSource: propertyInterestSourceForEvidence({ type: "transcript" }),
       createdAt: row.completedAt ? row.completedAt.toISOString() : null,
       text: String(row.text || "").trim(),
     }))
     .filter((item) => item.text.trim().length > 8);
 
   return [...messageEvidence, ...historyEvidence, ...transcriptEvidence].slice(-60);
+}
+
+function formatRequirementEvidenceLine(item: RequirementEvidenceItem): string {
+  const direction = item.direction ? ` direction=${item.direction}` : "";
+  return `[${item.type}${direction} interestSource=${item.propertyInterestSource} ${item.createdAt || ""} ${item.id}] ${item.text}`;
+}
+
+function toPropertyEvidenceInputs(
+  evidence: RequirementEvidenceItem[]
+): PropertyEvidenceInput[] {
+  return evidence.map((item) => ({
+    id: item.id,
+    text: item.text,
+    interestSource: item.propertyInterestSource,
+  }));
 }
 
 export async function generateRequirementProposal(args: {
@@ -279,13 +326,14 @@ export async function generateRequirementProposal(args: {
   }
 
   const evidence = await collectRequirementEvidence(args);
-  const evidenceText = evidence.map((item) => `[${item.type} ${item.createdAt || ""} ${item.id}] ${item.text}`).join("\n");
+  const evidenceText = evidence.map(formatRequirementEvidenceLine).join("\n");
   const propertyEvidence = await resolvePropertyEvidenceForContactActivity({
     locationId: args.locationId,
     contactId: contact.id,
     conversationId: args.conversationId || null,
     actorUserId: args.actorUserId || null,
     text: evidenceText,
+    evidence: toPropertyEvidenceInputs(evidence),
     source: args.sourceType || "manual",
   });
   if (!classifyRequirementSignal(evidenceText) && propertyEvidence.items.length === 0) {
@@ -336,9 +384,13 @@ Rules:
   - changedOrContradicted: evidence that replaces or conflicts with older requirements.
   - needsHumanClarification: unclear, missing, or conflicting criteria that should be asked about.
 - Only confirmedRequirements may update hard CRM filter fields such as status, district, bedrooms, budget, condition, types, and locations.
+- Treat evidence with interestSource=agent_sent_option as properties the agent/user sent to the client, not as contact interest.
+- Never update hard CRM fields from agent_sent_option by itself. Use it only as "options already sent" context in summary/other details.
+- Treat evidence with interestSource=client_inquired_property as contact-shown interest, but classify a one-property inquiry as historicalInquiries unless the client confirms it as a broader current requirement.
+- Treat agent_note and transcript as usable requirement evidence only when they describe what the contact said or asked for.
 - Put possiblePreferences, historicalInquiries, changedOrContradicted, and needsHumanClarification into requirementSummary or requirementOtherDetails instead of hard fields.
 - Preserve useful history in requirementSummary, including original property inquiry and how preferences evolved.
-- Use property evidence to understand what the client originally inquired about, but classify a one-property inquiry as historicalInquiries unless the conversation confirms it as current criteria.
+- Use property evidence to understand what the client originally inquired about, what the agent already sent, and which properties were only system-resolved.
 - If newer evidence contradicts older evidence, prefer the newer explicit client statement for hard fields and record the old signal in changedOrContradicted or historicalInquiries.
 - If a property import is queued or unavailable, mention the reference/link in requirementSummary instead of inventing details.
 - Do not erase existing requirements unless the evidence explicitly replaces them.
@@ -398,6 +450,8 @@ ${propertyEvidence.text || "None"}`;
       publicReference: item.publicReference || null,
       oldCrmPropertyId: item.oldCrmPropertyId || null,
       url: item.url || null,
+      interestSource: item.interestSource || null,
+      sourceTextId: item.sourceTextId || null,
       extracted: item.extracted || null,
     })),
   ].slice(0, 20);
@@ -450,13 +504,14 @@ export async function resolveContactPropertyEvidence(args: {
     contactId: contact.id,
     conversationId: args.conversationId || null,
   });
-  const evidenceText = evidence.map((item) => `[${item.type} ${item.createdAt || ""} ${item.id}] ${item.text}`).join("\n");
+  const evidenceText = evidence.map(formatRequirementEvidenceLine).join("\n");
   const propertyEvidence = await resolvePropertyEvidenceForContactActivity({
     locationId: args.locationId,
     contactId: contact.id,
     conversationId: args.conversationId || null,
     actorUserId: args.actorUserId || null,
     text: evidenceText,
+    evidence: toPropertyEvidenceInputs(evidence),
     source: args.sourceType || "manual_property_resolution",
   });
 

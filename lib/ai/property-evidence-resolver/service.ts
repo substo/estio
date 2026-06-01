@@ -20,9 +20,24 @@ type PropertyEvidenceStatus =
   | "import_unavailable"
   | "untrusted_url";
 
+export type PropertyEvidenceInterestSource =
+  | "client_inquired_property"
+  | "agent_sent_option"
+  | "agent_note"
+  | "transcript"
+  | "unknown";
+
+export type PropertyEvidenceInput = {
+  id?: string | null;
+  text: string;
+  interestSource?: PropertyEvidenceInterestSource | null;
+};
+
 export type PropertyEvidenceItem = {
   type: "legacy_crm_ref" | "url";
   status: PropertyEvidenceStatus;
+  interestSource?: PropertyEvidenceInterestSource | null;
+  sourceTextId?: string | null;
   publicReference?: string | null;
   oldCrmPropertyId?: string | null;
   source?: LegacyCrmRefCandidate["source"] | "message_url" | null;
@@ -48,23 +63,113 @@ export type PropertyEvidenceResolution = {
   text: string;
 };
 
+type NormalizedPropertyEvidenceInput = {
+  id?: string | null;
+  text: string;
+  interestSource: PropertyEvidenceInterestSource;
+};
+
 const MAX_CRAWL_URLS = 3;
 const TIMELINE_NOTE_SOURCE = "ai_property_evidence";
+const INTEREST_SOURCE_LABELS: Record<PropertyEvidenceInterestSource, string> = {
+  client_inquired_property: "client inquired property",
+  agent_sent_option: "agent sent option",
+  agent_note: "agent note",
+  transcript: "transcript",
+  unknown: "unknown",
+};
+
+const INTEREST_SOURCE_RANK: Record<PropertyEvidenceInterestSource, number> = {
+  client_inquired_property: 5,
+  agent_note: 4,
+  transcript: 3,
+  unknown: 2,
+  agent_sent_option: 1,
+};
 
 function normalizeText(value: unknown): string {
   return String(value || "").trim();
 }
 
-function uniqueBy<T>(items: T[], getKey: (item: T) => string): T[] {
-  const seen = new Set<string>();
-  const result: T[] = [];
-  for (const item of items) {
-    const key = getKey(item);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
+function normalizeInterestSource(value: unknown): PropertyEvidenceInterestSource {
+  const normalized = normalizeText(value);
+  if (
+    normalized === "client_inquired_property"
+    || normalized === "agent_sent_option"
+    || normalized === "agent_note"
+    || normalized === "transcript"
+    || normalized === "unknown"
+  ) {
+    return normalized;
   }
-  return result;
+  return "unknown";
+}
+
+function formatInterestSource(value: PropertyEvidenceInterestSource | null | undefined): string {
+  return INTEREST_SOURCE_LABELS[normalizeInterestSource(value)];
+}
+
+function isClientInterestSource(value: PropertyEvidenceInterestSource | null | undefined): boolean {
+  const source = normalizeInterestSource(value);
+  return source === "client_inquired_property" || source === "agent_note" || source === "transcript";
+}
+
+function chooseStrongerInterestSource(
+  current: PropertyEvidenceInterestSource | null | undefined,
+  next: PropertyEvidenceInterestSource | null | undefined
+): PropertyEvidenceInterestSource {
+  const currentSource = normalizeInterestSource(current);
+  const nextSource = normalizeInterestSource(next);
+  return INTEREST_SOURCE_RANK[nextSource] > INTEREST_SOURCE_RANK[currentSource] ? nextSource : currentSource;
+}
+
+function normalizeEvidenceInputs(args: {
+  text: string;
+  evidence?: PropertyEvidenceInput[] | null;
+}): NormalizedPropertyEvidenceInput[] {
+  const entries = Array.isArray(args.evidence) && args.evidence.length > 0
+    ? args.evidence
+    : [{ text: args.text, interestSource: "unknown" as const }];
+
+  return entries
+    .map((entry) => ({
+      id: normalizeText(entry.id) || null,
+      text: normalizeText(entry.text),
+      interestSource: normalizeInterestSource(entry.interestSource),
+    }))
+    .filter((entry) => entry.text.length > 0);
+}
+
+type SourcedLegacyCandidate = LegacyCrmRefCandidate & {
+  interestSource: PropertyEvidenceInterestSource;
+  sourceTextId?: string | null;
+};
+
+function mergeLegacyCandidate(
+  candidates: Map<string, SourcedLegacyCandidate>,
+  candidate: LegacyCrmRefCandidate,
+  meta: {
+    interestSource: PropertyEvidenceInterestSource;
+    sourceTextId?: string | null;
+  }
+) {
+  const existing = candidates.get(candidate.publicReference);
+  const nextSource = normalizeInterestSource(meta.interestSource);
+  if (!existing) {
+    candidates.set(candidate.publicReference, {
+      ...candidate,
+      interestSource: nextSource,
+      sourceTextId: meta.sourceTextId || null,
+    });
+    return;
+  }
+  const strongerSource = chooseStrongerInterestSource(existing.interestSource, nextSource);
+  candidates.set(candidate.publicReference, {
+    ...existing,
+    source: existing.source === "explicit_ref" ? existing.source : candidate.source,
+    interestSource: strongerSource,
+    sourceTextId: strongerSource === existing.interestSource ? existing.sourceTextId : meta.sourceTextId || null,
+  });
 }
 
 async function getConfiguredAllowedHosts(args: {
@@ -160,6 +265,7 @@ function formatPropertyEvidenceItem(item: PropertyEvidenceItem): string {
     const bits = [
       `ref ${item.publicReference || item.oldCrmPropertyId || "unknown"}`,
       item.status.replace(/_/g, " "),
+      `interest: ${formatInterestSource(item.interestSource)}`,
       item.title ? `title: ${item.title}` : null,
       item.location ? `location: ${item.location}` : null,
       item.price ? `price: ${item.price}` : null,
@@ -172,6 +278,7 @@ function formatPropertyEvidenceItem(item: PropertyEvidenceItem): string {
   return [
     `url ${item.url || "unknown"}`,
     item.status.replace(/_/g, " "),
+    `interest: ${formatInterestSource(item.interestSource)}`,
     item.extracted?.title ? `title: ${item.extracted.title}` : null,
     item.extracted?.reference ? `reference: ${item.extracted.reference}` : null,
     item.extracted?.price ? `price: ${item.extracted.price}` : null,
@@ -203,6 +310,7 @@ export function formatTimelineNoteBody(args: {
     item.publicReference || item.extracted?.reference ? `Reference: ${item.publicReference || item.extracted?.reference}` : null,
     item.url ? `URL: ${item.url}` : null,
     `Status: ${formatStatusLabel(item.status)}`,
+    `Interest source: ${formatInterestSource(item.interestSource)}`,
     item.title || item.extracted?.title ? `Title: ${item.title || item.extracted?.title}` : null,
     item.location || item.extracted?.location ? `Location: ${item.location || item.extracted?.location}` : null,
     item.price || item.extracted?.price ? `Price: ${item.price || item.extracted?.price}` : null,
@@ -269,10 +377,15 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
   conversationId?: string | null;
   actorUserId?: string | null;
   text: string;
+  evidence?: PropertyEvidenceInput[] | null;
   source?: string | null;
 }): Promise<PropertyEvidenceResolution> {
-  const text = normalizeText(args.text);
-  if (!text) return { items: [], text: "" };
+  const evidenceInputs = normalizeEvidenceInputs({
+    text: args.text,
+    evidence: args.evidence,
+  });
+  if (evidenceInputs.length === 0) return { items: [], text: "" };
+  const text = evidenceInputs.map((item) => item.text).join("\n");
 
   const location = await db.location.findUnique({
     where: { id: args.locationId },
@@ -283,29 +396,57 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
     locationId: args.locationId,
     locationDomain: location?.domain || null,
   });
-  const urls = extractHttpUrls(text);
-  const trustedUrls = urls.filter((url) => isAllowedPropertyUrl(url, allowedHosts));
-  const untrustedUrls = urls.filter((url) => !isAllowedPropertyUrl(url, allowedHosts));
+  const urlsByUrl = new Map<string, {
+    url: string;
+    interestSource: PropertyEvidenceInterestSource;
+    sourceTextId?: string | null;
+  }>();
+  for (const entry of evidenceInputs) {
+    for (const url of extractHttpUrls(entry.text)) {
+      const existing = urlsByUrl.get(url);
+      const interestSource = existing
+        ? chooseStrongerInterestSource(existing.interestSource, entry.interestSource)
+        : entry.interestSource;
+      urlsByUrl.set(url, {
+        url,
+        interestSource,
+        sourceTextId: interestSource === existing?.interestSource ? existing?.sourceTextId || null : entry.id || null,
+      });
+    }
+  }
+  const urls = Array.from(urlsByUrl.values());
+  const trustedUrls = urls.filter((item) => isAllowedPropertyUrl(item.url, allowedHosts));
+  const untrustedUrls = urls.filter((item) => !isAllowedPropertyUrl(item.url, allowedHosts));
   const crawledUrlEvidence: PropertyEvidenceItem[] = [];
-  const crawledTextByUrl = new Map<string, string>();
+  const crawledTextByUrl = new Map<string, {
+    text: string;
+    interestSource: PropertyEvidenceInterestSource;
+    sourceTextId?: string | null;
+  }>();
 
-  for (const url of trustedUrls.slice(0, MAX_CRAWL_URLS)) {
-    if (extractLegacyCrmRefCandidates(url).length > 0) continue;
-    const crawlResult = await crawlPropertyWithPython(url);
+  for (const urlEvidence of trustedUrls.slice(0, MAX_CRAWL_URLS)) {
+    if (extractLegacyCrmRefCandidates(urlEvidence.url).length > 0) continue;
+    const crawlResult = await crawlPropertyWithPython(urlEvidence.url);
     if (!crawlResult.success) {
       crawledUrlEvidence.push({
         type: "url",
         status: "import_unavailable",
+        interestSource: urlEvidence.interestSource,
+        sourceTextId: urlEvidence.sourceTextId || null,
         source: "message_url",
-        url,
+        url: urlEvidence.url,
         reason: `Allowed public page crawl failed: ${crawlResult.error || "unknown error"}.`,
       });
       continue;
     }
-    const crawledText = `${url}\n${crawlResult.markdown || ""}\n${crawlResult.html || ""}`;
-    crawledTextByUrl.set(url, crawledText);
+    const crawledText = `${urlEvidence.url}\n${crawlResult.markdown || ""}\n${crawlResult.html || ""}`;
+    crawledTextByUrl.set(urlEvidence.url, {
+      text: crawledText,
+      interestSource: urlEvidence.interestSource,
+      sourceTextId: urlEvidence.sourceTextId || null,
+    });
     const extracted = extractListingFactsFromCrawl({
-      url,
+      url: urlEvidence.url,
       markdown: crawlResult.markdown,
       html: crawlResult.html,
       metadata: crawlResult.metadata,
@@ -313,8 +454,10 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
     crawledUrlEvidence.push({
       type: "url",
       status: "import_unavailable",
+      interestSource: urlEvidence.interestSource,
+      sourceTextId: urlEvidence.sourceTextId || null,
       source: "message_url",
-      url,
+      url: urlEvidence.url,
       extracted,
       reason: extracted?.reference
         ? "Allowed public page crawled; reference discovered and old CRM import will be queued if supported."
@@ -322,13 +465,24 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
     });
   }
 
-  const legacyCandidates = uniqueBy(
-    extractLegacyCrmRefCandidates([
-      text,
-      ...Array.from(crawledTextByUrl.values()),
-    ].join("\n")),
-    (candidate) => candidate.publicReference
-  );
+  const legacyCandidatesByReference = new Map<string, SourcedLegacyCandidate>();
+  for (const entry of evidenceInputs) {
+    for (const candidate of extractLegacyCrmRefCandidates(entry.text)) {
+      mergeLegacyCandidate(legacyCandidatesByReference, candidate, {
+        interestSource: entry.interestSource,
+        sourceTextId: entry.id || null,
+      });
+    }
+  }
+  for (const crawled of crawledTextByUrl.values()) {
+    for (const candidate of extractLegacyCrmRefCandidates(crawled.text)) {
+      mergeLegacyCandidate(legacyCandidatesByReference, candidate, {
+        interestSource: crawled.interestSource,
+        sourceTextId: crawled.sourceTextId || null,
+      });
+    }
+  }
+  const legacyCandidates = Array.from(legacyCandidatesByReference.values());
 
   const items: PropertyEvidenceItem[] = [];
 
@@ -374,13 +528,17 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
     for (const candidate of legacyCandidates) {
       const existing = existingByReference.get(candidate.publicReference.toUpperCase());
       if (existing) {
-        await applyPropertyInterestToContact({
-          contactId: args.contactId,
-          property: existing,
-        });
+        if (isClientInterestSource(candidate.interestSource)) {
+          await applyPropertyInterestToContact({
+            contactId: args.contactId,
+            property: existing,
+          });
+        }
         items.push({
           type: "legacy_crm_ref",
           status: "linked_existing",
+          interestSource: candidate.interestSource,
+          sourceTextId: candidate.sourceTextId || null,
           publicReference: candidate.publicReference,
           oldCrmPropertyId: candidate.oldCrmPropertyId,
           source: candidate.source,
@@ -397,6 +555,8 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
         items.push({
           type: "legacy_crm_ref",
           status: "import_unavailable",
+          interestSource: candidate.interestSource,
+          sourceTextId: candidate.sourceTextId || null,
           publicReference: candidate.publicReference,
           oldCrmPropertyId: candidate.oldCrmPropertyId,
           source: candidate.source,
@@ -421,6 +581,8 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
       items.push({
         type: "legacy_crm_ref",
         status: enqueueResult.mode === "already-queued" ? "import_already_queued" : enqueueResult.accepted ? "import_queued" : "import_unavailable",
+        interestSource: candidate.interestSource,
+        sourceTextId: candidate.sourceTextId || null,
         publicReference: candidate.publicReference,
         oldCrmPropertyId: candidate.oldCrmPropertyId,
         source: candidate.source,
@@ -433,28 +595,32 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
     items.push(item);
   }
 
-  for (const url of trustedUrls) {
-    if (legacyCandidates.some((candidate) => candidate.source === "public_url" && url.toLowerCase().includes(candidate.publicReference.toLowerCase()))) {
+  for (const urlEvidence of trustedUrls) {
+    if (legacyCandidates.some((candidate) => candidate.source === "public_url" && urlEvidence.url.toLowerCase().includes(candidate.publicReference.toLowerCase()))) {
       continue;
     }
-    if (crawledUrlEvidence.some((item) => item.url === url)) {
+    if (crawledUrlEvidence.some((item) => item.url === urlEvidence.url)) {
       continue;
     }
     items.push({
       type: "url",
       status: "import_unavailable",
+      interestSource: urlEvidence.interestSource,
+      sourceTextId: urlEvidence.sourceTextId || null,
       source: "message_url",
-      url,
+      url: urlEvidence.url,
       reason: "Trusted property URL found, but no supported reference was extracted yet.",
     });
   }
 
-  for (const url of untrustedUrls) {
+  for (const urlEvidence of untrustedUrls) {
     items.push({
       type: "url",
       status: "untrusted_url",
+      interestSource: urlEvidence.interestSource,
+      sourceTextId: urlEvidence.sourceTextId || null,
       source: "message_url",
-      url,
+      url: urlEvidence.url,
       reason: "URL was not crawled because it is outside the allowed property domains.",
     });
   }
