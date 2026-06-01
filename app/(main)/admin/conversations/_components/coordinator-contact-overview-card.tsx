@@ -337,7 +337,7 @@ export function CoordinatorContactOverviewCard({
                                                         contactId={contact.id}
                                                         initialProposals={requirementProposals}
                                                         onContactContextUpdated={onContactContextUpdated}
-                                                        title="Search Criteria"
+                                                        title="Requirements"
                                                         variant="inline"
                                                     >
                                                         {briefRequirementItems.length > 0 && (

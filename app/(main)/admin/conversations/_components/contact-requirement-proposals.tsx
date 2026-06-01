@@ -27,7 +27,7 @@ type RequirementProposal = {
     reasoning: string | null;
 };
 
-const REQUIREMENTS_HELP_TEXT = "Shows AI-proposed changes to this client's search criteria from new client messages and activity notes. Proposals stay pending until a human approves them.";
+const REQUIREMENTS_HELP_TEXT = "Shows this client's current requirements. Use the refresh action to resolve property references and scan recent messages or notes for changed criteria. AI only creates proposals; a human must approve before anything is applied.";
 
 function formatFieldLabel(field: string) {
     return field
@@ -231,8 +231,6 @@ export function ContactRequirementProposals({
                     aria-label="Update client context from property references, messages, and notes"
                 >
                     {updatingContext ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    <span className="hidden min-[390px]:inline">Update context</span>
-                    <span className="min-[390px]:hidden">Update</span>
                 </Button>
             </div>
 
