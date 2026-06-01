@@ -81,6 +81,70 @@ function getModelMaxOutputTokens(modelName: string): number {
     if (/gemini-(?:2\.5|3)/i.test(modelName)) return 65536;
     return MODEL_OUTPUT_DEFAULT_LIMIT;
 }
+
+function formatDraftContextValue(value: unknown): string {
+    if (Array.isArray(value)) {
+        return value
+            .map((item) => String(item || "").trim())
+            .filter(Boolean)
+            .join(", ");
+    }
+
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
+}
+
+export function buildContactRequirementGuide(contact: {
+    leadStage?: unknown;
+    leadGoal?: unknown;
+    leadPriority?: unknown;
+    requirementStatus?: unknown;
+    requirementDistrict?: unknown;
+    requirementBedrooms?: unknown;
+    requirementMinPrice?: unknown;
+    requirementMaxPrice?: unknown;
+    requirementCondition?: unknown;
+    requirementPropertyTypes?: unknown;
+    requirementPropertyLocations?: unknown;
+    requirementOtherDetails?: unknown;
+    requirementSummary?: unknown;
+} | null | undefined): string {
+    if (!contact) return "Client requirement guide: No contact requirements available.";
+
+    const minPrice = formatDraftContextValue(contact.requirementMinPrice);
+    const maxPrice = formatDraftContextValue(contact.requirementMaxPrice);
+    const budget = minPrice || maxPrice
+        ? `${minPrice || "Any"} - ${maxPrice || "Any"}`
+        : "";
+    const lines = [
+        ["Lead stage", contact.leadStage],
+        ["Lead goal", contact.leadGoal],
+        ["Lead priority", contact.leadPriority],
+        ["Status", contact.requirementStatus],
+        ["District", contact.requirementDistrict],
+        ["Locations", contact.requirementPropertyLocations],
+        ["Bedrooms", contact.requirementBedrooms],
+        ["Budget", budget],
+        ["Condition", contact.requirementCondition],
+        ["Property types", contact.requirementPropertyTypes],
+        ["Other details", contact.requirementOtherDetails],
+        ["Requirement summary/history", contact.requirementSummary],
+    ]
+        .map(([label, value]) => {
+            const formatted = formatDraftContextValue(value);
+            return formatted ? `- ${label}: ${formatted}` : null;
+        })
+        .filter(Boolean);
+
+    if (lines.length === 0) return "Client requirement guide: No approved requirements recorded.";
+
+    return [
+        "Client requirement guide:",
+        ...lines,
+        "Use this as relevance guidance. Do not restate these requirements unless they help explain why a property fits, clarify a mismatch, or answer the client's latest message.",
+    ].join("\n");
+}
+
 const DRAFT_THINKING_BUDGET_SIMPLE = 0;
 const DRAFT_THINKING_BUDGET_COMPLEX = 128;
 const DRAFT_RETRY_BASE_DELAY_MS = 260;
@@ -735,13 +799,7 @@ export async function generateDraft(context: CoordinationContext) {
                 - First Name (preferred for greeting): ${contactFirstName}
                 - Phone: ${contact.phone}
                 
-                Requirements:
-                - Status: ${contact.requirementStatus}
-                - District: ${contact.requirementDistrict}
-                - Bedrooms: ${contact.requirementBedrooms}
-                - Budget: ${contact.requirementMinPrice} - ${contact.requirementMaxPrice}
-                - Condition: ${contact.requirementCondition}
-                - Types: ${contact.requirementPropertyTypes.join(", ")}
+                ${buildContactRequirementGuide(contact)}
                 
                 Property Activity:
                 - Interested Properties: ${contact.propertyRoles.filter(r => r.role === 'buyer' || r.role === 'tenant' || r.role === 'viewer').map(r => r.property.title).join(", ")}
@@ -790,7 +848,8 @@ export async function generateDraft(context: CoordinationContext) {
         Task:
         Draft a suggested reply for the Agent to send back to the Contact via ${channelName}.
         Prioritize the immediate reply need from the latest inbound message.
-        Use Contact Requirements, Property Activity, and timeline details only when needed for factual correctness or disambiguation.
+        Use the client requirement guide, Property Activity, and timeline details only when needed for relevance, factual correctness, or disambiguation.
+        Treat client requirements as guidance for deciding what to mention, not as mandatory content to include in every message.
         If they are asking about a property, answer directly when status/details are present in context.
         If the property is unavailable, explain briefly and offer help finding alternatives.
         Avoid adding extra strategy, fallback scenarios, or motivational filler unless explicitly requested.
