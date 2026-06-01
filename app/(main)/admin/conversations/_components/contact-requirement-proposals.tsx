@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Check, Info, Loader2, Search, X } from "lucide-react";
+import { AlertCircle, Check, Home, Info, Loader2, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
     analyzeContactRequirementsAction,
@@ -112,7 +112,6 @@ export function ContactRequirementProposals({
     ));
     const [loading, setLoading] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
-    const [resolvingProperties, setResolvingProperties] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [patchEdits, setPatchEdits] = useState<Record<string, string>>({});
 
@@ -157,26 +156,6 @@ export function ContactRequirementProposals({
             await refresh();
         } finally {
             setAnalyzing(false);
-        }
-    };
-
-    const resolveProperties = async () => {
-        if (!resolvedContactId || resolvingProperties) return;
-        setResolvingProperties(true);
-        try {
-            const result = await resolveContactPropertyEvidenceAction(conversationId, resolvedContactId);
-            if (!result.success) {
-                toast.error(String(result.error || "Property link resolution failed."));
-                return;
-            }
-            if (Number(result.count || 0) > 0) {
-                toast.success(`Resolved ${Number(result.count)} property evidence item${Number(result.count) === 1 ? "" : "s"}.`);
-            } else {
-                toast.info("No property links or references found.");
-            }
-            await refresh();
-        } finally {
-            setResolvingProperties(false);
         }
     };
 
@@ -228,36 +207,25 @@ export function ContactRequirementProposals({
 
     return (
         <div className={isInline ? "space-y-2" : "rounded-md border bg-white p-3 space-y-3"}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">
                     <div className="truncate text-xs font-semibold text-slate-800">{title}</div>
                     <RequirementsHelpControl />
                 </div>
-                <div className="flex items-center gap-1.5">
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-xs"
-                        disabled={!resolvedContactId || resolvingProperties || analyzing}
-                        onClick={resolveProperties}
-                    >
-                        {resolvingProperties ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                        <span className="hidden min-[420px]:inline">Resolve Links</span>
-                        <span className="min-[420px]:hidden">Links</span>
-                    </Button>
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-xs"
-                        disabled={!resolvedContactId || analyzing || resolvingProperties}
-                        onClick={analyze}
-                    >
-                        {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                        Analyze
-                    </Button>
-                </div>
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 shrink-0 px-1.5 text-[11px] text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    disabled={!resolvedContactId || analyzing}
+                    onClick={analyze}
+                    title="Scan messages and notes for changed search criteria"
+                    aria-label="Scan messages and notes for changed search criteria"
+                >
+                    {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    <span className="hidden min-[390px]:inline">Scan activity</span>
+                    <span className="min-[390px]:hidden">Scan</span>
+                </Button>
             </div>
 
             {children}
@@ -349,5 +317,57 @@ export function ContactRequirementProposals({
                 );
             })}
         </div>
+    );
+}
+
+export function PropertyEvidenceResolveButton({
+    conversationId,
+    contactId,
+    onContactContextUpdated,
+}: {
+    conversationId: string;
+    contactId?: string | null;
+    onContactContextUpdated: (context: any) => void;
+}) {
+    const [resolving, setResolving] = useState(false);
+    const resolvedContactId = String(contactId || "").trim();
+
+    const resolveProperties = async () => {
+        if (!resolvedContactId || resolving) return;
+        setResolving(true);
+        try {
+            const result = await resolveContactPropertyEvidenceAction(conversationId, resolvedContactId);
+            if (!result.success) {
+                toast.error(String(result.error || "Property link resolution failed."));
+                return;
+            }
+            const count = Number(result.count || 0);
+            if (count > 0) {
+                toast.success(`Resolved ${count} property evidence item${count === 1 ? "" : "s"}.`);
+                const context = await getContactContext(resolvedContactId, { refreshExternal: false });
+                onContactContextUpdated(context);
+            } else {
+                toast.info("No property links or references found.");
+            }
+        } finally {
+            setResolving(false);
+        }
+    };
+
+    return (
+        <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-5 shrink-0 px-1.5 text-[10px] font-medium text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+            disabled={!resolvedContactId || resolving}
+            onClick={resolveProperties}
+            title="Resolve property URLs and references from this conversation"
+            aria-label="Resolve property URLs and references from this conversation"
+        >
+            {resolving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Home className="h-3 w-3" />}
+            <span className="hidden min-[390px]:inline">Resolve property links</span>
+            <span className="min-[390px]:hidden">Resolve links</span>
+        </Button>
     );
 }
