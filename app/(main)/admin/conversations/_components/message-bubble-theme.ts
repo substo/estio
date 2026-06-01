@@ -152,8 +152,14 @@ export function getConversationTimelineClassName(input: { isWhatsApp: boolean })
         : "bg-slate-50/50";
 }
 
+const conversationPaneHorizontalClassName = "px-2.5 sm:px-4 lg:px-5";
+
 export function getConversationTimelineScrollClassName() {
-    return "px-2.5 py-2 sm:px-4 sm:py-3 lg:px-5";
+    return `${conversationPaneHorizontalClassName} py-2 sm:py-3`;
+}
+
+export function getConversationComposerContentClassName() {
+    return `w-full min-w-0 max-w-full ${conversationPaneHorizontalClassName} py-2`;
 }
 
 export function getConversationTimelineContentClassName() {

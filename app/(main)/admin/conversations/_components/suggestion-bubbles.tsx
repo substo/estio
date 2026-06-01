@@ -5,18 +5,23 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 interface SuggestionBubblesProps {
     suggestions: string[];
     onSelect: (text: string) => void;
+    className?: string;
 }
 
-export function SuggestionBubbles({ suggestions, onSelect }: SuggestionBubblesProps) {
+export function SuggestionBubbles({ suggestions, onSelect, className }: SuggestionBubblesProps) {
     if (!suggestions || suggestions.length === 0) return null;
 
     return (
         <TooltipProvider delayDuration={200}>
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-purple-50/60 to-transparent border-t border-purple-100/40 animate-in slide-in-from-bottom-2 fade-in duration-300">
+            <div className={cn(
+                "flex items-center gap-1.5 bg-gradient-to-r from-purple-50/60 to-transparent border-t border-purple-100/40 animate-in slide-in-from-bottom-2 fade-in duration-300",
+                className || "px-2 py-1"
+            )}>
                 {/* Single sparkle icon with tooltip */}
                 <Tooltip>
                     <TooltipTrigger asChild>

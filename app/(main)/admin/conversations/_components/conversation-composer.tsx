@@ -22,6 +22,7 @@ import { useConversationComposerChannel } from "./use-conversation-composer-chan
 import { useConversationComposerMedia } from "./use-conversation-composer-media";
 import { useConversationComposerAiDraft } from "./use-conversation-composer-ai-draft";
 import { useConversationComposerSend } from "./use-conversation-composer-send";
+import { getConversationComposerContentClassName } from "./message-bubble-theme";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -221,15 +222,17 @@ export function ConversationComposer({
         : smsSegmentInfo.segments > 1
             ? "This Android SMS will be sent as multipart SMS."
             : "Android SMS segment estimate.";
+    const composerContentClassName = getConversationComposerContentClassName();
 
     return (
-        <div className="border-t bg-white pb-[env(safe-area-inset-bottom)]">
+        <div className="w-full min-w-0 max-w-full overflow-x-hidden border-t bg-white pb-[env(safe-area-inset-bottom)]">
             <SuggestionBubbles
                 suggestions={suggestions}
                 onSelect={(text) => handleAiDraft(text)}
+                className={cn(composerContentClassName, "py-1")}
             />
 
-            <div className="mx-auto min-w-0 max-w-5xl px-3 py-2 sm:px-5">
+            <div className={composerContentClassName}>
                 {replyingToLabel ? (
                     <div className="px-1 pb-1 text-[11px] text-slate-500">
                         Replying to <span className="font-medium text-slate-700">{replyingToLabel}</span>
