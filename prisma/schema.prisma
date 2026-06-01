@@ -1632,6 +1632,7 @@ model ContactTask {
   notifications UserNotification[]
 
   @@index([locationId, contactId, status, dueAt])
+  @@index([locationId, contactId, deletedAt, status, dueAt])
   @@index([conversationId, status, dueAt])
   @@index([conversationId, deletedAt, status, dueAt])
   @@index([assignedUserId, status, dueAt])

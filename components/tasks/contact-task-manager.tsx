@@ -298,7 +298,9 @@ export function ContactTaskManager({
     }
 
     try {
-      const res = await listContactTasks(contactId, filter);
+      const res = await listContactTasks(contactId, filter, {
+        includeProviderState: true,
+      });
       if (requestId !== loadRequestIdRef.current) return;
 
       if (!res?.success) {

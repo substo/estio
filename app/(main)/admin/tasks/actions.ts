@@ -72,11 +72,17 @@ async function getAuthContext() {
 }
 
 async function resolveContact(locationId: string, contactIdOrGhlId: string) {
+  const id = String(contactIdOrGhlId || '').trim();
+  if (!id) return null;
+
+  const contactById = await db.contact.findFirst({
+    where: { id, locationId },
+    select: { id: true },
+  });
+  if (contactById) return contactById;
+
   return db.contact.findFirst({
-    where: {
-      locationId,
-      OR: [{ id: contactIdOrGhlId }, { ghlContactId: contactIdOrGhlId }],
-    },
+    where: { ghlContactId: id, locationId },
     select: { id: true },
   });
 }
@@ -109,7 +115,34 @@ function parseDueAt(input?: string | null, timeZone?: string | null): Date | nul
   return parsed;
 }
 
-export async function listContactTasks(contactId: string, statusFilter?: 'open' | 'completed' | 'all') {
+type ListContactTasksOptions = {
+  includeProviderState?: boolean;
+};
+
+function buildTaskCounts(statusCounts: Array<{ status: string; _count: { _all: number } }>) {
+  let all = 0;
+  let completed = 0;
+
+  for (const row of statusCounts) {
+    const count = Number(row._count?._all || 0);
+    all += count;
+    if (String(row.status || '').toLowerCase() === 'completed') {
+      completed += count;
+    }
+  }
+
+  return {
+    all,
+    completed,
+    open: Math.max(0, all - completed),
+  };
+}
+
+export async function listContactTasks(
+  contactId: string,
+  statusFilter?: 'open' | 'completed' | 'all',
+  options: ListContactTasksOptions = {},
+) {
   const { location } = await getAuthContext();
   const resolvedContact = await resolveContact(location.id, String(contactId || '').trim());
   if (!resolvedContact) {
@@ -122,6 +155,7 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
   }
 
   const filter = statusFilterSchema.parse(statusFilter || 'all');
+  const includeProviderState = options.includeProviderState ?? true;
 
   const baseWhere = {
     locationId: location.id,
@@ -129,19 +163,11 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
     deletedAt: null,
   } as const;
 
-  const [allCount, openCount, completedCount, tasks] = await Promise.all([
-    db.contactTask.count({ where: baseWhere }),
-    db.contactTask.count({
-      where: {
-        ...baseWhere,
-        status: { not: 'completed' },
-      },
-    }),
-    db.contactTask.count({
-      where: {
-        ...baseWhere,
-        status: 'completed',
-      },
+  const [statusCounts, tasks] = await Promise.all([
+    db.contactTask.groupBy({
+      by: ['status'],
+      where: baseWhere,
+      _count: { _all: true },
     }),
     db.contactTask.findMany({
       where: {
@@ -154,36 +180,49 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
         { dueAt: 'asc' },
         { createdAt: 'desc' },
       ],
-      include: {
-        syncRecords: {
-          select: {
-            provider: true,
-            status: true,
-            lastSyncedAt: true,
-            lastError: true,
-          },
-        },
-        outboxJobs: {
-          where: {
-            status: {
-              in: ['pending', 'processing', 'failed', 'dead'],
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        priority: true,
+        dueAt: true,
+        completedAt: true,
+        reminderMode: true,
+        assignedUserId: true,
+        ...(includeProviderState
+          ? {
+            syncRecords: {
+              select: {
+                provider: true,
+                status: true,
+                lastSyncedAt: true,
+                lastError: true,
+              },
             },
-          },
-          orderBy: [
-            { status: 'asc' },
-            { scheduledAt: 'asc' },
-            { createdAt: 'desc' },
-          ],
-          select: {
-            provider: true,
-            status: true,
-            operation: true,
-            attemptCount: true,
-            scheduledAt: true,
-            lastError: true,
-            createdAt: true,
-          },
-        },
+            outboxJobs: {
+              where: {
+                status: {
+                  in: ['pending', 'processing', 'failed', 'dead'],
+                },
+              },
+              orderBy: [
+                { status: 'asc' },
+                { scheduledAt: 'asc' },
+                { createdAt: 'desc' },
+              ],
+              select: {
+                provider: true,
+                status: true,
+                operation: true,
+                attemptCount: true,
+                scheduledAt: true,
+                lastError: true,
+                createdAt: true,
+              },
+            },
+          }
+          : {}),
         assignedUser: {
           select: {
             id: true,
@@ -194,15 +233,12 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
       },
     }),
   ]);
+  const counts = buildTaskCounts(statusCounts);
 
   return {
     success: true,
     tasks,
-    counts: {
-      all: allCount,
-      open: openCount,
-      completed: completedCount,
-    },
+    counts,
   };
 }
 
