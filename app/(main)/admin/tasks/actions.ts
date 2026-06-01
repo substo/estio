@@ -10,6 +10,18 @@ import { isLocalDateTimeWithoutZone } from '@/lib/tasks/datetime-local';
 import { normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobs } from '@/lib/tasks/reminders';
 import { enqueueTaskSyncJobs } from '@/lib/tasks/sync-engine';
+import {
+  attachFallbackConversationsToTasks,
+  buildTaskCounts,
+  buildTaskStatusWhere,
+  CONTACT_TASK_ASSIGNEE_SELECT,
+  CONTACT_TASK_ORDER_BY,
+  CONTACT_TASK_PROVIDER_STATE_SELECT,
+  EMPTY_TASK_COUNTS,
+  getContactIdsNeedingFallbackConversation,
+  normalizeTaskListPagination,
+  type ContactTaskStatusFilter,
+} from '@/lib/tasks/task-listing';
 import { parseViewingDateTimeInput } from '@/lib/viewings/datetime';
 import { buildConversationReferenceWhere } from '@/lib/conversations/identity';
 
@@ -119,28 +131,9 @@ type ListContactTasksOptions = {
   includeProviderState?: boolean;
 };
 
-function buildTaskCounts(statusCounts: Array<{ status: string; _count: { _all: number } }>) {
-  let all = 0;
-  let completed = 0;
-
-  for (const row of statusCounts) {
-    const count = Number(row._count?._all || 0);
-    all += count;
-    if (String(row.status || '').toLowerCase() === 'completed') {
-      completed += count;
-    }
-  }
-
-  return {
-    all,
-    completed,
-    open: Math.max(0, all - completed),
-  };
-}
-
 export async function listContactTasks(
   contactId: string,
-  statusFilter?: 'open' | 'completed' | 'all',
+  statusFilter?: ContactTaskStatusFilter,
   options: ListContactTasksOptions = {},
 ) {
   const { location } = await getAuthContext();
@@ -150,11 +143,11 @@ export async function listContactTasks(
       success: false,
       error: 'Contact not found',
       tasks: [],
-      counts: { all: 0, open: 0, completed: 0 },
+      counts: EMPTY_TASK_COUNTS,
     };
   }
 
-  const filter = statusFilterSchema.parse(statusFilter || 'all');
+  const filter = statusFilterSchema.parse(statusFilter || 'all') as ContactTaskStatusFilter;
   const includeProviderState = options.includeProviderState ?? true;
 
   const baseWhere = {
@@ -172,14 +165,9 @@ export async function listContactTasks(
     db.contactTask.findMany({
       where: {
         ...baseWhere,
-        ...(filter === 'open' ? { status: { not: 'completed' } } : {}),
-        ...(filter === 'completed' ? { status: 'completed' } : {}),
+        ...buildTaskStatusWhere(filter),
       },
-      orderBy: [
-        { status: 'asc' },
-        { dueAt: 'asc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: CONTACT_TASK_ORDER_BY,
       select: {
         id: true,
         title: true,
@@ -190,45 +178,9 @@ export async function listContactTasks(
         completedAt: true,
         reminderMode: true,
         assignedUserId: true,
-        ...(includeProviderState
-          ? {
-            syncRecords: {
-              select: {
-                provider: true,
-                status: true,
-                lastSyncedAt: true,
-                lastError: true,
-              },
-            },
-            outboxJobs: {
-              where: {
-                status: {
-                  in: ['pending', 'processing', 'failed', 'dead'],
-                },
-              },
-              orderBy: [
-                { status: 'asc' },
-                { scheduledAt: 'asc' },
-                { createdAt: 'desc' },
-              ],
-              select: {
-                provider: true,
-                status: true,
-                operation: true,
-                attemptCount: true,
-                scheduledAt: true,
-                lastError: true,
-                createdAt: true,
-              },
-            },
-          }
-          : {}),
+        ...(includeProviderState ? CONTACT_TASK_PROVIDER_STATE_SELECT : {}),
         assignedUser: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
+          select: CONTACT_TASK_ASSIGNEE_SELECT,
         },
       },
     }),
@@ -245,51 +197,41 @@ export async function listContactTasks(
 type ListLocationTasksOptions = {
   includeCounts?: boolean;
   includeProviderState?: boolean;
+  limit?: number;
+  offset?: number;
 };
 
 export async function listLocationTasks(
-  statusFilter?: 'open' | 'completed' | 'all',
+  statusFilter?: ContactTaskStatusFilter,
   options: ListLocationTasksOptions = {},
 ) {
   const { location } = await getAuthContext();
-  const filter = statusFilterSchema.parse(statusFilter || 'all');
+  const filter = statusFilterSchema.parse(statusFilter || 'all') as ContactTaskStatusFilter;
   const includeCounts = options.includeCounts ?? true;
   const includeProviderState = options.includeProviderState ?? true;
+  const { limit, offset } = normalizeTaskListPagination(options);
 
   const baseWhere = {
     locationId: location.id,
     deletedAt: null,
   } as const;
 
-  const [counts, tasks] = await Promise.all([
+  const [statusCounts, taskRows] = await Promise.all([
     includeCounts
-      ? Promise.all([
-        db.contactTask.count({ where: baseWhere }),
-        db.contactTask.count({
-          where: {
-            ...baseWhere,
-            status: { not: 'completed' },
-          },
-        }),
-        db.contactTask.count({
-          where: {
-            ...baseWhere,
-            status: 'completed',
-          },
-        }),
-      ])
-      : Promise.resolve([0, 0, 0] as const),
+      ? db.contactTask.groupBy({
+        by: ['status'],
+        where: baseWhere,
+        _count: { _all: true },
+      })
+      : Promise.resolve([]),
     db.contactTask.findMany({
       where: {
         ...baseWhere,
-        ...(filter === 'open' ? { status: { not: 'completed' } } : {}),
-        ...(filter === 'completed' ? { status: 'completed' } : {}),
+        ...buildTaskStatusWhere(filter),
       },
-      orderBy: [
-        { status: 'asc' },
-        { dueAt: 'asc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: CONTACT_TASK_ORDER_BY,
+      skip: offset,
+      take: limit + 1,
       select: {
         id: true,
         title: true,
@@ -307,11 +249,6 @@ export async function listLocationTasks(
             lastName: true,
             email: true,
             phone: true,
-            conversations: {
-              select: { id: true, ghlConversationId: true },
-              take: 1,
-              orderBy: { lastMessageAt: 'desc' as const },
-            },
           }
         },
         conversation: {
@@ -320,58 +257,40 @@ export async function listLocationTasks(
             ghlConversationId: true,
           }
         },
-        ...(includeProviderState
-          ? {
-            syncRecords: {
-              select: {
-                provider: true,
-                status: true,
-                lastSyncedAt: true,
-                lastError: true,
-              },
-            },
-            outboxJobs: {
-              where: {
-                status: {
-                  in: ['pending', 'processing', 'failed', 'dead'],
-                },
-              },
-              orderBy: [
-                { status: 'asc' },
-                { scheduledAt: 'asc' },
-                { createdAt: 'desc' },
-              ],
-              select: {
-                provider: true,
-                status: true,
-                operation: true,
-                attemptCount: true,
-                scheduledAt: true,
-                lastError: true,
-                createdAt: true,
-              },
-            },
-          }
-          : {}),
+        ...(includeProviderState ? CONTACT_TASK_PROVIDER_STATE_SELECT : {}),
         assignedUser: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
+          select: CONTACT_TASK_ASSIGNEE_SELECT,
         },
       },
     }),
   ]);
+  const hasMore = taskRows.length > limit;
+  const tasksPage = hasMore ? taskRows.slice(0, limit) : taskRows;
+  const contactIdsNeedingConversation = getContactIdsNeedingFallbackConversation(tasksPage);
+  let fallbackConversations: Array<{ id: string; ghlConversationId: string | null; contactId: string }> = [];
+  if (contactIdsNeedingConversation.length > 0) {
+    fallbackConversations = await db.conversation.findMany({
+      where: {
+        locationId: location.id,
+        contactId: { in: contactIdsNeedingConversation },
+      },
+      select: {
+        id: true,
+        ghlConversationId: true,
+        contactId: true,
+      },
+    });
+  }
+
+  const tasks = attachFallbackConversationsToTasks(tasksPage, fallbackConversations);
+  const counts = includeCounts ? buildTaskCounts(statusCounts) : EMPTY_TASK_COUNTS;
 
   return {
     success: true,
     tasks,
-    counts: {
-      all: counts[0],
-      open: counts[1],
-      completed: counts[2],
-    },
+    counts,
+    hasMore,
+    nextOffset: hasMore ? offset + limit : null,
   };
 }
 

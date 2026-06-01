@@ -14,6 +14,8 @@ import {
   setContactTaskCompletion,
 } from '@/app/(main)/admin/tasks/actions';
 
+const GLOBAL_TASK_LIST_PAGE_SIZE = 100;
+
 type GlobalTaskListProps = {
   selectedConversationId?: string | null;
   onSelectConversation: (id: string) => void;
@@ -29,15 +31,26 @@ export function GlobalTaskList({
 }: GlobalTaskListProps) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [busyTaskIds, setBusyTaskIds] = useState<Record<string, boolean>>({});
   const [editorTask, setEditorTask] = useState<any | null>(null);
   const loadRequestIdRef = useRef(0);
+  const nextOffsetRef = useRef<number | null>(null);
 
-  const loadTasks = useCallback(async (options?: { silent?: boolean }) => {
+  const updateNextOffset = useCallback((offset: number | null) => {
+    nextOffsetRef.current = offset;
+    setNextOffset(offset);
+  }, []);
+
+  const loadTasks = useCallback(async (options?: { silent?: boolean; append?: boolean }) => {
     const silent = options?.silent ?? false;
+    const append = options?.append ?? false;
     const requestId = ++loadRequestIdRef.current;
-    if (silent) {
+    if (append) {
+      setLoadingMore(true);
+    } else if (silent) {
       setRefreshing(true);
     } else {
       setLoading(true);
@@ -46,23 +59,28 @@ export function GlobalTaskList({
       const res = await listLocationTasks('open', {
         includeCounts: false,
         includeProviderState: false,
+        limit: GLOBAL_TASK_LIST_PAGE_SIZE,
+        offset: append ? nextOffsetRef.current || 0 : 0,
       });
       if (requestId !== loadRequestIdRef.current) return;
       if (res.success && res.tasks) {
-        setTasks(res.tasks);
+        setTasks((prev) => append ? [...prev, ...res.tasks] : res.tasks);
+        updateNextOffset(typeof res.nextOffset === 'number' ? res.nextOffset : null);
       }
     } catch (error) {
       if (requestId !== loadRequestIdRef.current) return;
       console.error('Failed to load global tasks:', error);
     } finally {
       if (requestId !== loadRequestIdRef.current) return;
-      if (silent) {
+      if (append) {
+        setLoadingMore(false);
+      } else if (silent) {
         setRefreshing(false);
       } else {
         setLoading(false);
       }
     }
-  }, []);
+  }, [updateNextOffset]);
 
   useEffect(() => {
     void loadTasks();
@@ -266,6 +284,25 @@ export function GlobalTaskList({
             </div>
           );
         })}
+        {nextOffset !== null ? (
+          <div className="p-3">
+            <button
+              type="button"
+              className="flex h-8 w-full items-center justify-center rounded border text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void loadTasks({ append: true })}
+              disabled={loadingMore}
+            >
+              {loadingMore ? (
+                <>
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Loading more...
+                </>
+              ) : (
+                'Load more tasks'
+              )}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <TaskEditorDialog
