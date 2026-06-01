@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertCircle, Check, Loader2, Search, X } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AlertCircle, Check, Info, Loader2, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import {
     analyzeContactRequirementsAction,
@@ -25,6 +27,8 @@ type RequirementProposal = {
     confidence: number | null;
     reasoning: string | null;
 };
+
+const REQUIREMENTS_HELP_TEXT = "Shows AI-proposed changes to this client's search criteria from new client messages and activity notes. Proposals stay pending until a human approves them.";
 
 function formatFieldLabel(field: string) {
     return field
@@ -47,6 +51,43 @@ function getEvidenceItems(evidence: any): Array<{ sourceId?: string; quote?: str
         field: item?.field,
         text: item?.text,
     }));
+}
+
+function RequirementsHelpControl() {
+    return (
+        <>
+            <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:inline-flex"
+                            aria-label="About client requirements"
+                        >
+                            <Info className="h-3.5 w-3.5" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" className="max-w-[260px] text-xs">
+                        {REQUIREMENTS_HELP_TEXT}
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+            <Popover>
+                <PopoverTrigger asChild>
+                    <button
+                        type="button"
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+                        aria-label="About client requirements"
+                    >
+                        <Info className="h-3.5 w-3.5" />
+                    </button>
+                </PopoverTrigger>
+                <PopoverContent side="bottom" align="start" className="w-[min(280px,calc(100vw-2rem))] p-3 text-xs text-slate-600">
+                    {REQUIREMENTS_HELP_TEXT}
+                </PopoverContent>
+            </Popover>
+        </>
+    );
 }
 
 export function ContactRequirementProposals({
@@ -88,12 +129,7 @@ export function ContactRequirementProposals({
     };
 
     useEffect(() => {
-        if (Array.isArray(initialProposals)) {
-            setItems(initialProposals.filter(Boolean));
-            void refresh({ showLoading: false });
-            return;
-        }
-        void refresh();
+        setItems(Array.isArray(initialProposals) ? initialProposals.filter(Boolean) : []);
     }, [resolvedContactId, seedKey]);
 
     const visibleItems = useMemo(() => items.filter(Boolean), [items]);
@@ -162,7 +198,6 @@ export function ContactRequirementProposals({
                 setItems(Array.isArray(context?.requirementProposals) ? context.requirementProposals as RequirementProposal[] : []);
                 onContactContextUpdated(context);
             }
-            await refresh();
         } finally {
             setBusyId(null);
         }
@@ -186,9 +221,9 @@ export function ContactRequirementProposals({
     return (
         <div className="rounded-md border bg-white p-3 space-y-3">
             <div className="flex items-center justify-between gap-2">
-                <div>
-                    <div className="text-xs font-semibold text-slate-800">Client Requirements</div>
-                    <div className="text-[10px] text-muted-foreground">Detect changed search criteria from messages and notes.</div>
+                <div className="flex min-w-0 items-center gap-1.5">
+                    <div className="truncate text-xs font-semibold text-slate-800">Client Requirements</div>
+                    <RequirementsHelpControl />
                 </div>
                 <div className="flex items-center gap-1.5">
                     <Button
@@ -221,10 +256,6 @@ export function ContactRequirementProposals({
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     Loading proposals...
                 </div>
-            )}
-
-            {!loading && visibleItems.length === 0 && (
-                <div className="text-xs text-muted-foreground">No pending requirement updates.</div>
             )}
 
             {visibleItems.map((proposal) => {
