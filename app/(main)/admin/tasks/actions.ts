@@ -206,29 +206,43 @@ export async function listContactTasks(contactId: string, statusFilter?: 'open' 
   };
 }
 
-export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'all') {
+type ListLocationTasksOptions = {
+  includeCounts?: boolean;
+  includeProviderState?: boolean;
+};
+
+export async function listLocationTasks(
+  statusFilter?: 'open' | 'completed' | 'all',
+  options: ListLocationTasksOptions = {},
+) {
   const { location } = await getAuthContext();
   const filter = statusFilterSchema.parse(statusFilter || 'all');
+  const includeCounts = options.includeCounts ?? true;
+  const includeProviderState = options.includeProviderState ?? true;
 
   const baseWhere = {
     locationId: location.id,
     deletedAt: null,
   } as const;
 
-  const [allCount, openCount, completedCount, tasks] = await Promise.all([
-    db.contactTask.count({ where: baseWhere }),
-    db.contactTask.count({
-      where: {
-        ...baseWhere,
-        status: { not: 'completed' },
-      },
-    }),
-    db.contactTask.count({
-      where: {
-        ...baseWhere,
-        status: 'completed',
-      },
-    }),
+  const [counts, tasks] = await Promise.all([
+    includeCounts
+      ? Promise.all([
+        db.contactTask.count({ where: baseWhere }),
+        db.contactTask.count({
+          where: {
+            ...baseWhere,
+            status: { not: 'completed' },
+          },
+        }),
+        db.contactTask.count({
+          where: {
+            ...baseWhere,
+            status: 'completed',
+          },
+        }),
+      ])
+      : Promise.resolve([0, 0, 0] as const),
     db.contactTask.findMany({
       where: {
         ...baseWhere,
@@ -240,7 +254,15 @@ export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'a
         { dueAt: 'asc' },
         { createdAt: 'desc' },
       ],
-      include: {
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        priority: true,
+        dueAt: true,
+        completedAt: true,
+        reminderMode: true,
         contact: {
           select: {
             id: true,
@@ -262,35 +284,39 @@ export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'a
             ghlConversationId: true,
           }
         },
-        syncRecords: {
-          select: {
-            provider: true,
-            status: true,
-            lastSyncedAt: true,
-            lastError: true,
-          },
-        },
-        outboxJobs: {
-          where: {
-            status: {
-              in: ['pending', 'processing', 'failed', 'dead'],
+        ...(includeProviderState
+          ? {
+            syncRecords: {
+              select: {
+                provider: true,
+                status: true,
+                lastSyncedAt: true,
+                lastError: true,
+              },
             },
-          },
-          orderBy: [
-            { status: 'asc' },
-            { scheduledAt: 'asc' },
-            { createdAt: 'desc' },
-          ],
-          select: {
-            provider: true,
-            status: true,
-            operation: true,
-            attemptCount: true,
-            scheduledAt: true,
-            lastError: true,
-            createdAt: true,
-          },
-        },
+            outboxJobs: {
+              where: {
+                status: {
+                  in: ['pending', 'processing', 'failed', 'dead'],
+                },
+              },
+              orderBy: [
+                { status: 'asc' },
+                { scheduledAt: 'asc' },
+                { createdAt: 'desc' },
+              ],
+              select: {
+                provider: true,
+                status: true,
+                operation: true,
+                attemptCount: true,
+                scheduledAt: true,
+                lastError: true,
+                createdAt: true,
+              },
+            },
+          }
+          : {}),
         assignedUser: {
           select: {
             id: true,
@@ -306,9 +332,9 @@ export async function listLocationTasks(statusFilter?: 'open' | 'completed' | 'a
     success: true,
     tasks,
     counts: {
-      all: allCount,
-      open: openCount,
-      completed: completedCount,
+      all: counts[0],
+      open: counts[1],
+      completed: counts[2],
     },
   };
 }

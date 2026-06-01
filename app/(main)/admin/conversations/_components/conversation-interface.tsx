@@ -222,6 +222,45 @@ const WORKSPACE_SIDEBAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
 
+async function sendReplyViaApi(
+    conversationId: string,
+    contactId: string,
+    messageBody: string,
+    type: 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY',
+    options?: {
+        clientMessageId?: string;
+        clientSentAt?: string | null;
+        translationSourceText?: string | null;
+        translationTargetLanguage?: string | null;
+        translationDetectedSourceLanguage?: string | null;
+    }
+) {
+    const response = await fetch("/api/admin/conversations/send-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            conversationId,
+            contactId,
+            messageBody,
+            type,
+            clientMessageId: options?.clientMessageId || null,
+            clientSentAt: options?.clientSentAt || null,
+            translationSourceText: options?.translationSourceText || null,
+            translationTargetLanguage: options?.translationTargetLanguage || null,
+            translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+        }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        return {
+            success: false as const,
+            error: payload?.error || `Message send failed (${response.status})`,
+            errorCode: payload?.errorCode,
+        };
+    }
+    return payload;
+}
+
 function estimateThreadViewportHeightPx(): number | null {
     if (typeof window === 'undefined') return null;
     const viewportHeight = Number(window.innerHeight);
@@ -1746,7 +1785,15 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                     return payload;
                 })
-                : await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
+                : type === "WhatsApp"
+                    ? await sendReplyViaApi(capturedConversationId, capturedContactId, text, type, {
+                        clientMessageId: optimisticClientMessageId,
+                        clientSentAt,
+                        translationSourceText: options?.translationSourceText || null,
+                        translationTargetLanguage: options?.translationTargetLanguage || null,
+                        translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+                    })
+                    : await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
                     clientMessageId: optimisticClientMessageId,
                     clientSentAt,
                     translationSourceText: options?.translationSourceText || null,
@@ -2162,13 +2209,21 @@ export function ConversationInterface({ locationId, initialConversations, initia
               // Basic retry for text for now, media retry requires original file which we don't store on client.
               // We'll fallback to alerting for media if we can't reconstruct.
               ? { success: false, error: "Retrying media messages is not supported without re-uploading the file" }
-              : await sendReply(
-                  conversationTarget.id,
-                  conversationTarget.contactId,
-                  originalMsg.body,
-                  originalMsg.type as 'SMS'|'Email'|'WhatsApp'|'SMS_RELAY',
-                  { clientMessageId: resendClientMessageId }
-              );
+              : getConversationMessageType(originalMsg) === "WhatsApp"
+                  ? await sendReplyViaApi(
+                      conversationTarget.id,
+                      conversationTarget.contactId,
+                      originalMsg.body,
+                      "WhatsApp",
+                      { clientMessageId: resendClientMessageId }
+                  )
+                  : await sendReply(
+                      conversationTarget.id,
+                      conversationTarget.contactId,
+                      originalMsg.body,
+                      originalMsg.type as 'SMS'|'Email'|'WhatsApp'|'SMS_RELAY',
+                      { clientMessageId: resendClientMessageId }
+                  );
 
             if (!res.success) {
                 if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {

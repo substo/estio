@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { format } from 'date-fns';
 import { Loader2, Circle, Clock3, Pencil, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TaskDetailDialog } from '@/components/tasks/task-detail-dialog';
 import { TaskEditorDialog } from '@/components/tasks/task-editor-dialog';
+import { notifyTasksMutated, useTasksMutatedRefresh } from '@/components/tasks/task-list-events';
+import { formatTaskDueLabel, getTaskPriorityTone, getTaskUrgencyTone } from '@/components/tasks/task-list-utils';
 import { cn } from '@/lib/utils';
 import {
   deleteContactTask,
@@ -21,36 +21,6 @@ type GlobalTaskListProps = {
   onSelectTask?: (taskId: string | null, conversationId?: string | null) => void;
 };
 
-function formatDueLabel(input?: Date | string | null) {
-  if (!input) return null;
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return null;
-  return format(date, 'MMM d, h:mm a');
-}
-
-function getPriorityTone(priority: string) {
-  if (priority === 'high') return 'bg-red-100 text-red-700 border-red-200';
-  if (priority === 'low') return 'bg-slate-100 text-slate-700 border-slate-200';
-  return 'bg-amber-100 text-amber-700 border-amber-200';
-}
-
-function getUrgencyColors(dueAt: Date | string | null) {
-  if (!dueAt) return 'bg-slate-50 text-slate-700 border-slate-200';
-
-  const date = new Date(dueAt);
-  const now = new Date();
-
-  if (date < now) {
-    return 'bg-red-50 text-red-700 border-red-200';
-  }
-
-  if (date.toDateString() === now.toDateString()) {
-    return 'bg-amber-50 text-amber-700 border-amber-200';
-  }
-
-  return 'bg-blue-50 text-blue-700 border-blue-200';
-}
-
 export function GlobalTaskList({
   selectedConversationId,
   onSelectConversation,
@@ -59,38 +29,47 @@ export function GlobalTaskList({
 }: GlobalTaskListProps) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busyTaskIds, setBusyTaskIds] = useState<Record<string, boolean>>({});
   const [editorTask, setEditorTask] = useState<any | null>(null);
+  const loadRequestIdRef = useRef(0);
 
-  const loadTasks = useCallback(async () => {
-    setLoading(true);
+  const loadTasks = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    const requestId = ++loadRequestIdRef.current;
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     try {
-      const res = await listLocationTasks('open');
+      const res = await listLocationTasks('open', {
+        includeCounts: false,
+        includeProviderState: false,
+      });
+      if (requestId !== loadRequestIdRef.current) return;
       if (res.success && res.tasks) {
         setTasks(res.tasks);
       }
     } catch (error) {
+      if (requestId !== loadRequestIdRef.current) return;
       console.error('Failed to load global tasks:', error);
     } finally {
-      setLoading(false);
+      if (requestId !== loadRequestIdRef.current) return;
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadTasks();
-
-    const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
-    const handleMutated = () => {
-      if (debounceRef.timer) clearTimeout(debounceRef.timer);
-      debounceRef.timer = setTimeout(() => void loadTasks(), 300);
-    };
-
-    window.addEventListener('estio-tasks-mutated', handleMutated);
-    return () => {
-      window.removeEventListener('estio-tasks-mutated', handleMutated);
-      if (debounceRef.timer) clearTimeout(debounceRef.timer);
-    };
   }, [loadTasks]);
+
+  const refreshTasksOnMutation = useCallback(() => void loadTasks({ silent: true }), [loadTasks]);
+  useTasksMutatedRefresh(refreshTasksOnMutation);
 
   const handleToggleComplete = async (event: React.MouseEvent, taskId: string, completed: boolean) => {
     event.stopPropagation();
@@ -113,7 +92,7 @@ export function GlobalTaskList({
         setTasks(previousTasks);
         return;
       }
-      window.dispatchEvent(new Event('estio-tasks-mutated'));
+      notifyTasksMutated();
     } catch (error) {
       console.error(error);
       // Roll back on error
@@ -145,7 +124,7 @@ export function GlobalTaskList({
         setTasks(previousTasks);
         return;
       }
-      window.dispatchEvent(new Event('estio-tasks-mutated'));
+      notifyTasksMutated();
     } catch (error) {
       console.error(error);
       // Roll back on error
@@ -178,6 +157,11 @@ export function GlobalTaskList({
   return (
     <>
       <div className="flex-1 min-h-0 overflow-y-auto">
+        {refreshing ? (
+          <div className="sticky top-0 z-10 flex justify-end bg-background/75 px-3 py-1 backdrop-blur">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          </div>
+        ) : null}
         {tasks.map((task) => {
           const convId =
             task.conversation?.id
@@ -186,7 +170,7 @@ export function GlobalTaskList({
           const isConversationSelected = convId === selectedConversationId;
           const isTaskSelected = task.id === selectedTaskId;
           const isBusy = !!busyTaskIds[task.id];
-          const dueLabel = formatDueLabel(task.dueAt);
+          const dueLabel = formatTaskDueLabel(task.dueAt, 'MMM d, h:mm a');
 
           return (
             <div
@@ -259,12 +243,12 @@ export function GlobalTaskList({
 
                   <div className="flex flex-wrap items-center gap-1.5 mt-2">
                     {dueLabel ? (
-                      <Badge variant="outline" className={cn('text-[10px] h-5 py-0', getUrgencyColors(task.dueAt))}>
+                      <Badge variant="outline" className={cn('text-[10px] h-5 py-0', getTaskUrgencyTone(task.dueAt))}>
                         <Clock3 className="w-3 h-3 mr-1 shrink-0" />
                         <span className="truncate max-w-[120px]">{dueLabel}</span>
                       </Badge>
                     ) : null}
-                    <Badge variant="outline" className={cn('text-[10px] h-5 py-0 capitalize', getPriorityTone(task.priority || 'medium'))}>
+                    <Badge variant="outline" className={cn('text-[10px] h-5 py-0 capitalize', getTaskPriorityTone(task.priority || 'medium'))}>
                       {task.priority || 'medium'}
                     </Badge>
                     {task.assignedUser?.name || task.assignedUser?.email ? (
@@ -293,8 +277,7 @@ export function GlobalTaskList({
         task={editorTask}
         onSaved={() => {
           setEditorTask(null);
-          window.dispatchEvent(new Event('estio-tasks-mutated'));
-          void loadTasks();
+          notifyTasksMutated();
         }}
       />
 
@@ -307,7 +290,7 @@ export function GlobalTaskList({
           }
         }}
         onTaskMutated={(taskId) => {
-          window.dispatchEvent(new Event('estio-tasks-mutated'));
+          notifyTasksMutated();
           if (selectedTaskId === taskId) {
             onSelectTask?.(null, selectedConversationId || null);
           }

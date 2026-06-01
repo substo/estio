@@ -1,11 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { format } from 'date-fns';
 import { Loader2, Plus, Trash2, Circle, CheckCircle2, Clock3, AlertCircle, Ban, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TaskEditorDialog } from '@/components/tasks/task-editor-dialog';
+import { notifyTasksMutated, useTasksMutatedRefresh } from '@/components/tasks/task-list-events';
+import {
+  decrementTaskCounts,
+  formatTaskDueLabel,
+  getTaskPriorityTone,
+  isCompletedTask,
+  normalizeTask,
+  transitionCompletionCounts,
+  type TaskCounts,
+} from '@/components/tasks/task-list-utils';
 import { cn } from '@/lib/utils';
 import {
   deleteContactTask,
@@ -52,12 +61,6 @@ type ProviderBadge = {
   title?: string;
 };
 
-type TaskCounts = {
-  all: number;
-  open: number;
-  completed: number;
-};
-
 const PROVIDER_ICON_SOURCES: Record<string, { src: string; alt: string }> = {
   ghl: {
     src: 'https://www.gohighlevel.com/favicon.ico',
@@ -68,19 +71,6 @@ const PROVIDER_ICON_SOURCES: Record<string, { src: string; alt: string }> = {
     alt: 'Google Tasks',
   },
 };
-
-function formatDueLabel(input?: Date | string | null) {
-  if (!input) return null;
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return null;
-  return format(date, 'PPp');
-}
-
-function getPriorityTone(priority: string) {
-  if (priority === 'high') return 'bg-red-100 text-red-700 border-red-200';
-  if (priority === 'low') return 'bg-slate-100 text-slate-700 border-slate-200';
-  return 'bg-amber-100 text-amber-700 border-amber-200';
-}
 
 function getProviderSyncTone(status: ProviderSyncStatus) {
   if (status === 'synced') return 'bg-emerald-50 border-emerald-200';
@@ -188,7 +178,7 @@ function buildProviderBadges(syncRecords: SyncRecord[], outboxJobs: OutboxJob[])
 
       if (status === 'failed') {
         const attempts = Math.max(1, Number(outboxState.attemptCount || 1));
-        const nextRetry = formatDueLabel(outboxState.scheduledAt || null);
+        const nextRetry = formatTaskDueLabel(outboxState.scheduledAt || null);
         const retryTitle = nextRetry
           ? `Retry ${attempts}/${TASK_SYNC_MAX_ATTEMPTS} scheduled for ${nextRetry}`
           : `Retry ${attempts}/${TASK_SYNC_MAX_ATTEMPTS} scheduled`;
@@ -228,7 +218,7 @@ function buildProviderBadges(syncRecords: SyncRecord[], outboxJobs: OutboxJob[])
         provider,
         key: `${provider}-synced`,
         status: 'synced',
-        title: syncRecord?.lastSyncedAt ? `Last synced ${formatDueLabel(syncRecord.lastSyncedAt)}` : 'Synced',
+        title: syncRecord?.lastSyncedAt ? `Last synced ${formatTaskDueLabel(syncRecord.lastSyncedAt)}` : 'Synced',
       });
       continue;
     }
@@ -262,47 +252,6 @@ function buildProviderBadges(syncRecords: SyncRecord[], outboxJobs: OutboxJob[])
   }
 
   return badges.sort((a, b) => a.provider.localeCompare(b.provider));
-}
-
-function normalizeTask(task: any) {
-  return {
-    ...task,
-    syncRecords: Array.isArray(task?.syncRecords) ? task.syncRecords : [],
-    outboxJobs: Array.isArray(task?.outboxJobs) ? task.outboxJobs : [],
-  };
-}
-
-function isCompletedTask(task: any) {
-  return String(task?.status || '').toLowerCase() === 'completed';
-}
-
-function clampCount(value: number) {
-  return Math.max(0, value);
-}
-
-function decrementTaskCounts(prev: TaskCounts, task: any): TaskCounts {
-  const completed = isCompletedTask(task);
-  return {
-    all: clampCount(prev.all - 1),
-    open: completed ? prev.open : clampCount(prev.open - 1),
-    completed: completed ? clampCount(prev.completed - 1) : prev.completed,
-  };
-}
-
-function transitionCompletionCounts(prev: TaskCounts, toCompleted: boolean): TaskCounts {
-  if (toCompleted) {
-    return {
-      all: prev.all,
-      open: clampCount(prev.open - 1),
-      completed: prev.completed + 1,
-    };
-  }
-
-  return {
-    all: prev.all,
-    open: prev.open + 1,
-    completed: clampCount(prev.completed - 1),
-  };
 }
 
 export function ContactTaskManager({
@@ -378,19 +327,10 @@ export function ContactTaskManager({
 
   useEffect(() => {
     void loadTasks();
-
-    const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
-    const handleMutated = () => {
-      if (debounceRef.timer) clearTimeout(debounceRef.timer);
-      debounceRef.timer = setTimeout(() => void loadTasks({ silent: true }), 300);
-    };
-
-    window.addEventListener('estio-tasks-mutated', handleMutated);
-    return () => {
-      window.removeEventListener('estio-tasks-mutated', handleMutated);
-      if (debounceRef.timer) clearTimeout(debounceRef.timer);
-    };
   }, [loadTasks]);
+
+  const refreshTasksOnMutation = useCallback(() => void loadTasks({ silent: true }), [loadTasks]);
+  useTasksMutatedRefresh(refreshTasksOnMutation);
 
   const openAddTaskModal = useCallback(() => {
     setError(null);
@@ -445,7 +385,7 @@ export function ContactTaskManager({
 
       const updatedTask = normalizeTask(res.task);
       setTasks((prev) => prev.map((task) => (task.id === taskId ? updatedTask : task)));
-      window.dispatchEvent(new Event('estio-tasks-mutated'));
+      notifyTasksMutated();
     } catch (e: any) {
       setTasks(previousTasks);
       setCounts(previousCounts);
@@ -474,7 +414,7 @@ export function ContactTaskManager({
         return;
       }
 
-      window.dispatchEvent(new Event('estio-tasks-mutated'));
+      notifyTasksMutated();
     } catch (e: any) {
       setTasks(previousTasks);
       setCounts(previousCounts);
@@ -574,7 +514,7 @@ export function ContactTaskManager({
         ) : (
           tasks.map((task) => {
             const isCompleted = task.status === 'completed';
-            const dueLabel = formatDueLabel(task.dueAt);
+            const dueLabel = formatTaskDueLabel(task.dueAt);
             const syncRecords: SyncRecord[] = Array.isArray(task.syncRecords) ? task.syncRecords : [];
             const outboxJobs: OutboxJob[] = Array.isArray(task.outboxJobs) ? task.outboxJobs : [];
             const providerBadges = buildProviderBadges(syncRecords, outboxJobs);
@@ -631,7 +571,7 @@ export function ContactTaskManager({
                 )}
 
                 <div className="flex flex-wrap items-center gap-1.5 pl-6">
-                  <Badge variant="outline" className={cn('text-[10px] h-5', getPriorityTone(task.priority || 'medium'))}>
+                  <Badge variant="outline" className={cn('text-[10px] h-5', getTaskPriorityTone(task.priority || 'medium'))}>
                     {task.priority || 'medium'}
                   </Badge>
 

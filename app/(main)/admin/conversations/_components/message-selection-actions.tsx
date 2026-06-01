@@ -47,6 +47,7 @@ import { TaskSuggestionFunnelMetrics } from "./task-suggestion-funnel-metrics";
 import { ViewingsSuggestionDialog } from "./viewings-suggestion-dialog";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
+import { notifyTasksMutated } from "@/components/tasks/task-list-events";
 import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from "./paste-lead-rich-text";
 
@@ -762,7 +763,7 @@ export function MessageSelectionActions({
                     ? "Task created"
                     : "Task created. Add a due date later to start reminders."
             );
-            window.dispatchEvent(new Event('estio-tasks-mutated'));
+            notifyTasksMutated();
             setCreateTaskOpen(false);
         } catch (error: any) {
             toast.error(error?.message || "Failed to create task");
@@ -871,7 +872,7 @@ export function MessageSelectionActions({
 
             if (created > 0) {
                 toast.success(`Created ${created} task${created > 1 ? "s" : ""} from suggestions`);
-                window.dispatchEvent(new Event('estio-tasks-mutated'));
+                notifyTasksMutated();
                 setSuggestTasksOpen(false);
                 if (hasBatchSelections) {
                     onClearSelectionBatch?.();
