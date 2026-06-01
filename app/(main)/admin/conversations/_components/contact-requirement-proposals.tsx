@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -95,11 +95,17 @@ export function ContactRequirementProposals({
     contactId,
     initialProposals,
     onContactContextUpdated,
+    title = "Client Requirements",
+    variant = "card",
+    children,
 }: {
     conversationId: string;
     contactId?: string | null;
     initialProposals?: RequirementProposal[] | null;
     onContactContextUpdated: (context: any) => void;
+    title?: string;
+    variant?: "card" | "inline";
+    children?: ReactNode;
 }) {
     const [items, setItems] = useState<RequirementProposal[]>(() => (
         Array.isArray(initialProposals) ? initialProposals.filter(Boolean) : []
@@ -218,11 +224,13 @@ export function ContactRequirementProposals({
         }
     };
 
+    const isInline = variant === "inline";
+
     return (
-        <div className="rounded-md border bg-white p-3 space-y-3">
-            <div className="flex items-center justify-between gap-2">
+        <div className={isInline ? "space-y-2" : "rounded-md border bg-white p-3 space-y-3"}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-1.5">
-                    <div className="truncate text-xs font-semibold text-slate-800">Client Requirements</div>
+                    <div className="truncate text-xs font-semibold text-slate-800">{title}</div>
                     <RequirementsHelpControl />
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -235,7 +243,8 @@ export function ContactRequirementProposals({
                         onClick={resolveProperties}
                     >
                         {resolvingProperties ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                        Resolve Links
+                        <span className="hidden min-[420px]:inline">Resolve Links</span>
+                        <span className="min-[420px]:hidden">Links</span>
                     </Button>
                     <Button
                         type="button"
@@ -250,6 +259,8 @@ export function ContactRequirementProposals({
                     </Button>
                 </div>
             </div>
+
+            {children}
 
             {loading && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">

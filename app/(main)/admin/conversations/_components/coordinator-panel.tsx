@@ -16,7 +16,6 @@ import { useCoordinatorContactContext } from "./use-coordinator-contact-context"
 import { useCoordinatorDealContext } from "./use-coordinator-deal-context";
 import { useCoordinatorQuickActions } from "./use-coordinator-quick-actions";
 import { CoordinatorContactOverviewCard } from "./coordinator-contact-overview-card";
-import { ContactRequirementProposals } from "./contact-requirement-proposals";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 const ContactTaskManager = dynamic(
@@ -307,16 +306,8 @@ export function CoordinatorPanel({
                 hidden={lazySidebarDataEnabled && sidebarTab !== 'overview'}
                 onContactSaved={handleContactSaved}
                 onContactMerged={onContactMerged}
+                onContactContextUpdated={setContactContext}
             />
-
-            {(!lazySidebarDataEnabled || sidebarTab === 'overview') && (
-                <ContactRequirementProposals
-                    conversationId={conversation.id}
-                    contactId={contactContext?.contact?.id || conversation.contactId}
-                    initialProposals={contactContext?.requirementProposals || null}
-                    onContactContextUpdated={setContactContext}
-                />
-            )}
 
             {(!lazySidebarDataEnabled || loadedSidebarTabs.tasks) && (
                 <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'tasks' ? 'hidden' : 'block')}>

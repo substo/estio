@@ -8,6 +8,7 @@ import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 import { GroupMembersList } from "./group-members-list";
 import { hasFullContactContext } from "./conversation-workspace-ui-actions";
+import { ContactRequirementProposals } from "./contact-requirement-proposals";
 
 const EditContactDialog = dynamic(
     () => import("../../contacts/_components/edit-contact-dialog").then((mod) => mod.EditContactDialog),
@@ -25,6 +26,7 @@ interface CoordinatorContactOverviewCardProps {
     hidden: boolean;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
     onContactMerged?: (targetContactId: string, targetConversationId?: string | null) => void;
+    onContactContextUpdated: (context: any) => void;
 }
 
 function normalizeContactValue(value: unknown): string {
@@ -100,6 +102,7 @@ export function CoordinatorContactOverviewCard({
     hidden,
     onContactSaved,
     onContactMerged,
+    onContactContextUpdated,
 }: CoordinatorContactOverviewCardProps) {
     const canEditContact = hasFullContactContext(contactContext);
 
@@ -195,6 +198,9 @@ export function CoordinatorContactOverviewCard({
                                         .filter((property: any) => !!property?.id);
 
                                     const briefRequirementItems = getBriefRequirementItems(contact);
+                                    const requirementProposals = Array.isArray(contactContext?.requirementProposals)
+                                        ? contactContext.requirementProposals.filter(Boolean)
+                                        : [];
                                     const isLeadLike = normalizedType === "lead" || normalizedType === "contact";
                                     const isOwnerOrTenant = normalizedType === "owner" || normalizedType === "tenant";
                                     const isAgentPartnerAssociate = normalizedType === "agent" || normalizedType === "partner" || normalizedType === "associate";
@@ -205,7 +211,7 @@ export function CoordinatorContactOverviewCard({
                                     let showPropertyAssociations = false;
                                     let showInterested = false;
                                     let showInspected = false;
-                                    let showRequirements = false;
+                                    let showSearchCriteria = false;
 
                                     if (isAgentPartnerAssociate) {
                                         showCompanyRelations = companyRoles.length > 0;
@@ -217,7 +223,7 @@ export function CoordinatorContactOverviewCard({
                                     } else if (isLeadLike) {
                                         showInterested = interestedProperties.length > 0;
                                         showInspected = inspectedProperties.length > 0;
-                                        showRequirements = briefRequirementItems.length > 0;
+                                        showSearchCriteria = true;
                                         if (normalizedType === "contact") {
                                             showCompanyRelations = companyRoles.length > 0;
                                             showPropertyAssociations = propertyRoles.length > 0;
@@ -318,25 +324,35 @@ export function CoordinatorContactOverviewCard({
                                                 </div>
                                             )}
 
-                                            {showRequirements && (
+                                            {showSearchCriteria && (
                                                 <div className="pt-1.5 border-t">
-                                                    <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Requirements</span>
-                                                    <div className="flex flex-wrap gap-1">
-                                                        {briefRequirementItems.map((item) => (
-                                                            <Badge
-                                                                key={`${item.label}-${item.value}`}
-                                                                variant="secondary"
-                                                                className="text-[9px] h-5 px-1.5 font-normal bg-secondary/60"
-                                                            >
-                                                                {item.label}: {item.value}
-                                                            </Badge>
-                                                        ))}
-                                                    </div>
-                                                    {contact.requirementSummary && (
-                                                        <p className="mt-1.5 text-[11px] leading-snug text-slate-600 whitespace-pre-wrap">
-                                                            {contact.requirementSummary}
-                                                        </p>
-                                                    )}
+                                                    <ContactRequirementProposals
+                                                        conversationId={conversationId}
+                                                        contactId={contact.id}
+                                                        initialProposals={requirementProposals}
+                                                        onContactContextUpdated={onContactContextUpdated}
+                                                        title="Search Criteria"
+                                                        variant="inline"
+                                                    >
+                                                        {briefRequirementItems.length > 0 && (
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {briefRequirementItems.map((item) => (
+                                                                    <Badge
+                                                                        key={`${item.label}-${item.value}`}
+                                                                        variant="secondary"
+                                                                        className="text-[9px] h-5 px-1.5 font-normal bg-secondary/60"
+                                                                    >
+                                                                        {item.label}: {item.value}
+                                                                    </Badge>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        {contact.requirementSummary && (
+                                                            <p className="text-[11px] leading-snug text-slate-600 whitespace-pre-wrap">
+                                                                {contact.requirementSummary}
+                                                            </p>
+                                                        )}
+                                                    </ContactRequirementProposals>
                                                 </div>
                                             )}
                                         </>
