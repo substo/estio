@@ -313,6 +313,7 @@ export function CoordinatorPanel({
                 <ContactRequirementProposals
                     conversationId={conversation.id}
                     contactId={contactContext?.contact?.id || conversation.contactId}
+                    initialProposals={contactContext?.requirementProposals || null}
                     onContactContextUpdated={setContactContext}
                 />
             )}

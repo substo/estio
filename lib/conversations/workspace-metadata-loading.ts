@@ -50,6 +50,67 @@ export type ConversationWorkspaceMetadata = {
     };
 };
 
+function serializeRequirementProposalSeed(row: any) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt || ""),
+        updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt || ""),
+        locationId: row.locationId,
+        contactId: row.contactId,
+        conversationId: row.conversationId || null,
+        sourceType: row.sourceType,
+        sourceIds: row.sourceIds || [],
+        status: row.status,
+        currentSnapshot: row.currentSnapshot || null,
+        proposedPatch: row.proposedPatch || null,
+        proposedSummary: row.proposedSummary || null,
+        evidence: row.evidence || null,
+        confidence: row.confidence ?? null,
+        reasoning: row.reasoning || null,
+        model: row.model || null,
+        promptTokens: row.promptTokens || 0,
+        completionTokens: row.completionTokens || 0,
+        totalTokens: row.totalTokens || 0,
+        estimatedCostUsd: row.estimatedCostUsd || 0,
+    };
+}
+
+async function getPendingRequirementProposalSeed(locationId: string, contactId: string) {
+    const rows = await db.contactRequirementProposal.findMany({
+        where: {
+            locationId,
+            contactId,
+            status: "pending",
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: {
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+            locationId: true,
+            contactId: true,
+            conversationId: true,
+            sourceType: true,
+            sourceIds: true,
+            status: true,
+            currentSnapshot: true,
+            proposedPatch: true,
+            proposedSummary: true,
+            evidence: true,
+            confidence: true,
+            reasoning: true,
+            model: true,
+            promptTokens: true,
+            completionTokens: true,
+            totalTokens: true,
+            estimatedCostUsd: true,
+        },
+    });
+    return rows.map(serializeRequirementProposalSeed).filter(Boolean);
+}
+
 export type ConversationWorkspaceCoreMetadata = {
     conversationHeader: Conversation;
     resolvedConversation: ResolvedConversationForMessages;
@@ -204,7 +265,7 @@ export const getCachedActiveLeadSourceNames = unstable_cache(
 );
 
 export async function getConversationContactContextSnapshot(locationId: string, contactId: string) {
-    const [contact, leadSources] = await Promise.all([
+    const [contact, leadSources, requirementProposals] = await Promise.all([
         db.contact.findFirst({
             where: {
                 id: contactId,
@@ -213,6 +274,7 @@ export async function getConversationContactContextSnapshot(locationId: string, 
             include: getContactContextInclude(),
         }),
         getCachedActiveLeadSourceNames(locationId),
+        getPendingRequirementProposalSeed(locationId, contactId),
     ]);
 
     const hydratedContact = await enrichContactContextContact(contact, locationId);
@@ -220,6 +282,7 @@ export async function getConversationContactContextSnapshot(locationId: string, 
     return {
         contact: hydratedContact,
         leadSources,
+        requirementProposals,
     };
 }
 

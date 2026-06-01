@@ -5921,14 +5921,23 @@ export async function getContactContext(contactId: string, options?: { refreshEx
         }
     }
 
-    const leadSources = await getCachedActiveLeadSourceNames(location.id);
-
+    const [leadSources, requirementProposalRows] = await Promise.all([
+        getCachedActiveLeadSourceNames(location.id),
+        contact?.id
+            ? listPendingRequirementProposals({
+                locationId: location.id,
+                contactId: contact.id,
+                limit: 5,
+            })
+            : Promise.resolve([]),
+    ]);
 
     const hydratedContact = await enrichContactContextContact(contact, location.id);
 
     return {
         contact: hydratedContact,
-        leadSources
+        leadSources,
+        requirementProposals: requirementProposalRows.map(serializeRequirementProposal),
     };
 }
 

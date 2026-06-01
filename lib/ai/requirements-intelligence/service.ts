@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { settingsService } from "@/lib/settings/service";
@@ -173,6 +174,42 @@ function formatRequirementAssessmentForReasoning(assessment: ReturnType<typeof n
     assessment.needsHumanClarification.length ? `Needs clarification: ${assessment.needsHumanClarification.join("; ")}` : null,
   ].filter(Boolean);
   return sections.length > 0 ? sections.join("\n") : null;
+}
+
+async function recordRequirementsIntelligenceUsage(args: {
+  locationId: string;
+  contactId: string;
+  conversationId?: string | null;
+  actorUserId?: string | null;
+  sourceType?: string | null;
+  proposalId?: string | null;
+  action: "assess_no_change" | "generate_requirement_proposal";
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}) {
+  await securelyRecordAiUsage({
+    locationId: args.locationId,
+    userId: args.actorUserId || null,
+    resourceType: "contact",
+    resourceId: args.contactId,
+    featureArea: "requirements_intelligence",
+    action: args.action,
+    provider: "google_gemini",
+    model: args.model,
+    inputTokens: args.promptTokens,
+    outputTokens: args.completionTokens,
+    metadata: {
+      contactId: args.contactId,
+      conversationId: args.conversationId || null,
+      proposalId: args.proposalId || null,
+      sourceType: args.sourceType || null,
+      totalTokens: args.totalTokens,
+      estimatedCostUsd: args.estimatedCostUsd,
+    },
+  });
 }
 
 function hasPatchChanges(snapshot: RequirementPatch, patch: RequirementPatch): boolean {
@@ -422,15 +459,29 @@ ${propertyEvidence.text || "None"}`;
     proposedPatch.requirementSummary = proposedSummary;
   }
 
-  if (!parsed.hasChanges || !hasPatchChanges(snapshot, proposedPatch)) {
-    return { success: true as const, created: false as const, reason: "No requirement changes detected." };
-  }
-
   const usage = result.response.usageMetadata || {};
   const promptTokens = Number(usage.promptTokenCount || 0);
   const completionTokens = Number(usage.candidatesTokenCount || 0);
   const totalTokens = Number(usage.totalTokenCount || promptTokens + completionTokens);
   const estimatedCostUsd = calculateRunCost(settings.model, promptTokens, completionTokens);
+  const hasMaterialChanges = Boolean(parsed.hasChanges && hasPatchChanges(snapshot, proposedPatch));
+
+  if (!hasMaterialChanges) {
+    await recordRequirementsIntelligenceUsage({
+      locationId: args.locationId,
+      contactId: contact.id,
+      conversationId: args.conversationId || null,
+      actorUserId: args.actorUserId || null,
+      sourceType: args.sourceType || "manual",
+      action: "assess_no_change",
+      model: settings.model,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      estimatedCostUsd,
+    });
+    return { success: true as const, created: false as const, reason: "No requirement changes detected." };
+  }
 
   const requirementAssessmentEvidence = {
     sourceId: "requirement_assessment",
@@ -481,6 +532,21 @@ ${propertyEvidence.text || "None"}`;
       totalTokens,
       estimatedCostUsd,
     },
+  });
+
+  await recordRequirementsIntelligenceUsage({
+    locationId: args.locationId,
+    contactId: contact.id,
+    conversationId: args.conversationId || null,
+    actorUserId: args.actorUserId || null,
+    sourceType: args.sourceType || "manual",
+    proposalId: proposal.id,
+    action: "generate_requirement_proposal",
+    model: settings.model,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    estimatedCostUsd,
   });
 
   return { success: true as const, created: true as const, proposal };

@@ -52,13 +52,17 @@ function getEvidenceItems(evidence: any): Array<{ sourceId?: string; quote?: str
 export function ContactRequirementProposals({
     conversationId,
     contactId,
+    initialProposals,
     onContactContextUpdated,
 }: {
     conversationId: string;
     contactId?: string | null;
+    initialProposals?: RequirementProposal[] | null;
     onContactContextUpdated: (context: any) => void;
 }) {
-    const [items, setItems] = useState<RequirementProposal[]>([]);
+    const [items, setItems] = useState<RequirementProposal[]>(() => (
+        Array.isArray(initialProposals) ? initialProposals.filter(Boolean) : []
+    ));
     const [loading, setLoading] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
     const [resolvingProperties, setResolvingProperties] = useState(false);
@@ -66,24 +70,31 @@ export function ContactRequirementProposals({
     const [patchEdits, setPatchEdits] = useState<Record<string, string>>({});
 
     const resolvedContactId = String(contactId || "").trim();
+    const seedKey = `${resolvedContactId}:${(initialProposals || []).map((proposal) => proposal.id).join(",")}`;
 
-    const refresh = async () => {
+    const refresh = async (options?: { showLoading?: boolean }) => {
         if (!resolvedContactId) {
             setItems([]);
             return;
         }
-        setLoading(true);
+        const showLoading = options?.showLoading !== false;
+        if (showLoading) setLoading(true);
         try {
             const proposals = await listContactRequirementProposals(resolvedContactId);
             setItems(Array.isArray(proposals) ? proposals as RequirementProposal[] : []);
         } finally {
-            setLoading(false);
+            if (showLoading) setLoading(false);
         }
     };
 
     useEffect(() => {
+        if (Array.isArray(initialProposals)) {
+            setItems(initialProposals.filter(Boolean));
+            void refresh({ showLoading: false });
+            return;
+        }
         void refresh();
-    }, [resolvedContactId]);
+    }, [resolvedContactId, seedKey]);
 
     const visibleItems = useMemo(() => items.filter(Boolean), [items]);
 
@@ -148,6 +159,7 @@ export function ContactRequirementProposals({
             toast.success("Contact requirements updated.");
             if (resolvedContactId) {
                 const context = await getContactContext(resolvedContactId, { refreshExternal: false });
+                setItems(Array.isArray(context?.requirementProposals) ? context.requirementProposals as RequirementProposal[] : []);
                 onContactContextUpdated(context);
             }
             await refresh();
