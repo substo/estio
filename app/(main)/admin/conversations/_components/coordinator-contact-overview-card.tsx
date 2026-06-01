@@ -8,7 +8,7 @@ import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 import { GroupMembersList } from "./group-members-list";
 import { hasFullContactContext, isShellContactContext } from "./conversation-workspace-ui-actions";
-import { ContactRequirementProposals, PropertyEvidenceResolveButton } from "./contact-requirement-proposals";
+import { ContactRequirementProposals } from "./contact-requirement-proposals";
 
 const EditContactDialog = dynamic(
     () => import("../../contacts/_components/edit-contact-dialog").then((mod) => mod.EditContactDialog),
@@ -239,9 +239,6 @@ export function CoordinatorContactOverviewCard({
                                         showPropertyAssociations = propertyRoles.length > 0;
                                     }
 
-                                    const showResolveLinksInPropertyAssociations = showPropertyAssociations;
-                                    const showResolveLinksInInterested = showInterested && !showResolveLinksInPropertyAssociations;
-
                                     return (
                                         <>
                                             {showCompanyRelations && (
@@ -269,16 +266,7 @@ export function CoordinatorContactOverviewCard({
 
                                             {showPropertyAssociations && (
                                                 <div className="pt-1.5 border-t">
-                                                    <div className="mb-1 flex items-center justify-between gap-2">
-                                                        <span className="text-[10px] text-muted-foreground font-medium">Property Associations</span>
-                                                        {showResolveLinksInPropertyAssociations && (
-                                                            <PropertyEvidenceResolveButton
-                                                                conversationId={conversationId}
-                                                                contactId={contact.id}
-                                                                onContactContextUpdated={onContactContextUpdated}
-                                                            />
-                                                        )}
-                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Property Associations</span>
                                                     <div className="space-y-1">
                                                         {propertyRoles.map((role: any) => (
                                                             <div key={role.id} className="text-[11px] flex items-center gap-1.5 p-1 bg-blue-50/50 rounded border border-blue-100/60 text-foreground">
@@ -301,16 +289,7 @@ export function CoordinatorContactOverviewCard({
 
                                             {showInterested && (
                                                 <div className="pt-1.5 border-t">
-                                                    <div className="mb-1 flex items-center justify-between gap-2">
-                                                        <span className="text-[10px] text-muted-foreground font-medium">Interested</span>
-                                                        {showResolveLinksInInterested && (
-                                                            <PropertyEvidenceResolveButton
-                                                                conversationId={conversationId}
-                                                                contactId={contact.id}
-                                                                onContactContextUpdated={onContactContextUpdated}
-                                                            />
-                                                        )}
-                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Interested</span>
                                                     <div className="space-y-1">
                                                         {interestedProperties.map((property: any) => (
                                                             <div key={property.id} className="text-[11px] flex items-center gap-1.5 p-1 bg-blue-50/50 rounded border border-blue-100/60 text-foreground">

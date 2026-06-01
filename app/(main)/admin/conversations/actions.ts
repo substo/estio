@@ -6152,7 +6152,7 @@ export async function listContactRequirementProposals(contactId: string) {
     return rows.map(serializeRequirementProposal);
 }
 
-export async function analyzeContactRequirementsAction(conversationId: string, contactId: string) {
+export async function updateContactClientContextAction(conversationId: string, contactId: string) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -6178,68 +6178,34 @@ export async function analyzeContactRequirementsAction(conversationId: string, c
         conversationInternalId = conversation?.id || null;
     }
 
-    const result = await generateRequirementProposal({
+    const propertyResult = await resolveContactPropertyEvidence({
         locationId: location.id,
         contactId: contact.id,
         conversationId: conversationInternalId,
-        sourceType: "manual",
+        actorUserId: actor.userId || null,
+        sourceType: "manual_context_update",
+    });
+    if (!propertyResult.success) return propertyResult;
+
+    const proposalResult = await generateRequirementProposal({
+        locationId: location.id,
+        contactId: contact.id,
+        conversationId: conversationInternalId,
+        sourceType: "manual_context_update",
         actorUserId: actor.userId || null,
     });
 
-    if (!result.success) {
-        return { success: false as const, error: result.error };
-    }
-    if (!result.created) {
-        return { success: true as const, created: false as const, reason: result.reason };
+    if (!proposalResult.success) {
+        return { success: false as const, error: proposalResult.error };
     }
 
     invalidateConversationReadCaches(conversationInternalId || requestedConversationId, { skipPath: true });
     return {
         success: true as const,
-        created: true as const,
-        proposal: serializeRequirementProposal(result.proposal),
-    };
-}
-
-export async function resolveContactPropertyEvidenceAction(conversationId: string, contactId: string) {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const actor = await resolveLocationActorContext(location.id);
-    if (!actor.hasAccess) {
-        return { success: false as const, error: "Unauthorized" };
-    }
-
-    const contact = await db.contact.findFirst({
-        where: {
-            locationId: location.id,
-            OR: [{ id: contactId }, { ghlContactId: contactId }],
-        },
-        select: { id: true },
-    });
-    if (!contact) return { success: false as const, error: "Contact not found." };
-
-    let conversationInternalId: string | null = null;
-    const requestedConversationId = String(conversationId || "").trim();
-    if (requestedConversationId) {
-        const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, requestedConversationId),
-            select: { id: true },
-        });
-        conversationInternalId = conversation?.id || null;
-    }
-
-    const result = await resolveContactPropertyEvidence({
-        locationId: location.id,
-        contactId: contact.id,
-        conversationId: conversationInternalId,
-        actorUserId: actor.userId || null,
-        sourceType: "manual",
-    });
-    if (!result.success) return result;
-
-    invalidateConversationReadCaches(conversationInternalId || requestedConversationId, { skipPath: true });
-    return {
-        success: true as const,
-        count: result.count,
+        propertyCount: propertyResult.count,
+        proposalCreated: Boolean(proposalResult.created),
+        proposal: proposalResult.created ? serializeRequirementProposal(proposalResult.proposal) : null,
+        reason: proposalResult.created ? null : proposalResult.reason,
     };
 }
 

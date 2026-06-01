@@ -6,15 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Check, Home, Info, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertCircle, Check, Info, Loader2, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
-    analyzeContactRequirementsAction,
     approveContactRequirementProposalAction,
     getContactContext,
     listContactRequirementProposals,
     rejectContactRequirementProposalAction,
-    resolveContactPropertyEvidenceAction,
+    updateContactClientContextAction,
 } from "../actions";
 
 type RequirementProposal = {
@@ -111,7 +110,7 @@ export function ContactRequirementProposals({
         Array.isArray(initialProposals) ? initialProposals.filter(Boolean) : []
     ));
     const [loading, setLoading] = useState(false);
-    const [analyzing, setAnalyzing] = useState(false);
+    const [updatingContext, setUpdatingContext] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [patchEdits, setPatchEdits] = useState<Record<string, string>>({});
 
@@ -139,23 +138,32 @@ export function ContactRequirementProposals({
 
     const visibleItems = useMemo(() => items.filter(Boolean), [items]);
 
-    const analyze = async () => {
-        if (!resolvedContactId || analyzing) return;
-        setAnalyzing(true);
+    const updateContext = async () => {
+        if (!resolvedContactId || updatingContext) return;
+        setUpdatingContext(true);
         try {
-            const result = await analyzeContactRequirementsAction(conversationId, resolvedContactId);
+            const result = await updateContactClientContextAction(conversationId, resolvedContactId);
             if (!result.success) {
-                toast.error(String(result.error || "Requirement analysis failed."));
+                toast.error(String(result.error || "Client context update failed."));
                 return;
             }
-            if (!result.created) {
-                toast.info(String(result.reason || "No requirement changes detected."));
+
+            const propertyCount = Number(result.propertyCount || 0);
+            if (result.proposalCreated) {
+                toast.success(propertyCount > 0
+                    ? `Resolved ${propertyCount} property item${propertyCount === 1 ? "" : "s"} and created a requirement proposal.`
+                    : "Requirement update proposal created."
+                );
+            } else if (propertyCount > 0) {
+                toast.success(`Resolved ${propertyCount} property evidence item${propertyCount === 1 ? "" : "s"}.`);
             } else {
-                toast.success("Requirement update proposal created.");
+                toast.info(String(result.reason || "No client context updates found."));
             }
-            await refresh();
+            const context = await getContactContext(resolvedContactId, { refreshExternal: false });
+            setItems(Array.isArray(context?.requirementProposals) ? context.requirementProposals as RequirementProposal[] : []);
+            onContactContextUpdated(context);
         } finally {
-            setAnalyzing(false);
+            setUpdatingContext(false);
         }
     };
 
@@ -217,14 +225,14 @@ export function ContactRequirementProposals({
                     size="sm"
                     variant="ghost"
                     className="h-6 shrink-0 px-1.5 text-[11px] text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    disabled={!resolvedContactId || analyzing}
-                    onClick={analyze}
-                    title="Scan messages and notes for changed search criteria"
-                    aria-label="Scan messages and notes for changed search criteria"
+                    disabled={!resolvedContactId || updatingContext}
+                    onClick={updateContext}
+                    title="Resolve property references and scan recent activity for changed search criteria"
+                    aria-label="Update client context from property references, messages, and notes"
                 >
-                    {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    <span className="hidden min-[390px]:inline">Scan activity</span>
-                    <span className="min-[390px]:hidden">Scan</span>
+                    {updatingContext ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    <span className="hidden min-[390px]:inline">Update context</span>
+                    <span className="min-[390px]:hidden">Update</span>
                 </Button>
             </div>
 
@@ -317,57 +325,5 @@ export function ContactRequirementProposals({
                 );
             })}
         </div>
-    );
-}
-
-export function PropertyEvidenceResolveButton({
-    conversationId,
-    contactId,
-    onContactContextUpdated,
-}: {
-    conversationId: string;
-    contactId?: string | null;
-    onContactContextUpdated: (context: any) => void;
-}) {
-    const [resolving, setResolving] = useState(false);
-    const resolvedContactId = String(contactId || "").trim();
-
-    const resolveProperties = async () => {
-        if (!resolvedContactId || resolving) return;
-        setResolving(true);
-        try {
-            const result = await resolveContactPropertyEvidenceAction(conversationId, resolvedContactId);
-            if (!result.success) {
-                toast.error(String(result.error || "Property link resolution failed."));
-                return;
-            }
-            const count = Number(result.count || 0);
-            if (count > 0) {
-                toast.success(`Resolved ${count} property evidence item${count === 1 ? "" : "s"}.`);
-                const context = await getContactContext(resolvedContactId, { refreshExternal: false });
-                onContactContextUpdated(context);
-            } else {
-                toast.info("No property links or references found.");
-            }
-        } finally {
-            setResolving(false);
-        }
-    };
-
-    return (
-        <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-5 shrink-0 px-1.5 text-[10px] font-medium text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-            disabled={!resolvedContactId || resolving}
-            onClick={resolveProperties}
-            title="Resolve property URLs and references from this conversation"
-            aria-label="Resolve property URLs and references from this conversation"
-        >
-            {resolving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Home className="h-3 w-3" />}
-            <span className="hidden min-[390px]:inline">Resolve property links</span>
-            <span className="min-[390px]:hidden">Resolve links</span>
-        </Button>
     );
 }
