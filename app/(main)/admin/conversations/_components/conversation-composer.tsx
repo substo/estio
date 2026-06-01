@@ -23,6 +23,7 @@ import { useConversationComposerMedia } from "./use-conversation-composer-media"
 import { useConversationComposerAiDraft } from "./use-conversation-composer-ai-draft";
 import { useConversationComposerSend } from "./use-conversation-composer-send";
 import { getConversationComposerContentClassName } from "./message-bubble-theme";
+import { PropertyMessageAssist } from "./property-message-assist";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -270,7 +271,6 @@ export function ConversationComposer({
             ? "This Android SMS will be sent as multipart SMS."
             : "Android SMS segment estimate.";
     const composerContentClassName = getConversationComposerContentClassName();
-
     return (
         <div className="w-full min-w-0 max-w-full overflow-x-hidden border-t bg-white pb-[env(safe-area-inset-bottom)]">
             <SuggestionBubbles
@@ -431,6 +431,11 @@ export function ConversationComposer({
                                             {previewingTranslation ? "..." : "Preview"}
                                         </Button>
                                     )}
+                                    <PropertyMessageAssist
+                                        disabled={isUnavailable}
+                                        generatingDraft={generatingDraft}
+                                        onGenerateInstruction={(instruction) => void handleAiDraft(instruction)}
+                                    />
                                     <Button
                                         variant="ghost"
                                         size="sm"
