@@ -23,6 +23,8 @@ WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
 WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
 WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
 REQUIRE_WHATSAPP_BRIDGE_READY="${REQUIRE_WHATSAPP_BRIDGE_READY:-false}"
+APP_REDIS_CONTAINER_NAME="${APP_REDIS_CONTAINER_NAME:-estio-redis}"
+APP_REDIS_PORT="${APP_REDIS_PORT:-${REDIS_PORT:-6379}}"
 LEGACY_SCRAPE_WORKER_PORT=3010
 PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
 # Schema sync modes:
@@ -58,6 +60,85 @@ cleanup() {
     ssh -S "$SSH_CONTROL_PATH" -O exit $SERVER 2>/dev/null || true
 }
 trap cleanup EXIT
+
+echo "🔎 Ensuring local Redis dependency is available..."
+ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
+    set -euo pipefail
+    APP_REDIS_CONTAINER_NAME="$APP_REDIS_CONTAINER_NAME"
+    APP_REDIS_PORT="$APP_REDIS_PORT"
+
+    redis_ping() {
+        if command -v redis-cli >/dev/null 2>&1; then
+            redis-cli -h 127.0.0.1 -p "\$APP_REDIS_PORT" ping 2>/dev/null | grep -Fxq PONG
+            return
+        fi
+
+        if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -Fxq "\$APP_REDIS_CONTAINER_NAME"; then
+            docker exec "\$APP_REDIS_CONTAINER_NAME" redis-cli ping 2>/dev/null | grep -Fxq PONG
+            return
+        fi
+
+        if command -v node >/dev/null 2>&1; then
+            APP_REDIS_PORT="\$APP_REDIS_PORT" node <<'NODE'
+const net = require("net");
+const port = Number(process.env.APP_REDIS_PORT || 6379);
+const socket = net.createConnection({ host: "127.0.0.1", port });
+let data = "";
+const timeout = setTimeout(() => {
+    socket.destroy();
+    process.exit(1);
+}, 2000);
+socket.on("connect", () => socket.write("*1\r\n$4\r\nPING\r\n"));
+socket.on("data", (chunk) => {
+    data += chunk.toString("utf8");
+    if (data.includes("PONG")) {
+        clearTimeout(timeout);
+        socket.end();
+        process.exit(0);
+    }
+});
+socket.on("error", () => {
+    clearTimeout(timeout);
+    process.exit(1);
+});
+socket.on("close", () => {
+    clearTimeout(timeout);
+    process.exit(data.includes("PONG") ? 0 : 1);
+});
+NODE
+            return
+        fi
+
+        return 1
+    }
+
+    if redis_ping; then
+        echo "✅ Redis is reachable on 127.0.0.1:\$APP_REDIS_PORT."
+        exit 0
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "❌ Redis is not reachable on 127.0.0.1:\$APP_REDIS_PORT and Docker is unavailable to start \$APP_REDIS_CONTAINER_NAME."
+        exit 1
+    fi
+
+    if docker ps -a --format '{{.Names}}' | grep -Fxq "\$APP_REDIS_CONTAINER_NAME"; then
+        if ! docker ps --format '{{.Names}}' | grep -Fxq "\$APP_REDIS_CONTAINER_NAME"; then
+            echo "🔄 Starting existing app Redis container \$APP_REDIS_CONTAINER_NAME"
+            docker start "\$APP_REDIS_CONTAINER_NAME" >/dev/null
+        fi
+    else
+        echo "🔄 Starting app Redis container \$APP_REDIS_CONTAINER_NAME on 127.0.0.1:\$APP_REDIS_PORT"
+        docker run -d --name "\$APP_REDIS_CONTAINER_NAME" --restart unless-stopped -p "127.0.0.1:\$APP_REDIS_PORT:6379" redis:alpine >/dev/null
+    fi
+
+    if redis_ping; then
+        echo "✅ App Redis dependency is healthy."
+    else
+        echo "❌ Redis container/process exists but did not answer PING on 127.0.0.1:\$APP_REDIS_PORT."
+        exit 1
+    fi
+ENDSSH
 
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."

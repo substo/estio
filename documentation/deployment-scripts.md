@@ -6,6 +6,10 @@ Use `deploy-local-build.sh` for production deploys. The script builds locally, u
 
 Evolution containers are no longer part of deployment.
 
+Redis is still an app dependency for queues and realtime. Standard deploys expect Redis on `127.0.0.1:6379`; when Docker is available and nothing else owns that port, deploy keeps a neutral `estio-redis` container running.
+
+Use `scripts/ops/audit-retired-evolution-runtime.sh` for one-off decommission audits. It is intentionally not part of standard deploys.
+
 ## WhatsApp Runtime Checks
 
 After deploy, verify the Web Bridge worker:
