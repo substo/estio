@@ -34,14 +34,19 @@ export default async function ConversationsPage({ searchParams }: { searchParams
             ? initialViewFilterParam
             : 'active';
     const initialViewMode = initialViewModeParam === 'deals' ? 'deals' : 'chats';
+    const shouldPreloadConversations = initialConversationStatus !== 'tasks';
 
     // Keep first paint focused on the active conversations path.
     // Deal data is only preloaded when the user lands directly in deal mode.
     const [initialConversationsData, initialDealsData] = await Promise.all([
-        fetchConversations(
-            initialConversationStatus === 'tasks' ? 'active' : initialConversationStatus,
-            selectedConversationId
-        ),
+        shouldPreloadConversations
+            ? fetchConversations(initialConversationStatus, selectedConversationId)
+            : Promise.resolve({
+                conversations: [],
+                hasMore: false,
+                nextCursor: null,
+                deltaCursor: null,
+            }),
         initialViewMode === 'deals' ? getDealContexts() : Promise.resolve([])
     ]);
     const featureFlags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
