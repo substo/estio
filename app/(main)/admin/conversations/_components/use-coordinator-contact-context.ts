@@ -72,14 +72,13 @@ export function useCoordinatorContactContext({
             setLoadingContext(false);
             return;
         }
-        if (isShellContactContext(initialContactContext)) {
-            setContactContext(initialContactContext);
-            setLoadingContext(true);
-            return;
-        }
 
-        // Keep a shell visible while fetching full contact metadata; clear only when there is no shell.
-        setContactContext(null);
+        const hasShellContext = isShellContactContext(initialContactContext);
+        if (hasShellContext) {
+            setContactContext(initialContactContext);
+        } else {
+            setContactContext(null);
+        }
 
         let cancelled = false;
         const fetchTimer = setTimeout(() => {
@@ -93,7 +92,7 @@ export function useCoordinatorContactContext({
                 .finally(() => {
                     if (!cancelled) setLoadingContext(false);
                 });
-        }, 150);
+        }, hasShellContext ? 0 : 150);
 
         return () => {
             cancelled = true;

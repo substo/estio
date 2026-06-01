@@ -196,6 +196,7 @@ export async function enrichContactContextContact(contact: any, locationId: stri
         db.viewing.findMany({
             where: { contactId: contact.id },
             orderBy: [{ date: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+            take: 50,
             select: {
                 propertyId: true,
                 date: true,

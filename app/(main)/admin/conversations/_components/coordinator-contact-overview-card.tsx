@@ -171,6 +171,11 @@ export function CoordinatorContactOverviewCard({
                                         <span className="font-medium">{contactContext.contact.contactType || (isShellContact ? "Loading..." : "Lead")}</span>
                                     </div>
                                 </div>
+                                {isShellContact && loadingContext && (
+                                    <div className="rounded border border-dashed border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] leading-snug text-slate-500">
+                                        Loading full contact details from the CRM database. Property associations and search criteria appear after this finishes.
+                                    </div>
+                                )}
 
                                 {!isShellContact && (() => {
                                     const contact = contactContext.contact;
