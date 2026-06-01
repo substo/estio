@@ -80,6 +80,38 @@ function getPlaceholderText(channel: ComposerChannel): string {
     return channelHints[channel] || channelHints.SMS;
 }
 
+const EMPTY_COMPOSER_HEIGHT_PX = 36;
+const DRAFT_COMPOSER_MIN_ROWS = 7;
+const MOBILE_COMPOSER_MAX_VIEWPORT_RATIO = 0.5;
+const DESKTOP_COMPOSER_MAX_HEIGHT_PX = 320;
+
+function resizeComposerTextarea(textarea: HTMLTextAreaElement | null, hasDraft: boolean) {
+    if (!textarea) return;
+    if (typeof window === "undefined") return;
+
+    textarea.style.height = "auto";
+
+    if (!hasDraft) {
+        textarea.style.height = `${EMPTY_COMPOSER_HEIGHT_PX}px`;
+        textarea.style.overflowY = "hidden";
+        return;
+    }
+
+    const computed = window.getComputedStyle(textarea);
+    const lineHeight = Number.parseFloat(computed.lineHeight) || 24;
+    const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+    const minHeight = Math.ceil((lineHeight * DRAFT_COMPOSER_MIN_ROWS) + paddingTop + paddingBottom);
+    const viewportMax = Math.floor(window.innerHeight * MOBILE_COMPOSER_MAX_VIEWPORT_RATIO);
+    const maxHeight = window.innerWidth < 640
+        ? Math.max(minHeight, viewportMax)
+        : Math.max(minHeight, DESKTOP_COMPOSER_MAX_HEIGHT_PX);
+    const nextHeight = Math.min(maxHeight, Math.max(minHeight, textarea.scrollHeight));
+
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > nextHeight ? "auto" : "hidden";
+}
+
 export function ConversationComposer({
     conversation,
     draft,
@@ -103,6 +135,8 @@ export function ConversationComposer({
 }: ConversationComposerProps) {
     const isUnavailable = disabled || !conversation;
     const isRecordingRef = useRef(false);
+    const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const composerHasDraft = draft.trim().length > 0;
     const {
         generatingDraft,
         selectedModel,
@@ -207,6 +241,19 @@ export function ConversationComposer({
         clearTranslationPreview();
     }, [clearTranslationPreview, conversation?.id, setIsRecording]);
 
+    useEffect(() => {
+        resizeComposerTextarea(composerTextareaRef.current, composerHasDraft);
+    }, [composerHasDraft, draft]);
+
+    useEffect(() => {
+        const handleResize = () => {
+            resizeComposerTextarea(composerTextareaRef.current, composerHasDraft);
+        };
+
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, [composerHasDraft]);
+
     const willAutoTranslate = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE && canUseWriteTranslation && !!onPreviewTranslatedReply;
 
     const smsSegmentInfo = getSmsSegmentInfo(draft);
@@ -255,11 +302,16 @@ export function ConversationComposer({
 
                 <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all min-w-0">
                     <Textarea
+                        ref={composerTextareaRef}
                         value={draft}
                         onChange={(e) => onDraftChange(e.target.value)}
                         placeholder={getPlaceholderText(selectedChannel)}
-                        className="min-h-[36px] max-h-[200px] w-full resize-none border-0 focus-visible:ring-0 bg-transparent py-2.5 px-3 text-sm"
-                        style={{ height: draft ? "auto" : "36px" }}
+                        rows={composerHasDraft ? DRAFT_COMPOSER_MIN_ROWS : 1}
+                        className={cn(
+                            "max-h-[50dvh] w-full resize-none overflow-hidden border-0 bg-transparent px-3 py-2.5 text-base focus-visible:ring-0 sm:max-h-[320px] sm:text-sm",
+                            composerHasDraft ? "min-h-[188px] sm:min-h-[160px]" : "min-h-[36px]"
+                        )}
+                        style={composerHasDraft ? undefined : { height: `${EMPTY_COMPOSER_HEIGHT_PX}px` }}
                         disabled={isUnavailable || sending || isRecording}
                         onKeyDown={(e) => {
                             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
