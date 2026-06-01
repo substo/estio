@@ -291,7 +291,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const searchParamsString = searchParams?.toString() || "";
     const getSearchParam = (key: string) => searchParams?.get(key) || null;
 
-    const updateUrl = useCallback((updates: Record<string, string | null>) => {
+    const updateUrl = useCallback((updates: Record<string, string | null>, mode: 'replace' | 'push' = 'replace') => {
         let params: URLSearchParams;
         let nextPathname = pathname || '/admin/conversations';
 
@@ -314,19 +314,29 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const query = params.toString();
         const nextHref = query ? `${nextPathname}?${query}` : nextPathname;
 
-        if (featureFlags.shallowUrlSync && typeof window !== 'undefined') {
-            window.history.replaceState(window.history.state, '', nextHref);
+        if (typeof window !== 'undefined') {
+            const currentHref = `${window.location.pathname}${window.location.search}`;
+            if (currentHref === nextHref) return;
+            const state = { ...(window.history.state || {}), as: nextHref, url: nextHref };
+            if (mode === 'push') {
+                window.history.pushState(state, '', nextHref);
+            } else {
+                window.history.replaceState(state, '', nextHref);
+            }
             return;
         }
 
         router.replace(nextHref, { scroll: false });
-    }, [featureFlags.shallowUrlSync, pathname, router, searchParamsString]);
+    }, [pathname, router, searchParamsString]);
 
     // Initialize state from URL or props
     // Map URL 'inbox' to internal 'active' if needed, but 'active' is the internal string. 
     // Let's support 'inbox' in URL for user friendliness
+    const urlMode = getSearchParam('mode');
     const urlView = getSearchParam('view');
-    const normalizedViewFilter = (urlView === 'inbox' ? 'active' : urlView) as 'active' | 'archived' | 'trash' | 'tasks' || 'active';
+    const normalizedViewFilter = (urlMode === 'tasks'
+        ? 'tasks'
+        : (urlView === 'inbox' ? 'active' : urlView)) as 'active' | 'archived' | 'trash' | 'tasks' || 'active';
 
     const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
     const conversationsRef = useRef<Conversation[]>(initialConversations);
@@ -389,8 +399,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [viewFilter, setViewFilter] = useState<'active' | 'archived' | 'trash' | 'tasks'>(normalizedViewFilter);
 
     // Deal Mode State
-    const initialViewMode = (getSearchParam('mode') as 'chats' | 'deals') || 'chats';
+    const initialViewMode = urlMode === 'deals' ? 'deals' : 'chats';
     const [viewMode, setViewMode] = useState<'chats' | 'deals'>(initialViewMode);
+    const previousWorkflowUrlModeRef = useRef<string | null>(urlMode === 'deals' || urlMode === 'tasks' ? urlMode : 'chats');
 
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearching, setIsSearching] = useState(false);
@@ -511,25 +522,29 @@ export function ConversationInterface({ locationId, initialConversations, initia
     }, [activeDealId]);
 
     useEffect(() => {
-        if (!featureFlags.shallowUrlSync) return;
         if (typeof window === 'undefined') return;
 
         const handlePopState = () => {
             const params = new URLSearchParams(window.location.search);
+            const rawMode = params.get('mode');
             const rawView = params.get('view');
             const normalizedView =
-                rawView === 'inbox' ||
-                rawView === 'active' ||
-                rawView === 'archived' ||
-                rawView === 'trash' ||
-                rawView === 'tasks'
-                    ? rawView === 'inbox'
-                        ? 'active'
-                        : rawView
-                    : 'active';
+                rawMode === 'tasks'
+                    ? 'tasks'
+                    : (
+                        rawView === 'inbox' ||
+                        rawView === 'active' ||
+                        rawView === 'archived' ||
+                        rawView === 'trash' ||
+                        rawView === 'tasks'
+                            ? rawView === 'inbox'
+                                ? 'active'
+                                : rawView
+                            : 'active'
+                    );
             const nextId = params.get('id');
             const nextTaskId = params.get('task');
-            const nextMode = (params.get('mode') as 'chats' | 'deals') || 'chats';
+            const nextMode = rawMode === 'deals' ? 'deals' : 'chats';
             const nextDealId = params.get('dealId');
 
             setUrlConversationId(nextId);
@@ -546,7 +561,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [featureFlags.shallowUrlSync]);
+    }, []);
 
     useEffect(() => {
         if (!isMobileViewport) return;
@@ -562,24 +577,22 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setActiveId(null);
     }, [initialSelectedConversationId, isMobileViewport, viewMode, urlConversationId]);
 
-    // Sync View Mode & Deal ID to URL
+    // Sync workflow, selected item, and task detail state to the URL without a Next route transition.
     useEffect(() => {
+        const workflowUrlMode = viewFilter === 'tasks' ? 'tasks' : viewMode;
+        const previousWorkflowUrlMode = previousWorkflowUrlModeRef.current;
+        const historyMode = previousWorkflowUrlMode && previousWorkflowUrlMode !== workflowUrlMode ? 'push' : 'replace';
+        previousWorkflowUrlModeRef.current = workflowUrlMode;
+        const view = viewFilter === 'archived' || viewFilter === 'trash' ? viewFilter : null;
         updateUrl({
-            mode: viewMode === 'chats' ? null : 'deals',
-            dealId: activeDealId
-        });
-    }, [viewMode, activeDealId, updateUrl]);
-
-    // Sync View Filter & Active ID to URL
-    useEffect(() => {
-        const view = viewFilter === 'active' ? null : viewFilter;
-        updateUrl({
+            mode: workflowUrlMode,
             view,
             id: activeId,
+            dealId: workflowUrlMode === 'deals' ? activeDealId : null,
             task: viewFilter === 'tasks' ? selectedTaskId : null,
-        });
+        }, historyMode);
         setUrlConversationId(activeId);
-    }, [viewFilter, activeId, selectedTaskId, updateUrl]);
+    }, [viewMode, activeDealId, viewFilter, activeId, selectedTaskId, updateUrl]);
 
     useEffect(() => {
         if (viewFilter === 'tasks') return;

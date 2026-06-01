@@ -28,9 +28,11 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     const initialViewModeParam = Array.isArray(resolvedSearchParams?.mode)
         ? resolvedSearchParams.mode[0]
         : resolvedSearchParams?.mode;
-    const initialConversationStatus = (initialViewFilterParam === 'archived' || initialViewFilterParam === 'trash' || initialViewFilterParam === 'tasks')
-        ? initialViewFilterParam
-        : 'active';
+    const initialConversationStatus = initialViewModeParam === 'tasks'
+        ? 'tasks'
+        : (initialViewFilterParam === 'archived' || initialViewFilterParam === 'trash' || initialViewFilterParam === 'tasks')
+            ? initialViewFilterParam
+            : 'active';
     const initialViewMode = initialViewModeParam === 'deals' ? 'deals' : 'chats';
 
     // Keep first paint focused on the active conversations path.
