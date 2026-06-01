@@ -339,6 +339,7 @@ export function CoordinatorContactOverviewCard({
                                                         onContactContextUpdated={onContactContextUpdated}
                                                         title="Requirements"
                                                         variant="inline"
+                                                        unstructuredRequirements={contact.requirementOtherDetails}
                                                     >
                                                         {briefRequirementItems.length > 0 && (
                                                             <div className="flex flex-wrap gap-1">

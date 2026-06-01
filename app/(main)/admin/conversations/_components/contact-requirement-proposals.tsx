@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Check, Info, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertCircle, Check, FileText, Info, Loader2, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import {
     approveContactRequirementProposalAction,
@@ -89,6 +89,50 @@ function RequirementsHelpControl() {
     );
 }
 
+function RequirementContextPreview({ value }: { value?: string | null }) {
+    const text = String(value || "").trim();
+    if (!text) return null;
+
+    const preview = text.length > 120 ? `${text.slice(0, 117).trim()}...` : text;
+
+    const previewRow = (
+        <div className="flex min-w-0 items-start gap-1.5 rounded border border-slate-200 bg-slate-50/70 px-2 py-1.5 text-[11px] text-slate-600">
+            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+            <div className="min-w-0">
+                <div className="text-[10px] font-medium uppercase text-slate-500">Context</div>
+                <div className="truncate leading-snug">{preview}</div>
+            </div>
+        </div>
+    );
+
+    return (
+        <>
+            <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <div className="hidden cursor-default md:block" tabIndex={0}>
+                            {previewRow}
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" className="max-w-[360px] whitespace-pre-wrap text-xs">
+                        {text}
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+            <Popover>
+                <PopoverTrigger asChild>
+                    <button type="button" className="block w-full text-left md:hidden" aria-label="Preview requirement context">
+                        {previewRow}
+                    </button>
+                </PopoverTrigger>
+                <PopoverContent side="bottom" align="start" className="w-[min(320px,calc(100vw-2rem))] p-3 text-xs leading-relaxed text-slate-700 whitespace-pre-wrap">
+                    {text}
+                </PopoverContent>
+            </Popover>
+        </>
+    );
+}
+
 export function ContactRequirementProposals({
     conversationId,
     contactId,
@@ -96,6 +140,7 @@ export function ContactRequirementProposals({
     onContactContextUpdated,
     title = "Client Requirements",
     variant = "card",
+    unstructuredRequirements,
     children,
 }: {
     conversationId: string;
@@ -104,6 +149,7 @@ export function ContactRequirementProposals({
     onContactContextUpdated: (context: any) => void;
     title?: string;
     variant?: "card" | "inline";
+    unstructuredRequirements?: string | null;
     children?: ReactNode;
 }) {
     const [items, setItems] = useState<RequirementProposal[]>(() => (
@@ -235,6 +281,7 @@ export function ContactRequirementProposals({
             </div>
 
             {children}
+            <RequirementContextPreview value={unstructuredRequirements} />
 
             {loading && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
