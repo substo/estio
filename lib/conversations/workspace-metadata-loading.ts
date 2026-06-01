@@ -131,7 +131,10 @@ export function normalizeContactContextRole(value: unknown): string {
 export function getContactContextInclude() {
     return {
         propertyRoles: {
-            include: {
+            select: {
+                id: true,
+                role: true,
+                propertyId: true,
                 property: {
                     select: {
                         id: true,
@@ -143,25 +146,15 @@ export function getContactContextInclude() {
             },
         },
         companyRoles: {
-            include: {
+            select: {
+                id: true,
+                role: true,
+                companyId: true,
                 company: {
                     select: {
                         id: true,
                         name: true,
                         type: true,
-                    },
-                },
-            },
-        },
-        viewings: {
-            take: 5,
-            orderBy: { date: "desc" as const },
-            include: {
-                property: {
-                    select: {
-                        id: true,
-                        title: true,
-                        reference: true,
                     },
                 },
             },
@@ -172,6 +165,8 @@ export function getContactContextInclude() {
 export async function enrichContactContextContact(contact: any, locationId: string) {
     if (!contact) return null;
 
+    const normalizedContactType = String(contact.contactType || "").trim().toLowerCase();
+    const shouldHydrateLeadPropertyContext = normalizedContactType === "lead" || normalizedContactType === "contact";
     const interestedPropertyIds: string[] = Array.from(new Set<string>(
         (Array.isArray(contact.propertiesInterested) ? contact.propertiesInterested : [])
             .map((id: any) => String(id || "").trim())
@@ -179,7 +174,7 @@ export async function enrichContactContextContact(contact: any, locationId: stri
     ));
 
     const [interestedPropertiesRaw, inspectedViewingRows] = await Promise.all([
-        interestedPropertyIds.length > 0
+        shouldHydrateLeadPropertyContext && interestedPropertyIds.length > 0
             ? db.property.findMany({
                 where: {
                     id: { in: interestedPropertyIds },
@@ -193,23 +188,25 @@ export async function enrichContactContextContact(contact: any, locationId: stri
                 },
             })
             : Promise.resolve([]),
-        db.viewing.findMany({
-            where: { contactId: contact.id },
-            orderBy: [{ date: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
-            take: 50,
-            select: {
-                propertyId: true,
-                date: true,
-                property: {
-                    select: {
-                        id: true,
-                        title: true,
-                        reference: true,
-                        price: true,
+        shouldHydrateLeadPropertyContext
+            ? db.viewing.findMany({
+                where: { contactId: contact.id },
+                orderBy: [{ date: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+                take: 50,
+                select: {
+                    propertyId: true,
+                    date: true,
+                    property: {
+                        select: {
+                            id: true,
+                            title: true,
+                            reference: true,
+                            price: true,
+                        },
                     },
                 },
-            },
-        }),
+            })
+            : Promise.resolve([]),
     ]);
 
     const interestedPropertyMap = new Map(
@@ -244,7 +241,7 @@ export async function enrichContactContextContact(contact: any, locationId: stri
         companyRoles,
         interestedProperties,
         inspectedProperties: Array.from(inspectedByPropertyId.values()),
-        normalizedContactType: String(contact.contactType || "").trim().toLowerCase(),
+        normalizedContactType,
         // TODO(whatsapp-groups): add relatedWhatsAppGroups once contact<->group relation support is implemented.
     };
 }
