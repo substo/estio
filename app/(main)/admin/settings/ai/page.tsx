@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
 import { cookies } from "next/headers";
 import { DEFAULT_REPLY_LANGUAGE } from "@/lib/ai/reply-language-options";
+import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
 import {
@@ -51,6 +52,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     pendingRuntimeJobs,
                     deadRuntimeJobs,
                     pendingSuggestions,
+                    pendingRequirementProposals,
                     policies,
                     recentDecisions,
                     recentRuntimeJobs,
@@ -86,6 +88,12 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                             locationId,
                             status: "pending",
                             source: { contains: "skill:" },
+                        },
+                    }),
+                    db.contactRequirementProposal.count({
+                        where: {
+                            locationId,
+                            status: "pending",
                         },
                     }),
                     db.aiSkillPolicy.findMany({
@@ -151,6 +159,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     pendingJobs: pendingRuntimeJobs,
                     deadJobs: deadRuntimeJobs,
                     pendingSuggestions,
+                    pendingRequirementProposals,
                     policies: policies.map((item) => ({
                         id: item.id,
                         skillId: item.skillId,
@@ -195,7 +204,8 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     nextRunAt: null,
                     pendingJobs: 0,
                     deadJobs: 0,
-                    pendingSuggestions: 0,
+                   pendingSuggestions: 0,
+                    pendingRequirementProposals: 0,
                     policies: [],
                     recentDecisions: [],
                     recentJobs: [],
@@ -227,14 +237,32 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             viewingSessionTranslationModel: aiDoc.payload?.viewingSessionTranslationModel ?? siteConfig?.viewingSessionTranslationModel,
             viewingSessionInsightsModel: aiDoc.payload?.viewingSessionInsightsModel ?? siteConfig?.viewingSessionInsightsModel,
             viewingSessionSummaryModel: aiDoc.payload?.viewingSessionSummaryModel ?? siteConfig?.viewingSessionSummaryModel,
+            requirementsIntelligence: aiDoc.payload?.requirementsIntelligence || {
+                mode: "manual_only",
+                model: aiDoc.payload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction || GEMINI_FLASH_STABLE_FALLBACK,
+                allowedPropertyDomains: [],
+            },
         }
         : {
             ...siteConfig,
             defaultReplyLanguage: DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiDoc?.payload?.precisionRemoveEnabled === true,
+            requirementsIntelligence: aiDoc?.payload?.requirementsIntelligence || {
+                mode: "manual_only",
+                model: siteConfig?.googleAiModelExtraction || GEMINI_FLASH_STABLE_FALLBACK,
+                allowedPropertyDomains: [],
+            },
         };
 
     const settingsVersion = aiDoc?.version ?? 0;
+    const enrichedRuntimeSummary = {
+        ...runtimeSummary,
+        requirementsIntelligence: initialData?.requirementsIntelligence || {
+            mode: "manual_only",
+            model: GEMINI_FLASH_STABLE_FALLBACK,
+            lastRun: null,
+        },
+    };
 
     return (
         <div className="p-6 max-w-4xl space-y-6">
@@ -252,7 +280,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
                     precisionRemoveInfrastructureReady={isPrecisionRemoveInfrastructureReady()}
-                    runtimeSummary={runtimeSummary}
+                    runtimeSummary={enrichedRuntimeSummary}
                 />
             </div>
         </div>

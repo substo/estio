@@ -332,6 +332,11 @@ export function CoordinatorContactOverviewCard({
                                                             </Badge>
                                                         ))}
                                                     </div>
+                                                    {contact.requirementSummary && (
+                                                        <p className="mt-1.5 text-[11px] leading-snug text-slate-600 whitespace-pre-wrap">
+                                                            {contact.requirementSummary}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             )}
                                         </>

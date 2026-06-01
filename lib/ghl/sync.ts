@@ -4,6 +4,7 @@ import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { Prisma } from "@prisma/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { buildConversationReferenceWhere, isLikelyGhlConversationId } from "@/lib/conversations/identity";
+import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
 
 function isLocalSyntheticConversationId(id: string | null | undefined) {
     const value = String(id || "").trim();
@@ -209,6 +210,16 @@ export async function syncMessageFromWebhook(payload: any) {
             createdAt: dateAdded
         }
     });
+
+    if (direction === "inbound") {
+        queueRequirementProposalForNewActivity({
+            locationId: location.id,
+            contactId: contact.id,
+            conversationId: conversation.id,
+            sourceType: "message",
+            sourceIds: [syncedMessage.id],
+        });
+    }
 
     await (db as any).messageSync.upsert({
         where: {

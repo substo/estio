@@ -13,6 +13,7 @@ import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
 import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
+import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
 export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/status-updates";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
@@ -1505,6 +1506,14 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
     // --- Smart Reply Generation (Background) ---
     if (direction === "inbound") {
+        queueRequirementProposalForNewActivity({
+            locationId,
+            contactId: contact.id,
+            conversationId: conversation.id,
+            sourceType: "message",
+            sourceIds: [newMessage.id],
+        });
+
         generateSmartReplies(conversation.id).catch(e => console.error("Smart Reply bg error", e));
 
         // --- Phase 6: Semi-Auto Event Emission ---

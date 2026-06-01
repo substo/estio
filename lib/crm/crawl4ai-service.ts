@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import util from 'util';
 import path from 'path';
 import { AIPropertyData } from '@/app/(main)/admin/properties/import/ai-property-extraction';
@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { PROPERTY_TYPES } from '@/lib/properties/constants';
 import { FEATURE_CATEGORIES, PROPERTY_CONDITIONS } from '@/lib/properties/filter-constants';
 
-const execPromise = util.promisify(exec);
+const execFilePromise = util.promisify(execFile);
 
 export interface CrawlResult {
     success: boolean;
@@ -21,8 +21,10 @@ export async function crawlPropertyWithPython(url: string, interactionSelector?:
     const scriptPath = path.join(process.cwd(), 'lib/crm/crawler/main.py');
     try {
         const selectorArg = interactionSelector ? interactionSelector : "null";
-        const command = `python3 "${scriptPath}" "${url}" "${selectorArg}"`;
-        const { stdout, stderr } = await execPromise(command, { maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execFilePromise("python3", [scriptPath, url, selectorArg], {
+            maxBuffer: 1024 * 1024 * 10,
+            timeout: 45000,
+        });
         if (stderr && stderr.length > 0) console.log("[Crawl4AI] Stderr:", stderr);
 
         // Log RAW output for debugging (Increased limit to see full execution logs)

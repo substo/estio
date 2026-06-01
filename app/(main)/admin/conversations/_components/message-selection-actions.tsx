@@ -1461,7 +1461,7 @@ export function MessageSelectionActions({
                             Create Task From Selection
                         </DialogTitle>
                         <DialogDescription>
-                            Save this as an actionable task for the contact in Mission Control and Contact Tasks.
+                            Save this as an actionable task for the contact in AI Coordinator and Contact Tasks.
                         </DialogDescription>
                     </DialogHeader>
 

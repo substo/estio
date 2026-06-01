@@ -355,7 +355,7 @@ export function ChatWindow({
                             size="icon"
                             className="h-8 w-8 shrink-0"
                             onClick={onOpenMissionControl}
-                            title="Open Mission Control"
+                            title="Open AI Coordinator"
                         >
                             <ListTodo className="h-4 w-4 text-gray-500" />
                         </Button>

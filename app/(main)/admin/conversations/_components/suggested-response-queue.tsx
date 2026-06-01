@@ -61,7 +61,7 @@ function formatSourceLabel(source: string): string {
 
     if (normalized.startsWith("mission:")) {
         const key = normalized.slice("mission:".length).replace(/_/g, " ");
-        return `Mission · ${key}`;
+        return `Coordinator · ${key}`;
     }
 
     return normalized.replace(/_/g, " ");

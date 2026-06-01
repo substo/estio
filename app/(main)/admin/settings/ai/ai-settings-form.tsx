@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
-import { updateAiSettings } from "./actions";
+import { runRequirementsIntelligenceNowAction, updateAiSettings } from "./actions";
 import { Input } from "@/components/ui/input";
 import { DEFAULT_REPLY_LANGUAGE, REPLY_LANGUAGE_OPTIONS } from "@/lib/ai/reply-language-options";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
@@ -47,6 +47,8 @@ export function AiSettingsForm({
         pendingJobs: number;
         deadJobs: number;
         pendingSuggestions: number;
+        pendingRequirementProposals?: number;
+        requirementsIntelligence?: any;
         policies: Array<{
             id: string;
             skillId: string;
@@ -92,6 +94,10 @@ export function AiSettingsForm({
     const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
 
     const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const [runningRequirementsScan, setRunningRequirementsScan] = useState(false);
+    const [requirementsLastRun, setRequirementsLastRun] = useState<any>(
+        runtimeSummary?.requirementsIntelligence?.lastRun || initialData?.requirementsIntelligence?.lastRun || null
+    );
     const [googleAiModel, setGoogleAiModel] = useState(
         (typeof initialData?.googleAiModel === "string" && initialData.googleAiModel.trim()) || GEMINI_FLASH_LATEST_ALIAS
     );
@@ -153,6 +159,42 @@ export function AiSettingsForm({
         });
         return () => { mounted = false; };
     }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel]);
+
+    const formatDateLabel = (value: string | null | undefined) => {
+        if (!value) return "Never";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString();
+    };
+
+    const runRequirementsScan = async () => {
+        setRunningRequirementsScan(true);
+        try {
+            const result = await runRequirementsIntelligenceNowAction(locationId, { batchSize: 40 });
+            if (!result?.success) {
+                toast.error(String(result?.error || "Requirements scan failed."));
+                return;
+            }
+            const stats = result.stats || {};
+            setRequirementsLastRun({
+                status: Number(stats.failures || 0) > 0 ? "failed" : "completed",
+                source: "manual",
+                startedAt: new Date().toISOString(),
+                finishedAt: new Date().toISOString(),
+                durationMs: 0,
+                mode: String(initialData?.requirementsIntelligence?.mode || "manual_only"),
+                batchSize: 40,
+                stats,
+                error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
+            });
+            toast.success(
+                `Requirements scan complete. Checked ${Number(stats.contactsChecked || 0)}, created ${Number(stats.proposalsCreated || 0)} proposal${Number(stats.proposalsCreated || 0) === 1 ? "" : "s"}.`
+            );
+        } catch (error: any) {
+            toast.error(error?.message || "Requirements scan failed.");
+        } finally {
+            setRunningRequirementsScan(false);
+        }
+    };
 
     return (
         <div className="space-y-8">
@@ -337,6 +379,118 @@ export function AiSettingsForm({
                                 className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
                                 defaultChecked={initialData?.whatsappTranscriptOnDemandEnabled === true}
                             />
+                        </div>
+
+                        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+                            <div className="space-y-0.5">
+                                <Label className="text-xs text-slate-500 uppercase tracking-wider">
+                                    AI Requirement Intelligence
+                                </Label>
+                                <p className="text-[10px] text-muted-foreground">
+                                    Maintains evolving client search criteria as human-approved contact updates.
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="requirementsIntelligenceMode" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Mode
+                                    </Label>
+                                    <select
+                                        id="requirementsIntelligenceMode"
+                                        name="requirementsIntelligenceMode"
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                        defaultValue={String(initialData?.requirementsIntelligence?.mode || "manual_only")}
+                                    >
+                                        <option value="off">Off</option>
+                                        <option value="manual_only">Manual only</option>
+                                        <option value="new_activity">Suggest from new activity</option>
+                                        <option value="daily_and_new_activity">Daily scan + new activity</option>
+                                    </select>
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="requirementsIntelligenceModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                                        Model
+                                    </Label>
+                                    <select
+                                        id="requirementsIntelligenceModel"
+                                        name="requirementsIntelligenceModel"
+                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                        defaultValue={String(initialData?.requirementsIntelligence?.model || googleAiModelExtraction)}
+                                    >
+                                        {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
+                                            <option key={model.value} value={model.value}>
+                                                {model.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="grid gap-2">
+                                <Label htmlFor="requirementsAllowedPropertyDomains" className="text-xs text-slate-500 uppercase tracking-wider">
+                                    Allowed property page domains
+                                </Label>
+                                <textarea
+                                    id="requirementsAllowedPropertyDomains"
+                                    name="requirementsAllowedPropertyDomains"
+                                    className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    placeholder={"downtowncyprus.com\nexample-agency.com"}
+                                    defaultValue={(initialData?.requirementsIntelligence?.allowedPropertyDomains || []).join("\n")}
+                                />
+                                <p className="text-[10px] text-muted-foreground">
+                                    One domain per line. Requirement Intelligence may crawl one public listing page from these domains to extract property evidence. Internal/private URLs are still blocked.
+                                </p>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                                Pending proposals: {Number(runtimeSummary?.pendingRequirementProposals || 0)}
+                            </div>
+                            <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-xs font-medium text-slate-700">Requirements Scan Status</div>
+                                        <div className="text-[10px] text-muted-foreground">
+                                            Last run: {formatDateLabel(requirementsLastRun?.finishedAt)}
+                                        </div>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 text-xs"
+                                        disabled={runningRequirementsScan}
+                                        onClick={runRequirementsScan}
+                                    >
+                                        {runningRequirementsScan ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                                        Run Requirements Scan Now
+                                    </Button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p>
+                                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.contactsChecked || 0)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wide text-slate-500">No New Activity</p>
+                                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.contactsWithoutNewActivity || 0)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Pending Skip</p>
+                                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.skippedPending || 0)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Created</p>
+                                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.proposalsCreated || 0)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Failures</p>
+                                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.failures || 0)}</p>
+                                    </div>
+                                </div>
+                                {requirementsLastRun?.error && (
+                                    <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] text-red-700">
+                                        {String(requirementsLastRun.error)}
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

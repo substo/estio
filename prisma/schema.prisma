@@ -48,6 +48,7 @@ model Location {
   aiDecisions                   AiDecision[]
   aiRuntimeJobs                 AiRuntimeJob[]
   aiSuggestedResponses          AiSuggestedResponse[]
+  contactRequirementProposals   ContactRequirementProposal[]
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
   userNotifications             UserNotification[]
   taskReminderJobs              TaskReminderJob[]
@@ -207,6 +208,8 @@ model User {
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")
   acceptedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseAcceptedBy")
   rejectedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseRejectedBy")
+  approvedContactRequirementProposals ContactRequirementProposal[] @relation("ContactRequirementProposalApprovedBy")
+  rejectedContactRequirementProposals ContactRequirementProposal[] @relation("ContactRequirementProposalRejectedBy")
   updatedPropertyImagePromptProfiles PropertyImagePromptProfile[] @relation("PropertyImagePromptProfileUpdater")
   aiUsages                     AiUsage[]
 
@@ -562,6 +565,7 @@ model Contact {
   requirementPropertyTypes     String[] @default([])
   requirementPropertyLocations String[] @default([])
   requirementOtherDetails      String?
+  requirementSummary           String?  @db.Text
 
   // Property Matching
   matchingPropertiesToMatch      String    @default("Updated and New")
@@ -612,6 +616,7 @@ model Contact {
   aiAutomationJobs           AiAutomationJob[]
   aiDecisions                AiDecision[]
   aiSuggestedResponses       AiSuggestedResponse[]
+  requirementProposals       ContactRequirementProposal[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
   whatsappIdentityMaps       WhatsAppIdentityMap[]
   syncRecords                ContactSync[]
@@ -1568,6 +1573,7 @@ model Conversation {
   aiAutomationJobs           AiAutomationJob[]
   aiDecisions                AiDecision[]
   aiSuggestedResponses       AiSuggestedResponse[]
+  requirementProposals       ContactRequirementProposal[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
   syncRecords                ConversationSync[]
   messageSyncRecords         MessageSync[]
@@ -2149,6 +2155,48 @@ model AiSuggestedResponse {
   @@index([dealId, status, createdAt(sort: Desc)])
   @@index([contactId, status, createdAt(sort: Desc)])
   @@index([decisionId, status, createdAt(sort: Desc)])
+}
+
+model ContactRequirementProposal {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId     String
+  contactId      String
+  conversationId String?
+
+  sourceType String // message | activity_note | transcript | manual | cron
+  sourceIds  Json?
+  status     String @default("pending") // pending | approved | rejected | superseded
+
+  currentSnapshot Json?
+  proposedPatch   Json?
+  proposedSummary String? @db.Text
+  evidence        Json?
+  confidence      Float?
+  reasoning       String? @db.Text
+  rejectedReason  String? @db.Text
+
+  model               String?
+  promptTokens        Int?
+  completionTokens    Int?
+  totalTokens         Int?
+  estimatedCostUsd    Float?
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+  approvedByUserId    String?
+  rejectedByUserId    String?
+
+  location   Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact    Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  approvedBy User?         @relation("ContactRequirementProposalApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  rejectedBy User?         @relation("ContactRequirementProposalRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([contactId, status, createdAt(sort: Desc)])
+  @@index([conversationId, status, createdAt(sort: Desc)])
 }
 
 model Message {

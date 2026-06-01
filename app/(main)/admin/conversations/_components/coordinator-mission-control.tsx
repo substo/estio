@@ -56,12 +56,12 @@ export function CoordinatorMissionControl({
 }: CoordinatorMissionControlProps) {
     return (
         <>
-            {/* PLANNER SECTION */}
+            {/* COORDINATOR SECTION */}
             {plan.length === 0 ? (
                 <div className="space-y-2 p-3 bg-card border rounded-md shadow-sm">
                     <div className="flex items-center gap-2 mb-1 text-purple-600 font-semibold text-sm">
                         <Sparkles className="w-4 h-4" />
-                        Initialize Agent
+                        Next Best Action
                     </div>
 
                     {/* ORCHESTRATION RESULT DISPLAY */}
@@ -70,7 +70,7 @@ export function CoordinatorMissionControl({
                             <div className="flex justify-between items-center border-b border-indigo-100 pb-1">
                                 <span className="font-semibold text-indigo-900">Analysis Complete</span>
                                 <Badge variant={orchestrationResult.requiresHumanApproval ? "destructive" : "outline"} className="text-[10px] h-4">
-                                    {orchestrationResult.requiresHumanApproval ? "Review Req" : "Auto-Pilot"}
+                                    {orchestrationResult.requiresHumanApproval ? "Review Req" : "Ready"}
                                 </Badge>
                             </div>
                             <div className="grid grid-cols-2 gap-1">
@@ -92,7 +92,7 @@ export function CoordinatorMissionControl({
                         </div>
                     )}
 
-                    <label className="text-[11px] text-muted-foreground uppercase font-medium">Ultimate Goal</label>
+                    <label className="text-[11px] text-muted-foreground uppercase font-medium">Coordinator Goal</label>
                     <Textarea
                         className="bg-muted/50 min-h-[60px] text-sm resize-none"
                         value={goal}
@@ -104,17 +104,16 @@ export function CoordinatorMissionControl({
                         className="w-full bg-purple-600 hover:bg-purple-700 text-primary-foreground"
                     >
                         {planning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                        Generate Mission Plan
+                        Create Follow-up Plan
                     </Button>
 
-                    {/* PHASE 1 ORCHESTRATOR BUTTON */}
                     <Button
                         onClick={handleOrchestrate}
                         disabled={orchestrating}
                         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
                     >
                         {orchestrating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Brain className="w-4 h-4 mr-2" />}
-                        Orchestrate (Smart Agent)
+                        Suggest Next Step
                     </Button>
                     <Button
                         onClick={handleGenerateDraftOnly}
@@ -129,7 +128,7 @@ export function CoordinatorMissionControl({
             ) : (
                 <div className="space-y-2 bg-card border rounded-md shadow-sm overflow-hidden flex flex-col max-h-[400px]">
                     <div className="p-2 px-3 bg-purple-50/50 border-b flex justify-between items-center shrink-0">
-                        <span className="text-[11px] font-bold text-purple-800 uppercase tracking-wider">Active Mission</span>
+                        <span className="text-[11px] font-bold text-purple-800 uppercase tracking-wider">Follow-up Plan</span>
                         <Button variant="ghost" size="sm" className="h-5 p-0 text-[10px] text-muted-foreground hover:text-destructive" onClick={() => setPlan([])}>Reset</Button>
                     </div>
                     <div className="overflow-y-auto flex-1 p-0">
@@ -166,7 +165,7 @@ export function CoordinatorMissionControl({
                             ) : (
                                 <>
                                     <Play className="w-3.5 h-3.5 mr-2" />
-                                    {plan.every(t => t.status === 'done') ? "Mission Complete" : "Execute Next Step"}
+                                    {plan.every(t => t.status === 'done') ? "Plan Complete" : "Suggest for Next Step"}
                                 </>
                             )}
                         </Button>

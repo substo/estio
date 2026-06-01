@@ -23,6 +23,8 @@ import {
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
 import { SettingsVersionConflictError } from "@/lib/settings/errors";
+import { runRequirementsIntelligenceCron } from "@/lib/ai/requirements-intelligence/service";
+import { normalizeAllowedPropertyDomains } from "@/lib/ai/property-evidence-resolver/domain-policy";
 
 interface AiSettingsState {
     message?: string;
@@ -117,6 +119,12 @@ export async function updateAiSettings(
         const viewingSessionTranslationModel = normalizeOptionalModelOverride(formData.get("viewingSessionTranslationModel"));
         const viewingSessionInsightsModel = normalizeOptionalModelOverride(formData.get("viewingSessionInsightsModel"));
         const viewingSessionSummaryModel = normalizeOptionalModelOverride(formData.get("viewingSessionSummaryModel"));
+        const requirementsIntelligenceModeRaw = String(formData.get("requirementsIntelligenceMode") || "").trim();
+        const requirementsIntelligenceMode = ["off", "manual_only", "new_activity", "daily_and_new_activity"].includes(requirementsIntelligenceModeRaw)
+            ? requirementsIntelligenceModeRaw
+            : "manual_only";
+        const requirementsIntelligenceModel = normalizeOptionalModelOverride(formData.get("requirementsIntelligenceModel")) || transcriptionModel;
+        const requirementsAllowedPropertyDomains = normalizeAllowedPropertyDomains(formData.get("requirementsAllowedPropertyDomains"));
         const defaultReplyLanguage = normalizeReplyLanguage(formData.get("defaultReplyLanguage")) || DEFAULT_REPLY_LANGUAGE;
         const payload = {
             ...existingPayload,
@@ -137,6 +145,11 @@ export async function updateAiSettings(
             viewingSessionTranslationModel,
             viewingSessionInsightsModel,
             viewingSessionSummaryModel,
+            requirementsIntelligence: {
+                mode: requirementsIntelligenceMode,
+                model: requirementsIntelligenceModel,
+                allowedPropertyDomains: requirementsAllowedPropertyDomains,
+            },
             brandVoice: formData.get("brandVoice") as string,
             outreachConfig: {
                 enabled: formData.get("outreachEnabled") === "on",
@@ -291,6 +304,33 @@ export async function runAiRuntimeNowAction(
     options?: { plannerOnly?: boolean; batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
     return runAiAutomationNowAction(locationId, options);
+}
+
+export async function runRequirementsIntelligenceNowAction(
+    locationId: string,
+    options?: { batchSize?: number }
+): Promise<RunAiAutomationNowResult> {
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Unauthorized" };
+
+    const targetLocationId = String(locationId || "").trim();
+    if (!targetLocationId) return { success: false, error: "Missing location ID." };
+
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) return { success: false, error: "Unauthorized: Admin access is required." };
+
+    try {
+        const stats = await runRequirementsIntelligenceCron({
+            locationId: targetLocationId,
+            batchSize: Math.max(1, Math.min(100, Number(options?.batchSize || 40))),
+            source: "manual",
+        });
+        revalidatePath("/admin/settings/ai");
+        return { success: true, stats };
+    } catch (error: any) {
+        console.error("[runRequirementsIntelligenceNowAction] Error:", error);
+        return { success: false, error: error?.message || "Failed to run Requirements Intelligence scan." };
+    }
 }
 
 export async function updateAiAutomationConfigFromSettingsAction(

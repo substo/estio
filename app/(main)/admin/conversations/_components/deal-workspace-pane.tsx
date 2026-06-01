@@ -111,7 +111,7 @@ export function DealWorkspacePane({
             composerDisabledReason={
                 loadingDealContext
                     ? "Loading recent deal timeline..."
-                    : "Select a contact in Mission Control to reply."
+                    : "Select a contact in AI Coordinator to reply."
             }
             replyingToLabel={selectedDealConversation?.contactName || undefined}
         />

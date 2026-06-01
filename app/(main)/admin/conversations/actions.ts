@@ -76,11 +76,20 @@ import {
 import {
     AiSkillPolicySchema,
 } from "@/lib/ai/runtime/config";
+import { REAL_ESTATE_COORDINATOR_LIFECYCLE_PROMPT } from "@/lib/ai/prompts/coordinator-lifecycle";
 import {
     runAiRuntimeCron,
     runAiSkillDecision,
     simulateSkillDecision as simulateSkillDecisionRuntime,
 } from "@/lib/ai/runtime/engine";
+import {
+    approveRequirementProposal,
+    generateRequirementProposal,
+    listPendingRequirementProposals,
+    queueRequirementProposalForNewActivity,
+    rejectRequirementProposal,
+    resolveContactPropertyEvidence,
+} from "@/lib/ai/requirements-intelligence/service";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
@@ -5730,13 +5739,18 @@ export async function orchestrateAction(conversationId: string, contactId: strin
     }
 
     const contextSummary = [
-        "Mission action: orchestrate",
+        "Coordinator action: suggest_next_step",
         dealStage ? `Deal stage: ${dealStage}` : null,
         bootstrapMode !== "none" ? `Bootstrap mode: ${bootstrapMode}` : null,
         `Latest message: ${latestMessage}`,
     ]
         .filter(Boolean)
         .join("\n");
+    const clientIntelligenceContext = await buildCoordinatorClientIntelligenceContext({
+        locationId: location.id,
+        contactId: resolvedContactId,
+        conversationId: conversation.id,
+    });
 
     const runtimeResult = await runAiSkillDecision({
         locationId: location.id,
@@ -5745,8 +5759,8 @@ export async function orchestrateAction(conversationId: string, contactId: strin
         source: "mission",
         contextSummary,
         extraInstruction: historyForOrchestration
-            ? `Use the full mission conversation history below when deciding the best next step.\n\n${historyForOrchestration}`
-            : "Generate the first mission-safe outreach for this conversation context.",
+            ? `${REAL_ESTATE_COORDINATOR_LIFECYCLE_PROMPT}\n\n${clientIntelligenceContext}\n\nUse the full coordinator conversation history below when deciding the best next step.\n\n${historyForOrchestration}`
+            : `${REAL_ESTATE_COORDINATOR_LIFECYCLE_PROMPT}\n\n${clientIntelligenceContext}\n\nGenerate the first review-safe outreach for this conversation context.`,
         executeImmediately: true,
     });
 
@@ -5756,7 +5770,7 @@ export async function orchestrateAction(conversationId: string, contactId: strin
 
     let reasoning = "";
     if (!success) {
-        reasoning = runtimeResult.error || "Mission runtime decision failed.";
+        reasoning = runtimeResult.error || "Coordinator runtime decision failed.";
     } else if (holdReason) {
         reasoning = `Decision held by policy: ${holdReason}.`;
     } else if (suggestionQueued) {
@@ -5768,7 +5782,7 @@ export async function orchestrateAction(conversationId: string, contactId: strin
     return {
         success,
         traceId: runtimeResult.traceId || null,
-        intent: runtimeResult.objective || "mission",
+        intent: runtimeResult.objective || "coordinator",
         sentiment: null,
         skillUsed: runtimeResult.selectedSkillId || null,
         actions: [] as any[],
@@ -5916,6 +5930,343 @@ export async function getContactContext(contactId: string, options?: { refreshEx
         contact: hydratedContact,
         leadSources
     };
+}
+
+function serializeRequirementProposal(row: any) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt || ""),
+        updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt || ""),
+        locationId: row.locationId,
+        contactId: row.contactId,
+        conversationId: row.conversationId || null,
+        sourceType: row.sourceType,
+        sourceIds: row.sourceIds || [],
+        status: row.status,
+        currentSnapshot: row.currentSnapshot || null,
+        proposedPatch: row.proposedPatch || null,
+        proposedSummary: row.proposedSummary || null,
+        evidence: row.evidence || null,
+        confidence: row.confidence ?? null,
+        reasoning: row.reasoning || null,
+        model: row.model || null,
+        promptTokens: row.promptTokens || 0,
+        completionTokens: row.completionTokens || 0,
+        totalTokens: row.totalTokens || 0,
+        estimatedCostUsd: row.estimatedCostUsd || 0,
+    };
+}
+
+function formatCoordinatorValue(value: unknown): string | null {
+    if (Array.isArray(value)) {
+        const filtered = value.map((item) => String(item || "").trim()).filter(Boolean);
+        return filtered.length > 0 ? filtered.join(", ") : null;
+    }
+    const text = String(value ?? "").trim();
+    if (!text || /^any\b/i.test(text) || text === "[]") return null;
+    return text;
+}
+
+async function buildCoordinatorClientIntelligenceContext(args: {
+    locationId: string;
+    contactId: string | null;
+    conversationId: string;
+}) {
+    if (!args.contactId) return "Client intelligence: No contact context available.";
+
+    const [contact, proposals, propertyEvidenceNotes] = await Promise.all([
+        db.contact.findFirst({
+            where: { id: args.contactId, locationId: args.locationId },
+            select: {
+                id: true,
+                name: true,
+                firstName: true,
+                leadStage: true,
+                leadGoal: true,
+                leadPriority: true,
+                requirementStatus: true,
+                requirementDistrict: true,
+                requirementBedrooms: true,
+                requirementMinPrice: true,
+                requirementMaxPrice: true,
+                requirementCondition: true,
+                requirementPropertyTypes: true,
+                requirementPropertyLocations: true,
+                requirementOtherDetails: true,
+                requirementSummary: true,
+                propertiesInterested: true,
+            },
+        }),
+        db.contactRequirementProposal.findMany({
+            where: {
+                locationId: args.locationId,
+                contactId: args.contactId,
+                status: { in: ["pending", "approved", "rejected"] },
+            },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: {
+                id: true,
+                status: true,
+                proposedPatch: true,
+                proposedSummary: true,
+                confidence: true,
+                reasoning: true,
+                createdAt: true,
+            },
+        }),
+        db.message.findMany({
+            where: {
+                conversationId: args.conversationId,
+                source: "ai_property_evidence",
+            },
+            orderBy: { createdAt: "desc" },
+            take: 6,
+            select: {
+                body: true,
+                createdAt: true,
+            },
+        }),
+    ]);
+
+    if (!contact) return "Client intelligence: Contact not found.";
+
+    const requirementLines = [
+        `Client: ${contact.name || contact.firstName || "Unknown"}`,
+        formatCoordinatorValue(contact.leadStage) ? `Lead stage: ${formatCoordinatorValue(contact.leadStage)}` : null,
+        formatCoordinatorValue(contact.leadGoal) ? `Lead goal: ${formatCoordinatorValue(contact.leadGoal)}` : null,
+        formatCoordinatorValue(contact.leadPriority) ? `Lead priority: ${formatCoordinatorValue(contact.leadPriority)}` : null,
+        formatCoordinatorValue(contact.requirementStatus) ? `Status: ${formatCoordinatorValue(contact.requirementStatus)}` : null,
+        formatCoordinatorValue(contact.requirementDistrict) ? `District: ${formatCoordinatorValue(contact.requirementDistrict)}` : null,
+        formatCoordinatorValue(contact.requirementBedrooms) ? `Bedrooms: ${formatCoordinatorValue(contact.requirementBedrooms)}` : null,
+        formatCoordinatorValue(contact.requirementPropertyTypes) ? `Property types: ${formatCoordinatorValue(contact.requirementPropertyTypes)}` : null,
+        formatCoordinatorValue(contact.requirementPropertyLocations) ? `Locations: ${formatCoordinatorValue(contact.requirementPropertyLocations)}` : null,
+        formatCoordinatorValue(contact.requirementMinPrice) || formatCoordinatorValue(contact.requirementMaxPrice)
+            ? `Budget: ${formatCoordinatorValue(contact.requirementMinPrice) || "Any"} - ${formatCoordinatorValue(contact.requirementMaxPrice) || "Any"}`
+            : null,
+        formatCoordinatorValue(contact.requirementCondition) ? `Condition: ${formatCoordinatorValue(contact.requirementCondition)}` : null,
+        formatCoordinatorValue(contact.requirementOtherDetails) ? `Other details: ${formatCoordinatorValue(contact.requirementOtherDetails)}` : null,
+        formatCoordinatorValue(contact.requirementSummary) ? `Requirement history/summary: ${formatCoordinatorValue(contact.requirementSummary)}` : null,
+    ].filter(Boolean);
+
+    let interestedPropertiesText = "None recorded.";
+    const interestedIds = Array.isArray(contact.propertiesInterested) ? contact.propertiesInterested.slice(0, 12) : [];
+    if (interestedIds.length > 0) {
+        const properties = await db.property.findMany({
+            where: {
+                locationId: args.locationId,
+                id: { in: interestedIds },
+            },
+            select: {
+                id: true,
+                title: true,
+                reference: true,
+                price: true,
+                bedrooms: true,
+                propertyLocation: true,
+                city: true,
+                goal: true,
+            },
+            take: 12,
+        });
+        if (properties.length > 0) {
+            interestedPropertiesText = properties.map((property) => {
+                const bits = [
+                    property.reference ? `Ref ${property.reference}` : property.id,
+                    property.goal ? String(property.goal) : null,
+                    property.price ? `Price ${property.price}` : null,
+                    property.bedrooms != null ? `${property.bedrooms} beds` : null,
+                    property.propertyLocation || property.city || null,
+                ].filter(Boolean);
+                return `- ${property.title} (${bits.join("; ")})`;
+            }).join("\n");
+        }
+    }
+
+    const proposalText = proposals.length > 0
+        ? proposals.map((proposal) => {
+            const patch = proposal.proposedPatch && typeof proposal.proposedPatch === "object"
+                ? JSON.stringify(proposal.proposedPatch)
+                : "{}";
+            const confidence = proposal.confidence != null ? ` confidence ${Math.round(Number(proposal.confidence) * 100)}%` : "";
+            return `- ${proposal.status}${confidence}: ${proposal.proposedSummary || proposal.reasoning || patch}`;
+        }).join("\n")
+        : "None.";
+
+    const propertyEvidenceText = propertyEvidenceNotes.length > 0
+        ? propertyEvidenceNotes.map((note) => {
+            const body = String(note.body || "").split("\n").slice(0, 8).join("; ");
+            return `- ${body}`;
+        }).join("\n")
+        : "None.";
+
+    return [
+        "Client intelligence for Coordinator:",
+        "",
+        "Approved/current contact requirements:",
+        requirementLines.length > 0 ? requirementLines.join("\n") : "No approved requirements recorded.",
+        "",
+        "Interested properties recorded on contact:",
+        interestedPropertiesText,
+        "",
+        "Recent requirement proposals:",
+        proposalText,
+        "",
+        "Recent property evidence timeline notes:",
+        propertyEvidenceText,
+        "",
+        "Coordinator rules for this context:",
+        "- Treat approved/current contact requirements as the current source of truth.",
+        "- Treat pending proposals and property evidence as unapproved context, not final truth.",
+        "- If requirements are stale, contradictory, or pending, suggest reviewing/approving them before using them as hard filters.",
+        "- Suggest the next human-approved action or draft only. Do not imply automation or sending without approval.",
+    ].join("\n");
+}
+
+export async function listContactRequirementProposals(contactId: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const contact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    if (!contact) return [];
+
+    const rows = await listPendingRequirementProposals({
+        locationId: location.id,
+        contactId: contact.id,
+        limit: 5,
+    });
+    return rows.map(serializeRequirementProposal);
+}
+
+export async function analyzeContactRequirementsAction(conversationId: string, contactId: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const contact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    if (!contact) return { success: false as const, error: "Contact not found." };
+
+    let conversationInternalId: string | null = null;
+    const requestedConversationId = String(conversationId || "").trim();
+    if (requestedConversationId) {
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, requestedConversationId),
+            select: { id: true },
+        });
+        conversationInternalId = conversation?.id || null;
+    }
+
+    const result = await generateRequirementProposal({
+        locationId: location.id,
+        contactId: contact.id,
+        conversationId: conversationInternalId,
+        sourceType: "manual",
+        actorUserId: actor.userId || null,
+    });
+
+    if (!result.success) {
+        return { success: false as const, error: result.error };
+    }
+    if (!result.created) {
+        return { success: true as const, created: false as const, reason: result.reason };
+    }
+
+    invalidateConversationReadCaches(conversationInternalId || requestedConversationId, { skipPath: true });
+    return {
+        success: true as const,
+        created: true as const,
+        proposal: serializeRequirementProposal(result.proposal),
+    };
+}
+
+export async function resolveContactPropertyEvidenceAction(conversationId: string, contactId: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const contact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    if (!contact) return { success: false as const, error: "Contact not found." };
+
+    let conversationInternalId: string | null = null;
+    const requestedConversationId = String(conversationId || "").trim();
+    if (requestedConversationId) {
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, requestedConversationId),
+            select: { id: true },
+        });
+        conversationInternalId = conversation?.id || null;
+    }
+
+    const result = await resolveContactPropertyEvidence({
+        locationId: location.id,
+        contactId: contact.id,
+        conversationId: conversationInternalId,
+        actorUserId: actor.userId || null,
+        sourceType: "manual",
+    });
+    if (!result.success) return result;
+
+    invalidateConversationReadCaches(conversationInternalId || requestedConversationId, { skipPath: true });
+    return {
+        success: true as const,
+        count: result.count,
+    };
+}
+
+export async function approveContactRequirementProposalAction(proposalId: string, editedPatch?: any) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const result = await approveRequirementProposal({
+        locationId: location.id,
+        proposalId,
+        actorUserId: actor.userId || null,
+        editedPatch: editedPatch || null,
+    });
+    if (!result.success) return result;
+
+    if (result.contactId) {
+        revalidatePath(`/admin/contacts/${result.contactId}/view`);
+    }
+    return result;
+}
+
+export async function rejectContactRequirementProposalAction(proposalId: string, reason?: string | null) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+    return rejectRequirementProposal({
+        locationId: location.id,
+        proposalId,
+        actorUserId: actor.userId || null,
+        reason,
+    });
 }
 
 // Helper to get location without strict GHL requirement
@@ -6718,9 +7069,9 @@ export async function generatePlanAction(conversationId: string, contactId: stri
                     conversationId: conversation.id,
                     locationId: location.id,
                     taskId: 'PLANNING', // Special ID for planning phase
-                    taskTitle: "Generate Mission Plan",
+                    taskTitle: "Create Follow-up Plan",
                     taskStatus: "done",
-                    thoughtSummary: result.thought || "Generated new mission plan based on goal.",
+                    thoughtSummary: result.thought || "Generated new follow-up plan based on goal.",
                     thoughtSteps: [], // Planner doesn't return steps currently
                     toolCalls: [],
                     draftReply: null,
@@ -6796,6 +7147,11 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
     const historyText = conversation.messages
         .map((message: any) => `${message.direction === "outbound" ? "Agent" : "Lead"}: ${message.body}`)
         .join("\n");
+    const clientIntelligenceContext = await buildCoordinatorClientIntelligenceContext({
+        locationId: location.id,
+        contactId: resolvedContactId,
+        conversationId: conversation.id,
+    });
 
     try {
         const runtimeResult = await runAiSkillDecision({
@@ -6804,11 +7160,13 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
             contactId: resolvedContactId,
             source: "mission",
             contextSummary: [
-                "Mission action: execute_next_task",
+                "Coordinator action: suggest_next_step_from_plan",
                 `Task: ${String(nextTask.title || nextTask.id || "Untitled task")}`,
             ].join("\n"),
             extraInstruction: [
-                `Execute this mission task: ${String(nextTask.title || nextTask.id || "Untitled task")}`,
+                REAL_ESTATE_COORDINATOR_LIFECYCLE_PROMPT,
+                clientIntelligenceContext,
+                `Suggest the next human-approved action for this task: ${String(nextTask.title || nextTask.id || "Untitled task")}`,
                 historyText ? `Conversation history:\n${historyText}` : null,
             ]
                 .filter(Boolean)
@@ -6895,7 +7253,7 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
             success: true,
             task: nextTask,
             draft: null,
-            thoughtSummary: nextTask.result || "Mission task executed.",
+            thoughtSummary: nextTask.result || "Coordinator task executed.",
             thoughtSteps: [],
             actions: [],
             usage,
@@ -6912,7 +7270,7 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
         };
     } catch (error: any) {
         nextTask.status = "failed";
-        nextTask.result = error?.message || "Mission task execution failed.";
+        nextTask.result = error?.message || "Coordinator task execution failed.";
         await db.conversation.update({
             where: { id: conversation.id },
             data: { agentPlan: plan } as any,
@@ -12055,6 +12413,17 @@ export async function addConversationActivityEntry(
             id: true,
             createdAt: true,
         },
+    });
+
+    runDetachedTask(`requirements_activity_note:${createdHistory.id}`, async () => {
+        queueRequirementProposalForNewActivity({
+            locationId: location.id,
+            contactId: conversation.contactId,
+            conversationId: conversation.id,
+            sourceType: "activity_note",
+            sourceIds: [createdHistory.id],
+            actorUserId: user.id,
+        });
     });
 
     revalidatePath(`/admin/contacts/${conversation.contactId}/view`);

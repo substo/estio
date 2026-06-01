@@ -16,6 +16,7 @@ import { useCoordinatorContactContext } from "./use-coordinator-contact-context"
 import { useCoordinatorDealContext } from "./use-coordinator-deal-context";
 import { useCoordinatorQuickActions } from "./use-coordinator-quick-actions";
 import { CoordinatorContactOverviewCard } from "./coordinator-contact-overview-card";
+import { ContactRequirementProposals } from "./contact-requirement-proposals";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 
 const ContactTaskManager = dynamic(
@@ -196,7 +197,7 @@ export function CoordinatorPanel({
                     )}
                     <div className="flex items-center gap-2">
                     <ListTodo className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold text-sm text-foreground">Mission Control</h3>
+                    <h3 className="font-semibold text-sm text-foreground">AI Coordinator</h3>
                     {planProgressLabel && (
                         <Badge variant="secondary" className="text-[9px] h-4 px-1">
                             {planProgressLabel}
@@ -307,6 +308,14 @@ export function CoordinatorPanel({
                 onContactSaved={handleContactSaved}
                 onContactMerged={onContactMerged}
             />
+
+            {(!lazySidebarDataEnabled || sidebarTab === 'overview') && (
+                <ContactRequirementProposals
+                    conversationId={conversation.id}
+                    contactId={contactContext?.contact?.id || conversation.contactId}
+                    onContactContextUpdated={setContactContext}
+                />
+            )}
 
             {(!lazySidebarDataEnabled || loadedSidebarTabs.tasks) && (
                 <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'tasks' ? 'hidden' : 'block')}>
