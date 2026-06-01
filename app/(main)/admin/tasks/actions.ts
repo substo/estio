@@ -5,7 +5,6 @@ import { z } from 'zod';
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { getLocationContext } from '@/lib/auth/location-context';
-import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import { isLocalDateTimeWithoutZone } from '@/lib/tasks/datetime-local';
 import { normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobs } from '@/lib/tasks/reminders';
@@ -66,20 +65,34 @@ async function getAuthContext() {
   const { userId: clerkUserId } = await auth();
   if (!clerkUserId) throw new Error('Unauthorized');
 
+  const user = await db.user.findUnique({
+    where: { clerkId: clerkUserId },
+    select: {
+      id: true,
+      timeZone: true,
+      locations: { take: 1 },
+    },
+  });
+
+  if (user?.id && user.locations?.[0]?.id) {
+    const location = user.locations[0];
+    return {
+      location,
+      userId: user.id,
+      currentUserTimeZone: user.timeZone || location.timeZone || 'UTC',
+    };
+  }
+
   const location = await getLocationContext();
   if (!location?.id) throw new Error('No location context');
 
-  const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, location.id);
-  if (!hasAccess) throw new Error('Unauthorized');
-
-  const user = await getCurrentUserRecord(clerkUserId);
-
-  if (!user?.id) throw new Error('User not found');
+  const fallbackUser = user?.id ? user : await getCurrentUserRecord(clerkUserId);
+  if (!fallbackUser?.id) throw new Error('User not found');
 
   return {
     location,
-    userId: user.id,
-    currentUserTimeZone: user.timeZone || location.timeZone || 'UTC',
+    userId: fallbackUser.id,
+    currentUserTimeZone: fallbackUser.timeZone || location.timeZone || 'UTC',
   };
 }
 
