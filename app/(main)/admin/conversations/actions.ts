@@ -432,6 +432,7 @@ function queueGhlConversationStatusSync(args: {
 }
 
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
+const MESSAGE_TRANSLATION_MODEL = GEMINI_DRAFT_FAST_DEFAULT;
 const MESSAGE_TRANSLATION_STATUS = {
     completed: "completed",
     failed: "failed",
@@ -487,7 +488,7 @@ async function runMessageTranslationLLM(args: {
     targetLanguage: string;
     modelOverride?: string;
 }) {
-    const modelId = String(args.modelOverride || "").trim() || getModelForTask("simple_generation");
+    const modelId = String(args.modelOverride || "").trim() || MESSAGE_TRANSLATION_MODEL;
     const systemPrompt = [
         "You are a translation assistant for enterprise SaaS conversation inboxes.",
         "Translate the source text to the requested target language while preserving meaning, tone, and business intent.",
@@ -5594,7 +5595,7 @@ export async function translateConversationMessage(
                 detectionConfidence: null,
                 status: MESSAGE_TRANSLATION_STATUS.failed,
                 provider: "google",
-                model: getModelForTask("simple_generation"),
+                model: MESSAGE_TRANSLATION_MODEL,
                 error: messageText,
             },
             update: {
@@ -5606,7 +5607,7 @@ export async function translateConversationMessage(
                 detectionConfidence: null,
                 status: MESSAGE_TRANSLATION_STATUS.failed,
                 provider: "google",
-                model: getModelForTask("simple_generation"),
+                model: MESSAGE_TRANSLATION_MODEL,
                 error: messageText,
             },
         }).catch(() => null);

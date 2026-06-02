@@ -1906,6 +1906,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         return {
             success: true as const,
             messageId: normalizedMessageId,
+            cached: !!result.cached,
             translation: result.translation,
         };
     }, []);

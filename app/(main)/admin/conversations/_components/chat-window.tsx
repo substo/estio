@@ -78,6 +78,7 @@ interface ChatWindowProps {
         success: boolean;
         error?: string;
         messageId?: string;
+        cached?: boolean;
         translation?: {
             targetLanguage: string;
             sourceLanguage?: string | null;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { MessageTranslationState, MessageTranslationVariant } from "@/lib/ghl/conversations";
 import { selectActiveTranslation } from "@/lib/conversations/translation-view";
@@ -114,6 +115,7 @@ export interface MessageBubbleProps {
     onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{
         success: boolean;
         error?: string;
+        cached?: boolean;
         translation?: MessageTranslationVariant | null;
     }>;
 }
@@ -313,16 +315,23 @@ export function MessageBubble({
 
     const handleTranslateMessage = useCallback(async () => {
         if (!onTranslateMessage || isTranslatingMessage) return;
+        const toastId = toast.loading(activeTranslation ? "Refreshing translation..." : "Translating message...");
         setIsTranslatingMessage(true);
         try {
             const result = await onTranslateMessage(message.id, preferredDisplayLanguage || null);
-            if (!result?.success || !result?.translation) return;
+            if (!result?.success || !result?.translation) {
+                toast.error(result?.error || "Failed to translate message.", { id: toastId });
+                return;
+            }
             setActiveTranslation(result.translation);
             setTranslationViewMode("translated");
+            toast.success(result.cached ? "Translation ready." : "Message translated.", { id: toastId });
+        } catch (error: any) {
+            toast.error(String(error?.message || "Failed to translate message."), { id: toastId });
         } finally {
             setIsTranslatingMessage(false);
         }
-    }, [isTranslatingMessage, message.id, onTranslateMessage, preferredDisplayLanguage]);
+    }, [activeTranslation, isTranslatingMessage, message.id, onTranslateMessage, preferredDisplayLanguage]);
 
     const handleToggleTranslationViewMode = useCallback(() => {
         setTranslationViewMode((current) => {

@@ -118,6 +118,9 @@ export function useChatWindowThreadTranslation({
         } else {
             setTranslatingVisibleThread(true);
         }
+        const toastId = options?.silent
+            ? null
+            : toast.loading(`Translating ${visibleInboundIds.length} visible message${visibleInboundIds.length === 1 ? "" : "s"}...`);
         try {
             const result = await onTranslateVisibleThread(
                 visibleInboundIds,
@@ -125,14 +128,23 @@ export function useChatWindowThreadTranslation({
             );
             if (!result?.success) {
                 if (!options?.silent) {
-                    toast.error(result?.error || "Failed to translate visible messages.");
+                    toast.error(result?.error || "Failed to translate visible messages.", toastId ? { id: toastId } : undefined);
                 }
                 return;
             }
             setThreadTranslationMode("translated");
             setTranslationBannerDismissed(true);
             if (!options?.silent) {
-                toast.success(`Translated ${Number(result.translatedCount || 0)} messages.`);
+                const translatedCount = Number(result.translatedCount || 0);
+                const failedCount = Number(result.failedCount || 0);
+                const message = failedCount > 0
+                    ? `Translated ${translatedCount} message${translatedCount === 1 ? "" : "s"}; ${failedCount} failed.`
+                    : `Translated ${translatedCount} message${translatedCount === 1 ? "" : "s"}.`;
+                toast.success(message, toastId ? { id: toastId } : undefined);
+            }
+        } catch (error: any) {
+            if (!options?.silent) {
+                toast.error(String(error?.message || "Failed to translate visible messages."), toastId ? { id: toastId } : undefined);
             }
         } finally {
             if (options?.auto) {
