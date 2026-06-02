@@ -47,6 +47,10 @@ import {
   canStartContactConversation,
   resolveContactConversationStartMessageType,
 } from '@/lib/contacts/conversation-start';
+import {
+  findContactsByPhoneDigitsWithFallback,
+  phoneDigitsLikelyMatch,
+} from '@/lib/contacts/phone-lookup';
 
 async function resolvePreferredChannelTypeForPhone(
   _location: unknown,
@@ -3060,26 +3064,8 @@ export async function saveSharedContact(params: {
     const normalizedPhone = normalizePhone(params.phoneNumber);
     const normalizedEmail = (params.email || '').trim().toLowerCase() || null;
 
-    // Check for existing contact by phone
     if (normalizedPhone) {
-      const rawDigits = normalizedPhone.replace(/\D/g, '');
-      const searchSuffix = rawDigits.length > 7 ? rawDigits.slice(-7) : rawDigits;
-
-      const candidates = await db.contact.findMany({
-        where: {
-          locationId: location.id,
-          phone: { contains: searchSuffix },
-        },
-        select: { id: true, name: true, phone: true },
-      });
-
-      const exactMatch = candidates.find(c => {
-        if (!c.phone) return false;
-        const dbDigits = c.phone.replace(/\D/g, '');
-        return dbDigits === rawDigits
-          || (dbDigits.endsWith(rawDigits) && rawDigits.length >= 9)
-          || (rawDigits.endsWith(dbDigits) && dbDigits.length >= 9);
-      });
+      const exactMatch = (await findContactsByPhoneDigitsWithFallback(db, location.id, normalizedPhone, { take: 1 }))[0];
 
       if (exactMatch) {
         return {
@@ -3219,42 +3205,34 @@ export async function checkSharedContactsSavedState(
       return { success: true, states: {} };
     }
 
-    const phoneSuffixes = normalizedPhones
-      .map((phone) => phone.replace(/\D/g, ""))
-      .filter(Boolean)
-      .map((digits) => digits.length > 7 ? digits.slice(-7) : digits);
-
-    const existingContacts = await db.contact.findMany({
-      where: {
-        locationId: location.id,
-        OR: [
-          { phone: { in: normalizedPhones } },
-          ...phoneSuffixes.map((suffix) => ({ phone: { contains: suffix } })),
-        ],
-      },
-      select: { 
-        id: true, 
-        phone: true,
-        conversations: {
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-          select: { id: true, ghlConversationId: true }
-        }
-      }
-    });
+    const existingContacts = await Promise.all(
+      normalizedPhones.map((phone) => findContactsByPhoneDigitsWithFallback(db, location.id, phone, { take: 1 }))
+    );
+    const existingContactIds = Array.from(new Set(existingContacts.flat().map((contact) => contact.id)));
+    const existingContactsWithConversations = existingContactIds.length > 0
+      ? await db.contact.findMany({
+          where: {
+            id: { in: existingContactIds },
+            locationId: location.id,
+          },
+          select: {
+            id: true,
+            phone: true,
+            conversations: {
+              take: 1,
+              orderBy: { createdAt: 'desc' },
+              select: { id: true, ghlConversationId: true }
+            }
+          }
+        })
+      : [];
 
     const finalStates: Record<string, { saved: boolean; contactId: string; conversationId?: string }> = {};
     phoneNumbers.forEach(inputPhone => {
       const normalized = normalizePhone(inputPhone);
       if (!normalized) return;
       const inputDigits = normalized.replace(/\D/g, '');
-      const matched = existingContacts.find(c => {
-        const contactDigits = String(c.phone || '').replace(/\D/g, '');
-        return c.phone === normalized
-          || contactDigits === inputDigits
-          || (contactDigits.endsWith(inputDigits) && inputDigits.length >= 9)
-          || (inputDigits.endsWith(contactDigits) && contactDigits.length >= 9);
-      });
+      const matched = existingContactsWithConversations.find(c => phoneDigitsLikelyMatch(inputDigits, c.phone));
       if (matched) {
         finalStates[inputPhone] = { 
           saved: true, 

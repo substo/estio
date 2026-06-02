@@ -14,6 +14,7 @@ import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
+import { findContactsByPhoneDigitsWithFallback, phoneDigitsLikelyMatch } from "@/lib/contacts/phone-lookup";
 export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/status-updates";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
@@ -721,10 +722,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     // --- Enhanced Contact Lookup ---
-    // 1. Clean the input phone to raw digits
+    // 1. Clean the input phone to raw digits. Exact digit matches use the normalized-phone expression index.
     const rawInputPhone = contactIdentityIsLid ? "" : contactPhone.replace(/\D/g, '');
-    // Use last 7 digits for DB filter (was 2, which caused cross-contact false matches)
-    const searchSuffix = rawInputPhone.length > 7 ? rawInputPhone.slice(-7) : rawInputPhone;
 
     // --- Group Chat Handling ---
     let contactType = "Lead";
@@ -748,31 +747,27 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Normalize LID for DB lookup (strip @lid suffix for contains search)
     const lidRaw = normalizeLidRaw(msg.lid) || undefined;
     const normalizedMsgLid = normalizeLidJid(msg.lid) || undefined;
-    const contactLookupClauses = [
-        ...(searchSuffix ? [{ phone: { contains: searchSuffix } }] : []),
-        ...(lidRaw ? [
-            { lid: normalizedMsgLid },
-            { lid: lidRaw },
-            { lid: { contains: lidRaw } },
-        ] : [])
-    ];
-    const candidates = contactLookupClauses.length ? await db.contact.findMany({
+    const phoneCandidates = rawInputPhone
+        ? await findContactsByPhoneDigitsWithFallback(db, locationId, rawInputPhone, { take: 12 })
+        : [];
+    const lidCandidates = lidRaw ? await db.contact.findMany({
         where: {
             locationId,
-            OR: contactLookupClauses
-        } as any
+            OR: [
+                { lid: normalizedMsgLid },
+                { lid: lidRaw },
+                { lid: { contains: lidRaw } },
+            ],
+        } as any,
     }) : [];
+    const candidates = [...phoneCandidates, ...lidCandidates].filter((candidate, index, list) =>
+        list.findIndex((row) => row.id === candidate.id) === index
+    );
 
     // Strategy: Prefer LID match -> Then Phone Match
     const phoneMatches = candidates.filter(c => {
         if (!c.phone) return false;
-        const rawDbPhone = c.phone.replace(/\D/g, '');
-        // Require exact match or at least 9-digit overlap to prevent cross-contact false positives
-        const exactMatch = rawDbPhone === rawInputPhone;
-        const minOverlap = 9;
-        const dbEndsWithInput = rawDbPhone.endsWith(rawInputPhone) && rawInputPhone.length >= minOverlap;
-        const inputEndsWithDb = rawInputPhone.endsWith(rawDbPhone) && rawDbPhone.length >= minOverlap;
-        return exactMatch || dbEndsWithInput || inputEndsWithDb;
+        return phoneDigitsLikelyMatch(rawInputPhone, c.phone);
     });
     const phoneMatchCandidate =
         phoneMatches.find((candidate) => candidate.contactType !== "Ref-GroupMember")
