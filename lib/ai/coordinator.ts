@@ -35,6 +35,7 @@ interface CoordinationContext {
     agentName?: string;
     businessName?: string;
     instruction?: string;
+    baseDraft?: string;
     model?: string;
     replyLanguageOverride?: string | null;
     draftLanguage?: string | null;
@@ -727,12 +728,14 @@ export async function generateDraft(context: CoordinationContext) {
                         : "Recent messages are close together in the same active thread.";
 
         const normalizedInstruction = String(context.instruction || "").trim();
+        const normalizedBaseDraft = String(context.baseDraft || "").trim();
         const isComplexDraft =
             !isFastDraft
             && (
                 requestedTimelineMode === "deal"
                 || timelineCompaction.stats.totalEvents > 90
                 || normalizedInstruction.length > 220
+                || normalizedBaseDraft.length > 300
             );
         telemetry.prompt.complexDraft = isComplexDraft;
 
@@ -859,10 +862,15 @@ export async function generateDraft(context: CoordinationContext) {
         Just the draft message text the agent should send next.
         `;
 
-        // Add specific user instruction if provided.
+        // Add current composer draft and specific user instruction if provided.
         let finalPrompt = fullPrompt;
+        if (normalizedBaseDraft) {
+            finalPrompt += `\n\nCURRENT COMPOSER DRAFT TO REVISE:\n${normalizedBaseDraft}\n\nRevision rules:\n1. Revise this draft; do not write a separate unrelated reply.\n2. Preserve factual meaning, commitments, property details, dates, times, and links unless the user instruction explicitly changes them.\n3. Return only the revised send-ready message body.`;
+        }
         if (normalizedInstruction) {
             finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user provided: "${normalizedInstruction}"\n\nYour draft MUST:\n1. Follow this instruction precisely.\n2. Treat this instruction as the primary scope for what to include.\n3. Produce a send-ready channel-appropriate message using only the wording needed.\n4. If the instruction is already close to send-ready, keep its structure and only refine clarity/grammar.\n5. Do not add new scenarios, commitments, pressure, or side notes unless explicitly requested.\n6. Do not repeat the instruction; write the actual message the agent should send.`;
+        } else if (normalizedBaseDraft) {
+            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nImprove the current composer draft for clarity, concision, and channel-appropriate tone without changing its factual meaning.`;
         }
 
         telemetry.prompt.chars = finalPrompt.length;

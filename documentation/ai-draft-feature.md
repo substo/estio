@@ -6,7 +6,7 @@
 > - `documentation/ai-skills-runtime-rewrite-handoff.md` (historical planning context)
 
 ## 1. Overview
-The AI Draft feature allows agents to quickly generate professional replies directly within the Chat Window. It supports a **"Sketch-to-Draft"** workflow where users type a rough instruction (e.g., *"say thanks and ask about budget"*) and the AI expands it into a polite, context-aware message.
+The AI Draft feature allows agents to quickly generate and refine professional replies directly within the Chat Window. The shared composer keeps the main text area as the sendable message, while AI instructions live in a dedicated Draft/Refine popover with quick actions and a custom instruction field.
 
 As of Feb 2026, draft generation also applies a **name-greeting cadence rule** to avoid repetitive openers like `Hi George,` in consecutive short-interval messages.
 
@@ -61,13 +61,13 @@ It is critical to distinguish between **Content** and **Metadata**:
 
 ## 4. Usage Guide
 
-### Sketch-to-Draft Workflow
-1.  **Type Instruction**: In the chat input, type a rough command.
-    *   *Example*: "tell him we have a viewing at 5pm"
-2.  **Click Sparkles**: Press the AI icon (Sparkles).
-3.  **Review**: The AI replaces your rough text with a polished draft.
-    *   *Result*: "Just confirming we have a viewing scheduled for today at 5:00 PM. Looking forward to seeing you there!"
+### Draft / Refine Workflow
+1.  **Generate**: With an empty composer, open `Draft` and choose a quick action such as `Best next reply`, or type a custom instruction such as "ask about budget".
+2.  **Review**: The AI writes the sendable message into the composer.
+3.  **Refine**: With a draft already in the composer, open `Refine` and choose actions such as `Shorter`, `Warmer`, `More formal`, or type a custom change request.
 4.  **Edit & Send**: Make any final tweaks and press Send.
+
+When refining an existing composer draft, the client sends the current text as `baseDraft` and the requested change as `instruction`. The model is explicitly prompted to revise the current draft rather than treating the instruction as a new outbound message.
 
 ### Greeting Cadence Rules (Feb 2026)
 - Name greeting (for example `Hi George,`) is allowed only when:

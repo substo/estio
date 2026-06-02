@@ -4997,6 +4997,7 @@ type GenerateAIDraftOptions = {
     mode?: "chat" | "deal";
     dealId?: string;
     draftLanguage?: string | null;
+    baseDraft?: string | null;
 };
 
 function logAIDraftTiming(event: string, fields: Record<string, unknown> = {}) {
@@ -5138,8 +5139,12 @@ export async function generateAIDraft(
                     `Mode: ${options?.mode || "chat"}`,
                     options?.dealId ? `Deal: ${options.dealId}` : null,
                     options?.draftLanguage ? `Draft language for agent review: ${options.draftLanguage}` : null,
+                    options?.baseDraft ? "Mode: revise current composer draft" : null,
                 ].filter(Boolean).join("\n"),
                 extraInstruction: [
+                    options?.baseDraft
+                        ? `Current composer draft to revise:\n${options.baseDraft}`
+                        : null,
                     instruction || "Draft the best next response based on current conversation context.",
                     options?.draftLanguage
                         ? `Write the draft in ${options.draftLanguage} for internal agent review. Do not translate it to the client's send language yet.`
@@ -5188,6 +5193,7 @@ export async function generateAIDraft(
         agentName,
         businessName: location.name || undefined,
         instruction,
+        baseDraft: options?.baseDraft || undefined,
         model: explicitModel,
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
@@ -5239,6 +5245,7 @@ export async function generateComposerAIDraft(
         agentName,
         businessName: location.name || undefined,
         instruction,
+        baseDraft: options?.baseDraft || undefined,
         model: explicitModel,
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,

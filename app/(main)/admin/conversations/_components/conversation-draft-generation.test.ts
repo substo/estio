@@ -62,6 +62,32 @@ test('generateDraftWithStreamingFallback falls back when stream fails', async ()
     assert.deepEqual(result, { draft: 'fallback draft', reasoning: 'fallback reasoning' });
 });
 
+test('generateDraftWithStreamingFallback passes base draft through stream and fallback paths', async () => {
+    let sawStreamBaseDraft = false;
+    let sawFallbackBaseDraft = false;
+
+    const result = await generateDraftWithStreamingFallback({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        instruction: 'Make it shorter',
+        baseDraft: 'This is the current draft that needs refinement.',
+        mode: 'chat',
+        onChunk: () => {},
+        streamDraft: async (args) => {
+            sawStreamBaseDraft = args.baseDraft === 'This is the current draft that needs refinement.';
+            return { reasoning: 'missing draft' };
+        },
+        generateDraft: async (_conversationId, _contactId, _instruction, _model, options) => {
+            sawFallbackBaseDraft = options?.baseDraft === 'This is the current draft that needs refinement.';
+            return { draft: 'Shorter draft' };
+        },
+    });
+
+    assert.equal(sawStreamBaseDraft, true);
+    assert.equal(sawFallbackBaseDraft, true);
+    assert.deepEqual(result, { draft: 'Shorter draft' });
+});
+
 test('generateDraftWithStreamingFallback times out stream before direct fallback', async () => {
     let sawStreamError = false;
     let fallbackCalls = 0;
@@ -140,9 +166,13 @@ test('streamDraftViaApi parses chunk lines and complete result', async () => {
             conversationId: 'conv-1',
             contactId: 'contact-1',
             mode: 'chat',
+            baseDraft: 'Current draft',
             onChunk: (chunk) => chunks.push(chunk),
         },
-        async () => new Response(body, { status: 200 })
+        async (_url, init) => {
+            assert.equal(JSON.parse(String(init?.body)).baseDraft, 'Current draft');
+            return new Response(body, { status: 200 });
+        }
     );
 
     assert.deepEqual(chunks, ['Hel', 'lo']);

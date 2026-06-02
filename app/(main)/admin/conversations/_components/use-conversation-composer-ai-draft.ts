@@ -13,6 +13,7 @@ type GenerateDraft = (
     instruction?: string,
     model?: string,
     draftLanguage?: string | null,
+    baseDraft?: string | null,
     onChunk?: (chunk: string) => void
 ) => Promise<string | null>;
 
@@ -68,7 +69,7 @@ export function useConversationComposerAiDraft({
     replyLanguageOpen: boolean;
     setReplyLanguageOpen: Dispatch<SetStateAction<boolean>>;
     savingReplyLanguage: boolean;
-    handleAiDraft: (instructionOverride?: string) => Promise<void>;
+    handleAiDraft: (instructionOverride?: string, baseDraftOverride?: string | null) => Promise<void>;
     handleReplyLanguageSelect: (value: string) => Promise<void>;
     selectedReplyLanguageLabel: string;
     resolvedDraftLanguageLabel: string;
@@ -124,23 +125,28 @@ export function useConversationComposerAiDraft({
         setSelectedModel(value);
     };
 
-    const handleAiDraft = async (instructionOverride?: string) => {
+    const handleAiDraft = async (instructionOverride?: string, baseDraftOverride?: string | null) => {
         if (!onGenerateDraft || generatingDraft || isUnavailable) return;
         const startedAt = Date.now();
         let firstChunkMs: number | null = null;
+        const instruction = String(instructionOverride || "").trim() || undefined;
+        const baseDraft = typeof baseDraftOverride === "string" && baseDraftOverride.trim()
+            ? baseDraftOverride.trim()
+            : null;
         logComposerDraftTiming("client_click_start", {
             conversationId: conversation?.id || null,
-            hasInstructionOverride: !!instructionOverride,
+            hasInstructionOverride: !!instruction,
+            hasBaseDraft: !!baseDraft,
         });
         setGeneratingDraft(true);
         try {
-            const instruction = instructionOverride || draft.trim();
             const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
             let streamedBuffer = "";
             const text = await onGenerateDraft(
                 instruction,
                 modelOverride,
                 agentDraftLanguage,
+                baseDraft,
                 (chunk) => {
                     if (!chunk) return;
                     if (firstChunkMs === null) {

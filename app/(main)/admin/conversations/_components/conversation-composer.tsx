@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
     REPLY_LANGUAGE_AUTO_VALUE,
@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2 } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -48,6 +48,7 @@ interface ConversationComposerProps {
         instruction?: string,
         model?: string,
         draftLanguage?: string | null,
+        baseDraft?: string | null,
         onChunk?: (chunk: string) => void
     ) => Promise<string | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
@@ -79,10 +80,10 @@ interface ConversationComposerProps {
 
 function getPlaceholderText(channel: ComposerChannel): string {
     const channelHints: Record<ComposerChannel, string> = {
-        WhatsApp: "Message or AI instruction...",
-        Email: "Email or AI instruction...",
-        SMS: "Text or AI instruction...",
-        SMS_RELAY: "Android SMS or AI instruction...",
+        WhatsApp: "Write a WhatsApp message...",
+        Email: "Write an email...",
+        SMS: "Write a text message...",
+        SMS_RELAY: "Write an Android SMS...",
     };
     return channelHints[channel] || channelHints.SMS;
 }
@@ -91,6 +92,23 @@ const EMPTY_COMPOSER_HEIGHT_PX = 36;
 const DRAFT_COMPOSER_MIN_ROWS = 7;
 const MOBILE_COMPOSER_MAX_VIEWPORT_RATIO = 0.5;
 const DESKTOP_COMPOSER_MAX_HEIGHT_PX = 320;
+const EMPTY_AI_INSTRUCTION = "";
+
+const CREATE_DRAFT_ACTIONS = [
+    "Best next reply",
+    "Ask for budget",
+    "Confirm viewing",
+    "Send property options",
+];
+
+const REFINE_DRAFT_ACTIONS = [
+    "Shorter",
+    "Warmer",
+    "More formal",
+    "Clearer",
+    "Fix grammar",
+    "Add next step",
+];
 
 function resizeComposerTextarea(textarea: HTMLTextAreaElement | null, hasDraft: boolean) {
     if (!textarea) return;
@@ -146,6 +164,8 @@ export function ConversationComposer({
     const isRecordingRef = useRef(false);
     const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
     const composerHasDraft = draft.trim().length > 0;
+    const [aiDraftOpen, setAiDraftOpen] = useState(false);
+    const [aiInstruction, setAiInstruction] = useState(EMPTY_AI_INSTRUCTION);
     const {
         generatingDraft,
         selectedModel,
@@ -280,6 +300,19 @@ export function ConversationComposer({
             : "Android SMS segment estimate.";
     const composerContentClassName = getConversationComposerContentClassName();
     const resolvedSurfaceTheme = surfaceTheme || getConversationSurfaceTheme(selectedChannel);
+    const aiActionLabel = composerHasDraft ? "Refine" : "Draft";
+    const aiCustomPlaceholder = composerHasDraft
+        ? "Tell AI how to change this draft..."
+        : "Tell AI what to write...";
+    const aiQuickActions = composerHasDraft ? REFINE_DRAFT_ACTIONS : CREATE_DRAFT_ACTIONS;
+
+    const runAiDraftCommand = (instruction?: string) => {
+        const trimmedInstruction = String(instruction || "").trim();
+        const baseDraft = composerHasDraft ? draft : null;
+        setAiDraftOpen(false);
+        setAiInstruction(EMPTY_AI_INSTRUCTION);
+        void handleAiDraft(trimmedInstruction || undefined, baseDraft);
+    };
 
     useEffect(() => {
         onSelectedChannelChange?.(selectedChannel);
@@ -450,20 +483,67 @@ export function ConversationComposer({
                                         generatingDraft={generatingDraft}
                                         onGenerateInstruction={(instruction) => void handleAiDraft(instruction)}
                                     />
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleAiDraft()}
-                                        disabled={isUnavailable || generatingDraft}
-                                        className="h-7 text-[11px] font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 px-1.5 sm:px-2"
-                                    >
-                                        {generatingDraft ? (
-                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                        ) : (
-                                            <Sparkles className="w-3 h-3" />
-                                        )}
-                                        {generatingDraft ? "..." : "AI"}
-                                    </Button>
+                                    <Popover open={aiDraftOpen} onOpenChange={setAiDraftOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                disabled={isUnavailable || generatingDraft}
+                                                className="h-7 text-[11px] font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 px-1.5 sm:px-2"
+                                            >
+                                                {generatingDraft ? (
+                                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                                ) : (
+                                                    <Sparkles className="w-3 h-3" />
+                                                )}
+                                                {generatingDraft ? "..." : aiActionLabel}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[280px] p-2" align="end">
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                {aiQuickActions.map((action) => (
+                                                    <Button
+                                                        key={action}
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-8 justify-start px-2 text-[11px] text-slate-700"
+                                                        onClick={() => runAiDraftCommand(action === "Best next reply" ? undefined : action)}
+                                                        disabled={generatingDraft}
+                                                    >
+                                                        <Wand2 className="mr-1.5 h-3 w-3 text-purple-500" />
+                                                        <span className="truncate">{action}</span>
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                            <div className="mt-2 flex gap-1.5">
+                                                <Textarea
+                                                    value={aiInstruction}
+                                                    onChange={(event) => setAiInstruction(event.target.value)}
+                                                    placeholder={aiCustomPlaceholder}
+                                                    rows={2}
+                                                    className="min-h-[56px] resize-none text-xs"
+                                                    disabled={generatingDraft}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                                                            event.preventDefault();
+                                                            runAiDraftCommand(aiInstruction);
+                                                        }
+                                                    }}
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    className="h-auto self-stretch px-2"
+                                                    onClick={() => runAiDraftCommand(aiInstruction)}
+                                                    disabled={generatingDraft || (!composerHasDraft && !aiInstruction.trim())}
+                                                    title={composerHasDraft ? "Apply AI instruction to current draft" : "Generate AI draft"}
+                                                >
+                                                    <Send className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
                                 </>
                             )}
                         </div>

@@ -2659,6 +2659,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         instruction?: string,
         model?: string,
         draftLanguage?: string | null,
+        baseDraft?: string | null,
         onChunk?: (chunk: string) => void
     ) => {
         if (!activeConversation) return null;
@@ -2668,6 +2669,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationId: activeConversation.id,
                 contactId: activeConversation.contactId,
                 instruction,
+                baseDraft,
                 model,
                 mode: "chat",
                 draftLanguage,
@@ -2732,6 +2734,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         instruction?: string,
         model?: string,
         draftLanguage?: string | null,
+        baseDraft?: string | null,
         onChunk?: (chunk: string) => void
     ) => {
         if (!selectedDealConversation) return null;
@@ -2740,6 +2743,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationId: selectedDealConversation.id,
                 contactId: selectedDealConversation.contactId,
                 instruction,
+                baseDraft,
                 model,
                 mode: "deal",
                 dealId: activeDealId || undefined,

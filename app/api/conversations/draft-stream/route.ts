@@ -13,6 +13,7 @@ type DraftStreamBody = {
     conversationId?: string;
     contactId?: string;
     instruction?: string;
+    baseDraft?: string;
     model?: string;
     options?: {
         mode?: "chat" | "deal";
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
     const conversationId = sanitizeString(body?.conversationId);
     const contactId = sanitizeString(body?.contactId);
     const instruction = sanitizeString(body?.instruction);
+    const baseDraft = sanitizeString(body?.baseDraft);
     const model = sanitizeString(body?.model);
     const mode = body?.options?.mode === "deal" ? "deal" : "chat";
     const dealId = sanitizeString(body?.options?.dealId);
@@ -146,6 +148,7 @@ export async function POST(req: NextRequest) {
                     agentName,
                     businessName: location.name || undefined,
                     instruction,
+                    baseDraft,
                     model,
                     mode,
                     dealId,

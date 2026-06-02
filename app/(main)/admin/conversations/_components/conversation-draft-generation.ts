@@ -9,6 +9,7 @@ type DraftStreamArgs = {
     conversationId: string;
     contactId: string;
     instruction?: string;
+    baseDraft?: string | null;
     model?: string;
     mode: DraftMode;
     dealId?: string | null;
@@ -21,6 +22,7 @@ type DraftFallbackArgs = {
     conversationId: string;
     contactId: string;
     instruction?: string;
+    baseDraft?: string | null;
     model?: string;
     options: {
         mode: DraftMode;
@@ -89,6 +91,7 @@ export async function streamDraftViaApi(
                 conversationId: args.conversationId,
                 contactId: args.contactId,
                 instruction: args.instruction,
+                baseDraft: args.baseDraft,
                 model: args.model,
                 options: {
                     mode: args.mode,
@@ -210,6 +213,7 @@ export async function generateDraftWithStreamingFallback(args: {
     conversationId: string;
     contactId: string;
     instruction?: string;
+    baseDraft?: string | null;
     model?: string;
     mode: DraftMode;
     dealId?: string;
@@ -222,7 +226,7 @@ export async function generateDraftWithStreamingFallback(args: {
         contactId: string,
         instruction?: string,
         model?: string,
-        options?: DraftFallbackArgs["options"]
+        options?: DraftFallbackArgs["options"] & { baseDraft?: string | null }
     ) => Promise<GenerateDraftResult>;
     onStreamError?: (error: unknown) => void;
 }): Promise<GenerateDraftResult> {
@@ -237,6 +241,7 @@ export async function generateDraftWithStreamingFallback(args: {
                 conversationId: args.conversationId,
                 contactId: args.contactId,
                 instruction: args.instruction,
+                baseDraft: args.baseDraft,
                 model: args.model,
                 mode: args.mode,
                 dealId: args.dealId ?? undefined,
@@ -276,6 +281,7 @@ export async function generateDraftWithStreamingFallback(args: {
             mode: args.mode,
             dealId: args.dealId || undefined,
             draftLanguage: args.draftLanguage,
+            ...(args.baseDraft ? { baseDraft: args.baseDraft } : {}),
         }
     );
     logDraftTiming("fallback_server_action_end", {
