@@ -10,9 +10,15 @@ import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
 import { useUnifiedTimelineScroll } from './use-unified-timeline-scroll';
-import { getConversationTimelineContentClassName, getDealTimelineScrollClassName } from './message-bubble-theme';
+import {
+    getConversationSurfaceTheme,
+    getConversationTimelineContentClassName,
+    getDealTimelineScrollClassName,
+    type ConversationSurfaceChannel,
+} from './message-bubble-theme';
 import { cn } from '@/lib/utils';
 import type { ComposerChannel } from './use-conversation-composer-translation-preview';
+import { getConversationChannelInfo } from './conversation-channel-info';
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -71,6 +77,15 @@ interface UnifiedTimelineProps {
     smsRelayEnabled?: boolean;
 }
 
+function getInitialSurfaceChannel(conversation: Conversation | null): ConversationSurfaceChannel {
+    if (!conversation) return "default";
+    const channel = getConversationChannelInfo(conversation).channel;
+    if (channel === "WhatsApp" || channel === "Email" || channel === "SMS" || channel === "SMS_RELAY") {
+        return channel;
+    }
+    return "default";
+}
+
 export function UnifiedTimeline({
     dealId,
     title,
@@ -104,8 +119,10 @@ export function UnifiedTimeline({
     smsRelayEnabled,
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState("");
+    const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(composerConversation));
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const events = useMemo(() => (Array.isArray(timelineEvents) ? timelineEvents : []), [timelineEvents]);
+    const surfaceTheme = getConversationSurfaceTheme(activeSurfaceChannel);
     const {
         timelineRef,
         timelineContentRef,
@@ -116,6 +133,10 @@ export function UnifiedTimeline({
         loading,
         onInitialPaintReady,
     });
+
+    useEffect(() => {
+        setActiveSurfaceChannel(getInitialSurfaceChannel(composerConversation));
+    }, [composerConversation?.id]);
 
     useEffect(() => {
         if (process.env.NODE_ENV === "production") return;
@@ -148,7 +169,7 @@ export function UnifiedTimeline({
             data-deal-hydration-status={hydrationStatus}
             data-deal-initial-paint-ready={isTimelineReady ? "true" : "false"}
             data-deal-mounted-timeline-items={events.length}
-            className="flex-1 min-h-0 bg-slate-200/50 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full"
+            className={cn("flex-1 min-h-0 p-0 flex flex-col relative overflow-hidden h-full min-w-0 w-full", surfaceTheme.timelineClassName)}
         >
             <div className="h-14 border-b bg-white flex items-center px-3 sm:px-4 justify-between shrink-0 gap-2">
                 <div className="flex items-center gap-2 text-gray-700 min-w-0">
@@ -216,6 +237,7 @@ export function UnifiedTimeline({
                                             user: event.user || null,
                                         }}
                                         contactName={event.contactName || undefined}
+                                        surfaceTheme={surfaceTheme}
                                     />
                                 );
                             }
@@ -250,6 +272,7 @@ export function UnifiedTimeline({
                     await onRejectSuggestedResponse(id, reason);
                 }}
                 allowSendNow={true}
+                surfaceTheme={surfaceTheme}
             />
 
             <ConversationComposer
@@ -270,6 +293,8 @@ export function UnifiedTimeline({
                 onModelChange={setSelectedModel}
                 insertDraftSeed={composerInsertSeed}
                 smsRelayEnabled={smsRelayEnabled}
+                surfaceTheme={surfaceTheme}
+                onSelectedChannelChange={(channel) => setActiveSurfaceChannel(channel)}
             />
         </div>
     );

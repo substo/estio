@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Send, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getConversationSurfaceTheme, type ConversationSurfaceTheme } from "./message-bubble-theme";
 
 export type SuggestedResponseQueueItem = {
     id: string;
@@ -38,6 +39,7 @@ interface SuggestedResponseQueueProps {
     onReject: (id: string, reason?: string | null) => Promise<void> | void;
     className?: string;
     allowSendNow?: boolean;
+    surfaceTheme?: ConversationSurfaceTheme;
 }
 
 function formatSourceLabel(source: string): string {
@@ -79,8 +81,10 @@ export function SuggestedResponseQueue({
     onReject,
     className,
     allowSendNow = true,
+    surfaceTheme,
 }: SuggestedResponseQueueProps) {
     const [busyId, setBusyId] = useState<string | null>(null);
+    const resolvedSurfaceTheme = surfaceTheme || getConversationSurfaceTheme(null);
 
     const visibleItems = useMemo(
         () => (Array.isArray(items) ? items.filter((item) => item.status === "pending") : []),
@@ -102,7 +106,7 @@ export function SuggestedResponseQueue({
     };
 
     return (
-        <div className={cn("border-t border-b bg-slate-50/70 px-3 py-2 space-y-2", className)}>
+        <div className={cn("px-3 py-2 space-y-2", resolvedSurfaceTheme.suggestedQueueClassName, className)}>
             <div className="text-xs font-semibold text-slate-700">Suggested Responses</div>
 
             {visibleItems.map((item) => (
@@ -165,7 +169,7 @@ export function SuggestedResponseQueue({
                             <Button
                                 type="button"
                                 size="sm"
-                                className="h-7 px-2 text-xs"
+                                className={cn("h-7 px-2 text-xs", resolvedSurfaceTheme.suggestedQueuePrimaryButtonClassName)}
                                 disabled={busyId === item.id}
                                 onClick={() => run(item.id, () => onAccept(item.id, "sendNow"))}
                             >

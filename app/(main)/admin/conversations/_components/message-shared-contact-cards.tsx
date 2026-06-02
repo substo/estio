@@ -20,6 +20,7 @@ import {
 } from "@/app/(main)/admin/contacts/actions";
 import { cn } from "@/lib/utils";
 import type { SharedContactInfo } from "@/lib/contacts/vcard";
+import type { MessageBubbleTheme } from "./message-bubble-theme";
 
 type ContactSaveState = {
     saving?: boolean;
@@ -38,19 +39,19 @@ type RouterDependency = {
 interface MessageSharedContactCardsProps {
     sharedContacts: SharedContactInfo[];
     bodyVCardDownloadHref: string | null;
-    isOutbound: boolean;
     messageId: string;
     locationId?: string;
     router: RouterDependency;
+    theme: MessageBubbleTheme;
 }
 
 export function MessageSharedContactCards({
     sharedContacts,
     bodyVCardDownloadHref,
-    isOutbound,
     messageId,
     locationId,
     router,
+    theme,
 }: MessageSharedContactCardsProps) {
     const [contactSaveStates, setContactSaveStates] = useState<Record<number, ContactSaveState>>({});
     const [contactOpenMessageStates, setContactOpenMessageStates] = useState<Record<number, boolean>>({});
@@ -168,32 +169,30 @@ export function MessageSharedContactCards({
                         key={`contact-${idx}-${contact.displayName}`}
                         className={cn(
                             "rounded-lg border p-3 space-y-2",
-                            isOutbound
-                                ? "border-white/20 bg-white/10"
-                                : "border-gray-200 bg-gray-50"
+                            theme.sharedContactCardClassName
                         )}
                     >
                         <div className="flex items-center gap-2">
                             <div className={cn(
                                 "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
-                                isOutbound ? "bg-white/20" : "bg-blue-100"
+                                theme.sharedContactAvatarClassName
                             )}>
                                 <User className={cn(
                                     "h-4 w-4",
-                                    isOutbound ? "text-white" : "text-blue-600"
+                                    theme.sharedContactAvatarIconClassName
                                 )} />
                             </div>
                             <div className="min-w-0 flex-1">
                                 <p className={cn(
                                     "font-semibold text-sm truncate",
-                                    isOutbound ? "text-white" : "text-gray-900"
+                                    theme.sharedContactNameClassName
                                 )}>
                                     {contact.displayName}
                                 </p>
                                 {contact.organization && (
                                     <p className={cn(
                                         "text-[11px] truncate flex items-center gap-1",
-                                        isOutbound ? "text-blue-100" : "text-gray-500"
+                                        theme.sharedContactMetaClassName
                                     )}>
                                         <Building2 className="h-3 w-3 shrink-0" />
                                         {contact.organization}
@@ -209,9 +208,7 @@ export function MessageSharedContactCards({
                                     onClick={(e) => e.stopPropagation()}
                                     className={cn(
                                         "flex items-center gap-2 text-xs rounded px-2 py-1 transition-colors",
-                                        isOutbound
-                                            ? "text-blue-100 hover:bg-white/10"
-                                            : "text-gray-600 hover:bg-gray-100"
+                                        theme.sharedContactInfoLinkClassName
                                     )}
                                 >
                                     <PhoneIcon className="h-3 w-3 shrink-0" />
@@ -224,9 +221,7 @@ export function MessageSharedContactCards({
                                     onClick={(e) => e.stopPropagation()}
                                     className={cn(
                                         "flex items-center gap-2 text-xs rounded px-2 py-1 transition-colors",
-                                        isOutbound
-                                            ? "text-blue-100 hover:bg-white/10"
-                                            : "text-gray-600 hover:bg-gray-100"
+                                        theme.sharedContactInfoLinkClassName
                                     )}
                                 >
                                     <MailIcon className="h-3 w-3 shrink-0" />
@@ -237,7 +232,7 @@ export function MessageSharedContactCards({
 
                         <div className="flex items-center gap-2 pt-1">
                             {isHydratingContactStates ? (
-                                <div className={cn("flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium", isOutbound ? "text-white/70" : "text-muted-foreground")}>
+                                <div className={cn("flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium", theme.sharedContactHydratingClassName)}>
                                     <RefreshCw className="h-3 w-3 animate-spin" />
                                     Checking...
                                 </div>
@@ -245,7 +240,7 @@ export function MessageSharedContactCards({
                                 <>
                                     <span className={cn(
                                         "flex items-center gap-1 text-[11px] font-medium",
-                                        isOutbound ? "text-emerald-200" : "text-emerald-600"
+                                        theme.sharedContactSavedClassName
                                     )}>
                                         <Check className="h-3 w-3" />
                                         {state.isNew ? "Saved" : "Already exists"}
@@ -256,9 +251,7 @@ export function MessageSharedContactCards({
                                             onClick={(e) => e.stopPropagation()}
                                             className={cn(
                                                 "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
-                                                isOutbound
-                                                    ? "bg-white/20 text-white hover:bg-white/30"
-                                                    : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                                theme.sharedContactSecondaryActionClassName
                                             )}
                                         >
                                             <ExternalLinkIcon className="h-3 w-3" />
@@ -272,9 +265,7 @@ export function MessageSharedContactCards({
                                                 onClick={(e) => e.stopPropagation()}
                                                 className={cn(
                                                     "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
-                                                    isOutbound
-                                                        ? "bg-white/20 text-white hover:bg-white/30"
-                                                        : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                                    theme.sharedContactSecondaryActionClassName
                                                 )}
                                             >
                                                 <MessageCirclePlus className="h-3 w-3" />
@@ -290,9 +281,7 @@ export function MessageSharedContactCards({
                                                 disabled={contactOpenMessageStates[idx]}
                                                 className={cn(
                                                     "inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
-                                                    isOutbound
-                                                        ? "bg-white/20 text-white hover:bg-white/30 disabled:opacity-60"
-                                                        : "bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                                                    theme.sharedContactSecondaryActionClassName
                                                 )}
                                             >
                                                 <MessageCirclePlus className="h-3 w-3" />
@@ -304,7 +293,7 @@ export function MessageSharedContactCards({
                             ) : state?.error ? (
                                 <span className={cn(
                                     "text-[11px]",
-                                    isOutbound ? "text-red-200" : "text-red-600"
+                                    theme.sharedContactErrorClassName
                                 )}>
                                     {state.error}
                                 </span>
@@ -318,9 +307,7 @@ export function MessageSharedContactCards({
                                     disabled={state?.saving || !locationId}
                                     className={cn(
                                         "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
-                                        isOutbound
-                                            ? "bg-white/20 text-white hover:bg-white/30 disabled:opacity-60"
-                                            : "bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                                        theme.sharedContactPrimaryActionClassName
                                     )}
                                 >
                                     <UserPlus className="h-3 w-3" />
@@ -338,9 +325,7 @@ export function MessageSharedContactCards({
                     onClick={(e) => e.stopPropagation()}
                     className={cn(
                         "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors",
-                        isOutbound
-                            ? "bg-white/15 text-white hover:bg-white/25"
-                            : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                        theme.sharedContactDownloadClassName
                     )}
                 >
                     <Download className="h-3 w-3" />

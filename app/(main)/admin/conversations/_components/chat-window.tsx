@@ -23,9 +23,10 @@ import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
 import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 import {
-    getConversationTimelineClassName,
     getConversationTimelineContentClassName,
     getConversationTimelineScrollClassName,
+    getConversationSurfaceTheme,
+    type ConversationSurfaceChannel,
 } from "./message-bubble-theme";
 import { getConversationChannelInfo } from "./conversation-channel-info";
 import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
@@ -137,6 +138,14 @@ const TRANSCRIPT_SEARCH_KEYWORDS = [
     "villa",
 ];
 
+function getInitialSurfaceChannel(conversation: Conversation): ConversationSurfaceChannel {
+    const channel = getConversationChannelInfo(conversation).channel;
+    if (channel === "WhatsApp" || channel === "Email" || channel === "SMS" || channel === "SMS_RELAY") {
+        return channel;
+    }
+    return "default";
+}
+
 export function ChatWindow({
     conversation,
     messages,
@@ -191,6 +200,7 @@ export function ChatWindow({
         onInitialPaintReady,
     });
     const [selectedModel, setSelectedModel] = useState("");
+    const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(conversation));
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const {
         selectionBatch,
@@ -286,6 +296,7 @@ export function ChatWindow({
     // Reset transient state when conversation changes
     useEffect(() => {
         setIsBulkTranscribingAudio(false);
+        setActiveSurfaceChannel(getInitialSurfaceChannel(conversation));
     }, [conversation.id]);
 
     const handleBulkTranscribeUnprocessedAudio = useCallback(async (window: "30d" | "all") => {
@@ -306,8 +317,10 @@ export function ChatWindow({
     const conversationType = String(conversation.lastMessageType || conversation.type || "").toUpperCase();
     const isWhatsAppConversation = conversationType.includes("WHATSAPP");
     const isEmailConversation = conversation.type === 'Email' || conversation.lastMessageType === 'TYPE_EMAIL' || conversationType.includes("EMAIL");
-    const conversationChannelLabel = getConversationChannelInfo(conversation).name;
+    const conversationChannelInfo = getConversationChannelInfo(conversation);
+    const conversationChannelLabel = conversationChannelInfo.name;
     const conversationLifecycle = getConversationLifecycleUi(conversation.status);
+    const surfaceTheme = getConversationSurfaceTheme(activeSurfaceChannel);
     const hasMobileMoreActions = (
         selectionBatch.length > 0
         || (!!isWhatsAppConversation && !!onSync)
@@ -322,7 +335,7 @@ export function ChatWindow({
             data-chat-mounted-timeline-items={timelineItems.length}
             data-chat-mounted-messages={messages.length}
             data-chat-mounted-activity-items={activityLog.length}
-            className="h-full min-h-0 flex flex-col bg-white min-w-0 overflow-hidden"
+            className={cn("h-full min-h-0 flex flex-col min-w-0 overflow-hidden", surfaceTheme.rootClassName)}
         >
             {/* Header */}
             <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
@@ -587,7 +600,7 @@ export function ChatWindow({
                                         className={cn(
                                             "rounded border px-2 py-0.5 text-[10px] transition-colors",
                                             transcriptSearchQuery.trim().toLowerCase() === keyword.toLowerCase()
-                                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                                ? surfaceTheme.searchActiveChipClassName
                                                 : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
                                         )}
                                         onClick={() => handleTranscriptKeyword(keyword)}
@@ -616,7 +629,7 @@ export function ChatWindow({
                                             key={`${match.transcriptId}:${match.messageId}`}
                                             type="button"
                                             onClick={() => jumpToMessage(match.messageId)}
-                                            className="w-full rounded border border-transparent bg-white px-2 py-1.5 text-left text-[11px] hover:border-blue-200 hover:bg-blue-50"
+                                            className={cn("w-full rounded border border-transparent bg-white px-2 py-1.5 text-left text-[11px]", surfaceTheme.searchResultHoverClassName)}
                                         >
                                             <div className="flex items-center gap-2 text-[10px] text-slate-500">
                                                 <span>{new Date(match.messageDate).toLocaleString()}</span>
@@ -703,7 +716,7 @@ export function ChatWindow({
                 className={cn(
                     "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
                     getConversationTimelineScrollClassName(),
-                    getConversationTimelineClassName({ isWhatsApp: isWhatsAppConversation })
+                    surfaceTheme.timelineClassName
                 )}
             >
                 <div
@@ -715,7 +728,7 @@ export function ChatWindow({
                 >
                     {loading && (
                         <div className="flex justify-center p-8">
-                            <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
+                            <Loader2 className={cn("h-8 w-8 animate-spin", surfaceTheme.loadingIconClassName)} />
                         </div>
                     )}
 
@@ -735,6 +748,7 @@ export function ChatWindow({
                                     <ActivityLogEntry
                                         item={item.activity}
                                         contactName={conversation.contactName}
+                                        surfaceTheme={surfaceTheme}
                                     />
                                 </div>
                             );
@@ -749,7 +763,7 @@ export function ChatWindow({
                                 }}
                                 className={cn(
                                     "rounded-xl transition-colors min-w-0 max-w-full overflow-x-hidden",
-                                    highlightedMessageId === m.id && "ring-2 ring-blue-300 bg-blue-50/60"
+                                    highlightedMessageId === m.id && surfaceTheme.highlightedMessageClassName
                                 )}
                             >
                                 <MessageBubble
@@ -794,6 +808,7 @@ export function ChatWindow({
                     await onRejectSuggestedResponse(id, reason);
                 }}
                 allowSendNow={true}
+                surfaceTheme={surfaceTheme}
             />
 
             <ConversationComposer
@@ -813,6 +828,8 @@ export function ChatWindow({
                 translationTargetLanguageLabel={resolvedReplyLanguage}
                 viewingLanguageLabel={resolvedTranslationTargetLanguage}
                 smsRelayEnabled={smsRelayEnabled}
+                surfaceTheme={surfaceTheme}
+                onSelectedChannelChange={(channel) => setActiveSurfaceChannel(channel)}
             />
         </div>
     );

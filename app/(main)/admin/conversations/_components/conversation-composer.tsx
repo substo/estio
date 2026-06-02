@@ -22,7 +22,11 @@ import { useConversationComposerChannel } from "./use-conversation-composer-chan
 import { useConversationComposerMedia } from "./use-conversation-composer-media";
 import { useConversationComposerAiDraft } from "./use-conversation-composer-ai-draft";
 import { useConversationComposerSend } from "./use-conversation-composer-send";
-import { getConversationComposerContentClassName } from "./message-bubble-theme";
+import {
+    getConversationComposerContentClassName,
+    getConversationSurfaceTheme,
+    type ConversationSurfaceTheme,
+} from "./message-bubble-theme";
 import { PropertyMessageAssist } from "./property-message-assist";
 
 interface ConversationComposerProps {
@@ -69,6 +73,8 @@ interface ConversationComposerProps {
     translationTargetLanguageLabel?: string | null;
     viewingLanguageLabel?: string | null;
     smsRelayEnabled?: boolean;
+    surfaceTheme?: ConversationSurfaceTheme;
+    onSelectedChannelChange?: (channel: ComposerChannel) => void;
 }
 
 function getPlaceholderText(channel: ComposerChannel): string {
@@ -133,6 +139,8 @@ export function ConversationComposer({
     translationTargetLanguageLabel,
     viewingLanguageLabel,
     smsRelayEnabled = false,
+    surfaceTheme,
+    onSelectedChannelChange,
 }: ConversationComposerProps) {
     const isUnavailable = disabled || !conversation;
     const isRecordingRef = useRef(false);
@@ -271,8 +279,14 @@ export function ConversationComposer({
             ? "This Android SMS will be sent as multipart SMS."
             : "Android SMS segment estimate.";
     const composerContentClassName = getConversationComposerContentClassName();
+    const resolvedSurfaceTheme = surfaceTheme || getConversationSurfaceTheme(selectedChannel);
+
+    useEffect(() => {
+        onSelectedChannelChange?.(selectedChannel);
+    }, [onSelectedChannelChange, selectedChannel]);
+
     return (
-        <div className="w-full min-w-0 max-w-full overflow-x-hidden border-t bg-white pb-[env(safe-area-inset-bottom)]">
+        <div className={cn("w-full min-w-0 max-w-full overflow-x-hidden pb-[env(safe-area-inset-bottom)]", resolvedSurfaceTheme.composerContainerClassName)}>
             <SuggestionBubbles
                 suggestions={suggestions}
                 onSelect={(text) => handleAiDraft(text)}
@@ -300,7 +314,7 @@ export function ConversationComposer({
                     onChange={handleMediaSelected}
                 />
 
-                <div className="relative rounded-xl border bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 transition-all min-w-0">
+                <div className={cn("relative rounded-xl shadow-sm transition-all min-w-0", resolvedSurfaceTheme.composerShellClassName)}>
                     <Textarea
                         ref={composerTextareaRef}
                         value={draft}
@@ -349,7 +363,7 @@ export function ConversationComposer({
                                 disabled={isUnavailable}
                             >
                                 <SelectTrigger
-                                    className="h-7 w-[78px] sm:w-auto sm:min-w-[85px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
+                                    className={cn("h-7 w-[78px] sm:w-auto sm:min-w-[85px] text-[11px] border-0 px-2", resolvedSurfaceTheme.composerControlClassName)}
                                     title={channelSelectorTitle}
                                 >
                                     <SelectValue />
@@ -371,7 +385,7 @@ export function ConversationComposer({
                                         value={selectedModel}
                                         onValueChange={handleModelChange}
                                         disabled={isUnavailable}
-                                        triggerClassName="h-7 w-[94px] sm:w-[110px] text-[11px] border-0 bg-slate-50 hover:bg-slate-100 focus:ring-0 px-2"
+                                        triggerClassName={cn("h-7 w-[94px] sm:w-[110px] text-[11px] border-0 px-2", resolvedSurfaceTheme.composerControlClassName)}
                                         itemClassName="text-xs"
                                         models={availableModels}
                                     />
@@ -380,7 +394,7 @@ export function ConversationComposer({
                                             <Button
                                                 type="button"
                                                 variant="ghost"
-                                                className="h-7 w-[118px] sm:w-[144px] justify-between text-[11px] border-0 bg-slate-50 hover:bg-slate-100 px-2"
+                                                className={cn("h-7 w-[118px] sm:w-[144px] justify-between text-[11px] border-0 px-2", resolvedSurfaceTheme.composerControlClassName)}
                                                 disabled={isUnavailable || !onSetReplyLanguageOverride || savingReplyLanguage}
                                             >
                                                 <span className="truncate">{selectedReplyLanguageLabel}</span>
@@ -425,7 +439,7 @@ export function ConversationComposer({
                                             size="sm"
                                             onClick={() => void handlePreviewTranslation()}
                                             disabled={isUnavailable || previewingTranslation || !draft.trim()}
-                                            className="h-7 text-[11px] font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-100 gap-1 px-1.5 sm:px-2"
+                                            className={cn("h-7 text-[11px] font-medium gap-1 px-1.5 sm:px-2", resolvedSurfaceTheme.composerIconButtonClassName)}
                                         >
                                             {previewingTranslation ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                                             {previewingTranslation ? "..." : "Preview"}
@@ -462,7 +476,7 @@ export function ConversationComposer({
                                         type="button"
                                         variant="ghost"
                                         size="sm"
-                                        className="h-7 w-7 p-0 text-slate-500 hover:text-slate-700"
+                                        className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
                                         onClick={handleMediaPickClick}
                                         title="Send media"
                                         disabled={isUnavailable || sending || isRecording}
@@ -477,7 +491,7 @@ export function ConversationComposer({
                                             "h-7 w-7 p-0",
                                             isRecording
                                                 ? "text-red-600 hover:text-red-700"
-                                                : "text-slate-500 hover:text-slate-700"
+                                                : resolvedSurfaceTheme.composerIconButtonClassName
                                         )}
                                         onClick={handleRecordToggle}
                                         title={isRecording ? "Stop recording and send voice note" : "Record voice note"}
@@ -511,7 +525,7 @@ export function ConversationComposer({
                                     </Button>
                                     <Button
                                         size="sm"
-                                        className="h-7 rounded-lg px-3 transition-all duration-150 bg-blue-600 hover:bg-blue-700"
+                                        className={cn("h-7 rounded-lg px-3 transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName)}
                                         onClick={() => handleSend("translated")}
                                         disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     >
@@ -524,7 +538,7 @@ export function ConversationComposer({
                                     size="sm"
                                     className={cn(
                                         "h-7 rounded-lg px-3 transition-all duration-150 gap-1",
-                                        draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                                        draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName
                                     )}
                                     onClick={() => handleSend("original")}
                                     disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
@@ -538,7 +552,7 @@ export function ConversationComposer({
                                     size="sm"
                                     className={cn(
                                         "h-7 rounded-lg px-3 transition-all duration-150",
-                                        draft.trim() ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                                        draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName
                                     )}
                                     onClick={() => handleSend("original")}
                                     disabled={isSendUnavailable || sending || isRecording || !draft.trim()}

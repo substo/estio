@@ -391,10 +391,10 @@ export function MessageBubble({
                         <MessageSharedContactCards
                             sharedContacts={sharedContacts}
                             bodyVCardDownloadHref={bodyVCardDownloadHref}
-                            isOutbound={isOutbound}
                             messageId={message.id}
                             locationId={locationId}
                             router={router}
+                            theme={theme}
                         />
                     ) : (
                         <MessageBubbleBody

@@ -16,6 +16,7 @@ import {
     parseHistoryChanges,
     summarizeRequirementChanges,
 } from '@/lib/contacts/history-formatting';
+import { getConversationSurfaceTheme, type ConversationSurfaceTheme } from './message-bubble-theme';
 
 interface ActivityLogEntryProps {
     item: {
@@ -26,6 +27,7 @@ interface ActivityLogEntryProps {
         user?: { name: string | null; email: string | null } | null;
     };
     contactName?: string;
+    surfaceTheme?: ConversationSurfaceTheme;
 }
 
 function formatViewingWhen(changes: Array<{ field?: string; new?: unknown }>): string | null {
@@ -51,7 +53,7 @@ function formatQuickSessionKind(sessionKind: string | null | undefined) {
     return "Viewing";
 }
 
-export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
+export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLogEntryProps) {
     const [expanded, setExpanded] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewPending, setPreviewPending] = useState(false);
@@ -67,6 +69,7 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
 
     // Determine config based on action
     let Icon = HelpCircle;
+    const resolvedSurfaceTheme = surfaceTheme || getConversationSurfaceTheme(null);
     let iconColor = "text-slate-500 bg-slate-100";
     let actionLabel = item.action;
     let description = "";
@@ -81,7 +84,7 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
     switch (item.action) {
         case 'MANUAL_ENTRY':
             Icon = NotebookPen;
-            iconColor = "text-blue-600 bg-blue-100";
+            iconColor = resolvedSurfaceTheme.activityManualIconClassName;
             actionLabel = "Added Note";
             
             // Extract the note text and actual date if present
@@ -243,9 +246,9 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
         <div className="flex flex-col items-center justify-center my-2.5 sm:my-3 group">
             {/* Horizontal Line Container */}
             <div className="flex items-center w-full justify-center opacity-50 relative">
-                <div className="flex-1 border-t border-slate-300"></div>
+                <div className={cn("flex-1 border-t", resolvedSurfaceTheme.activityDividerClassName)}></div>
                 <div className="px-2 min-w-0 max-w-full">
-                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 px-2.5 py-0.5 bg-white rounded-full border border-slate-200 shadow-sm transition-all hover:bg-slate-50 hover:shadow min-w-0 max-w-full overflow-hidden" onClick={() => hasChanges ? setExpanded(!expanded) : null} style={{ cursor: hasChanges ? 'pointer' : 'default' }}>
+                    <div className={cn("flex flex-wrap sm:flex-nowrap items-center gap-1.5 px-2.5 py-0.5 rounded-full border shadow-sm transition-all hover:shadow min-w-0 max-w-full overflow-hidden", resolvedSurfaceTheme.activityPillClassName, resolvedSurfaceTheme.activityPillHoverClassName)} onClick={() => hasChanges ? setExpanded(!expanded) : null} style={{ cursor: hasChanges ? 'pointer' : 'default' }}>
                         <div className={cn("flex items-center justify-center p-0.5 rounded-full", iconColor)}>
                             <Icon className="w-3 h-3" />
                         </div>
@@ -265,12 +268,12 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                         </span>
                     </div>
                 </div>
-                <div className="flex-1 border-t border-slate-300"></div>
+                <div className={cn("flex-1 border-t", resolvedSurfaceTheme.activityDividerClassName)}></div>
             </div>
 
             {/* Content Payload (If any) */}
             {(description || expanded || hasSessionPreview) && (
-                <div className="mt-1.5 max-w-[80%] mx-auto relative z-10 w-full animate-in fade-in slide-in-from-top-2 duration-200 text-sm bg-white border border-slate-200 shadow-sm rounded-lg px-2.5 py-1.5">
+                <div className={cn("mt-1.5 max-w-[80%] mx-auto relative z-10 w-full animate-in fade-in slide-in-from-top-2 duration-200 text-sm border shadow-sm rounded-lg px-2.5 py-1.5", resolvedSurfaceTheme.activityContentClassName)}>
                     {description && isManualEntry && (
                         <div className="text-slate-700 text-xs whitespace-pre-wrap leading-snug">
                             <LinkifiedText text={description} />
