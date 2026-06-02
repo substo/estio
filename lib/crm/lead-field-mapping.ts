@@ -1,4 +1,5 @@
 import { Contact } from "@prisma/client";
+import { normalizeRequirementPriceOption } from "@/lib/contacts/requirement-price-options";
 
 export interface CrmLeadFieldMapping {
     dbField: string;
@@ -128,12 +129,14 @@ export const CRM_LEAD_FIELD_MAPPING: CrmLeadFieldMapping[] = [
     {
         dbField: 'requirementMinPrice',
         selector: 'select[name="requirements_price_min"]',
-        type: 'select'
+        type: 'select',
+        transform: (val) => normalizeRequirementPriceOption(val) || val
     },
     {
         dbField: 'requirementMaxPrice',
         selector: 'select[name="requirements_price_max"]',
-        type: 'select'
+        type: 'select',
+        transform: (val) => normalizeRequirementPriceOption(val) || val
     },
     {
         dbField: 'requirementCondition',

@@ -175,6 +175,7 @@ import {
 import { normalizeInternationalPhone } from "@/lib/utils/phone";
 import { applyPropertyInterestToContact } from "@/lib/leads/contact-property-interest";
 import { enqueuePasteLeadPropertyImport } from "@/lib/queue/paste-lead-property-import";
+import { mapToRequirementPriceOption } from "@/lib/contacts/requirement-price-options";
 import {
     extractLegacyCrmRefCandidates,
     getOldCrmImportCapabilityForUser,
@@ -9051,9 +9052,6 @@ export async function startNewConversation(phone: string) {
 // ------------------------------------------------------------------
 
 const REQUIREMENT_DISTRICTS = ["Paphos", "Nicosia", "Famagusta", "Limassol", "Larnaca"] as const;
-const REQUIREMENT_PRICE_OPTIONS = [
-    200, 300, 400, 500, 600, 700, 800, 900, 1000, 1500, 2000, 3000, 5000, 50000, 75000, 100000, 125000, 150000, 175000
-] as const;
 
 function mergeUniqueText(existing?: string | null, incoming?: string | null): string | undefined {
     const next = incoming?.trim();
@@ -9137,22 +9135,12 @@ function parseBudgetRange(raw?: string | null): { min?: number; max?: number } {
     return { max: values[0] };
 }
 
-function formatPriceOption(value: number): string {
-    return `€${value.toLocaleString("en-US")}`;
-}
-
 function mapToMinPriceOption(value?: number): string | null {
-    if (!value || value <= 0) return null;
-    const eligible = REQUIREMENT_PRICE_OPTIONS.filter(p => p <= value);
-    const selected = eligible.length > 0 ? eligible[eligible.length - 1] : REQUIREMENT_PRICE_OPTIONS[0];
-    return formatPriceOption(selected);
+    return mapToRequirementPriceOption(value);
 }
 
 function mapToMaxPriceOption(value?: number): string | null {
-    if (!value || value <= 0) return null;
-    const eligible = REQUIREMENT_PRICE_OPTIONS.filter(p => p <= value);
-    const selected = eligible.length > 0 ? eligible[eligible.length - 1] : REQUIREMENT_PRICE_OPTIONS[0];
-    return formatPriceOption(selected);
+    return mapToRequirementPriceOption(value);
 }
 
 function normalizeRequirementDistrict(raw?: string | null): string | null {

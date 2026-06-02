@@ -43,6 +43,10 @@ import {
     CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType, type ContactType,
     LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS
 } from './contact-types';
+import {
+    normalizeRequirementPriceOption,
+    REQUIREMENT_PRICE_SELECT_OPTIONS,
+} from '@/lib/contacts/requirement-price-options';
 import { LeadScoreBadge } from './lead-score-badge';
 import {
     getReplyLanguageLabel,
@@ -149,6 +153,10 @@ export type ContactIdentityPatch = {
     lastName?: string | null;
     preferredLang?: string | null;
 };
+
+function getRequirementPriceValue(raw?: unknown) {
+    return normalizeRequirementPriceOption(raw) || "Any";
+}
 
 // Helper to safely display values
 const RenderField = ({
@@ -1032,21 +1040,21 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Min Price" value={contact?.requirementMinPrice} isEditing={isEditing}>
-                                    <Select name="requirementMinPrice" defaultValue={contact?.requirementMinPrice || "Any"}>
+                                <RenderField label="Min Price" value={getRequirementPriceValue(contact?.requirementMinPrice)} isEditing={isEditing}>
+                                    <Select name="requirementMinPrice" defaultValue={getRequirementPriceValue(contact?.requirementMinPrice)}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
-                                            {["Any", "€200", "€300", "€400", "€500", "€600", "€700", "€800", "€900", "€1,000", "€1,500", "€2,000", "€3,000", "€5,000", "€50,000", "€75,000", "€100,000", "€125,000", "€150,000", "€175,000"].map(p => (
+                                            {REQUIREMENT_PRICE_SELECT_OPTIONS.map(p => (
                                                 <SelectItem key={p} value={p}>{p}</SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Max Price" value={contact?.requirementMaxPrice} isEditing={isEditing}>
-                                    <Select name="requirementMaxPrice" defaultValue={contact?.requirementMaxPrice || "Any"}>
+                                <RenderField label="Max Price" value={getRequirementPriceValue(contact?.requirementMaxPrice)} isEditing={isEditing}>
+                                    <Select name="requirementMaxPrice" defaultValue={getRequirementPriceValue(contact?.requirementMaxPrice)}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
-                                            {["Any", "€200", "€300", "€400", "€500", "€600", "€700", "€800", "€900", "€1,000", "€1,500", "€2,000", "€3,000", "€5,000", "€50,000", "€75,000", "€100,000", "€125,000", "€150,000", "€175,000"].map(p => (
+                                            {REQUIREMENT_PRICE_SELECT_OPTIONS.map(p => (
                                                 <SelectItem key={p} value={p}>{p}</SelectItem>
                                             ))}
                                         </SelectContent>
