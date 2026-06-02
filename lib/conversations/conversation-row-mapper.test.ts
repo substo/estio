@@ -13,6 +13,7 @@ const baseRow = {
         phone: "+35799123456",
         email: "ada@example.com",
         preferredLang: "el",
+        contactType: "Lead",
     },
     replyLanguageOverride: null,
     detectedThreadLanguage: "fr",
@@ -33,6 +34,7 @@ test("mapConversationRowToUi preserves default reply language fallback", () => {
 
     assert.equal(mapped.locationDefaultReplyLanguage, "en");
     assert.equal(mapped.locationId, "loc-ghl");
+    assert.equal(mapped.contactType, "Lead");
 });
 
 test("mapConversationRowToUi keeps likely GHL ids as provider ids and rejects local aliases", () => {

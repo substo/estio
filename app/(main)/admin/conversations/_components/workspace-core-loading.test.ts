@@ -57,3 +57,65 @@ test('initial first-paint workspace core does not await transcript eligibility w
         reason: 'Deferred until workspace enrichment.',
     });
 });
+
+test('active first-paint workspace refresh does not await transcript eligibility', async () => {
+    let eligibilityCalled = false;
+    const neverResolves = new Promise<any>(() => {});
+
+    const result = await Promise.race([
+        loadConversationWorkspaceCore({
+            traceId: 'trace-active',
+            location,
+            conversationId: 'conv-1',
+            metadata,
+            includeMessages: false,
+            includeActivity: false,
+            messageLimit: 50,
+            activityLimit: 20,
+            refreshMode: 'active_refresh',
+            messageMetadataMode: 'firstPaint',
+            dependencies: {
+                resolveTranscriptVisibilityAccess: async () => ({ restrictContent: false }),
+                parseLegacyCrmLeadNotificationEmail: () => null,
+                getTranscriptEligibility: async () => {
+                    eligibilityCalled = true;
+                    return neverResolves;
+                },
+            },
+        }),
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    assert.notEqual(result, 'timed-out');
+    assert.equal(eligibilityCalled, false);
+    assert.equal((result as any).transcriptEligibilityDeferred, true);
+});
+
+test('deferred activity workspace refresh does not await transcript eligibility', async () => {
+    let eligibilityCalled = false;
+    const neverResolves = new Promise<any>(() => {});
+
+    const result = await loadConversationWorkspaceCore({
+        traceId: 'trace-activity',
+        location,
+        conversationId: 'conv-1',
+        metadata,
+        includeMessages: false,
+        includeActivity: true,
+        messageLimit: 50,
+        activityLimit: 20,
+        refreshMode: 'deferred_activity',
+        messageMetadataMode: 'full',
+        dependencies: {
+            resolveTranscriptVisibilityAccess: async () => ({ restrictContent: false }),
+            parseLegacyCrmLeadNotificationEmail: () => null,
+            getTranscriptEligibility: async () => {
+                eligibilityCalled = true;
+                return neverResolves;
+            },
+        },
+    });
+
+    assert.equal(eligibilityCalled, false);
+    assert.equal((result as any).transcriptEligibilityDeferred, true);
+});

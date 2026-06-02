@@ -16,6 +16,15 @@ export type ConversationListStatus = "active" | "archived" | "trash" | "tasks" |
 export type ConversationCursor = { id: string; lastMessageAtMs: number };
 export type ConversationDeltaCursor = { id: string; updatedAtMs: number };
 
+const CONVERSATION_LIST_CONTACT_SELECT = {
+    name: true,
+    email: true,
+    phone: true,
+    ghlContactId: true,
+    preferredLang: true,
+    contactType: true,
+} as const;
+
 export function buildConversationStatusWhere(status: ConversationListStatus, locationId: string) {
     const where: any = { locationId };
     if (status === "active") {
@@ -178,7 +187,7 @@ export async function queryConversationListSnapshot(args: {
         where: paginatedWhere,
         orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
         take: args.pageSize + 1,
-        include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } } },
+        include: { contact: { select: CONVERSATION_LIST_CONTACT_SELECT } },
     });
 
     const hasMore = fetchedRows.length > args.pageSize;
@@ -196,7 +205,7 @@ export async function queryConversationListSnapshot(args: {
     ) {
         const selectedConversation = await db.conversation.findFirst({
             where: buildConversationReferenceWhere(args.locationId, args.selectedConversationId),
-            include: { contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } } },
+            include: { contact: { select: CONVERSATION_LIST_CONTACT_SELECT } },
         });
         if (selectedConversation) {
             rows = [selectedConversation, ...rows];
@@ -248,7 +257,7 @@ export async function hydrateRankedConversationRows(args: {
             id: { in: args.rankedConversationIds },
         },
         include: {
-            contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } },
+            contact: { select: CONVERSATION_LIST_CONTACT_SELECT },
         },
     });
 
@@ -292,7 +301,7 @@ export async function queryConversationListDelta(args: {
         orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take: args.limit,
         include: {
-            contact: { select: { name: true, email: true, phone: true, ghlContactId: true, preferredLang: true } },
+            contact: { select: CONVERSATION_LIST_CONTACT_SELECT },
         },
     });
 

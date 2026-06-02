@@ -66,11 +66,15 @@ export async function loadConversationWorkspaceCore(args: {
         ? (args.includeMessages ? "with_messages" : "activity_only")
         : "skipped";
     const transcriptEligibilityDeferred = (
-        args.refreshMode === "initial_hydration"
+        args.refreshMode === "active_refresh"
+        || args.refreshMode === "deferred_activity"
         || args.refreshMode === "prefetch"
-    )
-        && args.messageMetadataMode === "firstPaint"
-        && !args.includeActivity;
+        || (
+            args.refreshMode === "initial_hydration"
+            && args.messageMetadataMode === "firstPaint"
+            && !args.includeActivity
+        )
+    );
 
     const timed = async <T>(work: Promise<T>, onElapsed: (elapsedMs: number) => void): Promise<T> => {
         const bucketStartedAtMs = Date.now();
