@@ -459,6 +459,29 @@ function buildTranslationSourceHash(sourceText: string): string {
     return createHash("sha256").update(String(sourceText || "").trim(), "utf8").digest("hex");
 }
 
+function serializeMessageTranslationCache(entry: {
+    id: string;
+    targetLanguage: string;
+    detectedSourceLanguage?: string | null;
+    sourceText?: string | null;
+    translatedText?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    updatedAt?: Date | string | null;
+}) {
+    return {
+        id: entry.id,
+        targetLanguage: entry.targetLanguage,
+        sourceLanguage: entry.detectedSourceLanguage || null,
+        sourceText: entry.sourceText || "",
+        translatedText: entry.translatedText || "",
+        status: MESSAGE_TRANSLATION_STATUS.completed,
+        provider: entry.provider || null,
+        model: entry.model || null,
+        updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
+    };
+}
+
 async function runMessageTranslationLLM(args: {
     sourceText: string;
     targetLanguage: string;
@@ -5475,17 +5498,7 @@ export async function translateConversationMessage(
             success: true as const,
             conversationId: message.conversation.id,
             messageId: message.id,
-            translation: {
-                id: existing.id,
-                targetLanguage: existing.targetLanguage,
-                sourceLanguage: existing.detectedSourceLanguage || null,
-                sourceText: existing.sourceText || sourceText,
-                translatedText: existing.translatedText || "",
-                status: MESSAGE_TRANSLATION_STATUS.completed,
-                provider: existing.provider || null,
-                model: existing.model || null,
-                updatedAt: existing.updatedAt ? new Date(existing.updatedAt).toISOString() : null,
-            },
+            translation: serializeMessageTranslationCache(existing),
             cached: true as const,
         };
     }
@@ -5496,8 +5509,15 @@ export async function translateConversationMessage(
             targetLanguage: resolvedTargetLanguage,
         });
 
-        const stored = await (db as any).messageTranslationCache.create({
-            data: {
+        const stored = await (db as any).messageTranslationCache.upsert({
+            where: {
+                messageId_targetLanguage_sourceHash: {
+                    messageId: message.id,
+                    targetLanguage: resolvedTargetLanguage,
+                    sourceHash,
+                },
+            },
+            create: {
                 messageId: message.id,
                 conversationId: message.conversationId,
                 locationId: location.id,
@@ -5510,6 +5530,19 @@ export async function translateConversationMessage(
                 status: MESSAGE_TRANSLATION_STATUS.completed,
                 provider: translation.provider,
                 model: translation.model,
+                error: null,
+            },
+            update: {
+                conversationId: message.conversationId,
+                locationId: location.id,
+                sourceText,
+                translatedText: translation.translatedText,
+                detectedSourceLanguage: translation.detectedSourceLanguage,
+                detectionConfidence: translation.confidence,
+                status: MESSAGE_TRANSLATION_STATUS.completed,
+                provider: translation.provider,
+                model: translation.model,
+                error: null,
             },
         });
 
@@ -5529,28 +5562,44 @@ export async function translateConversationMessage(
             success: true as const,
             conversationId: message.conversation.id,
             messageId: message.id,
-            translation: {
-                id: stored.id,
-                targetLanguage: stored.targetLanguage,
-                sourceLanguage: stored.detectedSourceLanguage || null,
-                sourceText: stored.sourceText || sourceText,
-                translatedText: stored.translatedText || "",
-                status: MESSAGE_TRANSLATION_STATUS.completed,
-                provider: stored.provider || null,
-                model: stored.model || null,
-                updatedAt: stored.updatedAt ? new Date(stored.updatedAt).toISOString() : null,
-            },
+            translation: serializeMessageTranslationCache(stored),
             cached: false as const,
         };
     } catch (error: any) {
         const messageText = String(error?.message || "Translation failed.");
-        await (db as any).messageTranslationCache.create({
-            data: {
+        console.warn("[Conversation Translation] Message translation failed", {
+            locationId: location.id,
+            conversationId: message.conversation.id,
+            messageId: message.id,
+            targetLanguage: resolvedTargetLanguage,
+            error: messageText,
+        });
+        await (db as any).messageTranslationCache.upsert({
+            where: {
+                messageId_targetLanguage_sourceHash: {
+                    messageId: message.id,
+                    targetLanguage: resolvedTargetLanguage,
+                    sourceHash,
+                },
+            },
+            create: {
                 messageId: message.id,
                 conversationId: message.conversationId,
                 locationId: location.id,
                 targetLanguage: resolvedTargetLanguage,
                 sourceHash,
+                sourceText,
+                translatedText: "",
+                detectedSourceLanguage: null,
+                detectionConfidence: null,
+                status: MESSAGE_TRANSLATION_STATUS.failed,
+                provider: "google",
+                model: getModelForTask("simple_generation"),
+                error: messageText,
+            },
+            update: {
+                conversationId: message.conversationId,
+                locationId: location.id,
                 sourceText,
                 translatedText: "",
                 detectedSourceLanguage: null,
@@ -5640,6 +5689,19 @@ export async function translateConversationThread(
             failedCount: failed.length,
         },
     });
+
+    if (rows.length > 0 && translatedCount === 0) {
+        return {
+            success: false as const,
+            error: failed[0]?.error || "Failed to translate visible messages.",
+            conversationId: conversation.id,
+            targetLanguage: resolvedTargetLanguage,
+            translatedCount,
+            cachedCount,
+            failedCount: failed.length,
+            failed,
+        };
+    }
 
     return {
         success: true as const,
