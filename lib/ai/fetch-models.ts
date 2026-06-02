@@ -14,12 +14,13 @@ export interface ModelOption {
     description?: string;
 }
 
-export type AiModelDefaultKind = "general" | "draft" | "extraction" | "design";
+export type AiModelDefaultKind = "general" | "draft" | "extraction" | "design" | "translation";
 
 interface ConfiguredAiModelFields {
     googleAiModel: string | null;
     googleAiModelExtraction: string | null;
     googleAiModelDesign: string | null;
+    googleAiModelTranslation: string | null;
 }
 
 interface ModelsApiResponse {
@@ -172,7 +173,8 @@ async function getConfiguredAiModelFields(locationId?: string): Promise<Configur
             googleAiModel: true,
             googleAiModelExtraction: true,
             googleAiModelDesign: true,
-        }
+            googleAiModelTranslation: true,
+        } as any
     });
 
     if (!siteConfig) {
@@ -188,6 +190,7 @@ async function getConfiguredAiModelFields(locationId?: string): Promise<Configur
         googleAiModel: normalize(siteConfig.googleAiModel),
         googleAiModelExtraction: normalize(siteConfig.googleAiModelExtraction),
         googleAiModelDesign: normalize(siteConfig.googleAiModelDesign),
+        googleAiModelTranslation: normalize((siteConfig as any).googleAiModelTranslation),
     };
 }
 
@@ -204,6 +207,10 @@ function getConfiguredDefaultForKind(fields: ConfiguredAiModelFields | null, kin
 
     if (kind === "design") {
         return fields.googleAiModelDesign || fields.googleAiModel || null;
+    }
+
+    if (kind === "translation") {
+        return fields.googleAiModelTranslation || null;
     }
 
     return fields.googleAiModel || null;
@@ -317,11 +324,12 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
     const allModels = await getAvailableModels(locationId);
     const pickerModels = sortModels(allModels.filter(isDraftPickerModel));
 
-    const [general, draft, extraction, design] = await Promise.all([
+    const [general, draft, extraction, design, translation] = await Promise.all([
         resolveAiModelDefault(locationId, "general", pickerModels),
         resolveAiModelDefault(locationId, "draft", pickerModels),
         resolveAiModelDefault(locationId, "extraction", pickerModels),
         resolveAiModelDefault(locationId, "design", pickerModels),
+        resolveAiModelDefault(locationId, "translation", pickerModels),
     ]);
 
     const models = dedupeModelOptions([
@@ -330,11 +338,12 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
         { value: draft, label: mapCuratedLabel(draft) || draft },
         { value: extraction, label: mapCuratedLabel(extraction) || extraction },
         { value: design, label: mapCuratedLabel(design) || design },
+        { value: translation, label: mapCuratedLabel(translation) || translation },
     ]);
 
     return {
         models: sortModels(models),
-        defaults: { general, draft, extraction, design }
+        defaults: { general, draft, extraction, design, translation }
     };
 }
 

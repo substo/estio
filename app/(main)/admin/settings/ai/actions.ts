@@ -108,6 +108,7 @@ export async function updateAiSettings(
         const expectedVersion = Number.isFinite(expectedVersionCandidate) ? expectedVersionCandidate : null;
 
         const transcriptionModel = normalizeTranscriptionModel(formData.get("googleAiModelTranscription"));
+        const translationModel = String(formData.get("googleAiModelTranslation") || "").trim() || GEMINI_FLASH_LATEST_ALIAS;
         const transcriptOnDemandEnabled = formData.get("whatsappTranscriptOnDemandEnabled") === "on";
         const transcriptRetentionDays = normalizeTranscriptRetentionDays(formData.get("whatsappTranscriptRetentionDays"));
         const transcriptVisibility = normalizeTranscriptVisibility(formData.get("whatsappTranscriptVisibility"));
@@ -132,6 +133,7 @@ export async function updateAiSettings(
             googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelTranscription: transcriptionModel,
+            googleAiModelTranslation: translationModel,
             defaultReplyLanguage,
             precisionRemoveEnabled: formData.get("precisionRemoveEnabled") === "on",
             whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
@@ -205,6 +207,7 @@ export async function updateAiSettings(
                     googleAiModelExtraction: payload.googleAiModelExtraction,
                     googleAiModelDesign: payload.googleAiModelDesign,
                     googleAiModelTranscription: payload.googleAiModelTranscription,
+                    googleAiModelTranslation: payload.googleAiModelTranslation,
                     whatsappTranscriptOnDemandEnabled: payload.whatsappTranscriptOnDemandEnabled,
                     whatsappTranscriptRetentionDays: payload.whatsappTranscriptRetentionDays,
                     whatsappTranscriptVisibility: payload.whatsappTranscriptVisibility,
@@ -226,6 +229,7 @@ export async function updateAiSettings(
                     googleAiModelExtraction: payload.googleAiModelExtraction,
                     googleAiModelDesign: payload.googleAiModelDesign,
                     googleAiModelTranscription: payload.googleAiModelTranscription,
+                    googleAiModelTranslation: payload.googleAiModelTranslation,
                     whatsappTranscriptOnDemandEnabled: payload.whatsappTranscriptOnDemandEnabled,
                     whatsappTranscriptRetentionDays: payload.whatsappTranscriptRetentionDays,
                     whatsappTranscriptVisibility: payload.whatsappTranscriptVisibility,

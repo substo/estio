@@ -462,6 +462,7 @@ model SiteConfig {
   googleAiModelExtraction    String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
   googleAiModelDesign        String? @default("gemini-1.5-pro") // Stage 2: High-End Designer
   googleAiModelTranscription String? @default("gemini-2.5-flash") // Phase 1: Audio transcription default
+  googleAiModelTranslation   String? @default("gemini-flash-latest") // Conversation translation default
   brandVoice                 String? // Custom instructions for AI Brand Voice
   homeSections               Json? // Configuration for Home Page Sections (order, visibility)
   favoritesConfig            Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }

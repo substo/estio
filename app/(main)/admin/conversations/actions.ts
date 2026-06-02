@@ -18,7 +18,7 @@ import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-languag
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
-import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
@@ -528,6 +528,25 @@ async function runMessageTranslationLLM(args: {
         model: modelId,
         usage,
     };
+}
+
+async function resolveConversationTranslationModel(locationId: string): Promise<string> {
+    const aiDoc = await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_AI,
+    }).catch(() => null);
+    const configuredFromDoc = String(aiDoc?.payload?.googleAiModelTranslation || "").trim();
+    if (configuredFromDoc) return configuredFromDoc;
+
+    const siteConfig = await db.siteConfig.findUnique({
+        where: { locationId },
+        select: { googleAiModelTranslation: true } as any,
+    }).catch(() => null);
+    const configuredFromLegacy = String((siteConfig as any)?.googleAiModelTranslation || "").trim();
+    if (configuredFromLegacy) return configuredFromLegacy;
+
+    return GEMINI_FLASH_LATEST_ALIAS;
 }
 
 function normalizeSingleLine(text: string, fallback: string): string {
@@ -5368,9 +5387,11 @@ export async function previewTranslatedReply(
     const sourceHash = buildTranslationSourceHash(normalizedSourceText);
 
     try {
+        const translationModel = await resolveConversationTranslationModel(location.id);
         const translation = await runMessageTranslationLLM({
             sourceText: normalizedSourceText,
             targetLanguage: resolvedTargetLanguage,
+            modelOverride: translationModel,
         });
 
         return {
@@ -5424,9 +5445,11 @@ export async function translateSelectedText(
     );
 
     try {
+        const translationModel = await resolveConversationTranslationModel(location.id);
         const translation = await runMessageTranslationLLM({
             sourceText,
             targetLanguage: resolvedTargetLanguage,
+            modelOverride: translationModel,
         });
 
         return {
@@ -5484,6 +5507,7 @@ export async function translateConversationMessage(
         targetLanguage || message.conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
     );
     const sourceHash = buildTranslationSourceHash(sourceText);
+    const translationModel = await resolveConversationTranslationModel(location.id);
 
     const existing = await (db as any).messageTranslationCache.findFirst({
         where: {
@@ -5491,6 +5515,7 @@ export async function translateConversationMessage(
             targetLanguage: resolvedTargetLanguage,
             sourceHash,
             status: MESSAGE_TRANSLATION_STATUS.completed,
+            model: translationModel,
         },
         orderBy: [{ updatedAt: "desc" }],
     });
@@ -5508,6 +5533,7 @@ export async function translateConversationMessage(
         const translation = await runMessageTranslationLLM({
             sourceText,
             targetLanguage: resolvedTargetLanguage,
+            modelOverride: translationModel,
         });
 
         const stored = await (db as any).messageTranslationCache.upsert({
@@ -5595,7 +5621,7 @@ export async function translateConversationMessage(
                 detectionConfidence: null,
                 status: MESSAGE_TRANSLATION_STATUS.failed,
                 provider: "google",
-                model: MESSAGE_TRANSLATION_MODEL,
+                model: translationModel,
                 error: messageText,
             },
             update: {
@@ -5607,7 +5633,7 @@ export async function translateConversationMessage(
                 detectionConfidence: null,
                 status: MESSAGE_TRANSLATION_STATUS.failed,
                 provider: "google",
-                model: MESSAGE_TRANSLATION_MODEL,
+                model: translationModel,
                 error: messageText,
             },
         }).catch(() => null);

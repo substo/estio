@@ -78,6 +78,7 @@ const aiSchema = z.object({
     googleAiModelExtraction: z.string().trim().min(1),
     googleAiModelDesign: z.string().trim().min(1),
     googleAiModelTranscription: z.string().trim().min(1),
+    googleAiModelTranslation: z.string().trim().min(1),
     defaultReplyLanguage: defaultReplyLanguageSchema,
     precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,

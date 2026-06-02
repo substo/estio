@@ -2,7 +2,7 @@ import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
 import { cookies } from "next/headers";
 import { DEFAULT_REPLY_LANGUAGE } from "@/lib/ai/reply-language-options";
-import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
 import {
@@ -222,6 +222,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             googleAiModelExtraction: aiDoc.payload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction,
             googleAiModelDesign: aiDoc.payload?.googleAiModelDesign || siteConfig?.googleAiModelDesign,
             googleAiModelTranscription: aiDoc.payload?.googleAiModelTranscription || siteConfig?.googleAiModelTranscription,
+            googleAiModelTranslation: aiDoc.payload?.googleAiModelTranslation || (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LATEST_ALIAS,
             defaultReplyLanguage: aiDoc.payload?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiDoc.payload?.precisionRemoveEnabled === true,
             brandVoice: aiDoc.payload?.brandVoice || siteConfig?.brandVoice,
@@ -245,6 +246,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         }
         : {
             ...siteConfig,
+            googleAiModelTranslation: (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LATEST_ALIAS,
             defaultReplyLanguage: DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiDoc?.payload?.precisionRemoveEnabled === true,
             requirementsIntelligence: aiDoc?.payload?.requirementsIntelligence || {
