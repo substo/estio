@@ -88,6 +88,29 @@ function lidJidFromContact(contact: any, fallback?: string) {
     return candidates.find((candidate) => /@lid$/i.test(candidate)) || "";
 }
 
+async function resolveLidAndPhoneFromClient(messageOrChat: any, fallbackJid: string) {
+    const client = messageOrChat?.client;
+    if (!client || typeof client.getContactLidAndPhone !== "function" || !fallbackJid) {
+        return { phoneJid: "", lidJid: "" };
+    }
+
+    try {
+        const mappings = await withTimeout(
+            client.getContactLidAndPhone([fallbackJid]),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp LID/phone lookup ${fallbackJid}`
+        );
+        const mapping = Array.isArray(mappings) ? mappings[0] : null;
+        return {
+            phoneJid: jidFromId(mapping?.pn),
+            lidJid: jidFromId(mapping?.lid),
+        };
+    } catch (error: any) {
+        console.warn(`[WhatsApp Web Bridge] LID/phone lookup failed for ${fallbackJid}:`, error?.message || error);
+        return { phoneJid: "", lidJid: "" };
+    }
+}
+
 async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
     let contact: any = null;
     try {
@@ -98,8 +121,16 @@ async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
         console.warn(`[WhatsApp Web Bridge] Contact metadata lookup failed for ${fallbackJid}:`, error?.message || error);
     }
 
-    const phoneJid = phoneJidFromContact(contact) || (/@(c\.us|s\.whatsapp\.net)$/i.test(fallbackJid) ? fallbackJid : "");
-    const lidJid = lidJidFromContact(contact, fallbackJid);
+    const contactPhoneJid = phoneJidFromContact(contact);
+    const contactLidJid = lidJidFromContact(contact, fallbackJid);
+    const needsResolver = !contactPhoneJid || !contactLidJid;
+    const resolved = needsResolver
+        ? await resolveLidAndPhoneFromClient(messageOrChat, fallbackJid)
+        : { phoneJid: "", lidJid: "" };
+    const phoneJid = contactPhoneJid
+        || resolved.phoneJid
+        || (/@(c\.us|s\.whatsapp\.net)$/i.test(fallbackJid) ? fallbackJid : "");
+    const lidJid = contactLidJid || resolved.lidJid;
     const displayName = String(
         contact?.verifiedName
         || contact?.name

@@ -190,6 +190,34 @@ test("normalizeWhatsAppWebBridgeMessage does not trust stale identity-map phone 
     assert.equal(result.normalized?.lid, "160099217719497@lid");
 });
 
+test("normalizeWhatsAppWebBridgeMessage trusts non-own identity-map phone for inbound LID-only messages", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35794006663@c.us",
+        resolvedIdentity: {
+            phone: "35799123456",
+            lid: "160099217719497@lid",
+            displayName: "New WhatsApp Contact",
+            source: "identity_map",
+        },
+        message: {
+            fromMe: false,
+            from: "160099217719497@lid",
+            to: "35794006663@c.us",
+            id: "false_160099217719497@lid_A4",
+            body: "Inbound after outbound",
+            type: "chat",
+            timestamp: 1779972548,
+        },
+    });
+
+    assert.equal(result.normalized?.from, "35799123456");
+    assert.equal(result.normalized?.to, "35794006663");
+    assert.equal(result.normalized?.resolvedPhone, "35799123456");
+    assert.equal(result.normalized?.lid, "160099217719497@lid");
+    assert.equal(result.normalized?.contactName, "New WhatsApp Contact");
+});
+
 test("normalizeWhatsAppWebBridgeMessage rejects connected account phone as inbound contact identity", () => {
     const result = normalizeWhatsAppWebBridgeMessage({
         locationId: "loc_1",

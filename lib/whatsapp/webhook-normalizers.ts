@@ -1,5 +1,5 @@
 import type { NormalizedMessage } from "@/lib/whatsapp/sync";
-import { normalizeDigits } from "@/lib/whatsapp/identity";
+import { isHighConfidenceResolvedPhone, normalizeDigits } from "@/lib/whatsapp/identity";
 import { parseWhatsAppWebChatIdentity } from "@/lib/whatsapp/web-bridge";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 
@@ -100,8 +100,9 @@ export function normalizeWhatsAppWebBridgeMessage(args: {
         : null;
     const contactLid = args.resolvedIdentity.lid || contactIdentity.lid || "";
     const ownPhone = ownIdentity.phone || args.locationId;
-    const resolvedIdentityPhone = args.resolvedIdentity.source === "web_bridge_contact_metadata"
-        ? args.resolvedIdentity.phone
+    const resolvedIdentityDigits = normalizeDigits(args.resolvedIdentity.phone);
+    const resolvedIdentityPhone = isHighConfidenceResolvedPhone(resolvedIdentityDigits)
+        ? resolvedIdentityDigits
         : "";
     const candidateContactPhone = contactIdentity.phone || resolvedIdentityPhone || "";
     const candidateIsOwnPhone = !!candidateContactPhone
