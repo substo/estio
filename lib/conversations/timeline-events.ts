@@ -391,22 +391,34 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
     const contactIds = Array.from(new Set(conversations.map((item) => item.contactId)));
     const conversationByContact = buildConversationByContact(conversations);
 
-    const messageWhere: any = { conversationId: { in: conversationIds } };
+    const messageWhere: any = {
+        conversationId: { in: conversationIds },
+        OR: [
+            { source: null },
+            { source: { not: "ai_property_evidence" } },
+        ],
+    };
     const historyWhere: any = { contactId: { in: contactIds } };
     const viewingWhere: any = { contactId: { in: contactIds } };
     const taskWhere: any = { contactId: { in: contactIds }, deletedAt: null };
 
     if (cursor) {
         const cursorDate = new Date(cursor.createdAtMs);
-        messageWhere.OR = [
-            { createdAt: { lt: cursorDate } },
+        messageWhere.AND = [
+            { OR: messageWhere.OR },
             {
-                AND: [
-                    { createdAt: { equals: cursorDate } },
-                    { id: { lt: cursor.id } },
+                OR: [
+                    { createdAt: { lt: cursorDate } },
+                    {
+                        AND: [
+                            { createdAt: { equals: cursorDate } },
+                            { id: { lt: cursor.id } },
+                        ],
+                    },
                 ],
             },
         ];
+        delete messageWhere.OR;
         historyWhere.OR = [
             { createdAt: { lt: cursorDate } },
             {

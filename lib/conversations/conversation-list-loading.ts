@@ -154,6 +154,7 @@ async function fetchLatestMessageMetadataByConversationId(
             "createdAt"
         FROM "Message"
         WHERE "conversationId" IN (${Prisma.join(uniqueIds)})
+          AND (source IS NULL OR source <> 'ai_property_evidence')
         ORDER BY "conversationId", "createdAt" DESC, id DESC
     `);
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   extractListingFactsFromCrawl,
-  formatTimelineNoteBody,
+  formatPropertyEvidenceItem,
   getEvidenceDedupeKey,
 } from "./service";
 import {
@@ -124,39 +124,32 @@ test("property evidence resolver extracts listing facts and DT refs from crawled
   assert.equal(facts?.location, "Tala");
 });
 
-test("property evidence timeline note includes stable dedupe key and visible status", () => {
-  const note = formatTimelineNoteBody({
-    key: "DT3327",
-    item: {
-      type: "legacy_crm_ref",
-      status: "linked_existing",
-      interestSource: "client_inquired_property",
-      publicReference: "DT3327",
-      propertyId: "prop_123",
-      title: "Apartment in Kato Paphos",
-      location: "Kato Paphos",
-    },
+test("property evidence audit text includes stable evidence details without timeline debug labels", () => {
+  const text = formatPropertyEvidenceItem({
+    type: "legacy_crm_ref",
+    status: "linked_existing",
+    interestSource: "client_inquired_property",
+    publicReference: "DT3327",
+    propertyId: "prop_123",
+    title: "Apartment in Kato Paphos",
+    location: "Kato Paphos",
   });
 
-  assert.match(note, /\[AI Property Evidence\]/);
-  assert.match(note, /Evidence key: DT3327/);
-  assert.match(note, /Reference: DT3327/);
-  assert.match(note, /Status: linked existing/);
-  assert.match(note, /Interest source: client inquired property/);
-  assert.match(note, /Linked property: prop_123/);
+  assert.doesNotMatch(text, /\[AI Property Evidence\]/);
+  assert.match(text, /ref DT3327/);
+  assert.match(text, /linked existing/);
+  assert.match(text, /interest: client inquired property/);
+  assert.match(text, /propertyId: prop_123/);
 });
 
-test("property evidence timeline note distinguishes agent-sent options", () => {
-  const note = formatTimelineNoteBody({
-    key: "DT5001",
-    item: {
-      type: "legacy_crm_ref",
-      status: "linked_existing",
-      interestSource: "agent_sent_option",
-      publicReference: "DT5001",
-      propertyId: "prop_option",
-    },
+test("property evidence audit text distinguishes agent-sent options", () => {
+  const text = formatPropertyEvidenceItem({
+    type: "legacy_crm_ref",
+    status: "linked_existing",
+    interestSource: "agent_sent_option",
+    publicReference: "DT5001",
+    propertyId: "prop_option",
   });
 
-  assert.match(note, /Interest source: agent sent option/);
+  assert.match(text, /interest: agent sent option/);
 });

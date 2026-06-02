@@ -339,7 +339,13 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
             take: 1,
         }),
         db.message.findFirst({
-            where: { conversationId: conversation.id },
+            where: {
+                conversationId: conversation.id,
+                OR: [
+                    { source: null },
+                    { source: { not: "ai_property_evidence" } },
+                ],
+            },
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
@@ -545,7 +551,13 @@ export async function queryConversationWorkspaceMetadata(args: {
             orderBy: { createdAt: "desc" },
         }),
         db.message.findFirst({
-            where: { conversationId: conversation.id },
+            where: {
+                conversationId: conversation.id,
+                OR: [
+                    { source: null },
+                    { source: { not: "ai_property_evidence" } },
+                ],
+            },
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),

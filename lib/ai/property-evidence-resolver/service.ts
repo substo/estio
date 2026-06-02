@@ -70,7 +70,6 @@ type NormalizedPropertyEvidenceInput = {
 };
 
 const MAX_CRAWL_URLS = 3;
-const TIMELINE_NOTE_SOURCE = "ai_property_evidence";
 const INTEREST_SOURCE_LABELS: Record<PropertyEvidenceInterestSource, string> = {
   client_inquired_property: "client inquired property",
   agent_sent_option: "agent sent option",
@@ -260,7 +259,7 @@ async function resolveFallbackOldCrmActorUserId(locationId: string): Promise<str
   return row?.userId || null;
 }
 
-function formatPropertyEvidenceItem(item: PropertyEvidenceItem): string {
+export function formatPropertyEvidenceItem(item: PropertyEvidenceItem): string {
   if (item.type === "legacy_crm_ref") {
     const bits = [
       `ref ${item.publicReference || item.oldCrmPropertyId || "unknown"}`,
@@ -293,82 +292,6 @@ export function getEvidenceDedupeKey(item: PropertyEvidenceItem): string | null 
   if (reference) return reference;
   const url = normalizeText(item.url);
   return url || null;
-}
-
-function formatStatusLabel(status: PropertyEvidenceStatus): string {
-  return status.replace(/_/g, " ");
-}
-
-export function formatTimelineNoteBody(args: {
-  key: string;
-  item: PropertyEvidenceItem;
-}): string {
-  const item = args.item;
-  const lines = [
-    "[AI Property Evidence]",
-    `Evidence key: ${args.key}`,
-    item.publicReference || item.extracted?.reference ? `Reference: ${item.publicReference || item.extracted?.reference}` : null,
-    item.url ? `URL: ${item.url}` : null,
-    `Status: ${formatStatusLabel(item.status)}`,
-    `Interest source: ${formatInterestSource(item.interestSource)}`,
-    item.title || item.extracted?.title ? `Title: ${item.title || item.extracted?.title}` : null,
-    item.location || item.extracted?.location ? `Location: ${item.location || item.extracted?.location}` : null,
-    item.price || item.extracted?.price ? `Price: ${item.price || item.extracted?.price}` : null,
-    item.bedrooms || item.extracted?.bedrooms ? `Bedrooms: ${item.bedrooms || item.extracted?.bedrooms}` : null,
-    item.propertyId ? `Linked property: ${item.propertyId}` : null,
-    item.reason ? `Note: ${item.reason}` : null,
-  ].filter(Boolean);
-  return lines.join("\n");
-}
-
-async function writePropertyEvidenceTimelineNotes(args: {
-  locationId: string;
-  contactId: string;
-  conversationId?: string | null;
-  items: PropertyEvidenceItem[];
-}) {
-  if (!args.conversationId || args.items.length === 0) return;
-
-  const conversation = await db.conversation.findFirst({
-    where: {
-      id: args.conversationId,
-      locationId: args.locationId,
-      contactId: args.contactId,
-    },
-    select: { id: true },
-  });
-  if (!conversation) return;
-
-  const byKey = new Map<string, PropertyEvidenceItem>();
-  for (const item of args.items) {
-    const key = getEvidenceDedupeKey(item);
-    if (!key || byKey.has(key)) continue;
-    byKey.set(key, item);
-  }
-
-  for (const [key, item] of byKey.entries()) {
-    const existing = await db.message.findFirst({
-      where: {
-        conversationId: conversation.id,
-        source: TIMELINE_NOTE_SOURCE,
-        body: { contains: `Evidence key: ${key}` },
-      },
-      select: { id: true },
-    });
-    if (existing) continue;
-
-    await db.message.create({
-      data: {
-        conversationId: conversation.id,
-        body: formatTimelineNoteBody({ key, item }),
-        direction: "system",
-        type: "TYPE_NOTE",
-        status: "read",
-        source: TIMELINE_NOTE_SOURCE,
-        createdAt: new Date(),
-      },
-    });
-  }
 }
 
 export async function resolvePropertyEvidenceForContactActivity(args: {
@@ -624,13 +547,6 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
       reason: "URL was not crawled because it is outside the allowed property domains.",
     });
   }
-
-  await writePropertyEvidenceTimelineNotes({
-    locationId: args.locationId,
-    contactId: args.contactId,
-    conversationId: args.conversationId || null,
-    items,
-  });
 
   const formatted = items.map(formatPropertyEvidenceItem).filter(Boolean);
   return {

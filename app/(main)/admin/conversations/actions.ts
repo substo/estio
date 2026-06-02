@@ -5984,60 +5984,28 @@ async function buildCoordinatorClientIntelligenceContext(args: {
 }) {
     if (!args.contactId) return "Client intelligence: No contact context available.";
 
-    const [contact, proposals, propertyEvidenceNotes] = await Promise.all([
-        db.contact.findFirst({
-            where: { id: args.contactId, locationId: args.locationId },
-            select: {
-                id: true,
-                name: true,
-                firstName: true,
-                leadStage: true,
-                leadGoal: true,
-                leadPriority: true,
-                requirementStatus: true,
-                requirementDistrict: true,
-                requirementBedrooms: true,
-                requirementMinPrice: true,
-                requirementMaxPrice: true,
-                requirementCondition: true,
-                requirementPropertyTypes: true,
-                requirementPropertyLocations: true,
-                requirementOtherDetails: true,
-                requirementSummary: true,
-                propertiesInterested: true,
-            },
-        }),
-        db.contactRequirementProposal.findMany({
-            where: {
-                locationId: args.locationId,
-                contactId: args.contactId,
-                status: { in: ["pending", "approved", "rejected"] },
-            },
-            orderBy: { createdAt: "desc" },
-            take: 5,
-            select: {
-                id: true,
-                status: true,
-                proposedPatch: true,
-                proposedSummary: true,
-                confidence: true,
-                reasoning: true,
-                createdAt: true,
-            },
-        }),
-        db.message.findMany({
-            where: {
-                conversationId: args.conversationId,
-                source: "ai_property_evidence",
-            },
-            orderBy: { createdAt: "desc" },
-            take: 6,
-            select: {
-                body: true,
-                createdAt: true,
-            },
-        }),
-    ]);
+    const contact = await db.contact.findFirst({
+        where: { id: args.contactId, locationId: args.locationId },
+        select: {
+            id: true,
+            name: true,
+            firstName: true,
+            leadStage: true,
+            leadGoal: true,
+            leadPriority: true,
+            requirementStatus: true,
+            requirementDistrict: true,
+            requirementBedrooms: true,
+            requirementMinPrice: true,
+            requirementMaxPrice: true,
+            requirementCondition: true,
+            requirementPropertyTypes: true,
+            requirementPropertyLocations: true,
+            requirementOtherDetails: true,
+            requirementSummary: true,
+            propertiesInterested: true,
+        },
+    });
 
     if (!contact) return "Client intelligence: Contact not found.";
 
@@ -6093,23 +6061,6 @@ async function buildCoordinatorClientIntelligenceContext(args: {
         }
     }
 
-    const proposalText = proposals.length > 0
-        ? proposals.map((proposal) => {
-            const patch = proposal.proposedPatch && typeof proposal.proposedPatch === "object"
-                ? JSON.stringify(proposal.proposedPatch)
-                : "{}";
-            const confidence = proposal.confidence != null ? ` confidence ${Math.round(Number(proposal.confidence) * 100)}%` : "";
-            return `- ${proposal.status}${confidence}: ${proposal.proposedSummary || proposal.reasoning || patch}`;
-        }).join("\n")
-        : "None.";
-
-    const propertyEvidenceText = propertyEvidenceNotes.length > 0
-        ? propertyEvidenceNotes.map((note) => {
-            const body = String(note.body || "").split("\n").slice(0, 8).join("; ");
-            return `- ${body}`;
-        }).join("\n")
-        : "None.";
-
     return [
         "Client intelligence for Coordinator:",
         "",
@@ -6119,16 +6070,10 @@ async function buildCoordinatorClientIntelligenceContext(args: {
         "Interested properties recorded on contact:",
         interestedPropertiesText,
         "",
-        "Recent requirement proposals:",
-        proposalText,
-        "",
-        "Recent property evidence timeline notes:",
-        propertyEvidenceText,
-        "",
         "Coordinator rules for this context:",
         "- Treat approved/current contact requirements as the current source of truth.",
-        "- Treat pending proposals and property evidence as unapproved context, not final truth.",
-        "- If requirements are stale, contradictory, or pending, suggest reviewing/approving them before using them as hard filters.",
+        "- Do not infer new hard requirements from historical proposal evidence.",
+        "- If the approved requirements look stale or incomplete, suggest asking the client or reviewing requirements before using them as hard filters.",
         "- Suggest the next human-approved action or draft only. Do not imply automation or sending without approval.",
     ].join("\n");
 }

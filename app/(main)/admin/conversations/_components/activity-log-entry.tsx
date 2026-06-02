@@ -4,11 +4,18 @@ import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages } from 'lucide-react';
+import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
 import { LinkifiedText } from './linkified-text';
+import {
+    formatHistoryFieldName,
+    formatHistoryValue,
+    isRequirementHistoryAction,
+    parseHistoryChanges,
+    summarizeRequirementChanges,
+} from '@/lib/contacts/history-formatting';
 
 interface ActivityLogEntryProps {
     item: {
@@ -19,18 +26,6 @@ interface ActivityLogEntryProps {
         user?: { name: string | null; email: string | null } | null;
     };
     contactName?: string;
-}
-
-function formatChangeValue(val: any): string {
-    if (val === null || val === undefined) return 'Empty';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return String(val);
-}
-
-function formatFieldName(field: string): string {
-    const result = field.replace(/([A-Z])/g, " $1");
-    const final = result.charAt(0).toUpperCase() + result.slice(1);
-    return final;
 }
 
 function formatViewingWhen(changes: Array<{ field?: string; new?: unknown }>): string | null {
@@ -63,28 +58,12 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
     const [previewError, setPreviewError] = useState<string | null>(null);
     const [preview, setPreview] = useState<any | null>(null);
     
-    // Parse changes safely
-    let changes: any[] = [];
-    if (typeof item.changes === 'string') {
-        try {
-            changes = JSON.parse(item.changes);
-            if (!Array.isArray(changes)) {
-                changes = Object.entries(changes).map(([k, v]) => ({ field: k, old: null, new: v }));
-            }
-        } catch (e) {
-            // ignore parse errors
-        }
-    } else if (item.changes && typeof item.changes === 'object') {
-        if (Array.isArray(item.changes)) {
-            changes = item.changes;
-        } else {
-            changes = Object.entries(item.changes).map(([k, v]) => ({ field: k, old: null, new: v }));
-        }
-    }
+    const changes = parseHistoryChanges(item.changes, item.action);
     const changeMap = useMemo(
         () => Object.fromEntries(changes.map((change) => [String(change.field || ''), change.new])),
         [changes]
     );
+    const isRequirementsUpdate = isRequirementHistoryAction(item.action);
 
     // Determine config based on action
     let Icon = HelpCircle;
@@ -191,6 +170,13 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
             iconColor = "text-indigo-700 bg-indigo-100";
             actionLabel = "Quick Session Attached";
             description = `${formatQuickSessionKind(String(changeMap.sessionKind || ""))} linked back into CRM context`;
+            break;
+
+        case 'AI_REQUIREMENTS_UPDATED':
+            Icon = ListChecks;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "Requirements Updated";
+            description = summarizeRequirementChanges(changes);
             break;
 
         case 'TASK_OPEN':
@@ -306,27 +292,44 @@ export function ActivityLogEntry({ item, contactName }: ActivityLogEntryProps) {
                     )}
 
                     {expanded && hasChanges && (
-                        <div className="text-xs space-y-1 mt-1 border-l-2 border-slate-200 pl-2">
-                            {changes.map((change, idx) => (
-                                <div key={idx} className="flex flex-col gap-0.5">
-                                    {item.action === 'UPDATED' ? (
-                                        <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
-                                            <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatFieldName(change.field)}:</span>
-                                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                                <span className="text-slate-400 line-through break-words [overflow-wrap:anywhere]">{formatChangeValue(change.old)}</span>
-                                                <span className="text-slate-400">→</span>
-                                                <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatChangeValue(change.new)}</span>
+                        isRequirementsUpdate ? (
+                            <div className="mt-2 grid gap-1.5">
+                                {changes.map((change, idx) => (
+                                    <div key={idx} className="rounded-md border border-emerald-100 bg-emerald-50/60 px-2.5 py-1.5">
+                                        <div className="text-[10px] font-semibold uppercase text-emerald-700">
+                                            {formatHistoryFieldName(change.field)}
+                                        </div>
+                                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                                            <span className="max-w-full break-words text-slate-400 line-through [overflow-wrap:anywhere]">{formatHistoryValue(change.old)}</span>
+                                            <span className="text-emerald-600">→</span>
+                                            <span className="max-w-full break-words font-medium text-slate-800 [overflow-wrap:anywhere]">{formatHistoryValue(change.new)}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-xs space-y-1 mt-1 border-l-2 border-slate-200 pl-2">
+                                {changes.map((change, idx) => (
+                                    <div key={idx} className="flex flex-col gap-0.5">
+                                        {item.action === 'UPDATED' ? (
+                                            <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
+                                                <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatHistoryFieldName(change.field)}:</span>
+                                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                                    <span className="text-slate-400 line-through break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.old)}</span>
+                                                    <span className="text-slate-400">→</span>
+                                                    <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.new)}</span>
+                                                </div>
                                             </div>
-                                        </div>
-                                    ) : (
-                                        <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
-                                            <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatFieldName(change.field)}:</span>
-                                            <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatChangeValue(change.new)}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
+                                        ) : (
+                                            <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
+                                                <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatHistoryFieldName(change.field)}:</span>
+                                                <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.new)}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )
                     )}
                 </div>
             )}

@@ -158,18 +158,30 @@ export async function fetchMessagesForResolvedConversation(args: {
         markTiming("ensure_history_ms", historyStartedAtMs);
     }
 
-    const messageWhere: any = { conversationId: conversation.id };
+    const messageWhere: any = {
+        conversationId: conversation.id,
+        OR: [
+            { source: null },
+            { source: { not: "ai_property_evidence" } },
+        ],
+    };
     if (paginationCursor) {
         const cursorDate = new Date(paginationCursor.createdAtMs);
-        messageWhere.OR = [
-            { createdAt: { lt: cursorDate } },
+        messageWhere.AND = [
+            { OR: messageWhere.OR },
             {
-                AND: [
-                    { createdAt: { equals: cursorDate } },
-                    { id: { lt: paginationCursor.id } },
+                OR: [
+                    { createdAt: { lt: cursorDate } },
+                    {
+                        AND: [
+                            { createdAt: { equals: cursorDate } },
+                            { id: { lt: paginationCursor.id } },
+                        ],
+                    },
                 ],
             },
         ];
+        delete messageWhere.OR;
     }
 
     const readDescending = !!boundedTake || !!paginationCursor;

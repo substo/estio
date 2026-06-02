@@ -14,6 +14,13 @@ import { improveInternalNoteText } from '@/app/(main)/admin/conversations/action
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 import { toast } from 'sonner';
 import { LeadScoreBadge } from './lead-score-badge';
+import {
+    formatHistoryFieldName,
+    formatHistoryValue,
+    isRequirementHistoryAction,
+    parseHistoryChanges,
+    summarizeRequirementChanges,
+} from '@/lib/contacts/history-formatting';
 
 type Change = {
     field: string;
@@ -33,19 +40,6 @@ interface HistoryTabProps {
     history: HistoryItem[];
     loading?: boolean;
     contact?: { id?: string; createdAt?: Date | string | null; updatedAt?: Date | string | null };
-}
-
-function formatChangeValue(val: any): string {
-    if (val === null || val === undefined) return 'Empty';
-    if (typeof val === 'object') return JSON.stringify(val);
-    return String(val);
-}
-
-function formatFieldName(field: string): string {
-    // Convert camelCase to Title Case
-    const result = field.replace(/([A-Z])/g, " $1");
-    const final = result.charAt(0).toUpperCase() + result.slice(1);
-    return final;
 }
 
 export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
@@ -190,34 +184,15 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
             <div className="flex-1 pr-4 overflow-y-auto custom-scrollbar">
                 <div className="space-y-4">
                     {history.map((item) => {
-                        let changes: Change[] = [];
-                        // Parse changes if string, or use as is if already object (Prisma Json)
-                        if (typeof item.changes === 'string') {
-                            try {
-                                changes = JSON.parse(item.changes);
-                                // Adjust for VIEWING_ADDED which might store object directly not array
-                                if (!Array.isArray(changes)) {
-                                    changes = Object.entries(changes).map(([k, v]) => ({ field: k, old: null, new: v }));
-                                }
-                            } catch (e) {
-                                // fallback
-                                console.error("Failed to parse history changes", e);
-                            }
-                        } else if (item.changes && typeof item.changes === 'object') {
-                            if (Array.isArray(item.changes)) {
-                                changes = item.changes;
-                            } else {
-                                // Handle single object case (e.g. Viewing) which might be stored as { propertyId: ... }
-                                changes = Object.entries(item.changes).map(([k, v]) => ({ field: k, old: null, new: v }));
-                            }
-                        }
+                        const changes = parseHistoryChanges(item.changes, item.action) as Change[];
+                        const isRequirementsUpdate = isRequirementHistoryAction(item.action);
 
                         return (
                             <div key={item.id} className="flex flex-col gap-2 p-3 border rounded-lg bg-card text-card-foreground shadow-sm">
                                 <div className="flex justify-between items-start">
                                     <div className="flex gap-2 items-center">
                                         <Badge variant="outline" className="font-mono text-xs">
-                                            {item.action}
+                                            {isRequirementsUpdate ? "REQUIREMENTS_UPDATED" : item.action}
                                         </Badge>
                                         <span className="text-xs text-muted-foreground">
                                             by {item.user?.name || item.user?.email || 'System'}
@@ -229,62 +204,78 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
                                 </div>
 
                                 {changes && changes.length > 0 && (
-                                    <div className="text-sm mt-1 space-y-1 pl-1 border-l-2 border-muted">
-                                        {changes.map((change, idx) => (
-                                            <div key={idx} className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center text-xs">
-                                                <span className="font-medium text-muted-foreground text-right">{formatFieldName(change.field)}:</span>
-                                                <span className="text-muted-foreground">→</span>
-                                                <span className={change.field === 'status' || change.field === 'leadStage' ? 'font-semibold' : ''}>
-                                                    {item.action === 'CREATED'
-                                                        ? formatChangeValue(change.new)
-                                                        : item.action === 'VIEWING_ADDED' || item.action === 'VIEWING_UPDATED'
-                                                            ? (
-                                                                <div className="flex flex-col gap-1 ml-2">
-                                                                    {/* For viewings, we expect specific fields like Property and Date */}
-                                                                    {change.field === 'property' && <span className="text-foreground font-medium">{formatChangeValue(change.new)}</span>}
-                                                                    {change.field === 'date' && <span className="text-xs">{new Date(change.new).toLocaleString()}</span>}
-                                                                    {change.field === 'notes' && change.new && <span className="italic text-xs">"{formatChangeValue(change.new)}"</span>}
-                                                                    {/* Fallback for other fields */}
-                                                                    {!['property', 'date', 'notes'].includes(change.field) && formatChangeValue(change.new)}
-                                                                </div>
-                                                            )
-                                                            : item.action === 'STAGE_CHANGED'
-                                                                ? (
-                                                                    <div className="flex items-center gap-2">
-                                                                        <Badge variant="outline">{change.old || 'None'}</Badge>
-                                                                        <span>→</span>
-                                                                        <Badge variant="default">{change.new}</Badge>
-                                                                    </div>
-                                                                )
-                                                            : item.action === 'SCORE_UPDATED'
-                                                                ? (
-                                                                    <div className="flex items-center gap-2">
-                                                                        {change.field === 'leadScore' ? (
-                                                                            <>
-                                                                                <LeadScoreBadge score={change.old || 0} />
-                                                                                <span>→</span>
-                                                                                <LeadScoreBadge score={change.new || 0} />
-                                                                            </>
-                                                                        ) : change.field === 'reason' ? (
-                                                                            <span className="text-xs italic text-muted-foreground">{change.new}</span>
-                                                                        ) : (
-                                                                            <>{formatChangeValue(change.old)} <span className="text-muted-foreground mx-1">to</span> {formatChangeValue(change.new)}</>
-                                                                        )}
-                                                                    </div>
-                                                                )
-                                                            : item.action === 'MANUAL_ENTRY'
-                                                                ? (
-                                                                    <div className="flex flex-col gap-1 w-full pl-2">
-                                                                        {change.field === 'date' && <span className="text-xs text-muted-foreground font-mono mb-1">{format(new Date(change.new), 'PPP')}</span>}
-                                                                        {change.field === 'entry' && <span className="text-foreground text-sm whitespace-pre-wrap">{formatChangeValue(change.new)}</span>}
-                                                                    </div>
-                                                                )
-                                                                : <>{formatChangeValue(change.old)} <span className="text-muted-foreground mx-1">to</span> {formatChangeValue(change.new)}</>
-                                                    }
-                                                </span>
+                                    isRequirementsUpdate ? (
+                                        <div className="mt-1 space-y-2 rounded-md border border-emerald-100 bg-emerald-50/60 p-2">
+                                            <div className="text-xs font-medium text-emerald-800">{summarizeRequirementChanges(changes)}</div>
+                                            <div className="grid gap-1.5">
+                                                {changes.map((change, idx) => (
+                                                    <div key={idx} className="rounded border border-emerald-100 bg-white px-2 py-1 text-xs">
+                                                        <div className="font-medium text-emerald-700">{formatHistoryFieldName(change.field)}</div>
+                                                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                                            <span className="text-muted-foreground line-through break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.old)}</span>
+                                                            <span className="text-emerald-600">→</span>
+                                                            <span className="font-medium break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.new)}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ))}
-                                    </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-sm mt-1 space-y-1 pl-1 border-l-2 border-muted">
+                                            {changes.map((change, idx) => (
+                                                <div key={idx} className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center text-xs">
+                                                    <span className="font-medium text-muted-foreground text-right">{formatHistoryFieldName(change.field)}:</span>
+                                                    <span className="text-muted-foreground">→</span>
+                                                    <span className={change.field === 'status' || change.field === 'leadStage' ? 'font-semibold' : ''}>
+                                                        {item.action === 'CREATED'
+                                                            ? formatHistoryValue(change.new)
+                                                            : item.action === 'VIEWING_ADDED' || item.action === 'VIEWING_UPDATED'
+                                                                ? (
+                                                                    <div className="flex flex-col gap-1 ml-2">
+                                                                        {change.field === 'property' && <span className="text-foreground font-medium">{formatHistoryValue(change.new)}</span>}
+                                                                        {change.field === 'date' && <span className="text-xs">{new Date(String(change.new)).toLocaleString()}</span>}
+                                                                        {change.field === 'notes' && change.new && <span className="italic text-xs">"{formatHistoryValue(change.new)}"</span>}
+                                                                        {!['property', 'date', 'notes'].includes(change.field) && formatHistoryValue(change.new)}
+                                                                    </div>
+                                                                )
+                                                                : item.action === 'STAGE_CHANGED'
+                                                                    ? (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Badge variant="outline">{String(change.old || 'None')}</Badge>
+                                                                            <span>→</span>
+                                                                            <Badge variant="default">{String(change.new)}</Badge>
+                                                                        </div>
+                                                                    )
+                                                                : item.action === 'SCORE_UPDATED'
+                                                                    ? (
+                                                                        <div className="flex items-center gap-2">
+                                                                            {change.field === 'leadScore' ? (
+                                                                                <>
+                                                                                    <LeadScoreBadge score={Number(change.old || 0)} />
+                                                                                    <span>→</span>
+                                                                                    <LeadScoreBadge score={Number(change.new || 0)} />
+                                                                                </>
+                                                                            ) : change.field === 'reason' ? (
+                                                                                <span className="text-xs italic text-muted-foreground">{formatHistoryValue(change.new)}</span>
+                                                                            ) : (
+                                                                                <>{formatHistoryValue(change.old)} <span className="text-muted-foreground mx-1">to</span> {formatHistoryValue(change.new)}</>
+                                                                            )}
+                                                                        </div>
+                                                                    )
+                                                                : item.action === 'MANUAL_ENTRY'
+                                                                    ? (
+                                                                        <div className="flex flex-col gap-1 w-full pl-2">
+                                                                            {change.field === 'date' && <span className="text-xs text-muted-foreground font-mono mb-1">{format(new Date(String(change.new)), 'PPP')}</span>}
+                                                                            {change.field === 'entry' && <span className="text-foreground text-sm whitespace-pre-wrap">{formatHistoryValue(change.new)}</span>}
+                                                                        </div>
+                                                                    )
+                                                                    : <>{formatHistoryValue(change.old)} <span className="text-muted-foreground mx-1">to</span> {formatHistoryValue(change.new)}</>
+                                                        }
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )
                                 )}
                             </div>
                         );
