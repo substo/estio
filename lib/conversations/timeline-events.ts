@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { buildTimelineCursorFromEvent } from "./timeline-cursor";
 import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
+import { buildVisibleMessageSourceWhere } from "./internal-message-visibility";
 
 type TimelineMode = "chat" | "deal";
 
@@ -393,10 +394,7 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
 
     const messageWhere: any = {
         conversationId: { in: conversationIds },
-        OR: [
-            { source: null },
-            { source: { not: "ai_property_evidence" } },
-        ],
+        ...buildVisibleMessageSourceWhere(),
     };
     const historyWhere: any = { contactId: { in: contactIds } };
     const viewingWhere: any = { contactId: { in: contactIds } };

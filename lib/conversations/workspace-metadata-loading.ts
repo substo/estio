@@ -7,6 +7,7 @@ import {
 } from "@/lib/conversations/identity";
 import { mapConversationRowToUi } from "@/lib/conversations/conversation-row-mapper";
 import { LATEST_MESSAGE_METADATA_SELECT } from "@/lib/conversations/latest-message-metadata";
+import { buildVisibleMessageSourceWhere } from "@/lib/conversations/internal-message-visibility";
 import { unstable_cache } from "next/cache";
 
 export type ConversationWorkspaceTaskSummary = {
@@ -341,10 +342,7 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
         db.message.findFirst({
             where: {
                 conversationId: conversation.id,
-                OR: [
-                    { source: null },
-                    { source: { not: "ai_property_evidence" } },
-                ],
+                ...buildVisibleMessageSourceWhere(),
             },
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -553,10 +551,7 @@ export async function queryConversationWorkspaceMetadata(args: {
         db.message.findFirst({
             where: {
                 conversationId: conversation.id,
-                OR: [
-                    { source: null },
-                    { source: { not: "ai_property_evidence" } },
-                ],
+                ...buildVisibleMessageSourceWhere(),
             },
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],

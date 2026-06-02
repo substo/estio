@@ -4,6 +4,7 @@ import { ensureConversationHistory } from "@/lib/ghl/sync";
 import { buildMessageTranslationState, getResolvedConversationTranslationLanguage } from "@/lib/conversations/translation-view";
 import { getWhatsAppMediaObjectBytes, parseR2Uri } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia, parseVCardContacts } from "@/lib/contacts/vcard";
+import { buildVisibleMessageSourceWhere } from "./internal-message-visibility";
 
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
 const MESSAGE_TRANSLATION_STATUS = {
@@ -160,10 +161,7 @@ export async function fetchMessagesForResolvedConversation(args: {
 
     const messageWhere: any = {
         conversationId: conversation.id,
-        OR: [
-            { source: null },
-            { source: { not: "ai_property_evidence" } },
-        ],
+        ...buildVisibleMessageSourceWhere(),
     };
     if (paginationCursor) {
         const cursorDate = new Date(paginationCursor.createdAtMs);

@@ -11,6 +11,7 @@ import {
 } from "@/lib/conversations/latest-message-metadata";
 import { unstable_cache } from "next/cache";
 import { Prisma } from "@prisma/client";
+import { getInternalTimelineMessageSources } from "./internal-message-visibility";
 
 export type ConversationListStatus = "active" | "archived" | "trash" | "tasks" | "all";
 export type ConversationCursor = { id: string; lastMessageAtMs: number };
@@ -144,6 +145,7 @@ async function fetchLatestMessageMetadataByConversationId(
     const uniqueIds = Array.from(new Set(conversationIds.map((id) => String(id || "").trim()).filter(Boolean)));
     if (uniqueIds.length === 0) return new Map();
 
+    const internalMessageSources = getInternalTimelineMessageSources();
     const latestMessages = await db.$queryRaw<ConversationLatestMessageMetadata[]>(Prisma.sql`
         SELECT DISTINCT ON ("conversationId")
             id,
@@ -154,7 +156,7 @@ async function fetchLatestMessageMetadataByConversationId(
             "createdAt"
         FROM "Message"
         WHERE "conversationId" IN (${Prisma.join(uniqueIds)})
-          AND (source IS NULL OR source <> 'ai_property_evidence')
+          AND (source IS NULL OR source NOT IN (${Prisma.join(internalMessageSources)}))
         ORDER BY "conversationId", "createdAt" DESC, id DESC
     `);
 
