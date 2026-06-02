@@ -233,24 +233,25 @@ export async function fetchMessagesForResolvedConversation(args: {
                 },
                 take: 1,
             },
-            ...(includeHeavyMessageMetadata ? {
-                translationCaches: {
-                    orderBy: [{ updatedAt: "desc" }],
-                    take: 12,
-                    select: {
-                        id: true,
-                        targetLanguage: true,
-                        sourceText: true,
-                        translatedText: true,
-                        detectedSourceLanguage: true,
-                        detectionConfidence: true,
-                        status: true,
-                        provider: true,
-                        model: true,
-                        updatedAt: true,
-                    },
+            translationCaches: {
+                where: {
+                    status: MESSAGE_TRANSLATION_STATUS.completed,
                 },
-            } : {}),
+                orderBy: [{ updatedAt: "desc" }],
+                take: 12,
+                select: {
+                    id: true,
+                    targetLanguage: true,
+                    sourceText: true,
+                    translatedText: true,
+                    detectedSourceLanguage: true,
+                    detectionConfidence: true,
+                    status: true,
+                    provider: true,
+                    model: true,
+                    updatedAt: true,
+                },
+            },
             ...(includeLegacyEmailMeta ? {
                 legacyCrmLeadEmailProcessing: {
                     select: {
@@ -317,7 +318,7 @@ export async function fetchMessagesForResolvedConversation(args: {
         const webBridgeMedia = webBridgeSync?.metadata && typeof webBridgeSync.metadata === "object"
             ? (webBridgeSync.metadata as any).webBridgeMedia || null
             : null;
-        const translationEntries = includeHeavyMessageMetadata ? (m.translationCaches || []).map((entry: any) => ({
+        const translationEntries = (m.translationCaches || []).map((entry: any) => ({
             id: entry.id,
             targetLanguage: entry.targetLanguage,
             sourceLanguage: entry.detectedSourceLanguage || null,
@@ -329,9 +330,9 @@ export async function fetchMessagesForResolvedConversation(args: {
             provider: entry.provider || null,
             model: entry.model || null,
             updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
-        })) : [];
-        const detectedLanguage = includeHeavyMessageMetadata ? ((m.translationCaches?.[0]?.detectedSourceLanguage || null) || null) : null;
-        const detectedLanguageConfidence = includeHeavyMessageMetadata && Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
+        }));
+        const detectedLanguage = ((m.translationCaches?.[0]?.detectedSourceLanguage || null) || null);
+        const detectedLanguageConfidence = Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
             ? Number(m.translationCaches?.[0]?.detectionConfidence)
             : null;
 
