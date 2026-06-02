@@ -48,6 +48,7 @@ import {
   resolveContactConversationStartMessageType,
 } from '@/lib/contacts/conversation-start';
 import {
+  findContactsByPhoneDigitsBatchWithFallback,
   findContactsByPhoneDigitsWithFallback,
   phoneDigitsLikelyMatch,
 } from '@/lib/contacts/phone-lookup';
@@ -3205,10 +3206,8 @@ export async function checkSharedContactsSavedState(
       return { success: true, states: {} };
     }
 
-    const existingContacts = await Promise.all(
-      normalizedPhones.map((phone) => findContactsByPhoneDigitsWithFallback(db, location.id, phone, { take: 1 }))
-    );
-    const existingContactIds = Array.from(new Set(existingContacts.flat().map((contact) => contact.id)));
+    const existingContacts = await findContactsByPhoneDigitsBatchWithFallback(db, location.id, normalizedPhones);
+    const existingContactIds = Array.from(new Set(existingContacts.map((contact) => contact.id)));
     const existingContactsWithConversations = existingContactIds.length > 0
       ? await db.contact.findMany({
           where: {

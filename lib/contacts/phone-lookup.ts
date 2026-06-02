@@ -1,4 +1,4 @@
-import type { Contact, Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type Contact, type PrismaClient } from "@prisma/client";
 
 type ContactPhoneLookupClient = PrismaClient | Prisma.TransactionClient;
 
@@ -29,6 +29,14 @@ function uniqueById<T extends { id: string }>(rows: T[]): T[] {
     });
 }
 
+function uniquePhoneDigits(values: Array<string | null | undefined>): string[] {
+    return Array.from(new Set(
+        values
+            .map(normalizePhoneDigits)
+            .filter((digits) => digits.length >= MIN_PHONE_MATCH_DIGITS)
+    ));
+}
+
 export async function findContactsByIndexedPhoneDigits(
     client: ContactPhoneLookupClient,
     locationId: string,
@@ -47,6 +55,23 @@ export async function findContactsByIndexedPhoneDigits(
           AND regexp_replace(COALESCE("phone", ''), '\\D', '', 'g') = ${digits}
         ORDER BY "updatedAt" DESC
         LIMIT ${take}
+    `;
+}
+
+export async function findContactsByIndexedPhoneDigitsBatch(
+    client: ContactPhoneLookupClient,
+    locationId: string,
+    phonesOrDigits: Array<string | null | undefined>
+): Promise<Contact[]> {
+    const digits = uniquePhoneDigits(phonesOrDigits);
+    if (digits.length === 0) return [];
+
+    return client.$queryRaw<Contact[]>`
+        SELECT *
+        FROM "Contact"
+        WHERE "locationId" = ${locationId}
+          AND regexp_replace(COALESCE("phone", ''), '\\D', '', 'g') IN (${Prisma.join(digits)})
+        ORDER BY "updatedAt" DESC
     `;
 }
 
@@ -76,4 +101,38 @@ export async function findContactsByPhoneDigitsWithFallback(
     return uniqueById(fallback)
         .filter((contact) => phoneDigitsLikelyMatch(digits, contact.phone))
         .slice(0, take);
+}
+
+export async function findContactsByPhoneDigitsBatchWithFallback(
+    client: ContactPhoneLookupClient,
+    locationId: string,
+    phonesOrDigits: Array<string | null | undefined>
+): Promise<Contact[]> {
+    const digits = uniquePhoneDigits(phonesOrDigits);
+    if (digits.length === 0) return [];
+
+    const indexedMatches = await findContactsByIndexedPhoneDigitsBatch(client, locationId, digits);
+    const unmatchedDigits = digits.filter((candidate) =>
+        !indexedMatches.some((contact) => phoneDigitsLikelyMatch(candidate, contact.phone))
+    );
+    if (unmatchedDigits.length === 0) return indexedMatches;
+
+    const suffixes = Array.from(new Set(unmatchedDigits.map((value) =>
+        value.length > MIN_PHONE_MATCH_DIGITS ? value.slice(-MIN_PHONE_MATCH_DIGITS) : value
+    )));
+    const fallback = await client.contact.findMany({
+        where: {
+            locationId,
+            OR: suffixes.map((suffix) => ({ phone: { contains: suffix } })),
+        },
+        take: Math.max(12, suffixes.length * 3),
+        orderBy: { updatedAt: "desc" },
+    });
+
+    return uniqueById([
+        ...indexedMatches,
+        ...fallback.filter((contact) =>
+            unmatchedDigits.some((candidate) => phoneDigitsLikelyMatch(candidate, contact.phone))
+        ),
+    ]);
 }
