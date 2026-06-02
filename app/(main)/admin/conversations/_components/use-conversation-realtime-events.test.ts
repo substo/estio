@@ -66,7 +66,7 @@ function createHarness(overrides?: {
     };
 }
 
-test('pure envelope router ignores duplicate and stale events', () => {
+test('pure envelope router ignores duplicate events and applies unique out-of-order events', () => {
     const harness = createHarness();
 
     harness.route({
@@ -91,7 +91,48 @@ test('pure envelope router ignores duplicate and stale events', () => {
         payload: { messageId: 'msg-2' },
     });
 
-    assert.deepEqual(harness.calls, ['patch:conv-1:msg-1', 'refresh:conv-1']);
+    assert.deepEqual(harness.calls, [
+        'patch:conv-1:msg-1',
+        'refresh:conv-1',
+        'patch:conv-1:msg-2',
+        'refresh:conv-1',
+    ]);
+});
+
+test('message.inbound appends after newer unique event for same conversation', () => {
+    const harness = createHarness({
+        activeId: 'conv-1',
+        cachedSnapshot: { messages: [] },
+    });
+
+    harness.route({
+        id: 'evt-status-newer',
+        type: 'message.status',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:01.000Z',
+        payload: { messageId: 'msg-status' },
+    });
+    harness.route({
+        id: 'evt-inbound-older',
+        type: 'message.inbound',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:00.000Z',
+        payload: {
+            messageId: 'msg-in-older',
+            wamId: 'wam-in-older',
+            body: 'arrived after status event',
+            createdAt: '2026-05-24T10:00:00.000Z',
+        },
+    });
+
+    assert.equal(harness.messages.length, 1);
+    assert.equal(harness.messages[0].id, 'msg-in-older');
+    assert.deepEqual(harness.calls, [
+        'patch:conv-1:msg-status',
+        'refresh:conv-1',
+        'cache:1',
+        'refresh:conv-1',
+    ]);
 });
 
 test('message.status patch success avoids refresh', () => {

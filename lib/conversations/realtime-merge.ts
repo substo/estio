@@ -39,10 +39,7 @@ export function shouldApplyRealtimeEnvelope(
     const eventTsMs = Number(new Date(envelope.ts || 0).getTime());
     if (conversationId && Number.isFinite(eventTsMs) && eventTsMs > 0) {
         const previousTsMs = state.lastTsByConversationId[conversationId] || 0;
-        if (eventTsMs < previousTsMs) {
-            return false;
-        }
-        state.lastTsByConversationId[conversationId] = eventTsMs;
+        state.lastTsByConversationId[conversationId] = Math.max(previousTsMs, eventTsMs);
     }
 
     return true;
