@@ -32,6 +32,17 @@ function isChangeLike(value: unknown): value is NormalizedHistoryChange {
     return typeof candidate.field === "string" && "new" in candidate;
 }
 
+function normalizeComparableValue(value: unknown): string {
+    if (Array.isArray(value)) {
+        return JSON.stringify(value.map((item) => String(item || "").trim()).filter(Boolean));
+    }
+    return String(value || "").trim();
+}
+
+function hasVisibleChange(change: NormalizedHistoryChange): boolean {
+    return normalizeComparableValue(change.old) !== normalizeComparableValue(change.new);
+}
+
 export function parseHistoryChanges(rawChanges: unknown, action?: string): NormalizedHistoryChange[] {
     const parsed = parseMaybeJson(rawChanges);
     if (!parsed) return [];
@@ -42,7 +53,7 @@ export function parseHistoryChanges(rawChanges: unknown, action?: string): Norma
         && !Array.isArray(parsed)
         && Array.isArray((parsed as any).changes)
     ) {
-        return (parsed as any).changes.filter(isChangeLike);
+        return (parsed as any).changes.filter(isChangeLike).filter(hasVisibleChange);
     }
 
     if (Array.isArray(parsed)) {

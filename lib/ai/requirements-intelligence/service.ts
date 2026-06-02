@@ -213,13 +213,21 @@ async function recordRequirementsIntelligenceUsage(args: {
 }
 
 function hasPatchChanges(snapshot: RequirementPatch, patch: RequirementPatch): boolean {
-  return Object.entries(patch).some(([key, value]) => {
+  return getRequirementPatchChanges(snapshot, patch).length > 0;
+}
+
+export function getRequirementPatchChanges(snapshot: RequirementPatch, patch: RequirementPatch) {
+  return Object.entries(patch).filter(([key, value]) => {
     const previous = (snapshot as any)[key];
     if (Array.isArray(value) || Array.isArray(previous)) {
       return JSON.stringify(toStringArray(previous)) !== JSON.stringify(toStringArray(value));
     }
     return String(previous || "").trim() !== String(value || "").trim();
-  });
+  }).map(([field, value]) => ({
+    field,
+    old: (snapshot as any)[field] ?? null,
+    new: value,
+  }));
 }
 
 export function classifyRequirementSignal(text: string): boolean {
@@ -627,16 +635,16 @@ export async function approveRequirementProposal(args: {
     return { success: true as const, updated: false as const };
   }
 
-  const changes = Object.entries(patch).map(([field, value]) => ({
-    field,
-    old: (snapshot as any)[field] ?? null,
-    new: value,
-  }));
+  const changes = getRequirementPatchChanges(snapshot, patch);
+  const changedPatch = changes.reduce((data, change) => {
+    (data as any)[change.field] = change.new;
+    return data;
+  }, {} as RequirementPatch);
 
   await db.$transaction(async (tx) => {
     await tx.contact.update({
       where: { id: proposal.contactId },
-      data: patch as any,
+      data: changedPatch as any,
     });
     await tx.contactHistory.create({
       data: {

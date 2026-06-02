@@ -22,6 +22,22 @@ test("parseHistoryChanges unwraps AI requirement update payload", () => {
     ]);
 });
 
+test("parseHistoryChanges filters unchanged AI requirement update rows", () => {
+    const changes = parseHistoryChanges({
+        proposalId: "proposal_123",
+        changes: [
+            { field: "requirementDistrict", old: "Paphos", new: "Paphos" },
+            { field: "requirementBedrooms", old: "3", new: "4" },
+            { field: "requirementMinPrice", old: "200000", new: " 200000 " },
+            { field: "requirementPropertyTypes", old: ["Apartment"], new: ["Apartment"] },
+        ],
+    }, "AI_REQUIREMENTS_UPDATED");
+
+    assert.deepEqual(changes, [
+        { field: "requirementBedrooms", old: "3", new: "4" },
+    ]);
+});
+
 test("requirement history helpers format user-facing labels and summaries", () => {
     const changes = parseHistoryChanges(JSON.stringify({
         proposalId: "proposal_123",
