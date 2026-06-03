@@ -60,6 +60,16 @@ export function getWebBridgeDisplayName(identity: any, fallback?: unknown) {
     ).trim();
 }
 
+export function getHighConfidenceWebBridgeResolvedPhone(identity: any, ownPhone?: unknown) {
+    const resolvedDigits = normalizeDigits(identity?.phone);
+    if (!isHighConfidenceResolvedPhone(resolvedDigits)) return "";
+
+    const ownDigits = normalizeDigits(String(ownPhone || ""));
+    if (ownDigits && resolvedDigits === ownDigits) return "";
+
+    return resolvedDigits;
+}
+
 export async function resolveWebBridgeIdentity(args: {
     locationId: string;
     remoteJid: string;

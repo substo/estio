@@ -130,6 +130,7 @@ import {
     initWhatsAppMediaRefetchWorker,
 } from "@/lib/queue/whatsapp-media-refetch";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
+import { getHighConfidenceWebBridgeResolvedPhone } from "@/lib/whatsapp/web-bridge-identity";
 import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
     canOpenDirectChatForParticipant,
@@ -8624,17 +8625,28 @@ async function importWebBridgeRecentMessagesForContact(args: {
                 remoteJid: messageIdentity.contactJid,
                 identity: message?.contactIdentity || null,
             });
-            const resolvedMessagePhone = resolvedIdentity.source === "web_bridge_contact_metadata"
-                ? resolvedIdentity.phone
-                : "";
+            const ownPhone = ownIdentity.phone || args.locationId;
+            const resolvedMessagePhone = getHighConfidenceWebBridgeResolvedPhone(resolvedIdentity, ownPhone);
             let contactPhone = contactIdentity.phone || resolvedMessagePhone;
             const contactLid = resolvedIdentity.lid || contactIdentity.lid || "";
-            const canonicalPhoneDigits = String(args.canonicalPhone || args.phone || "").replace(/\D/g, "");
+            let canonicalPhoneDigits = String(args.canonicalPhone || args.phone || "").replace(/\D/g, "");
+            if (!canonicalPhoneDigits && args.canonicalContactId && contactPhone) {
+                const resolvedContactDigits = String(contactPhone || "").replace(/\D/g, "");
+                if (resolvedContactDigits.length >= 7) {
+                    const backfilled = await db.contact.update({
+                        where: { id: args.canonicalContactId },
+                        data: { phone: `+${resolvedContactDigits}` } as any,
+                    }).then(() => true).catch((error) => {
+                        console.warn(`${args.logPrefix || "[Sync][web_bridge]"} Failed to backfill canonical contact phone:`, error?.message || error);
+                        return false;
+                    });
+                    if (backfilled) canonicalPhoneDigits = resolvedContactDigits;
+                }
+            }
             if (!contactPhone && fromMe && contactLid && canonicalPhoneDigits.length >= 7) {
                 contactPhone = canonicalPhoneDigits;
             }
             const contactAddress = contactPhone || contactLid;
-            const ownPhone = ownIdentity.phone || args.locationId;
             if (!contactIdentity.isSupported || !contactAddress) {
                 skipped++;
                 continue;
@@ -8821,7 +8833,7 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
                 remoteJid: jid,
                 identity: chat.contactIdentity || null,
             });
-            const rawPhone = identity.phone || resolvedIdentity.phone;
+            const rawPhone = identity.phone || getHighConfidenceWebBridgeResolvedPhone(resolvedIdentity);
             const lid = resolvedIdentity.lid || identity.lid || "";
             const alreadySynced = (
                 !!rawPhone

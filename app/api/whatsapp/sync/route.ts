@@ -7,6 +7,7 @@ import { fetchWhatsAppWebBridgeChats, fetchWhatsAppWebBridgeMessages, parseWhats
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { updateWebBridgeMediaSyncMetadata } from "@/lib/whatsapp/web-bridge-media-refetch";
+import { getHighConfidenceWebBridgeResolvedPhone } from "@/lib/whatsapp/web-bridge-identity";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
                         remoteJid: chatId,
                         identity: chat?.contactIdentity || null,
                     });
-                    const phone = chatIdentity.phone || (resolvedIdentity.source === "web_bridge_contact_metadata" ? resolvedIdentity.phone : "");
+                    const phone = chatIdentity.phone || getHighConfidenceWebBridgeResolvedPhone(resolvedIdentity);
                     const lid = resolvedIdentity.lid || chatIdentity.lid || "";
                     const name = resolvedIdentity.displayName || chat?.name || chat?.pushName || (phone ? `+${phone}` : "WhatsApp Contact");
 
@@ -104,13 +105,11 @@ export async function GET(req: NextRequest) {
                                     remoteJid: messageIdentity.contactJid,
                                     identity: message?.contactIdentity || null,
                                 });
-                                const resolvedMessagePhone = resolvedMessageIdentity.source === "web_bridge_contact_metadata"
-                                    ? resolvedMessageIdentity.phone
-                                    : "";
+                                const ownPhone = ownIdentity.phone || location.id;
+                                const resolvedMessagePhone = getHighConfidenceWebBridgeResolvedPhone(resolvedMessageIdentity, ownPhone);
                                 const contactPhone = contactIdentity.phone || resolvedMessagePhone || phone;
                                 const contactLid = resolvedMessageIdentity.lid || contactIdentity.lid || lid;
                                 const contactAddress = contactPhone || contactLid;
-                                const ownPhone = ownIdentity.phone || location.id;
                                 if (!contactAddress || !contactIdentity.isSupported) {
                                     totalSkipped++;
                                     chatSkipped++;

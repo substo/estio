@@ -12,7 +12,7 @@ import {
     shouldRejectWebBridgeOutboundLidForOwnContact,
     shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
 } from "@/lib/whatsapp/sync";
-import { extractReliableWebBridgePhone } from "@/lib/whatsapp/web-bridge-identity";
+import { extractReliableWebBridgePhone, getHighConfidenceWebBridgeResolvedPhone } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 
 test("getWhatsAppCloudInboundBody preserves provider-specific fallbacks", () => {
@@ -381,4 +381,10 @@ test("extractReliableWebBridgePhone prefers phone JID and rejects LID number dig
     };
 
     assert.equal(extractReliableWebBridgePhone(identity, "258699151036638@lid"), "35794475454");
+});
+
+test("getHighConfidenceWebBridgeResolvedPhone accepts mapped contact phones but rejects own phone", () => {
+    assert.equal(getHighConfidenceWebBridgeResolvedPhone({ phone: "+357 99 123456", source: "identity_map" }, "35794006663"), "35799123456");
+    assert.equal(getHighConfidenceWebBridgeResolvedPhone({ phone: "+357 94 006663", source: "identity_map" }, "35794006663"), "");
+    assert.equal(getHighConfidenceWebBridgeResolvedPhone({ phone: "0907476", source: "contact_lid" }, "35794006663"), "");
 });
