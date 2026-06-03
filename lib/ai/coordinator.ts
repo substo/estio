@@ -167,11 +167,13 @@ Core rules:
 - Do not add backup scenarios, persuasive framing, or goodwill filler unless explicitly requested.
 - If a user instruction already reads like a send-ready message, preserve its structure and only refine clarity.
 - If the user instructs a specific phrasing approach, keep that approach and meaning unless a change is required for factual accuracy, policy safety, or basic grammar.
-- If the user instructs to decline sharing the exact location of a plot or land, state that due to internal procedures you cannot share it, but offer to arrange a viewing and show it in person.
+- If the user instructs to decline sharing the exact location, maps URL, coordinates, address, or directions for any property before a viewing is arranged, state that due to internal procedures you cannot share it yet, but offer to arrange/accompany a viewing and show it in person.
 - Do not add hedge phrases such as "based on the information I have" or "at this stage" unless the context truly contains uncertainty, incomplete confirmation, or unresolved authority.
 - Avoid manipulative urgency and hard-finality claims unless explicitly supported by context evidence.
 - Never include automatic signature blocks unless explicitly asked.
 - If you include a URL, put it on its own line and never end the URL with trailing punctuation such as a final period.
+- Never invent URLs. Only include a URL if the exact URL appears in the provided context or user instruction.
+- Never invent Google Maps links, map shortlinks, coordinates, addresses, directions, or neighborhood descriptions. If exact location context is missing, say you can share only the general area and offer to arrange/accompany a viewing.
 - Preserve channel-appropriate style (chat vs email) as instructed in runtime context.`;
 const SIGN_OFF_PHRASES = new Set([
     "best regards",
@@ -301,6 +303,116 @@ function stripManualSignatureBlock(text: string): string {
     }
 
     return trimmed;
+}
+
+function normalizeUrlForGrounding(value: string): string {
+    return String(value || "")
+        .trim()
+        .replace(/[),.;:!?]+$/g, "")
+        .toLowerCase();
+}
+
+function isMapUrl(value: string): boolean {
+    const normalized = normalizeUrlForGrounding(value);
+    return (
+        normalized.includes("maps.app.goo.gl/") ||
+        normalized.includes("google.com/maps") ||
+        normalized.includes("maps.google.") ||
+        normalized.includes("maps.google.com") ||
+        normalized.includes("google.com/?q=")
+    );
+}
+
+function hasMapSharingRestrictionInstruction(value: string): boolean {
+    const normalized = String(value || "").toLowerCase().replace(/\s+/g, " ");
+    if (!normalized) return false;
+
+    const referencesLocation = /\b(map|maps|url|link|location|address|coordinate|coordinates|directions)\b/.test(normalized);
+    const referencesProcedure = /\b(internal procedure|internal procedures|procedure|procedures|policy|policies)\b/.test(normalized);
+    const referencesViewingGate = /\b(before|until|unless|without|prior to)\b.{0,80}\b(viewing|appointment)\b/.test(normalized) ||
+        /\b(viewing|appointment)\b.{0,80}\b(arranged|booked|scheduled|confirmed)\b/.test(normalized);
+    const deniesSharing = /\b(do not|don't|cannot|can't|can not|not allowed|should not|won't|will not|decline|avoid)\b.{0,80}\b(share|send|give|provide|include)\b/.test(normalized) ||
+        /\b(share|send|give|provide|include)\b.{0,80}\b(after|once|when)\b.{0,80}\b(viewing|appointment)\b/.test(normalized);
+
+    return referencesLocation && referencesProcedure && referencesViewingGate && deniesSharing;
+}
+
+function stripMapUrls(text: string): string {
+    return text
+        .split(/\r?\n/)
+        .map((line) => {
+            const urls = Array.from(line.matchAll(/https?:\/\/[^\s<>"']+/gi)).map((match) => match[0]);
+            if (urls.length === 0) return line;
+
+            let nextLine = line;
+            let removedMapUrl = false;
+            for (const url of urls) {
+                if (!isMapUrl(url)) continue;
+                removedMapUrl = true;
+                nextLine = nextLine.replace(url, "").replace(/\s{2,}/g, " ").trimEnd();
+            }
+
+            return removedMapUrl && nextLine.trim().length === 0 ? "" : nextLine;
+        })
+        .filter((line) => line.trim().length > 0)
+        .join("\n")
+        .trim();
+}
+
+export function stripUngroundedMapUrls(text: string, groundingText: string): string {
+    if (!text || !/https?:\/\//i.test(text)) return text;
+
+    const groundedUrls = new Set(
+        Array.from(String(groundingText || "").matchAll(/https?:\/\/[^\s<>"']+/gi))
+            .map((match) => normalizeUrlForGrounding(match[0]))
+            .filter(Boolean)
+    );
+
+    if (groundedUrls.size === 0 && !/(maps\.app\.goo\.gl|google\.com\/maps|maps\.google\.|google\.com\/\?q=)/i.test(text)) {
+        return text;
+    }
+
+    const cleanedLines: string[] = [];
+    for (const line of text.split(/\r?\n/)) {
+        const urls = Array.from(line.matchAll(/https?:\/\/[^\s<>"']+/gi)).map((match) => match[0]);
+        if (urls.length === 0) {
+            cleanedLines.push(line);
+            continue;
+        }
+
+        let nextLine = line;
+        let removedMapUrl = false;
+        for (const url of urls) {
+            const normalized = normalizeUrlForGrounding(url);
+            if (!isMapUrl(normalized) || groundedUrls.has(normalized)) continue;
+            removedMapUrl = true;
+            nextLine = nextLine.replace(url, "").replace(/\s{2,}/g, " ").trimEnd();
+        }
+
+        if (removedMapUrl && nextLine.trim().length === 0) {
+            let previousIndex = cleanedLines.length - 1;
+            while (previousIndex >= 0 && cleanedLines[previousIndex]?.trim().length === 0) {
+                previousIndex -= 1;
+            }
+            const previous = previousIndex >= 0 ? cleanedLines[previousIndex] || "" : "";
+            if (/\b(?:map|maps|location)\s+(?:link|url)\b/i.test(previous) || /\bhere(?:'s| is)\s+(?:the\s+)?(?:map|location)(?:\s+(?:link|url))?\b/i.test(previous)) {
+                cleanedLines.splice(previousIndex);
+            }
+            continue;
+        }
+
+        cleanedLines.push(nextLine);
+    }
+
+    return cleanedLines
+        .filter((line) => line.trim().length > 0)
+        .join("\n")
+        .trim();
+}
+
+export function enforceMapSharingInstruction(text: string, instruction: string): string {
+    if (!hasMapSharingRestrictionInstruction(instruction)) return text;
+    return stripMapUrls(text);
 }
 
 
@@ -791,6 +903,8 @@ export async function generateDraft(context: CoordinationContext) {
                 : "- Output must be plain text only."}
         - Do NOT use Markdown.
         ${!isEmail ? "- Do NOT use HTML tags." : ""}
+        - Never invent URLs, map links, coordinates, addresses, or directions. Only include exact links or exact location details that appear in the context below.
+        - If the contact asks for a location and no exact map/location context is provided, explain that you can share the general area only and offer to arrange/accompany a viewing.
         - Output only the message body text, no metadata.`;
 
         if (contact) {
@@ -1010,9 +1124,17 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         if (withoutRepeatedGreeting !== rawText) {
             console.log("[AI Draft] Removed leading name greeting based on timing rule.");
         }
-        const text = stripManualSignatureBlock(withoutRepeatedGreeting);
-        if (text !== withoutRepeatedGreeting) {
+        const withoutSignature = stripManualSignatureBlock(withoutRepeatedGreeting);
+        if (withoutSignature !== withoutRepeatedGreeting) {
             console.log("[AI Draft] Removed manual signature block from draft output.");
+        }
+        const instructionEnforced = enforceMapSharingInstruction(withoutSignature, normalizedInstruction);
+        if (instructionEnforced !== withoutSignature) {
+            console.warn("[AI Draft] Removed map URL due to user map-sharing instruction.");
+        }
+        const text = stripUngroundedMapUrls(instructionEnforced, finalPrompt);
+        if (text !== instructionEnforced) {
+            console.warn("[AI Draft] Removed ungrounded map URL from draft output.");
         }
         const draftLanguage = detectLanguageFromText(text);
         const policyEvidence = inferCommunicationEvidenceFromText(`${conversationText}\n${timelineRecentText}\n${context.instruction || ""}`);

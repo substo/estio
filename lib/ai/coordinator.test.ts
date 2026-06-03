@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildContactRequirementGuide } from "./coordinator";
+import { buildContactRequirementGuide, enforceMapSharingInstruction, stripUngroundedMapUrls } from "./coordinator";
 
 test("buildContactRequirementGuide includes non-empty requirement guidance", () => {
     const guide = buildContactRequirementGuide({
@@ -42,4 +42,50 @@ test("buildContactRequirementGuide handles contacts without recorded requirement
         buildContactRequirementGuide({}),
         "Client requirement guide: No approved requirements recorded."
     );
+});
+
+test("stripUngroundedMapUrls removes hallucinated map shortlinks", () => {
+    const draft = [
+        "Here is the location link for the Tala apartment:",
+        "",
+        "https://maps.app.goo.gl/uPkaY4Xv7Q9i2pD86",
+        "",
+        "Let me know if you would like to arrange a viewing.",
+    ].join("\n");
+
+    const cleaned = stripUngroundedMapUrls(
+        draft,
+        "Context: https://www.downtowncyprus.com/properties/apartment-for-sale-in-tala-paphos-ref-dt4145"
+    );
+
+    assert.doesNotMatch(cleaned, /maps\.app\.goo\.gl/);
+    assert.doesNotMatch(cleaned, /Here is the location link/);
+    assert.match(cleaned, /arrange a viewing/);
+});
+
+test("stripUngroundedMapUrls keeps map links that were present in context", () => {
+    const mapUrl = "https://maps.app.goo.gl/6mx86RZZZLyK5mUr5?g_st=aw";
+    const draft = `Here is the map link:\n${mapUrl}`;
+
+    assert.equal(
+        stripUngroundedMapUrls(draft, `Internal notes include ${mapUrl}`),
+        draft
+    );
+});
+
+test("enforceMapSharingInstruction removes map links when procedure gates sharing until viewing", () => {
+    const mapUrl = "https://maps.app.goo.gl/6mx86RZZZLyK5mUr5?g_st=aw";
+    const draft = [
+        "Due to internal procedures, we can only share the map URL once the viewing is arranged.",
+        mapUrl,
+        "I can arrange a viewing and show you the exact location in person.",
+    ].join("\n");
+
+    const cleaned = enforceMapSharingInstruction(
+        draft,
+        "Say due to internal procedures we cannot share maps url before the viewing is arranged."
+    );
+
+    assert.doesNotMatch(cleaned, /maps\.app\.goo\.gl/);
+    assert.match(cleaned, /viewing is arranged/);
 });
