@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { generateSmartReplies } from "@/lib/ai/smart-replies";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
+import { detectAndHandleWhatsAppCallConsent } from "@/lib/whatsapp/calling";
 import {
     isHighConfidenceResolvedPhone,
     normalizeDigits,
@@ -1501,6 +1502,21 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
     // --- Smart Reply Generation (Background) ---
     if (direction === "inbound") {
+        if (source === "whatsapp_web_bridge" && !isGroup) {
+            void detectAndHandleWhatsAppCallConsent({
+                locationId,
+                conversationId: conversation.id,
+                contactId: contact.id,
+                messageId: newMessage.id,
+                wamId,
+                body,
+                contactPhone: contact.phone || null,
+                receivedAt: timestamp,
+            }).catch((error) => {
+                console.warn("[WhatsApp Calling] Failed to process WebBridge call consent:", error?.message || error);
+            });
+        }
+
         queueRequirementProposalForNewActivity({
             locationId,
             contactId: contact.id,

@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks } from 'lucide-react';
+import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks, Phone, PhoneCall, PhoneOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
@@ -180,6 +180,124 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
             iconColor = "text-emerald-700 bg-emerald-100";
             actionLabel = "Requirements Updated";
             description = summarizeRequirementChanges(changes);
+            break;
+
+        case 'WHATSAPP_CALL_REQUESTED':
+            Icon = Phone;
+            iconColor = "text-cyan-700 bg-cyan-100";
+            actionLabel = "WhatsApp Call Requested";
+            description = String(changes.find(c => c.field === 'prompt')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_READINESS_CHECKED':
+            Icon = Phone;
+            iconColor = "text-sky-700 bg-sky-100";
+            actionLabel = "Call Bridge Readiness Checked";
+            description = String(
+                changes.find(c => c.field === 'bridgeStatus')?.new
+                || changes.find(c => c.field === 'baileysCallBridgeStatus')?.new
+                || changes.find(c => c.field === 'mediaStatus')?.new
+                || ''
+            );
+            break;
+
+        case 'WHATSAPP_CALL_CONSENTED':
+            Icon = PhoneCall;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "WhatsApp Call Consent";
+            description = String(changes.find(c => c.field === 'reply')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_ATTEMPTED':
+            Icon = PhoneCall;
+            iconColor = "text-blue-700 bg-blue-100";
+            actionLabel = "WhatsApp Call Offer Attempted";
+            description = String(
+                changes.find(c => c.field === 'mediaStatus')?.new
+                || changes.find(c => c.field === 'runtime')?.new
+                || 'baileys_rnd'
+            );
+            break;
+
+        case 'WHATSAPP_CALL_SIGNALING_STARTED':
+            Icon = PhoneCall;
+            iconColor = "text-blue-700 bg-blue-100";
+            actionLabel = "WhatsApp Call Signaling Started";
+            description = String(
+                changes.find(c => c.field === 'event')?.new
+                || changes.find(c => c.field === 'callId')?.new
+                || ''
+            );
+            break;
+
+        case 'WHATSAPP_CALL_RINGING':
+            Icon = PhoneCall;
+            iconColor = "text-sky-700 bg-sky-100";
+            actionLabel = "WhatsApp Call Ringing";
+            description = String(changes.find(c => c.field === 'callId')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_ACCEPTED':
+            Icon = PhoneCall;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "WhatsApp Call Accepted";
+            description = String(changes.find(c => c.field === 'callId')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_REJECTED':
+            Icon = PhoneOff;
+            iconColor = "text-rose-700 bg-rose-100";
+            actionLabel = "WhatsApp Call Rejected";
+            description = String(changes.find(c => c.field === 'callId')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_TIMEOUT':
+            Icon = PhoneOff;
+            iconColor = "text-amber-700 bg-amber-100";
+            actionLabel = "WhatsApp Call Timeout";
+            description = String(changes.find(c => c.field === 'callId')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_MEDIA_UNKNOWN':
+            Icon = Phone;
+            iconColor = "text-amber-700 bg-amber-100";
+            actionLabel = "WhatsApp Call Media Unknown";
+            description = String(changes.find(c => c.field === 'mediaStatus')?.new || 'signaling_only');
+            break;
+
+        case 'WHATSAPP_CALL_MEDIA_CONNECTED':
+            Icon = PhoneCall;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "WhatsApp Call Audio Connected";
+            description = String(changes.find(c => c.field === 'callId')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_PROVIDER_RESULT':
+            Icon = PhoneCall;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "WhatsApp Call Bridge Event";
+            description = String(changes.find(c => c.field === 'status')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_STARTED':
+            Icon = PhoneCall;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "WhatsApp Call Started";
+            description = String(changes.find(c => c.field === 'providerCallId')?.new || changes.find(c => c.field === 'status')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_ENDED':
+            Icon = PhoneOff;
+            iconColor = "text-slate-700 bg-slate-100";
+            actionLabel = "WhatsApp Call Ended";
+            description = String(changes.find(c => c.field === 'status')?.new || '');
+            break;
+
+        case 'WHATSAPP_CALL_FAILED':
+            Icon = PhoneOff;
+            iconColor = "text-rose-700 bg-rose-100";
+            actionLabel = "WhatsApp Call Failed";
+            description = String(changes.find(c => c.field === 'errorMessage')?.new || changes.find(c => c.field === 'status')?.new || '');
             break;
 
         case 'TASK_OPEN':

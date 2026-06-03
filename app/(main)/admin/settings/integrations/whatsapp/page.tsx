@@ -19,6 +19,9 @@ import {
     disconnectWhatsAppWebBridge,
     clearWhatsAppWebBridge,
     setWhatsAppWebBridgeDefault,
+    updateWhatsAppCallingSettings,
+    checkWhatsAppCallingReadinessAction,
+    startWhatsAppCallingBridgeAction,
 } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +85,48 @@ type WhatsAppWebBridgeDiagnostics = {
     workerLastReadyAt: string | null;
     workerLastError: string | null;
     error: string | null;
+};
+
+type WhatsAppCallingConfigState = {
+    callingRuntimeMode: string;
+    baileysCallBridgeStatus: string;
+    baileysSessionId: string;
+    bridgeBaseUrl: string;
+    lastBaileysHeartbeatAt: string | null;
+    mediaStatus: string;
+    mediaNotes: string;
+    lastReadinessStatus: string | null;
+    lastReadinessCheckedAt: string | null;
+    lastError: string;
+    pairingCode: string;
+    qr: string;
+    authPath: string;
+    authPathPersistent: boolean;
+    simulated: boolean;
+    capabilities: {
+        offerCall: boolean;
+    };
+};
+
+const EMPTY_CALLING_CONFIG: WhatsAppCallingConfigState = {
+    callingRuntimeMode: "baileys_rnd",
+    baileysCallBridgeStatus: "offline",
+    baileysSessionId: "",
+    bridgeBaseUrl: "http://127.0.0.1:3037",
+    lastBaileysHeartbeatAt: null,
+    mediaStatus: "signaling_only",
+    mediaNotes: "",
+    lastReadinessStatus: null,
+    lastReadinessCheckedAt: null,
+    lastError: "",
+    pairingCode: "",
+    qr: "",
+    authPath: ".data/whatsapp-call-bridge",
+    authPathPersistent: false,
+    simulated: false,
+    capabilities: {
+        offerCall: false,
+    },
 };
 
 type TemplateBuilderState = {
@@ -193,6 +238,7 @@ export default function WhatsAppSettingsPage() {
         twilioWhatsAppFrom: "",
         whatsappProviderMode: "web_bridge",
         whatsappChannels: [] as WhatsAppChannelRow[],
+        whatsappCallingConfig: EMPTY_CALLING_CONFIG,
         webBridgeSession: null as WhatsAppWebBridgeSessionRow | null,
         webBridgeDiagnostics: null as WhatsAppWebBridgeDiagnostics | null,
     });
@@ -207,6 +253,10 @@ export default function WhatsAppSettingsPage() {
     const [aiBusy, setAiBusy] = useState(false);
     const [clearWhatsAppAccessToken, setClearWhatsAppAccessToken] = useState(false);
     const [clearTwilioAuthToken, setClearTwilioAuthToken] = useState(false);
+    const [callingBusy, setCallingBusy] = useState(false);
+    const [callingReadiness, setCallingReadiness] = useState<any>(null);
+    const [callBridgePairingPhone, setCallBridgePairingPhone] = useState("");
+    const [callBridgePolling, setCallBridgePolling] = useState(false);
 
     // Embedded Signup State
     const [appId, setAppId] = useState(process.env.NEXT_PUBLIC_META_APP_ID || "");
@@ -253,6 +303,10 @@ export default function WhatsAppSettingsPage() {
             twilioWhatsAppFrom: data.twilioWhatsAppFrom || "",
             whatsappProviderMode: data.whatsappProviderMode || "web_bridge",
             whatsappChannels: Array.isArray(data.whatsappChannels) ? data.whatsappChannels : [],
+            whatsappCallingConfig: {
+                ...EMPTY_CALLING_CONFIG,
+                ...(data.whatsappCallingConfig || {}),
+            },
             webBridgeSession: data.webBridgeSession || null,
             webBridgeDiagnostics: data.webBridgeDiagnostics || null,
         });
@@ -339,6 +393,119 @@ export default function WhatsAppSettingsPage() {
     const reloadSettings = async () => {
         const data = await getWhatsAppSettings(settings.locationId || null);
         applyServerSettings(data);
+    };
+
+    const setCallingConfig = (patch: Partial<WhatsAppCallingConfigState>) => {
+        setSettings(prev => ({
+            ...prev,
+            whatsappCallingConfig: {
+                ...prev.whatsappCallingConfig,
+                ...patch,
+            },
+        }));
+    };
+
+    const handleSaveCallingConfig = async () => {
+        setCallingBusy(true);
+        try {
+            const result = await updateWhatsAppCallingSettings({
+                locationId: settings.locationId || null,
+                baileysSessionId: settings.whatsappCallingConfig.baileysSessionId,
+                bridgeBaseUrl: settings.whatsappCallingConfig.bridgeBaseUrl,
+                mediaNotes: settings.whatsappCallingConfig.mediaNotes,
+            });
+            if (result?.success) {
+                setCallingReadiness(result.readiness || null);
+                setCallingConfig(result.config || EMPTY_CALLING_CONFIG);
+                toast({ title: "Calling config saved", description: result.readiness?.errorMessage || "Readiness updated." });
+            }
+        } catch (error: any) {
+            toast({ title: "Calling config failed", description: error?.message || "Unable to save calling config.", variant: "destructive" });
+        } finally {
+            setCallingBusy(false);
+        }
+    };
+
+    const handleCheckCallingReadiness = async () => {
+        setCallingBusy(true);
+        try {
+            const result = await checkWhatsAppCallingReadinessAction(settings.locationId || null);
+            if (result?.success) {
+                setCallingReadiness(result.readiness || null);
+                setCallingConfig(result.config || EMPTY_CALLING_CONFIG);
+                toast({
+                    title: result.readiness?.ready ? "Calling ready" : "Calling not ready",
+                    description: result.readiness?.errorMessage || "Readiness check complete.",
+                    variant: result.readiness?.ready ? "default" : "destructive",
+                });
+            }
+        } catch (error: any) {
+            toast({ title: "Readiness check failed", description: error?.message || "Unable to check readiness.", variant: "destructive" });
+        } finally {
+            setCallingBusy(false);
+        }
+    };
+
+    const pollCallBridgeReadiness = async () => {
+        setCallBridgePolling(true);
+        try {
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+                await new Promise(resolve => window.setTimeout(resolve, attempt === 0 ? 1200 : 2500));
+                const result = await checkWhatsAppCallingReadinessAction(settings.locationId || null);
+                if (result?.success) {
+                    setCallingReadiness(result.readiness || null);
+                    setCallingConfig(result.config || EMPTY_CALLING_CONFIG);
+                    if (
+                        result.readiness?.ready
+                        || result.config?.qr
+                        || result.config?.pairingCode
+                        || result.config?.baileysCallBridgeStatus === "unhealthy"
+                    ) {
+                        break;
+                    }
+                }
+            }
+        } catch (error: any) {
+            toast({ title: "Call bridge polling failed", description: error?.message || "Unable to poll call bridge.", variant: "destructive" });
+        } finally {
+            setCallBridgePolling(false);
+        }
+    };
+
+    const handleStartCallBridge = async () => {
+        setCallingBusy(true);
+        try {
+            const result = await startWhatsAppCallingBridgeAction({
+                locationId: settings.locationId || null,
+                phoneNumber: callBridgePairingPhone || null,
+            });
+            if (result?.success) {
+                setCallingReadiness(result.readiness || null);
+                setCallingConfig(result.config || EMPTY_CALLING_CONFIG);
+                toast({
+                    title: result.readiness?.ready ? "Call bridge ready" : "Call bridge started",
+                    description: result.config?.pairingCode
+                        ? "Enter the pairing code in WhatsApp linked devices."
+                        : result.config?.qr
+                            ? "Scan the QR value from the call bridge worker output or diagnostics."
+                            : result.readiness?.errorMessage || "Wait for readiness to report open.",
+                    variant: result.readiness?.ready ? "default" : "destructive",
+                });
+                void pollCallBridgeReadiness();
+            } else {
+                setCallingReadiness(result?.readiness || null);
+                setCallingConfig(result?.config || settings.whatsappCallingConfig);
+                toast({
+                    title: "Call bridge start failed",
+                    description: result?.result?.error || result?.readiness?.errorMessage || "Unable to start call bridge.",
+                    variant: "destructive",
+                });
+            }
+        } catch (error: any) {
+            toast({ title: "Call bridge start failed", description: error?.message || "Unable to start call bridge.", variant: "destructive" });
+        } finally {
+            setCallingBusy(false);
+        }
     };
 
     const handleConnectWebBridge = async () => {
@@ -866,6 +1033,174 @@ export default function WhatsAppSettingsPage() {
                                 ))}
                             </div>
                         )}
+
+                        <div className="space-y-4 rounded-md border p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <div className="font-medium">Baileys Call Bridge R&amp;D</div>
+                                    <div className="text-sm text-muted-foreground">
+                                        Same-number NOWEB call-signaling spike. Milestone 1 proves outbound ringing; media remains experimental until audio is confirmed.
+                                    </div>
+                                </div>
+                                <Badge variant={callingReadiness?.ready ? "default" : "outline"}>
+                                    {callingReadiness?.ready
+                                        ? "Signaling ready"
+                                        : callBridgePolling
+                                            ? "Pairing check..."
+                                            : settings.whatsappCallingConfig.baileysCallBridgeStatus || "offline"}
+                                </Badge>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-3">
+                                <div className="space-y-1">
+                                    <Label>Runtime Mode</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">baileys_rnd</div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="baileysSessionId">Baileys Session ID</Label>
+                                    <Input
+                                        id="baileysSessionId"
+                                        value={settings.whatsappCallingConfig.baileysSessionId}
+                                        onChange={(event) => setCallingConfig({ baileysSessionId: event.target.value })}
+                                        placeholder={settings.locationId || "location/session id"}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="callBridgeBaseUrl">Bridge URL</Label>
+                                    <Input
+                                        id="callBridgeBaseUrl"
+                                        value={settings.whatsappCallingConfig.bridgeBaseUrl}
+                                        onChange={(event) => setCallingConfig({ bridgeBaseUrl: event.target.value })}
+                                        placeholder="http://127.0.0.1:3037"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="callBridgePairingPhone">Pairing Phone</Label>
+                                    <Input
+                                        id="callBridgePairingPhone"
+                                        value={callBridgePairingPhone}
+                                        onChange={(event) => setCallBridgePairingPhone(event.target.value)}
+                                        placeholder="357..."
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Bridge Status</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.baileysCallBridgeStatus || "offline"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Media Status</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.mediaStatus || "signaling_only"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Last Heartbeat</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.lastBaileysHeartbeatAt
+                                            ? new Date(settings.whatsappCallingConfig.lastBaileysHeartbeatAt).toLocaleString()
+                                            : "Never"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Auth Directory</Label>
+                                    <div className="break-all rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.authPath || ".data/whatsapp-call-bridge"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Call Capability</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.capabilities?.offerCall ? "offerCall available" : "offerCall not detected"}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {(!settings.whatsappCallingConfig.authPathPersistent || settings.whatsappCallingConfig.pairingCode || settings.whatsappCallingConfig.qr || settings.whatsappCallingConfig.simulated || callBridgePolling) && (
+                                <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs md:grid-cols-2">
+                                    {callBridgePolling && (
+                                        <div className="text-sky-700 md:col-span-2">
+                                            Polling bridge health for QR, pairing code, or ready status.
+                                        </div>
+                                    )}
+                                    {!settings.whatsappCallingConfig.authPathPersistent && (
+                                        <div className="text-amber-700 md:col-span-2">
+                                            Configure WHATSAPP_CALL_BRIDGE_AUTH_DIR to a persistent server path before production pairing.
+                                        </div>
+                                    )}
+                                    {settings.whatsappCallingConfig.pairingCode && (
+                                        <div>
+                                            <div className="font-medium text-foreground">Pairing Code</div>
+                                            <div className="mt-1 rounded border bg-background px-2 py-1 font-mono text-sm">
+                                                {settings.whatsappCallingConfig.pairingCode}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {settings.whatsappCallingConfig.qr && (
+                                        <div>
+                                            <div className="font-medium text-foreground">QR Payload</div>
+                                            <div className="mt-1 max-h-24 overflow-auto break-all rounded border bg-background px-2 py-1 font-mono">
+                                                {settings.whatsappCallingConfig.qr}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {settings.whatsappCallingConfig.simulated && (
+                                        <div className="text-amber-700 md:col-span-2">
+                                            Simulation mode is active. UI plumbing can be tested, but customer phones will not ring.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="space-y-1">
+                                <Label htmlFor="baileysMediaNotes">R&amp;D notes</Label>
+                                <Textarea
+                                    id="baileysMediaNotes"
+                                    value={settings.whatsappCallingConfig.mediaNotes}
+                                    onChange={(event) => setCallingConfig({ mediaNotes: event.target.value })}
+                                    rows={3}
+                                    placeholder="Baileys fork, offerCall behavior, ringing result, media probe findings, kill condition..."
+                                />
+                            </div>
+
+                            <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground md:grid-cols-3">
+                                <div>
+                                    <span className="font-medium text-foreground">Milestone 1: </span>
+                                    {settings.whatsappCallingConfig.baileysCallBridgeStatus === "ready" ? "Signaling can be attempted" : "Bridge not ready"}
+                                </div>
+                                <div>
+                                    <span className="font-medium text-foreground">Milestone 2: </span>
+                                    {settings.whatsappCallingConfig.mediaStatus === "audio_connected" ? "Audio connected" : "Audio unproven"}
+                                </div>
+                                <div>
+                                    <span className="font-medium text-foreground">Last readiness: </span>
+                                    {settings.whatsappCallingConfig.lastReadinessCheckedAt
+                                        ? new Date(settings.whatsappCallingConfig.lastReadinessCheckedAt).toLocaleString()
+                                        : "Never"}
+                                </div>
+                                {(callingReadiness?.errorMessage || settings.whatsappCallingConfig.lastError) && (
+                                    <div className="md:col-span-3 text-amber-700">
+                                        {callingReadiness?.errorMessage || settings.whatsappCallingConfig.lastError}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                <Button type="button" onClick={handleSaveCallingConfig} disabled={callingBusy}>
+                                    {callingBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                    Save Bridge Config
+                                </Button>
+                                <Button type="button" variant="outline" onClick={handleStartCallBridge} disabled={callingBusy || callBridgePolling}>
+                                    {callBridgePolling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
+                                    {callBridgePolling ? "Polling Bridge" : "Start Call Bridge"}
+                                </Button>
+                                <Button type="button" variant="outline" onClick={handleCheckCallingReadiness} disabled={callingBusy || callBridgePolling}>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Refresh Bridge Readiness
+                                </Button>
+                            </div>
+                        </div>
 
                         <div className="space-y-4 rounded-md border p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">

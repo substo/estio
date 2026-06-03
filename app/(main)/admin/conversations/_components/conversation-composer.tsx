@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2 } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -166,6 +166,8 @@ export function ConversationComposer({
     const composerHasDraft = draft.trim().length > 0;
     const [aiDraftOpen, setAiDraftOpen] = useState(false);
     const [aiInstruction, setAiInstruction] = useState(EMPTY_AI_INSTRUCTION);
+    const [requestingWhatsAppCall, setRequestingWhatsAppCall] = useState(false);
+    const [whatsAppCallRequestError, setWhatsAppCallRequestError] = useState<string | null>(null);
     const {
         generatingDraft,
         selectedModel,
@@ -267,6 +269,7 @@ export function ConversationComposer({
 
     useEffect(() => {
         setIsRecording(false);
+        setWhatsAppCallRequestError(null);
         clearTranslationPreview();
     }, [clearTranslationPreview, conversation?.id, setIsRecording]);
 
@@ -314,6 +317,31 @@ export function ConversationComposer({
         void handleAiDraft(trimmedInstruction || undefined, baseDraft);
     };
 
+    const handleRequestWhatsAppCall = async () => {
+        if (!conversation || requestingWhatsAppCall) return;
+        setRequestingWhatsAppCall(true);
+        setWhatsAppCallRequestError(null);
+        try {
+            const response = await fetch("/api/admin/conversations/whatsapp-call/request", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    conversationId: conversation.id,
+                    contactId: conversation.contactId,
+                }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload?.success) {
+                throw new Error(payload?.error || "Failed to request WhatsApp call.");
+            }
+        } catch (error) {
+            console.error("Failed to request WhatsApp call:", error);
+            setWhatsAppCallRequestError(error instanceof Error ? error.message : "Failed to request WhatsApp call.");
+        } finally {
+            setRequestingWhatsAppCall(false);
+        }
+    };
+
     useEffect(() => {
         onSelectedChannelChange?.(selectedChannel);
     }, [onSelectedChannelChange, selectedChannel]);
@@ -336,6 +364,12 @@ export function ConversationComposer({
                 {(isUnavailable || sendUnavailableReason) && (
                     <div className="px-1 pb-1 text-[11px] text-amber-700">
                         {sendUnavailableReason || "Composer unavailable until a contact is selected."}
+                    </div>
+                )}
+
+                {whatsAppCallRequestError && (
+                    <div className="px-1 pb-1 text-[11px] text-amber-700">
+                        {whatsAppCallRequestError}
                     </div>
                 )}
 
@@ -550,35 +584,54 @@ export function ConversationComposer({
 
                         <div className="ml-auto flex w-full items-center justify-end gap-1.5 sm:w-auto">
                             <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
-                            {selectedChannel === "WhatsApp" && onSendMedia && (
+                            {selectedChannel === "WhatsApp" && (
                                 <>
                                     <Button
                                         type="button"
                                         variant="ghost"
                                         size="sm"
                                         className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
-                                        onClick={handleMediaPickClick}
-                                        title="Send media"
-                                        disabled={isUnavailable || sending || isRecording}
+                                        onClick={() => void handleRequestWhatsAppCall()}
+                                        title="Request WhatsApp Call"
+                                        disabled={isUnavailable || sending || isRecording || requestingWhatsAppCall}
                                     >
-                                        <Paperclip className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className={cn(
-                                            "h-7 w-7 p-0",
-                                            isRecording
-                                                ? "text-red-600 hover:text-red-700"
-                                                : resolvedSurfaceTheme.composerIconButtonClassName
+                                        {requestingWhatsAppCall ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                            <PhoneOutgoing className="h-3.5 w-3.5" />
                                         )}
-                                        onClick={handleRecordToggle}
-                                        title={isRecording ? "Stop recording and send voice note" : "Record voice note"}
-                                        disabled={isUnavailable || sending}
-                                    >
-                                        {isRecording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
                                     </Button>
+                                    {onSendMedia && (
+                                        <>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
+                                                onClick={handleMediaPickClick}
+                                                title="Send media"
+                                                disabled={isUnavailable || sending || isRecording}
+                                            >
+                                                <Paperclip className="h-3.5 w-3.5" />
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className={cn(
+                                                    "h-7 w-7 p-0",
+                                                    isRecording
+                                                        ? "text-red-600 hover:text-red-700"
+                                                        : resolvedSurfaceTheme.composerIconButtonClassName
+                                                )}
+                                                onClick={handleRecordToggle}
+                                                title={isRecording ? "Stop recording and send voice note" : "Record voice note"}
+                                                disabled={isUnavailable || sending}
+                                            >
+                                                {isRecording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                                            </Button>
+                                        </>
+                                    )}
                                 </>
                             )}
                             {selectedChannel === "SMS" && draft.length > 0 && (

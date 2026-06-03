@@ -62,6 +62,8 @@ model Location {
   whatsappWebBridgeSessions     WhatsAppWebBridgeSession[]
   whatsappTemplates             WhatsAppTemplate[]
   whatsappIdentityMaps          WhatsAppIdentityMap[]
+  whatsappCallAttempts          WhatsAppCallAttempt[]
+  whatsappCallBridgeConfig      WhatsAppCallBridgeConfig?
   conversationSyncRecords       ConversationSync[]
   messageSyncRecords            MessageSync[]
   providerOutboxJobs            ProviderOutbox[]
@@ -620,6 +622,7 @@ model Contact {
   requirementProposals       ContactRequirementProposal[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
   whatsappIdentityMaps       WhatsAppIdentityMap[]
+  whatsappCallAttempts       WhatsAppCallAttempt[]
   syncRecords                ContactSync[]
   outboxJobs                 ContactOutbox[]
   providerOutboxJobs         ProviderOutbox[]
@@ -1576,6 +1579,7 @@ model Conversation {
   aiSuggestedResponses       AiSuggestedResponse[]
   requirementProposals       ContactRequirementProposal[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
+  whatsappCallAttempts       WhatsAppCallAttempt[]
   syncRecords                ConversationSync[]
   messageSyncRecords         MessageSync[]
   providerOutboxJobs         ProviderOutbox[]
@@ -2416,6 +2420,71 @@ model WhatsAppOutboundOutbox {
   @@index([status, scheduledAt])
   @@index([locationId, status, scheduledAt])
   @@index([conversationId, status, scheduledAt])
+}
+
+model WhatsAppCallAttempt {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId     String
+  conversationId String
+  contactId      String
+
+  status String @default("requested") // requested | consented | call_attempted | accepted | rejected | failed | ended
+  provider String @default("baileys_rnd")
+  providerCallId String?
+  bridgeCallId String?
+  whatsappCallId String?
+
+  requestMessageId String?
+  consentMessageId String?
+  requestedAt DateTime?
+  consentedAt DateTime?
+  attemptedAt DateTime?
+  endedAt DateTime?
+
+  contactPhone String?
+  errorCode    String?
+  errorMessage String? @db.Text
+  metadata     Json?
+
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([contactId, status, createdAt(sort: Desc)])
+  @@index([providerCallId])
+  @@index([bridgeCallId])
+  @@index([whatsappCallId])
+}
+
+model WhatsAppCallBridgeConfig {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String @unique
+
+  callingRuntimeMode String @default("baileys_rnd")
+  baileysCallBridgeStatus String @default("offline") // offline | pairing | ready | unhealthy
+  baileysSessionId String?
+  bridgeBaseUrl String?
+  lastBaileysHeartbeatAt DateTime?
+  mediaStatus String @default("signaling_only") // signaling_only | media_probe_started | audio_connected | failed
+  mediaNotes String? @db.Text
+
+  lastReadinessStatus String?
+  lastReadinessCheckedAt DateTime?
+  lastError String? @db.Text
+  metadata  Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([baileysCallBridgeStatus])
+  @@index([mediaStatus])
 }
 
 model WhatsAppChannel {
