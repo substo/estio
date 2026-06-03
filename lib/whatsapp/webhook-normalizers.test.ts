@@ -26,6 +26,7 @@ test("getWhatsAppCloudInboundBody preserves provider-specific fallbacks", () => 
 
 test("normalizeWhatsAppCloudInboundType keeps existing vocabulary", () => {
     assert.equal(normalizeWhatsAppCloudInboundType("text"), "text");
+    assert.equal(normalizeWhatsAppCloudInboundType("chat"), "text");
     assert.equal(normalizeWhatsAppCloudInboundType("contacts"), "contact");
     assert.equal(normalizeWhatsAppCloudInboundType("button"), "other");
 });
@@ -120,12 +121,103 @@ test("normalizeWhatsAppWebBridgeMessage preserves Web Bridge normalized fields",
     assert.equal(result.wamId, "wam_web_1");
     assert.equal(result.normalized?.from, "35799111111");
     assert.equal(result.normalized?.to, "35725000000");
+    assert.equal(result.normalized?.type, "text");
     assert.equal(result.normalized?.body, "Hello");
     assert.equal(result.normalized?.direction, "inbound");
     assert.equal(result.normalized?.source, "whatsapp_web_bridge");
     assert.equal(result.normalized?.contactName, "Mia");
     assert.equal(result.normalized?.remoteJid, "35799111111@c.us");
     assert.equal(result.normalized?.chatId, "35799111111@c.us");
+});
+
+test("normalizeWhatsAppWebBridgeMessage ignores empty inbound chat without media", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35725000000@c.us",
+        resolvedIdentity: { phone: "35799111111", displayName: "Mia" },
+        message: {
+            fromMe: false,
+            from: "35799111111@c.us",
+            to: "35725000000@c.us",
+            id: "wam_empty_1",
+            body: "",
+            type: "chat",
+            timestamp: 1710000000,
+            hasMedia: false,
+            contactIdentity: { source: "worker" },
+        },
+    });
+
+    assert.equal(result.normalized, null);
+    assert.equal(result.ignoreReason, "empty_inbound_text");
+});
+
+test("normalizeWhatsAppWebBridgeMessage renders inbound Web Bridge call events", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35725000000@c.us",
+        resolvedIdentity: { phone: "35799111111", displayName: "Mia" },
+        message: {
+            fromMe: false,
+            from: "35799111111@c.us",
+            to: "35725000000@c.us",
+            id: "wam_call_1",
+            body: "",
+            type: "call_log",
+            callStatus: "missed",
+            timestamp: 1710000000,
+            hasMedia: false,
+            contactIdentity: { source: "worker" },
+        },
+    });
+
+    assert.equal(result.normalized?.type, "other");
+    assert.equal(result.normalized?.body, "Missed voice call");
+});
+
+test("normalizeWhatsAppWebBridgeMessage renders outbound video call events", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35725000000@c.us",
+        resolvedIdentity: { phone: "35799111111", displayName: "Mia" },
+        message: {
+            fromMe: true,
+            from: "35725000000@c.us",
+            to: "35799111111@c.us",
+            id: "wam_call_2",
+            body: "",
+            type: "call",
+            isVideo: true,
+            timestamp: 1710000000,
+            hasMedia: false,
+            contactIdentity: { source: "worker" },
+        },
+    });
+
+    assert.equal(result.normalized?.type, "other");
+    assert.equal(result.normalized?.body, "Outgoing video call");
+});
+
+test("normalizeWhatsAppWebBridgeMessage keeps media-only inbound messages renderable", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35725000000@c.us",
+        resolvedIdentity: { phone: "35799111111", displayName: "Mia" },
+        message: {
+            fromMe: false,
+            from: "35799111111@c.us",
+            to: "35725000000@c.us",
+            id: "wam_media_1",
+            body: "",
+            type: "image",
+            timestamp: 1710000000,
+            hasMedia: true,
+            contactIdentity: { source: "worker" },
+        },
+    });
+
+    assert.equal(result.normalized?.type, "image");
+    assert.equal(result.normalized?.body, "[Image]");
 });
 
 test("normalizeWhatsAppWebBridgeMessage uses resolved inbound LID phone instead of connected account phone", () => {

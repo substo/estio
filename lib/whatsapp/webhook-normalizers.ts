@@ -39,11 +39,70 @@ export function getWhatsAppCloudInboundBody(message: any) {
 }
 
 export function normalizeWhatsAppCloudInboundType(type: string): NormalizedMessage["type"] {
-    if (["text", "image", "document", "audio", "video", "sticker", "reaction", "contact"].includes(type)) {
-        return type as NormalizedMessage["type"];
+    const normalized = String(type || "").toLowerCase();
+    if (normalized === "chat") return "text";
+    if (normalized === "ptt") return "audio";
+    if (["text", "image", "document", "audio", "video", "sticker", "reaction", "contact"].includes(normalized)) {
+        return normalized as NormalizedMessage["type"];
     }
-    if (type === "contacts") return "contact";
+    if (normalized === "contacts") return "contact";
     return "other";
+}
+
+function normalizeCallStatus(value: any) {
+    return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "_");
+}
+
+export function getWhatsAppWebBridgeCallBody(message: any, direction: "inbound" | "outbound") {
+    const type = String(message?.type || message?.messageType || "").trim().toLowerCase();
+    const subtype = String(message?.subtype || message?.callType || "").trim().toLowerCase();
+    const call = message?.call && typeof message.call === "object" ? message.call : null;
+    const isCall = Boolean(
+        message?.isCall
+        || message?.call
+        || type === "call"
+        || type === "call_log"
+        || type === "call_log_message"
+        || type === "call_log_msg"
+        || type.includes("call")
+        || subtype.includes("call")
+    );
+    if (!isCall) return "";
+
+    const status = normalizeCallStatus(message?.callStatus || message?.callStatusString || message?.callResult || message?.status || message?.event || call?.status || call?.event);
+    const isVideo = Boolean(message?.isVideo || message?.video || call?.isVideo || call?.video || type.includes("video") || subtype.includes("video"));
+    const mediaLabel = isVideo ? "video call" : "voice call";
+    const directionLabel = direction === "outbound" ? "Outgoing" : "Incoming";
+    if (["missed", "missed_call", "missed_voice_call", "missed_video_call", "unanswered", "no_answer"].includes(status)) {
+        return `Missed ${mediaLabel}`;
+    }
+    if (["rejected", "declined", "busy"].includes(status)) {
+        return `${directionLabel} ${mediaLabel} ${status}`;
+    }
+    if (["ended", "completed", "accepted", "answered"].includes(status)) {
+        return `${directionLabel} ${mediaLabel}`;
+    }
+    return `${directionLabel} ${mediaLabel}`;
+}
+
+export function getWhatsAppWebBridgeBody(message: any, direction: "inbound" | "outbound" = "inbound") {
+    const body = String(message?.body || message?.caption || "").trim();
+    if (body) return body;
+
+    const callBody = getWhatsAppWebBridgeCallBody(message, direction);
+    if (callBody) return callBody;
+
+    const type = String(message?.type || "text").toLowerCase();
+    if (message?.hasMedia) {
+        if (type === "image") return "[Image]";
+        if (type === "audio" || type === "ptt") return "[Audio]";
+        if (type === "video") return "[Video]";
+        if (type === "document") return String(message?.mediaMeta?.filename || "[Document]");
+        if (type === "sticker") return "[Sticker]";
+        return "[Media]";
+    }
+
+    return "";
 }
 
 export function parseWhatsAppWebhookTimestamp(value: any) {
@@ -130,6 +189,19 @@ export function normalizeWhatsAppWebBridgeMessage(args: {
         };
     }
 
+    const direction = fromMe ? "outbound" : "inbound";
+    const normalizedBody = getWhatsAppWebBridgeBody(message, direction);
+    const normalizedType = normalizeWhatsAppCloudInboundType(String(message.type || "text"));
+    const isTextLike = normalizedType === "text" || normalizedType === "other";
+    if (!fromMe && !normalizedBody && isTextLike && !message.hasMedia) {
+        return {
+            normalized: null,
+            wamId,
+            rawMessage: message,
+            ignoreReason: "empty_inbound_text",
+        };
+    }
+
     return {
         wamId,
         rawMessage: message,
@@ -137,11 +209,11 @@ export function normalizeWhatsAppWebBridgeMessage(args: {
             locationId: args.locationId,
             from: fromMe ? ownPhone : contactAddress,
             to: fromMe ? contactAddress : ownPhone,
-            body: String(message.body || message.caption || ""),
-            type: String(message.type || "text") as any,
+            body: normalizedBody,
+            type: normalizedType,
             wamId,
             timestamp: new Date(Number(message.timestamp || Date.now() / 1000) * 1000),
-            direction: fromMe ? "outbound" : "inbound",
+            direction,
             source: "whatsapp_web_bridge" as any,
             contactName: args.resolvedIdentity.displayName || message.contactName || message.notifyName || undefined,
             lid: contactLid || undefined,

@@ -45,6 +45,20 @@ function resolveWhatsAppSendState(status: string | null | undefined, outboxStatu
     return undefined;
 }
 
+function resolveMessageDisplayBody(message: any) {
+    const body = String(message?.body || "");
+    if (body.trim()) return body;
+
+    const isWhatsApp = String(message?.type || "").toUpperCase().includes("WHATSAPP");
+    const isWebBridge = String(message?.source || "") === "whatsapp_web_bridge";
+    const hasAttachments = Array.isArray(message?.attachments) && message.attachments.length > 0;
+    if (isWhatsApp && isWebBridge && !hasAttachments) {
+        return "WhatsApp call";
+    }
+
+    return "";
+}
+
 async function parseStoredVCardAttachmentContacts(attachment: {
     url?: string | null;
     contentType?: string | null;
@@ -389,7 +403,7 @@ export async function fetchMessagesForResolvedConversation(args: {
             wamId: m.wamId || undefined,
             conversationId: m.conversationId,
             contactId: conversation.contact.ghlContactId || "",
-            body: m.body || "",
+            body: resolveMessageDisplayBody(m),
             type: m.type,
             direction: m.direction as "inbound" | "outbound",
             status: m.status,
