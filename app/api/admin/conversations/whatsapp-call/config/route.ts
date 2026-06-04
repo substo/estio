@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
-import { WHATSAPP_CALLING_RUNTIME_MODE, getWhatsAppCallBridgeBaseUrl } from "@/lib/whatsapp/calling";
+import { WHATSAPP_CALLING_PROVIDER } from "@/lib/whatsapp/calling";
 
 function serializeError(error: unknown): string {
     if (error instanceof Error) return error.message;
     if (typeof error === "string") return error;
-    return "WhatsApp call bridge config failed.";
+    return "WhatsApp calling config failed.";
 }
 
 export async function GET() {
@@ -16,7 +16,7 @@ export async function GET() {
             return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
         }
 
-        const config = await (db as any).whatsAppCallBridgeConfig.findUnique({
+        const config = await (db as any).whatsAppCallingConfig.findUnique({
             where: { locationId: location.id },
         });
         return NextResponse.json({ success: true, config });
@@ -34,20 +34,26 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json().catch(() => ({}));
+        const mediaMode = ["sip", "browser_webrtc", "manual_sdp", "provider_managed"].includes(String(body?.mediaMode || ""))
+            ? String(body.mediaMode)
+            : "sip";
         const data = {
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysSessionId: body?.baileysSessionId ? String(body.baileysSessionId).trim() : location.id,
-            bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(body?.bridgeBaseUrl),
+            provider: WHATSAPP_CALLING_PROVIDER,
+            status: body?.callingEnabled ? "ready" : "not_configured",
+            phoneNumberId: body?.phoneNumberId ? String(body.phoneNumberId).trim() : null,
+            wabaId: body?.wabaId ? String(body.wabaId).trim() : null,
+            callingEnabled: body?.callingEnabled === true,
+            webhooksEnabled: body?.webhooksEnabled === true,
+            mediaMode,
+            sipEndpoint: body?.sipEndpoint ? String(body.sipEndpoint).trim() : null,
             mediaNotes: body?.mediaNotes ? String(body.mediaNotes).trim() : null,
             metadata: body?.metadata && typeof body.metadata === "object" ? body.metadata : undefined,
         };
 
-        const config = await (db as any).whatsAppCallBridgeConfig.upsert({
+        const config = await (db as any).whatsAppCallingConfig.upsert({
             where: { locationId: location.id },
             create: {
                 locationId: location.id,
-                baileysCallBridgeStatus: "offline",
-                mediaStatus: "signaling_only",
                 ...data,
             },
             update: data,

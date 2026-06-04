@@ -201,10 +201,10 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
         case 'WHATSAPP_CALL_READINESS_CHECKED':
             Icon = Phone;
             iconColor = "text-sky-700 bg-sky-100";
-            actionLabel = "Call Bridge Readiness Checked";
+            actionLabel = "WhatsApp Calling Readiness Checked";
             description = String(
-                changes.find(c => c.field === 'bridgeStatus')?.new
-                || changes.find(c => c.field === 'baileysCallBridgeStatus')?.new
+                changes.find(c => c.field === 'provider')?.new
+                || changes.find(c => c.field === 'phoneNumberId')?.new
                 || changes.find(c => c.field === 'mediaStatus')?.new
                 || ''
             );
@@ -223,8 +223,8 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
             actionLabel = "WhatsApp Call Offer Attempted";
             description = String(
                 changes.find(c => c.field === 'mediaStatus')?.new
-                || changes.find(c => c.field === 'runtime')?.new
-                || 'baileys_rnd'
+                || changes.find(c => c.field === 'provider')?.new
+                || 'meta_calling_api'
             );
             break;
 

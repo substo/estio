@@ -63,7 +63,7 @@ model Location {
   whatsappTemplates             WhatsAppTemplate[]
   whatsappIdentityMaps          WhatsAppIdentityMap[]
   whatsappCallAttempts          WhatsAppCallAttempt[]
-  whatsappCallBridgeConfig      WhatsAppCallBridgeConfig?
+  whatsappCallingConfig         WhatsAppCallingConfig?
   conversationSyncRecords       ConversationSync[]
   messageSyncRecords            MessageSync[]
   providerOutboxJobs            ProviderOutbox[]
@@ -2432,7 +2432,7 @@ model WhatsAppCallAttempt {
   contactId      String
 
   status String @default("requested") // requested | consented | call_attempted | accepted | rejected | failed | ended
-  provider String @default("baileys_rnd")
+  provider String @default("meta_calling_api")
   providerCallId String?
   bridgeCallId String?
   whatsappCallId String?
@@ -2461,19 +2461,21 @@ model WhatsAppCallAttempt {
   @@index([whatsappCallId])
 }
 
-model WhatsAppCallBridgeConfig {
+model WhatsAppCallingConfig {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   locationId String @unique
 
-  callingRuntimeMode String @default("baileys_rnd")
-  baileysCallBridgeStatus String @default("offline") // offline | pairing | ready | unhealthy
-  baileysSessionId String?
-  bridgeBaseUrl String?
-  lastBaileysHeartbeatAt DateTime?
-  mediaStatus String @default("signaling_only") // signaling_only | media_probe_started | audio_connected | failed
+  provider String @default("meta_calling_api")
+  status String @default("not_configured") // not_configured | blocked | ready | unhealthy
+  phoneNumberId String?
+  wabaId String?
+  callingEnabled Boolean @default(false)
+  webhooksEnabled Boolean @default(false)
+  mediaMode String @default("sip") // sip | browser_webrtc | manual_sdp | provider_managed
+  sipEndpoint String?
   mediaNotes String? @db.Text
 
   lastReadinessStatus String?
@@ -2483,8 +2485,10 @@ model WhatsAppCallBridgeConfig {
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  @@index([baileysCallBridgeStatus])
-  @@index([mediaStatus])
+  @@index([provider])
+  @@index([status])
+  @@index([phoneNumberId])
+  @@index([mediaMode])
 }
 
 model WhatsAppChannel {

@@ -6,26 +6,25 @@ import { buildWhatsAppInboundAttachmentKey, putWhatsAppMediaObject } from "@/lib
 import { readFile, stat } from "node:fs/promises";
 
 export const WHATSAPP_CALL_REQUEST_BODY = "Can I call you here on WhatsApp about this?";
-export const WHATSAPP_CALLING_RUNTIME_MODE = "whatsapp_web_browser_call_rnd";
-export const WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE = "baileys_rnd";
+export const WHATSAPP_CALLING_PROVIDER = "meta_calling_api";
+export const WHATSAPP_CALLING_DEFAULT_MEDIA_MODE = "sip";
 const RECENT_WHATSAPP_CALL_WINDOW_MS = 24 * 60 * 60 * 1000;
-const BAILEYS_OFFER_CALL_TIMEOUT_MS = 45_000;
-const BROWSER_CALL_START_TIMEOUT_MS = 45_000;
 
 export type WhatsAppCallStatus =
     | "requested"
     | "consented"
     | "call_attempted"
+    | "ringing"
     | "accepted"
     | "rejected"
     | "failed"
     | "ended";
 
 export type WhatsAppCallingOutcome = "success" | "failed" | "unsupported";
-export type BaileysCallBridgeStatus = "offline" | "pairing" | "ready" | "unhealthy";
-export type WhatsAppCallMediaStatus = "signaling_only" | "media_probe_started" | "audio_connected" | "failed";
-export type BrowserCallBridgeStatus = "offline" | "starting" | "unpaired" | "ready" | "unhealthy";
-export type BrowserCallBridgeState = "started" | "ringing" | "recording" | "ended" | "failed";
+export type WhatsAppCallingProviderName = "meta_calling_api";
+export type WhatsAppCallingConfigStatus = "not_configured" | "blocked" | "ready" | "unhealthy";
+export type WhatsAppCallingMediaMode = "sip" | "browser_webrtc" | "manual_sdp" | "provider_managed";
+export type WhatsAppCallMediaStatus = "not_connected" | "signaling_only" | "audio_connected" | "failed";
 
 export type WhatsAppCallingProviderResult = {
     success: boolean;
@@ -34,7 +33,7 @@ export type WhatsAppCallingProviderResult = {
     bridgeCallId?: string | null;
     whatsappCallId?: string | null;
     status: WhatsAppCallStatus;
-    bridgeEvent?: string | null;
+    providerEvent?: string | null;
     mediaStatus?: WhatsAppCallMediaStatus | string | null;
     errorCode?: string | null;
     errorMessage?: string | null;
@@ -44,45 +43,28 @@ export type WhatsAppCallingProviderResult = {
 export type WhatsAppCallingReadiness = {
     ready: boolean;
     outcome: WhatsAppCallingOutcome;
-    callingRuntimeMode: string;
-    baileysCallBridgeStatus: BaileysCallBridgeStatus;
-    baileysSessionId: string | null;
-    lastBaileysHeartbeatAt: string | null;
-    mediaStatus: WhatsAppCallMediaStatus;
-    bridgeBaseUrl: string;
-    browserCallBridgeStatus: BrowserCallBridgeStatus;
-    browserCallState: BrowserCallBridgeState | null;
-    browserProfileDir: string | null;
-    browserRecordingDir: string | null;
-    browserRecordingPath: string | null;
-    browserRecordingDurationSeconds: number | null;
-    chromeReady: boolean;
-    whatsappWebPaired: boolean;
-    callButtonAvailable: boolean;
-    audioSinkReady: boolean;
-    ffmpegReady: boolean;
+    provider: WhatsAppCallingProviderName;
+    status: WhatsAppCallingConfigStatus;
+    phoneNumberId: string | null;
+    wabaId: string | null;
+    displayPhoneNumber: string | null;
+    coexistenceEnabled: boolean;
+    hasCloudChannel: boolean;
+    hasAccessToken: boolean;
+    callingEnabled: boolean;
+    webhooksEnabled: boolean;
+    mediaMode: WhatsAppCallingMediaMode;
+    sipEndpoint: string | null;
+    lastReadinessCheckedAt: string | null;
+    lastError: string | null;
     errorCode?: string | null;
     errorMessage?: string | null;
-};
-
-export type BaileysCallBridgeStartResult = {
-    success: boolean;
-    status?: BaileysCallBridgeStatus | string | null;
-    sessionId?: string | null;
-    pairingCode?: string | null;
-    qr?: string | null;
-    authPath?: string | null;
-    simulated?: boolean;
-    errorCode?: string | null;
-    error?: string | null;
-    raw?: any;
 };
 
 export type WhatsAppCallingProvider = {
     placeCall(input: {
         locationId: string;
         to: string;
-        targetJid?: string | null;
         conversationId: string;
         contactId: string;
         attemptId: string;
@@ -127,164 +109,96 @@ export function isPositiveWhatsAppCallConsentReply(body: string): boolean {
     return POSITIVE_PATTERN.test(normalized);
 }
 
-export function getWhatsAppCallBridgeBaseUrl(value?: string | null) {
-    return String(value || process.env.WHATSAPP_BROWSER_CALL_BRIDGE_BASE_URL || process.env.WHATSAPP_CALL_BRIDGE_BASE_URL || "http://127.0.0.1:3038")
-        .replace(/\/+$/, "");
-}
-
-export function getBaileysCallBridgeBaseUrl(value?: string | null) {
-    return String(value || process.env.WHATSAPP_CALL_BRIDGE_BASE_URL || "http://127.0.0.1:3037")
-        .replace(/\/+$/, "");
-}
-
-function normalizeBridgeStatus(value: unknown): BaileysCallBridgeStatus {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (normalized === "pairing" || normalized === "ready" || normalized === "unhealthy" || normalized === "offline") {
+function normalizeMediaMode(value: unknown): WhatsAppCallingMediaMode {
+    const normalized = String(value || WHATSAPP_CALLING_DEFAULT_MEDIA_MODE).trim().toLowerCase();
+    if (normalized === "sip" || normalized === "browser_webrtc" || normalized === "manual_sdp" || normalized === "provider_managed") {
         return normalized;
     }
-    return "offline";
+    return WHATSAPP_CALLING_DEFAULT_MEDIA_MODE;
 }
 
-function normalizeBrowserBridgeStatus(value: unknown): BrowserCallBridgeStatus {
+function normalizeConfigStatus(value: unknown): WhatsAppCallingConfigStatus {
     const normalized = String(value || "").trim().toLowerCase();
-    if (
-        normalized === "starting"
-        || normalized === "unpaired"
-        || normalized === "ready"
-        || normalized === "unhealthy"
-        || normalized === "offline"
-    ) {
+    if (normalized === "blocked" || normalized === "ready" || normalized === "unhealthy" || normalized === "not_configured") {
         return normalized;
     }
-    return "offline";
+    return "not_configured";
 }
 
-function normalizeBrowserCallState(value: unknown): BrowserCallBridgeState | null {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (
-        normalized === "started"
-        || normalized === "ringing"
-        || normalized === "recording"
-        || normalized === "ended"
-        || normalized === "failed"
-    ) {
-        return normalized;
-    }
-    if (normalized === "initiated" || normalized === "dialing") return "started";
-    if (normalized === "call_ringing") return "ringing";
-    if (normalized === "call_recording") return "recording";
-    if (normalized === "complete" || normalized === "completed" || normalized === "hangup") return "ended";
-    if (normalized === "error" || normalized === "call_failed") return "failed";
-    return null;
+function normalizePhoneDigits(value: unknown): string {
+    return String(value || "").replace(/\D/g, "");
 }
 
-function normalizeMediaStatus(value: unknown): WhatsAppCallMediaStatus {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (
-        normalized === "signaling_only"
-        || normalized === "media_probe_started"
-        || normalized === "audio_connected"
-        || normalized === "failed"
-    ) {
-        return normalized;
-    }
-    return "signaling_only";
+function getGraphApiVersion() {
+    return String(process.env.WHATSAPP_GRAPH_API_VERSION || process.env.META_GRAPH_API_VERSION || "v24.0").replace(/^\/+/, "");
 }
 
-function normalizeRuntimeMode(value: unknown): string {
-    const normalized = String(value || WHATSAPP_CALLING_RUNTIME_MODE).trim().toLowerCase();
-    return normalized || WHATSAPP_CALLING_RUNTIME_MODE;
+function getLocationWhatsAppToken(location: any): string {
+    return String(location?.whatsappAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || "").trim();
 }
 
-export function normalizeBaileysCallBridgeResult(response: any): WhatsAppCallingProviderResult {
-    const event = String(response?.event || response?.status || "").trim().toLowerCase();
-    const bridgeCallId = response?.bridgeCallId || response?.callId || null;
-    const whatsappCallId = response?.whatsappCallId
-        || response?.whatsapp_call_id
-        || response?.raw?.callId
-        || response?.raw?.call_id
-        || response?.raw?.id
-        || null;
-    const callId = response?.providerCallId || whatsappCallId || bridgeCallId || response?.id || null;
-    const mediaStatus = normalizeMediaStatus(response?.mediaStatus);
-    if (response?.success === false || event === "call_failed" || event === "call_media_unknown") {
+function getManualSdp(config: any): string {
+    const metadata = config?.metadata && typeof config.metadata === "object" ? config.metadata : {};
+    return String(metadata.manualSdp || process.env.WHATSAPP_CALLING_MANUAL_SDP || "").trim();
+}
+
+function normalizeOfficialCallResult(response: any): WhatsAppCallingProviderResult {
+    const event = String(response?.event || response?.status || response?.call_status || "").trim().toLowerCase();
+    const call = Array.isArray(response?.calls) ? response.calls[0] : response?.call || response;
+    const callId = response?.providerCallId || call?.id || response?.call_id || response?.id || null;
+
+    if (response?.success === false || response?.error) {
         return {
             success: false,
             outcome: "failed",
             status: "failed",
             providerCallId: callId ? String(callId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
-            bridgeEvent: event || "call_failed",
-            mediaStatus,
-            errorCode: response?.errorCode
-                ? String(response.errorCode)
-                : event === "call_media_unknown"
-                    ? "baileys_offer_unconfirmed"
-                    : "baileys_call_bridge_failed",
-            errorMessage: response?.errorMessage
-                || response?.error
-                || (event === "call_media_unknown"
-                    ? "WhatsApp accepted the call offer, but no ringing event arrived."
-                    : "Baileys call bridge failed."),
+            whatsappCallId: callId ? String(callId) : null,
+            providerEvent: event || "call_failed",
+            mediaStatus: "failed",
+            errorCode: response?.errorCode || response?.error?.code
+                ? String(response.errorCode || response.error.code)
+                : "meta_calling_api_failed",
+            errorMessage: response?.errorMessage || response?.error?.message || response?.error || "WhatsApp Business Calling API call failed.",
             raw: response,
         };
     }
 
-    if (event === "call_rejected") {
-        return {
-            success: false,
-            outcome: "success",
-            status: "rejected",
-            providerCallId: callId ? String(callId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
-            bridgeEvent: event,
-            mediaStatus,
-            raw: response,
-        };
-    }
-
-    if (event === "call_timeout") {
-        return {
-            success: false,
-            outcome: "success",
-            status: "failed",
-            providerCallId: callId ? String(callId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
-            bridgeEvent: event,
-            mediaStatus,
-            errorCode: "call_timeout",
-            errorMessage: "Baileys call offer timed out.",
-            raw: response,
-        };
-    }
-
-    if (event === "call_terminated") {
+    if (event === "ringing" || event === "call_ringing") {
         return {
             success: true,
             outcome: "success",
-            status: "ended",
+            status: "ringing",
             providerCallId: callId ? String(callId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
-            bridgeEvent: event,
-            mediaStatus,
+            whatsappCallId: callId ? String(callId) : null,
+            providerEvent: event,
+            mediaStatus: "signaling_only",
             raw: response,
         };
     }
 
-    if (event === "call_accepted" || event === "call_media_connected") {
+    if (event === "accepted" || event === "call_accepted" || event === "connect" || event === "connected") {
         return {
             success: true,
             outcome: "success",
             status: "accepted",
             providerCallId: callId ? String(callId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
-            bridgeEvent: event,
-            mediaStatus: event === "call_media_connected" ? "audio_connected" : mediaStatus,
+            whatsappCallId: callId ? String(callId) : null,
+            providerEvent: event,
+            mediaStatus: "audio_connected",
+            raw: response,
+        };
+    }
+
+    if (event === "ended" || event === "terminated" || event === "call_terminated") {
+        return {
+            success: true,
+            outcome: "success",
+            status: "ended",
+            providerCallId: callId ? String(callId) : null,
+            whatsappCallId: callId ? String(callId) : null,
+            providerEvent: event,
+            mediaStatus: "audio_connected",
             raw: response,
         };
     }
@@ -294,343 +208,103 @@ export function normalizeBaileysCallBridgeResult(response: any): WhatsAppCalling
         outcome: "success",
         status: "call_attempted",
         providerCallId: callId ? String(callId) : null,
-        bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-        whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
-        bridgeEvent: event || "call_offer_sent",
-        mediaStatus,
+        whatsappCallId: callId ? String(callId) : null,
+        providerEvent: event || "connect",
+        mediaStatus: "signaling_only",
         raw: response,
     };
 }
 
-export function normalizeBrowserCallBridgeResult(response: any): WhatsAppCallingProviderResult {
-    const state = normalizeBrowserCallState(response?.state || response?.status || response?.event);
-    const event = String(response?.event || response?.status || response?.state || state || "").trim().toLowerCase();
-    const bridgeCallId = response?.bridgeCallId || response?.callId || response?.id || null;
-    const providerCallId = response?.providerCallId || bridgeCallId || null;
-    const recordingPath = response?.recordingPath || response?.recording?.path || null;
-    const raw = {
-        ...response,
-        browserCallState: state,
-        recordingPath,
-        recordingDurationSeconds: response?.recordingDurationSeconds || response?.recording?.durationSeconds || null,
-    };
-
-    if (response?.success === false || state === "failed") {
-        return {
-            success: false,
-            outcome: "failed",
-            status: "failed",
-            providerCallId: providerCallId ? String(providerCallId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            bridgeEvent: event || "failed",
-            mediaStatus: recordingPath ? "audio_connected" : "signaling_only",
-            errorCode: response?.errorCode ? String(response.errorCode) : "browser_call_bridge_failed",
-            errorMessage: response?.errorMessage || response?.error || "WhatsApp Web browser call bridge failed.",
-            raw,
-        };
-    }
-
-    if (state === "ended") {
-        return {
-            success: true,
-            outcome: "success",
-            status: "ended",
-            providerCallId: providerCallId ? String(providerCallId) : null,
-            bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-            bridgeEvent: event || "ended",
-            mediaStatus: recordingPath ? "audio_connected" : "signaling_only",
-            raw,
-        };
-    }
-
-    return {
-        success: true,
-        outcome: "success",
-        status: state === "recording" || state === "ringing" || state === "started" ? "call_attempted" : "call_attempted",
-        providerCallId: providerCallId ? String(providerCallId) : null,
-        bridgeCallId: bridgeCallId ? String(bridgeCallId) : null,
-        bridgeEvent: event || state || "started",
-        mediaStatus: state === "recording" || recordingPath ? "audio_connected" : "signaling_only",
-        raw,
-    };
+export function normalizeWhatsAppCallingProviderResult(response: any): WhatsAppCallingProviderResult {
+    return normalizeOfficialCallResult(response);
 }
 
-async function bridgeFetch(baseUrl: string, path: string, init?: RequestInit & { timeoutMs?: number }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.max(500, Number(init?.timeoutMs || 2500)));
-    try {
-        const response = await fetch(`${getWhatsAppCallBridgeBaseUrl(baseUrl)}${path}`, {
-            ...init,
-            signal: controller.signal,
-            headers: {
-                "Content-Type": "application/json",
-                ...(process.env.WHATSAPP_CALL_BRIDGE_SECRET
-                    ? { "x-whatsapp-call-bridge-secret": process.env.WHATSAPP_CALL_BRIDGE_SECRET }
-                    : {}),
-                ...(init?.headers || {}),
-            },
-        });
-        clearTimeout(timeout);
-        const payload = await response.json().catch(() => null);
-        if (!response.ok) {
-            return {
-                success: false,
-                event: "call_failed",
-                errorCode: payload?.errorCode || `bridge_http_${response.status}`,
-                errorMessage: payload?.error || payload?.message || response.statusText,
-                raw: payload,
-            };
-        }
-        return payload;
-    } catch (error: any) {
-        clearTimeout(timeout);
-        return {
-            success: false,
-            event: "call_failed",
-            errorCode: error?.name === "AbortError" ? "bridge_timeout" : "bridge_unreachable",
-            errorMessage: error?.name === "AbortError" ? "WhatsApp call bridge did not respond quickly." : error?.message || "WhatsApp call bridge is unreachable.",
-        };
-    }
-}
-
-export function resolveBaileysCallOfferTarget(input: { phone?: string | null; targetJid?: string | null }) {
-    const phoneDigits = String(input.phone || "").replace(/\D/g, "");
-    if (phoneDigits.length >= 8) return phoneDigits;
-
-    const jid = String(input.targetJid || "").trim().toLowerCase();
-    if (/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(jid)) return jid;
-    return phoneDigits || "";
-}
-
-export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
-    constructor(private readonly baseUrl: string = getBaileysCallBridgeBaseUrl()) {}
-
+export class OfficialWhatsAppCallingProvider implements WhatsAppCallingProvider {
     async placeCall(input: {
         locationId: string;
         to: string;
-        targetJid?: string | null;
         conversationId: string;
         contactId: string;
         attemptId: string;
     }): Promise<WhatsAppCallingProviderResult> {
-        try {
-            const config = await (db as any).whatsAppCallBridgeConfig.findUnique({
-                where: { locationId: input.locationId },
-            }).catch(() => null);
-            const sessionId = String(config?.baileysSessionId || input.locationId).trim();
-            if (!sessionId) {
-                return {
-                    success: false,
-                    outcome: "failed",
-                    status: "failed",
-                    errorCode: "baileys_session_missing",
-                    errorMessage: "Baileys call bridge session id is not configured.",
-                };
-            }
+        const [location, config] = await Promise.all([
+            (db as any).location.findUnique({ where: { id: input.locationId } }),
+            (db as any).whatsAppCallingConfig.findUnique({ where: { locationId: input.locationId } }).catch(() => null),
+        ]);
+        const token = getLocationWhatsAppToken(location);
+        const phoneNumberId = String(config?.phoneNumberId || location?.whatsappPhoneNumberId || "").trim();
+        const to = normalizePhoneDigits(input.to);
+        if (!token || !phoneNumberId || !to) {
+            return {
+                success: false,
+                outcome: "failed",
+                status: "failed",
+                errorCode: "meta_calling_api_missing_credentials",
+                errorMessage: "WhatsApp Business Calling API requires a WABA access token, phone number id, and contact phone.",
+            };
+        }
 
-            const response = await bridgeFetch(
-                this.baseUrl,
-                `/sessions/${encodeURIComponent(sessionId)}/offer-call`,
-                {
-                    method: "POST",
-                    timeoutMs: BAILEYS_OFFER_CALL_TIMEOUT_MS,
-                    body: JSON.stringify({
-                        to: resolveBaileysCallOfferTarget({
-                            phone: input.to,
-                            targetJid: input.targetJid,
-                        }),
-                        targetJid: input.targetJid || null,
-                        locationId: input.locationId,
-                        conversationId: input.conversationId,
-                        contactId: input.contactId,
-                        attemptId: input.attemptId,
-                    }),
-                }
-            );
-            return normalizeBaileysCallBridgeResult(response);
+        const mediaMode = normalizeMediaMode(config?.mediaMode);
+        const manualSdp = getManualSdp(config);
+        if (mediaMode !== "manual_sdp") {
+            return {
+                success: false,
+                outcome: "unsupported",
+                status: "failed",
+                errorCode: "media_session_not_implemented",
+                errorMessage: `${mediaMode} calling readiness is configured, but the media session connector is not implemented yet.`,
+            };
+        }
+        if (!manualSdp) {
+            return {
+                success: false,
+                outcome: "failed",
+                status: "failed",
+                errorCode: "manual_sdp_missing",
+                errorMessage: "Manual SDP diagnostic mode requires metadata.manualSdp or WHATSAPP_CALLING_MANUAL_SDP.",
+            };
+        }
+
+        const url = `https://graph.facebook.com/${getGraphApiVersion()}/${encodeURIComponent(phoneNumberId)}/calls`;
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    to,
+                    action: "connect",
+                    session: {
+                        sdp_type: "offer",
+                        sdp: manualSdp,
+                    },
+                    biz_opaque_callback_data: input.attemptId,
+                }),
+            });
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+                return normalizeOfficialCallResult({
+                    success: false,
+                    errorCode: payload?.error?.code || `meta_http_${response.status}`,
+                    errorMessage: payload?.error?.message || response.statusText,
+                    error: payload?.error || payload,
+                });
+            }
+            return normalizeOfficialCallResult(payload);
         } catch (error: any) {
             return {
                 success: false,
                 outcome: "failed",
                 status: "failed",
-                errorCode: "baileys_call_bridge_unreachable",
-                errorMessage: error?.message || "Baileys call bridge is unreachable.",
+                errorCode: "meta_calling_api_unreachable",
+                errorMessage: error?.message || "WhatsApp Business Calling API is unreachable.",
                 raw: error,
             };
         }
     }
-}
-
-export class BrowserCallBridgeProvider implements WhatsAppCallingProvider {
-    constructor(private readonly baseUrl: string = getWhatsAppCallBridgeBaseUrl()) {}
-
-    async placeCall(input: {
-        locationId: string;
-        to: string;
-        targetJid?: string | null;
-        conversationId: string;
-        contactId: string;
-        attemptId: string;
-    }): Promise<WhatsAppCallingProviderResult> {
-        const response = await bridgeFetch(
-            this.baseUrl,
-            "/call/start",
-            {
-                method: "POST",
-                timeoutMs: BROWSER_CALL_START_TIMEOUT_MS,
-                body: JSON.stringify({
-                    to: resolveBaileysCallOfferTarget({
-                        phone: input.to,
-                        targetJid: input.targetJid,
-                    }),
-                    targetJid: input.targetJid || null,
-                    locationId: input.locationId,
-                    conversationId: input.conversationId,
-                    contactId: input.contactId,
-                    attemptId: input.attemptId,
-                }),
-            }
-        );
-        return normalizeBrowserCallBridgeResult(response);
-    }
-}
-
-export async function startBaileysCallBridgeSession(input: {
-    locationId: string;
-    sessionId?: string | null;
-    bridgeBaseUrl?: string | null;
-    phoneNumber?: string | null;
-    resetAuth?: boolean;
-}): Promise<BaileysCallBridgeStartResult> {
-    const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
-        where: { locationId: input.locationId },
-    }).catch(() => null);
-    const bridgeBaseUrl = getBaileysCallBridgeBaseUrl(input.bridgeBaseUrl || existing?.bridgeBaseUrl);
-    const sessionId = String(input.sessionId || existing?.baileysSessionId || input.locationId).trim();
-    if (!sessionId) {
-        return {
-            success: false,
-            status: "offline",
-            errorCode: "baileys_session_missing",
-            error: "Baileys session id is required.",
-        };
-    }
-
-    const response = await bridgeFetch(
-        bridgeBaseUrl,
-        `/sessions/${encodeURIComponent(sessionId)}/start`,
-        {
-            method: "POST",
-            body: JSON.stringify({
-                phoneNumber: input.phoneNumber || null,
-                resetAuth: input.resetAuth === true,
-            }),
-        }
-    );
-
-    const health = await bridgeFetch(bridgeBaseUrl, "/health", { method: "GET" }).catch(() => null);
-    const status = normalizeBridgeStatus(health?.status || response?.status);
-    const mediaStatus = normalizeMediaStatus(health?.mediaStatus);
-    const lastError = health?.ok === false
-        ? String(health?.error || "Bridge unhealthy.")
-        : response?.success === false
-            ? String(response?.error || response?.errorMessage || "Bridge start failed.")
-            : null;
-    const updated = await (db as any).whatsAppCallBridgeConfig.upsert({
-        where: { locationId: input.locationId },
-        create: {
-            locationId: input.locationId,
-            callingRuntimeMode: WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE,
-            baileysCallBridgeStatus: status,
-            baileysSessionId: sessionId,
-            bridgeBaseUrl,
-            lastBaileysHeartbeatAt: health?.lastHeartbeatAt ? new Date(health.lastHeartbeatAt) : new Date(),
-            mediaStatus,
-            lastError,
-            metadata: { start: response, health },
-        },
-        update: {
-            callingRuntimeMode: WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE,
-            baileysCallBridgeStatus: status,
-            baileysSessionId: sessionId,
-            bridgeBaseUrl,
-            lastBaileysHeartbeatAt: health?.lastHeartbeatAt ? new Date(health.lastHeartbeatAt) : new Date(),
-            mediaStatus,
-            lastError,
-            metadata: {
-                ...((existing?.metadata && typeof existing.metadata === "object") ? existing.metadata : {}),
-                start: response,
-                health,
-            },
-        },
-    });
-
-    return {
-        success: response?.success !== false,
-        status,
-        sessionId: updated.baileysSessionId || sessionId,
-        pairingCode: response?.pairingCode || health?.pairingCode || null,
-        qr: response?.qr || health?.qr || null,
-        authPath: response?.authPath || null,
-        simulated: response?.simulated === true || health?.simulated === true,
-        errorCode: response?.errorCode || null,
-        error: response?.error || response?.errorMessage || null,
-        raw: response,
-    };
-}
-
-export async function startBrowserCallBridgeSession(input: {
-    locationId: string;
-    bridgeBaseUrl?: string | null;
-}): Promise<BaileysCallBridgeStartResult> {
-    const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
-        where: { locationId: input.locationId },
-    }).catch(() => null);
-    const bridgeBaseUrl = getWhatsAppCallBridgeBaseUrl(input.bridgeBaseUrl || existing?.bridgeBaseUrl);
-    const response = await bridgeFetch(bridgeBaseUrl, "/session/start", { method: "POST" });
-    const health = await bridgeFetch(bridgeBaseUrl, "/health", { method: "GET" }).catch(() => response);
-    const browserStatus = normalizeBrowserBridgeStatus(health?.status || response?.status);
-    const status = browserStatus === "ready" ? "ready" : browserStatus === "unpaired" || browserStatus === "starting" ? "pairing" : browserStatus === "unhealthy" ? "unhealthy" : "offline";
-    const mediaStatus = health?.audioSinkReady && health?.ffmpegReady ? "media_probe_started" : "failed";
-
-    await (db as any).whatsAppCallBridgeConfig.upsert({
-        where: { locationId: input.locationId },
-        create: {
-            locationId: input.locationId,
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysCallBridgeStatus: status,
-            baileysSessionId: input.locationId,
-            bridgeBaseUrl,
-            lastBaileysHeartbeatAt: health?.lastHeartbeatAt ? new Date(health.lastHeartbeatAt) : new Date(),
-            mediaStatus,
-            lastError: health?.ok ? null : String(health?.error || health?.errorMessage || "Browser call bridge is not ready."),
-            metadata: { start: response, health },
-        },
-        update: {
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysCallBridgeStatus: status,
-            bridgeBaseUrl,
-            lastBaileysHeartbeatAt: health?.lastHeartbeatAt ? new Date(health.lastHeartbeatAt) : new Date(),
-            mediaStatus,
-            lastError: health?.ok ? null : String(health?.error || health?.errorMessage || "Browser call bridge is not ready."),
-            metadata: {
-                ...((existing?.metadata && typeof existing.metadata === "object") ? existing.metadata : {}),
-                start: response,
-                health,
-            },
-        },
-    });
-
-    return {
-        success: response?.success !== false,
-        status,
-        sessionId: input.locationId,
-        authPath: health?.profileDir || null,
-        simulated: response?.simulated === true || health?.simulated === true,
-        errorCode: response?.errorCode || null,
-        error: response?.error || response?.errorMessage || null,
-        raw: response,
-    };
 }
 
 function serializeTimelineValue(value: unknown): string {
@@ -668,21 +342,19 @@ async function logWhatsAppCallActivity(input: {
         },
     });
 
-    const activityEntry = {
-        id: `history:${history.id}`,
-        type: "activity",
-        createdAt: history.createdAt.toISOString(),
-        action: input.action,
-        changes,
-        user: null,
-    };
-
     void publishConversationRealtimeEvent({
         locationId: input.locationId,
         conversationId: input.conversationId,
         type: "activity.created",
         payload: {
-            activityEntry,
+            activityEntry: {
+                id: `history:${history.id}`,
+                type: "activity",
+                createdAt: history.createdAt.toISOString(),
+                action: input.action,
+                changes,
+                user: null,
+            },
         },
     });
 }
@@ -712,154 +384,123 @@ async function findConversationContact(locationId: string, conversationId: strin
     return { conversation, contact };
 }
 
-function buildReadinessFromConfig(config: any): WhatsAppCallingReadiness {
-    const callingRuntimeMode = normalizeRuntimeMode(config?.callingRuntimeMode);
-    const baileysCallBridgeStatus = normalizeBridgeStatus(config?.baileysCallBridgeStatus);
-    const mediaStatus = normalizeMediaStatus(config?.mediaStatus);
-    const baileysSessionId = config?.baileysSessionId ? String(config.baileysSessionId) : null;
-    const bridgeBaseUrl = getWhatsAppCallBridgeBaseUrl(config?.bridgeBaseUrl);
-    const health = config?.metadata && typeof config.metadata === "object" ? (config.metadata as any).health : null;
-    const browser = health?.browser && typeof health.browser === "object" ? health.browser : health;
-    const profile = health?.profile && typeof health.profile === "object" ? health.profile : {};
-    const recording = health?.recording && typeof health.recording === "object" ? health.recording : {};
-    const chromeReady = Boolean(browser?.chromeReady ?? health?.chromeReady);
-    const whatsappWebPaired = Boolean(browser?.whatsappWebPaired ?? health?.whatsappWebPaired ?? health?.paired);
-    const callButtonAvailable = Boolean(browser?.callButtonAvailable ?? health?.callButtonAvailable);
-    const audioSinkReady = Boolean(browser?.audioSinkReady ?? health?.audioSinkReady ?? health?.audioReady);
-    const ffmpegReady = Boolean(browser?.ffmpegReady ?? health?.ffmpegReady);
-    const browserCallBridgeStatus = normalizeBrowserBridgeStatus(
-        health?.status
-        || (!health ? "offline" : chromeReady && whatsappWebPaired && audioSinkReady && ffmpegReady ? "ready" : "unhealthy")
-    );
-    const browserCallState = normalizeBrowserCallState(health?.callState || health?.activeCall?.state);
-    const simulated = health?.simulated === true;
+async function findDefaultWhatsAppChannel(locationId: string, phoneNumberId?: string | null) {
+    return (db as any).whatsAppChannel.findFirst({
+        where: {
+            locationId,
+            ...(phoneNumberId ? { phoneNumberId } : {}),
+        },
+        orderBy: [
+            { isDefaultOutbound: "desc" },
+            { updatedAt: "desc" },
+        ],
+    }).catch(() => null);
+}
+
+async function buildReadiness(locationId: string, config: any): Promise<WhatsAppCallingReadiness> {
+    const location = await (db as any).location.findUnique({
+        where: { id: locationId },
+        select: {
+            whatsappAccessToken: true,
+            whatsappPhoneNumberId: true,
+            whatsappBusinessAccountId: true,
+        },
+    }).catch(() => null);
+    const configuredPhoneNumberId = String(config?.phoneNumberId || location?.whatsappPhoneNumberId || "").trim();
+    const channel = await findDefaultWhatsAppChannel(locationId, configuredPhoneNumberId || null);
+    const mediaMode = normalizeMediaMode(config?.mediaMode);
+    const phoneNumberId = String(config?.phoneNumberId || channel?.phoneNumberId || location?.whatsappPhoneNumberId || "").trim() || null;
+    const wabaId = String(config?.wabaId || channel?.wabaId || location?.whatsappBusinessAccountId || "").trim() || null;
+    const hasAccessToken = Boolean(getLocationWhatsAppToken(location));
+    const callingEnabled = config?.callingEnabled === true;
+    const webhooksEnabled = config?.webhooksEnabled === true;
+    const sipEndpoint = String(config?.sipEndpoint || "").trim() || null;
+    const status = normalizeConfigStatus(config?.status);
     const common = {
-        callingRuntimeMode,
-        baileysCallBridgeStatus,
-        baileysSessionId,
-        lastBaileysHeartbeatAt: config?.lastBaileysHeartbeatAt?.toISOString?.() || null,
-        mediaStatus,
-        bridgeBaseUrl,
-        browserCallBridgeStatus,
-        browserCallState,
-        browserProfileDir: String(profile?.dir || health?.profileDir || "").trim() || null,
-        browserRecordingDir: String(recording?.dir || health?.recordingDir || "").trim() || null,
-        browserRecordingPath: String(recording?.path || health?.recordingPath || "").trim() || null,
-        browserRecordingDurationSeconds: Number.isFinite(Number(recording?.durationSeconds || health?.recordingDurationSeconds))
-            ? Number(recording?.durationSeconds || health?.recordingDurationSeconds)
-            : null,
-        chromeReady,
-        whatsappWebPaired,
-        callButtonAvailable,
-        audioSinkReady,
-        ffmpegReady,
+        provider: WHATSAPP_CALLING_PROVIDER as const,
+        status,
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber: channel?.displayPhoneNumber || null,
+        coexistenceEnabled: channel?.coexistenceEnabled === true,
+        hasCloudChannel: Boolean(channel?.id),
+        hasAccessToken,
+        callingEnabled,
+        webhooksEnabled,
+        mediaMode,
+        sipEndpoint,
+        lastReadinessCheckedAt: config?.lastReadinessCheckedAt?.toISOString?.() || null,
+        lastError: config?.lastError || null,
     };
 
-    if (callingRuntimeMode === WHATSAPP_CALLING_RUNTIME_MODE) {
-        if (!health || health?.success === false || browserCallBridgeStatus === "offline") {
-            return {
-                ready: false,
-                outcome: "failed",
-                ...common,
-                errorCode: health?.errorCode || "browser_call_bridge_unreachable",
-                errorMessage: health?.error || health?.errorMessage || "WhatsApp Web browser call bridge is unreachable.",
-            };
-        }
-
-        if (!chromeReady) {
-            return {
-                ready: false,
-                outcome: "failed",
-                ...common,
-                errorCode: "browser_chrome_unavailable",
-                errorMessage: "Chrome/Xvfb is not ready for WhatsApp Web calling.",
-            };
-        }
-
-        if (!whatsappWebPaired) {
-            return {
-                ready: false,
-                outcome: "failed",
-                ...common,
-                errorCode: "whatsapp_web_unpaired",
-                errorMessage: "WhatsApp Web is not paired in the browser call bridge profile.",
-            };
-        }
-
-        if (!audioSinkReady) {
-            return {
-                ready: false,
-                outcome: "failed",
-                ...common,
-                errorCode: "browser_audio_sink_unavailable",
-                errorMessage: "Browser call bridge audio sink is not ready.",
-            };
-        }
-
-        if (!ffmpegReady) {
-            return {
-                ready: false,
-                outcome: "failed",
-                ...common,
-                errorCode: "browser_ffmpeg_unavailable",
-                errorMessage: "ffmpeg is not available for WhatsApp call recording.",
-            };
-        }
-
+    if (!channel?.id) {
+        return {
+            ready: false,
+            outcome: "failed",
+            ...common,
+            errorCode: "waba_channel_missing",
+            errorMessage: "No WABA-registered WhatsApp Cloud API number is available for this location.",
+        };
+    }
+    if (!hasAccessToken) {
+        return {
+            ready: false,
+            outcome: "failed",
+            ...common,
+            errorCode: "waba_access_token_missing",
+            errorMessage: "WhatsApp Cloud API access token is missing.",
+        };
+    }
+    if (!phoneNumberId || !wabaId) {
+        return {
+            ready: false,
+            outcome: "failed",
+            ...common,
+            errorCode: "waba_phone_number_missing",
+            errorMessage: "Select a WABA phone number before enabling WhatsApp calling.",
+        };
+    }
+    if (!callingEnabled || status === "blocked") {
+        return {
+            ready: false,
+            outcome: "failed",
+            ...common,
+            errorCode: "calling_not_enabled",
+            errorMessage: "The selected WABA phone number is not marked calling-enabled.",
+        };
+    }
+    if (!webhooksEnabled) {
+        return {
+            ready: false,
+            outcome: "failed",
+            ...common,
+            errorCode: "calling_webhooks_missing",
+            errorMessage: "Call lifecycle webhooks are not enabled for this WhatsApp app/WABA.",
+        };
+    }
+    if (mediaMode === "sip" && !sipEndpoint) {
+        return {
+            ready: false,
+            outcome: "failed",
+            ...common,
+            errorCode: "sip_endpoint_missing",
+            errorMessage: "SIP media mode requires a configured SIP endpoint.",
+        };
+    }
+    if (mediaMode === "browser_webrtc" || mediaMode === "provider_managed") {
         return {
             ready: true,
             outcome: "success",
             ...common,
         };
     }
-
-    if (callingRuntimeMode !== WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE) {
-        return {
-            ready: false,
-            outcome: "unsupported",
-            ...common,
-            errorCode: "unsupported_calling_runtime",
-            errorMessage: "Only WhatsApp Web browser call R&D is enabled by default; Baileys is dormant unless explicitly selected.",
-        };
-    }
-
-    if (simulated) {
+    if (mediaMode === "manual_sdp" && !getManualSdp(config)) {
         return {
             ready: false,
             outcome: "failed",
             ...common,
-            errorCode: "baileys_bridge_simulated",
-            errorMessage: "Baileys call bridge is in simulation mode. This can test UI plumbing but cannot ring a customer phone.",
-        };
-    }
-
-    if (!baileysSessionId) {
-        return {
-            ready: false,
-            outcome: "failed",
-            ...common,
-            errorCode: "baileys_session_missing",
-            errorMessage: "Configure and start a Baileys call bridge session before requesting calls.",
-        };
-    }
-
-    if (baileysCallBridgeStatus !== "ready") {
-        return {
-            ready: false,
-            outcome: "failed",
-            ...common,
-            errorCode: "baileys_bridge_not_ready",
-            errorMessage: "Baileys call bridge must be ready before sending outbound call offers.",
-        };
-    }
-
-    if (mediaStatus === "failed") {
-        return {
-            ready: false,
-            outcome: "failed",
-            ...common,
-            errorCode: "baileys_media_failed",
-            errorMessage: "Baileys call bridge media probe is failed. Signaling may work, but media is not viable.",
+            errorCode: "manual_sdp_missing",
+            errorMessage: "Manual SDP diagnostic mode requires metadata.manualSdp or WHATSAPP_CALLING_MANUAL_SDP.",
         };
     }
 
@@ -871,91 +512,78 @@ function buildReadinessFromConfig(config: any): WhatsAppCallingReadiness {
 }
 
 export function checkCallingReadinessFromConfig(config: any): WhatsAppCallingReadiness {
-    return buildReadinessFromConfig(config);
-}
-
-export async function refreshBaileysCallBridgeHealth(locationId: string) {
-    const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
-        where: { locationId },
-    }).catch(() => null);
-    const bridgeBaseUrl = getWhatsAppCallBridgeBaseUrl(existing?.bridgeBaseUrl);
-    let health: any = null;
-    try {
-        health = await bridgeFetch(bridgeBaseUrl, "/health", { method: "GET" });
-    } catch (error: any) {
-        health = {
-            ok: false,
-            status: "offline",
-            error: error?.message || "Bridge unreachable.",
-        };
+    const mediaMode = normalizeMediaMode(config?.mediaMode);
+    const phoneNumberId = String(config?.phoneNumberId || "").trim() || null;
+    const wabaId = String(config?.wabaId || "").trim() || null;
+    const callingEnabled = config?.callingEnabled === true;
+    const webhooksEnabled = config?.webhooksEnabled === true;
+    const sipEndpoint = String(config?.sipEndpoint || "").trim() || null;
+    const hasCloudChannel = Boolean(config?.hasCloudChannel ?? (phoneNumberId && wabaId));
+    const hasAccessToken = config?.hasAccessToken !== false;
+    const common = {
+        provider: WHATSAPP_CALLING_PROVIDER as const,
+        status: normalizeConfigStatus(config?.status),
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber: config?.displayPhoneNumber || null,
+        coexistenceEnabled: config?.coexistenceEnabled === true,
+        hasCloudChannel,
+        hasAccessToken,
+        callingEnabled,
+        webhooksEnabled,
+        mediaMode,
+        sipEndpoint,
+        lastReadinessCheckedAt: config?.lastReadinessCheckedAt?.toISOString?.() || config?.lastReadinessCheckedAt || null,
+        lastError: config?.lastError || null,
+    };
+    if (!hasCloudChannel || !phoneNumberId || !wabaId) {
+        return { ready: false, outcome: "failed", ...common, errorCode: "waba_channel_missing", errorMessage: "No WABA-registered WhatsApp Cloud API number is available for this location." };
     }
-
-    const browserStatus = normalizeBrowserBridgeStatus(health?.status || (health?.ok ? "ready" : "offline"));
-    const status = browserStatus === "ready" ? "ready" : browserStatus === "unpaired" || browserStatus === "starting" ? "pairing" : browserStatus === "unhealthy" ? "unhealthy" : "offline";
-    const mediaStatus = normalizeMediaStatus(health?.mediaStatus || existing?.mediaStatus);
-    const sessionId = String(health?.sessionId || existing?.baileysSessionId || locationId).trim();
-    const heartbeatAt = health?.lastHeartbeatAt
-        ? new Date(health.lastHeartbeatAt)
-        : health?.ok
-            ? new Date()
-            : null;
-    const updated = await (db as any).whatsAppCallBridgeConfig.upsert({
-        where: { locationId },
-        create: {
-            locationId,
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysCallBridgeStatus: status,
-            baileysSessionId: sessionId,
-            bridgeBaseUrl,
-            lastBaileysHeartbeatAt: heartbeatAt,
-            mediaStatus,
-            lastError: health?.ok ? null : String(health?.error || "Bridge unhealthy."),
-            metadata: { health },
-        },
-        update: {
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysCallBridgeStatus: status,
-            baileysSessionId: sessionId,
-            bridgeBaseUrl,
-            lastBaileysHeartbeatAt: heartbeatAt,
-            mediaStatus,
-            lastError: health?.ok ? null : String(health?.error || "Bridge unhealthy."),
-            metadata: {
-                ...((existing?.metadata && typeof existing.metadata === "object") ? existing.metadata : {}),
-                health,
-            },
-        },
-    });
-
-    return { health, config: updated };
+    if (!hasAccessToken) {
+        return { ready: false, outcome: "failed", ...common, errorCode: "waba_access_token_missing", errorMessage: "WhatsApp Cloud API access token is missing." };
+    }
+    if (!callingEnabled || common.status === "blocked") {
+        return { ready: false, outcome: "failed", ...common, errorCode: "calling_not_enabled", errorMessage: "The selected WABA phone number is not marked calling-enabled." };
+    }
+    if (!webhooksEnabled) {
+        return { ready: false, outcome: "failed", ...common, errorCode: "calling_webhooks_missing", errorMessage: "Call lifecycle webhooks are not enabled for this WhatsApp app/WABA." };
+    }
+    if (mediaMode === "sip" && !sipEndpoint) {
+        return { ready: false, outcome: "failed", ...common, errorCode: "sip_endpoint_missing", errorMessage: "SIP media mode requires a configured SIP endpoint." };
+    }
+    if (mediaMode === "manual_sdp" && !getManualSdp(config)) {
+        return { ready: false, outcome: "failed", ...common, errorCode: "manual_sdp_missing", errorMessage: "Manual SDP diagnostic mode requires metadata.manualSdp or WHATSAPP_CALLING_MANUAL_SDP." };
+    }
+    return { ready: true, outcome: "success", ...common };
 }
 
 export async function checkCallingReadiness(
     locationId: string,
     options?: { conversationId?: string | null; contactId?: string | null; refreshHealth?: boolean; logActivity?: boolean }
 ): Promise<WhatsAppCallingReadiness> {
-    if (options?.refreshHealth) {
-        await refreshBaileysCallBridgeHealth(locationId).catch(() => undefined);
-    }
-    const config = await (db as any).whatsAppCallBridgeConfig.findUnique({
+    const config = await (db as any).whatsAppCallingConfig.findUnique({
         where: { locationId },
     }).catch(() => null);
-    const readiness = buildReadinessFromConfig(config);
+    const readiness = await buildReadiness(locationId, config);
 
-    await (db as any).whatsAppCallBridgeConfig.upsert({
+    await (db as any).whatsAppCallingConfig.upsert({
         where: { locationId },
         create: {
             locationId,
-            callingRuntimeMode: readiness.callingRuntimeMode,
-            baileysCallBridgeStatus: readiness.baileysCallBridgeStatus,
-            baileysSessionId: readiness.baileysSessionId || locationId,
-            bridgeBaseUrl: readiness.bridgeBaseUrl,
-            mediaStatus: readiness.mediaStatus,
+            provider: WHATSAPP_CALLING_PROVIDER,
+            status: readiness.status,
+            phoneNumberId: readiness.phoneNumberId,
+            wabaId: readiness.wabaId,
+            callingEnabled: readiness.callingEnabled,
+            webhooksEnabled: readiness.webhooksEnabled,
+            mediaMode: readiness.mediaMode,
+            sipEndpoint: readiness.sipEndpoint,
             lastReadinessStatus: readiness.outcome,
             lastReadinessCheckedAt: new Date(),
             lastError: readiness.errorMessage || null,
         },
         update: {
+            status: readiness.ready ? "ready" : readiness.status === "blocked" ? "blocked" : readiness.status,
             lastReadinessStatus: readiness.outcome,
             lastReadinessCheckedAt: new Date(),
             lastError: readiness.errorMessage || null,
@@ -971,10 +599,9 @@ export async function checkCallingReadiness(
             fields: {
                 outcome: readiness.outcome,
                 ready: readiness.ready,
-                runtime: readiness.callingRuntimeMode,
-                bridgeStatus: readiness.baileysCallBridgeStatus,
-                sessionId: readiness.baileysSessionId || null,
-                mediaStatus: readiness.mediaStatus,
+                provider: readiness.provider,
+                phoneNumberId: readiness.phoneNumberId,
+                mediaMode: readiness.mediaMode,
                 errorCode: readiness.errorCode || null,
                 errorMessage: readiness.errorMessage || null,
             },
@@ -998,7 +625,6 @@ export async function requestWhatsAppCallConsent(input: {
     const readiness = await checkCallingReadiness(input.locationId, {
         conversationId: conversation.id,
         contactId: contact.id,
-        refreshHealth: true,
         logActivity: false,
     });
     if (!readiness.ready) {
@@ -1006,7 +632,7 @@ export async function requestWhatsAppCallConsent(input: {
             success: false,
             outcome: readiness.outcome,
             errorCode: readiness.errorCode,
-            error: readiness.errorMessage || "Baileys call bridge is not ready.",
+            error: readiness.errorMessage || "WhatsApp Business Calling API is not ready.",
             readiness,
         };
     }
@@ -1026,7 +652,7 @@ export async function requestWhatsAppCallConsent(input: {
             conversationId: conversation.id,
             contactId: contact.id,
             status: "requested",
-            provider: WHATSAPP_CALLING_RUNTIME_MODE,
+            provider: WHATSAPP_CALLING_PROVIDER,
             requestMessageId: (sendResult as any)?.messageId || null,
             requestedAt: new Date(),
             contactPhone: contact.phone || null,
@@ -1049,7 +675,7 @@ export async function requestWhatsAppCallConsent(input: {
             prompt: WHATSAPP_CALL_REQUEST_BODY,
             callAttemptId: attempt.id,
             messageId: (sendResult as any)?.messageId || null,
-            runtime: WHATSAPP_CALLING_RUNTIME_MODE,
+            provider: WHATSAPP_CALLING_PROVIDER,
         },
     });
 
@@ -1087,6 +713,7 @@ export async function detectAndHandleWhatsAppCallConsent(input: {
         where: { id: pending.id },
         data: {
             status: "consented",
+            provider: WHATSAPP_CALLING_PROVIDER,
             consentMessageId: input.messageId,
             consentedAt,
             contactPhone: input.contactPhone || pending.contactPhone || null,
@@ -1124,77 +751,61 @@ export async function detectAndHandleWhatsAppCallConsent(input: {
     return { success: true, detected: true, callAttemptId: attempt.id, callResult };
 }
 
-export async function updateWhatsAppCallFromBridgeEvent(input: {
+export async function updateWhatsAppCallFromProviderEvent(input: {
     locationId: string;
     event: any;
 }) {
-    const eventName = String(input.event?.event || input.event?.type || "").trim();
-    const attemptId = input.event?.attemptId ? String(input.event.attemptId) : "";
-    const rawBridgeCallId = input.event?.bridgeCallId || input.event?.callId;
-    const rawWhatsAppCallId = input.event?.whatsappCallId || input.event?.whatsapp_call_id;
-    const rawProviderCallId = input.event?.providerCallId || input.event?.id;
-    const bridgeCallId = rawBridgeCallId ? String(rawBridgeCallId) : "";
-    const whatsappCallId = rawWhatsAppCallId ? String(rawWhatsAppCallId) : "";
+    const eventName = String(input.event?.event || input.event?.type || input.event?.status || "").trim();
+    const attemptId = input.event?.attemptId || input.event?.biz_opaque_callback_data ? String(input.event.attemptId || input.event.biz_opaque_callback_data) : "";
+    const rawProviderCallId = input.event?.providerCallId || input.event?.call_id || input.event?.id || input.event?.calls?.[0]?.id;
     const providerCallId = rawProviderCallId ? String(rawProviderCallId) : "";
     const attempt = attemptId
-        ? await (db as any).whatsAppCallAttempt.findFirst({
-            where: { id: attemptId, locationId: input.locationId },
-        })
-        : whatsappCallId
+        ? await (db as any).whatsAppCallAttempt.findFirst({ where: { id: attemptId, locationId: input.locationId } })
+        : providerCallId
             ? await (db as any).whatsAppCallAttempt.findFirst({
-                where: { whatsappCallId, locationId: input.locationId },
+                where: {
+                    locationId: input.locationId,
+                    OR: [{ providerCallId }, { whatsappCallId: providerCallId }],
+                },
             })
-            : bridgeCallId
-            ? await (db as any).whatsAppCallAttempt.findFirst({
-                where: { bridgeCallId, locationId: input.locationId },
-            })
-            : providerCallId
-                ? await (db as any).whatsAppCallAttempt.findFirst({
-                    where: { providerCallId, locationId: input.locationId },
-                })
-                : null;
+            : null;
     if (!attempt) return { success: false, ignored: true, reason: "attempt_not_found" };
 
-    const runtime = String(attempt.provider || input.event?.runtime || input.event?.provider || WHATSAPP_CALLING_RUNTIME_MODE);
-    const result = runtime === WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE
-        ? normalizeBaileysCallBridgeResult(input.event)
-        : normalizeBrowserCallBridgeResult(input.event);
+    const result = normalizeOfficialCallResult(input.event);
     const status = result.status;
-    const recordingPath = result.raw?.recordingPath || result.raw?.recording?.path || input.event?.recordingPath || input.event?.recording?.path || null;
-    const recordingDurationSeconds = result.raw?.recordingDurationSeconds || result.raw?.recording?.durationSeconds || input.event?.recordingDurationSeconds || input.event?.recording?.durationSeconds || null;
+    const recordingPath = input.event?.recordingPath || input.event?.recording?.path || null;
+    const recordingDurationSeconds = input.event?.recordingDurationSeconds || input.event?.recording?.durationSeconds || null;
     const updatedAttempt = await (db as any).whatsAppCallAttempt.update({
         where: { id: attempt.id },
         data: {
             status,
+            provider: WHATSAPP_CALLING_PROVIDER,
             providerCallId: result.providerCallId || attempt.providerCallId || null,
-            bridgeCallId: result.bridgeCallId || attempt.bridgeCallId || null,
             whatsappCallId: result.whatsappCallId || attempt.whatsappCallId || null,
             endedAt: status === "ended" ? new Date() : attempt.endedAt || null,
             errorCode: result.errorCode || null,
             errorMessage: result.errorMessage || null,
             metadata: {
                 ...(attempt.metadata || {}),
-                bridgeEvent: input.event || null,
-                bridgeCallId: result.bridgeCallId || null,
+                providerEvent: input.event || null,
+                providerCallId: result.providerCallId || null,
                 whatsappCallId: result.whatsappCallId || null,
                 mediaStatus: result.mediaStatus || null,
-                browserCallState: normalizeBrowserCallState(result.raw?.browserCallState || input.event?.state || input.event?.status || eventName),
                 recordingPath,
                 recordingDurationSeconds,
-                fallbackCallLink: input.event?.fallbackCallLink || (attempt.metadata as any)?.fallbackCallLink || null,
             },
         },
     });
 
-    if (recordingPath && (status === "ended" || normalizeBrowserCallState(input.event?.state || input.event?.status || eventName) === "ended")) {
-        await attachBrowserCallRecording({
+    if (recordingPath && status === "ended") {
+        await attachOfficialCallRecording({
             locationId: input.locationId,
             attempt: updatedAttempt,
             recordingPath: String(recordingPath),
             recordingDurationSeconds: recordingDurationSeconds == null ? null : Number(recordingDurationSeconds),
             event: input.event,
         }).catch((error) => {
-            console.error("[WhatsApp Browser Call Bridge] Failed to attach call recording:", error);
+            console.error("[WhatsApp Calling API] Failed to attach call recording:", error);
         });
     }
 
@@ -1203,13 +814,12 @@ export async function updateWhatsAppCallFromBridgeEvent(input: {
             locationId: input.locationId,
             conversationId: attempt.conversationId,
             contactId: attempt.contactId,
-            action: mapBridgeEventToTimelineAction(eventName || result.bridgeEvent || "", status),
+            action: mapProviderEventToTimelineAction(eventName || result.providerEvent || "", status),
             fields: {
                 status,
                 callAttemptId: attempt.id,
-                bridgeCallId: result.bridgeCallId || attempt.bridgeCallId || null,
+                providerCallId: result.providerCallId || attempt.providerCallId || null,
                 whatsappCallId: result.whatsappCallId || attempt.whatsappCallId || null,
-                browserCallState: normalizeBrowserCallState(result.raw?.browserCallState || input.event?.state || input.event?.status || eventName),
                 recordingPath,
                 recordingDurationSeconds,
                 errorCode: result.errorCode || null,
@@ -1221,7 +831,9 @@ export async function updateWhatsAppCallFromBridgeEvent(input: {
     return { success: true, callAttemptId: attempt.id, status };
 }
 
-async function attachBrowserCallRecording(input: {
+export const updateWhatsAppCallFromBridgeEvent = updateWhatsAppCallFromProviderEvent;
+
+async function attachOfficialCallRecording(input: {
     locationId: string;
     attempt: any;
     recordingPath: string;
@@ -1234,12 +846,12 @@ async function attachBrowserCallRecording(input: {
     const message = await (db as any).message.create({
         data: {
             conversationId: input.attempt.conversationId,
-            clientMessageId: `whatsapp-browser-call-recording:${input.attempt.id}`,
+            clientMessageId: `whatsapp-official-call-recording:${input.attempt.id}`,
             type: "WhatsApp",
             direction: "inbound",
             status: "delivered",
             body: "WhatsApp call recording",
-            source: "whatsapp_browser_call_bridge",
+            source: "whatsapp_calling_api",
             createdAt: new Date(),
         },
     });
@@ -1292,15 +904,15 @@ async function attachBrowserCallRecording(input: {
     });
 }
 
-function mapBridgeEventToTimelineAction(eventName: string, status: WhatsAppCallStatus) {
-    if (eventName === "call_media_connected") return "WHATSAPP_CALL_MEDIA_CONNECTED";
-    if (eventName === "call_media_unknown") return "WHATSAPP_CALL_MEDIA_UNKNOWN";
-    if (eventName === "call_terminated" || status === "ended") return "WHATSAPP_CALL_ENDED";
-    if (eventName === "call_accepted" || status === "accepted") return "WHATSAPP_CALL_ACCEPTED";
-    if (eventName === "call_rejected" || status === "rejected") return "WHATSAPP_CALL_REJECTED";
-    if (eventName === "call_ringing") return "WHATSAPP_CALL_RINGING";
-    if (eventName === "call_timeout") return "WHATSAPP_CALL_TIMEOUT";
-    if (eventName === "call_failed" || status === "failed") return "WHATSAPP_CALL_FAILED";
+function mapProviderEventToTimelineAction(eventName: string, status: WhatsAppCallStatus) {
+    const normalized = String(eventName || "").trim().toLowerCase();
+    if (normalized === "call_media_connected") return "WHATSAPP_CALL_MEDIA_CONNECTED";
+    if (normalized === "call_terminated" || normalized === "terminated" || status === "ended") return "WHATSAPP_CALL_ENDED";
+    if (normalized === "call_accepted" || normalized === "accepted" || status === "accepted") return "WHATSAPP_CALL_ACCEPTED";
+    if (normalized === "call_rejected" || normalized === "rejected" || status === "rejected") return "WHATSAPP_CALL_REJECTED";
+    if (normalized === "call_ringing" || normalized === "ringing" || status === "ringing") return "WHATSAPP_CALL_RINGING";
+    if (normalized === "call_timeout") return "WHATSAPP_CALL_TIMEOUT";
+    if (normalized === "call_failed" || status === "failed") return "WHATSAPP_CALL_FAILED";
     return "WHATSAPP_CALL_PROVIDER_RESULT";
 }
 
@@ -1323,22 +935,6 @@ async function findRecentWhatsAppConversationActivity(conversationId: string) {
     });
 }
 
-async function findWebBridgeConversationJid(conversationId: string, locationId: string) {
-    const sync = await (db as any).conversationSync.findFirst({
-        where: {
-            conversationId,
-            locationId,
-            provider: "whatsapp_web_bridge",
-            providerConversationId: { not: null },
-        },
-        orderBy: { updatedAt: "desc" },
-        select: { providerConversationId: true },
-    }).catch(() => null);
-    const jid = String(sync?.providerConversationId || "").trim().toLowerCase();
-    if (/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(jid)) return jid;
-    return null;
-}
-
 export async function startWhatsAppCall(input: {
     locationId: string;
     conversationId: string;
@@ -1350,7 +946,6 @@ export async function startWhatsAppCall(input: {
     const readiness = await checkCallingReadiness(input.locationId, {
         conversationId: conversation.id,
         contactId: contact.id,
-        refreshHealth: true,
         logActivity: false,
     });
     if (!readiness.ready) {
@@ -1369,14 +964,13 @@ export async function startWhatsAppCall(input: {
                 where: { id: failedAttempt.id },
                 data: {
                     status: "failed",
+                    provider: WHATSAPP_CALLING_PROVIDER,
                     errorCode: readiness.errorCode || null,
                     errorMessage: readiness.errorMessage || null,
                     metadata: {
                         ...(failedAttempt.metadata || {}),
                         readiness,
-                        spikeResult: readiness.callingRuntimeMode === WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE
-                            ? "baileys_bridge_not_ready"
-                            : "browser_call_bridge_not_ready",
+                        providerResult: "official_calling_not_ready",
                     },
                 },
             });
@@ -1431,7 +1025,7 @@ export async function startWhatsAppCall(input: {
                 conversationId: conversation.id,
                 contactId: contact.id,
                 status: "consented",
-                provider: readiness.callingRuntimeMode,
+                provider: WHATSAPP_CALLING_PROVIDER,
                 requestedAt: new Date(),
                 consentedAt: recentWhatsAppActivity.createdAt,
                 consentMessageId: recentWhatsAppActivity.id,
@@ -1448,7 +1042,7 @@ export async function startWhatsAppCall(input: {
         });
     }
 
-    if (!existing) {
+    if (!existing || (existing.status !== "consented" && !recentWhatsAppActivity)) {
         await logWhatsAppCallActivity({
             locationId: input.locationId,
             conversationId: conversation.id,
@@ -1456,47 +1050,28 @@ export async function startWhatsAppCall(input: {
             action: "WHATSAPP_CALL_FAILED",
             fields: {
                 status: "failed",
+                callAttemptId: existing?.id || null,
                 errorCode: "recent_whatsapp_activity_required",
-                errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
+                errorMessage: "A recent WhatsApp conversation or explicit call consent is required before starting a WhatsApp call.",
             },
         });
         return {
             success: false,
             outcome: "failed" as const,
             status: "failed" as const,
+            callAttemptId: existing?.id || null,
             errorCode: "recent_whatsapp_activity_required",
-            errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
+            errorMessage: "A recent WhatsApp conversation or explicit call consent is required before starting a WhatsApp call.",
             readiness,
         };
     }
-    if (existing.status !== "consented") {
-        if (!recentWhatsAppActivity) {
-            await logWhatsAppCallActivity({
-                locationId: input.locationId,
-                conversationId: conversation.id,
-                contactId: contact.id,
-                action: "WHATSAPP_CALL_FAILED",
-                fields: {
-                    status: "failed",
-                    callAttemptId: existing.id,
-                    errorCode: "recent_whatsapp_activity_required",
-                    errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
-                },
-            });
-            return {
-                success: false,
-                outcome: "failed" as const,
-                status: "failed" as const,
-                callAttemptId: existing.id,
-                errorCode: "recent_whatsapp_activity_required",
-                errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
-                readiness,
-            };
-        }
+
+    if (existing.status !== "consented" && recentWhatsAppActivity) {
         existing = await (db as any).whatsAppCallAttempt.update({
             where: { id: existing.id },
             data: {
                 status: "consented",
+                provider: WHATSAPP_CALLING_PROVIDER,
                 consentedAt: recentWhatsAppActivity.createdAt,
                 consentMessageId: recentWhatsAppActivity.id,
                 metadata: {
@@ -1513,19 +1088,13 @@ export async function startWhatsAppCall(input: {
 
     await (db as any).whatsAppCallAttempt.update({
         where: { id: existing.id },
-        data: { status: "call_attempted", attemptedAt: new Date() },
+        data: { status: "call_attempted", provider: WHATSAPP_CALLING_PROVIDER, attemptedAt: new Date() },
     });
 
-    const provider = input.provider || (
-        readiness.callingRuntimeMode === WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE
-            ? new BaileysCallBridgeProvider(readiness.bridgeBaseUrl)
-            : new BrowserCallBridgeProvider(readiness.bridgeBaseUrl)
-    );
-    const targetJid = await findWebBridgeConversationJid(conversation.id, input.locationId);
+    const provider = input.provider || new OfficialWhatsAppCallingProvider();
     const result = await provider.placeCall({
         locationId: input.locationId,
         to: contact.phone || existing.contactPhone || "",
-        targetJid,
         conversationId: conversation.id,
         contactId: contact.id,
         attemptId: existing.id,
@@ -1535,54 +1104,40 @@ export async function startWhatsAppCall(input: {
         where: { id: existing.id },
         data: {
             status: result.status || (result.success ? "call_attempted" : "failed"),
+            provider: WHATSAPP_CALLING_PROVIDER,
             providerCallId: result.providerCallId || null,
-            bridgeCallId: result.bridgeCallId || null,
+            bridgeCallId: null,
             whatsappCallId: result.whatsappCallId || null,
             errorCode: result.errorCode || null,
             errorMessage: result.errorMessage || null,
             metadata: {
                 ...(existing.metadata || {}),
-                bridgeResult: result.raw || null,
-                bridgeEvent: result.bridgeEvent || null,
-                bridgeCallId: result.bridgeCallId || null,
+                providerResult: result.raw || null,
+                providerEvent: result.providerEvent || null,
+                providerCallId: result.providerCallId || null,
                 whatsappCallId: result.whatsappCallId || null,
-                targetJid,
                 mediaStatus: result.mediaStatus || null,
-                browserCallState: normalizeBrowserCallState(result.raw?.browserCallState || result.raw?.state || result.raw?.status || result.bridgeEvent),
-                browserProfileState: result.raw?.profile || result.raw?.profileState || null,
-                recordingPath: result.raw?.recordingPath || result.raw?.recording?.path || null,
-                recordingDurationSeconds: result.raw?.recordingDurationSeconds || result.raw?.recording?.durationSeconds || null,
-                spikeResult: result.success
-                    ? readiness.callingRuntimeMode === WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE
-                        ? "baileys_call_signaling_started"
-                        : "browser_call_started"
-                    : readiness.callingRuntimeMode === WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE
-                        ? "baileys_call_signaling_failed"
-                        : "browser_call_failed",
+                readiness,
             },
         },
     });
 
-    if (!result.success) {
-        await logWhatsAppCallActivity({
-            locationId: input.locationId,
-            conversationId: conversation.id,
-            contactId: contact.id,
-            action: "WHATSAPP_CALL_FAILED",
-            fields: {
-                status: result.status,
-                outcome: result.outcome,
-                callAttemptId: existing.id,
-                callId: result.providerCallId || null,
-                bridgeCallId: result.bridgeCallId || null,
-                whatsappCallId: result.whatsappCallId || null,
-                event: result.bridgeEvent || null,
-                mediaStatus: result.mediaStatus || null,
-                errorCode: result.errorCode || null,
-                errorMessage: result.errorMessage || null,
-            },
-        });
-    }
+    await logWhatsAppCallActivity({
+        locationId: input.locationId,
+        conversationId: conversation.id,
+        contactId: contact.id,
+        action: result.success ? "WHATSAPP_CALL_PROVIDER_RESULT" : "WHATSAPP_CALL_FAILED",
+        fields: {
+            status: result.status,
+            outcome: result.outcome,
+            callAttemptId: existing.id,
+            callId: result.providerCallId || null,
+            event: result.providerEvent || null,
+            mediaStatus: result.mediaStatus || null,
+            errorCode: result.errorCode || null,
+            errorMessage: result.errorMessage || null,
+        },
+    });
 
     return { success: result.success, callAttemptId: existing.id, ...result };
 }

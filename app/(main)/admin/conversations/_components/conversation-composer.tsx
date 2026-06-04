@@ -157,7 +157,7 @@ function mapWhatsAppCallPayloadToState(
         label = "WhatsApp call accepted";
         detail = mediaStatus === "audio_connected"
             ? "Audio is connected."
-            : "The customer accepted. Audio is still not implemented in this R&D bridge.";
+            : "The customer accepted. Waiting for the configured Calling API media path.";
     } else if (rawStatus === "ended" || rawEvent === "call_terminated") {
         phase = "ended";
         label = "WhatsApp call ended";
@@ -174,8 +174,8 @@ function mapWhatsAppCallPayloadToState(
                 ? "WhatsApp call timed out"
                 : "WhatsApp call failed";
         detail = errorMessage || (rawEvent === "call_media_unknown"
-            ? "The Baileys bridge got a WhatsApp call id, but WhatsApp did not report ringing."
-            : "The bridge did not complete the call offer.");
+            ? "The provider returned a WhatsApp call id, but WhatsApp did not report ringing."
+            : "The provider did not complete the call offer.");
     } else if (rawEvent === "call_ringing" || rawStatus === "ringing") {
         phase = "ringing";
         label = "WhatsApp call ringing";
@@ -496,9 +496,9 @@ export function ConversationComposer({
                             return {
                                 ...next,
                                 phase: "waiting",
-                                label: "Call offer sent, no ringing event yet",
-                                detail: "Baileys returned a WhatsApp call id, but no ringing/answer event has arrived.",
-                            };
+                label: "Call offer sent, no ringing event yet",
+                detail: "The provider returned a WhatsApp call id, but no ringing/answer event has arrived.",
+            };
                         }
                         return next;
                     });

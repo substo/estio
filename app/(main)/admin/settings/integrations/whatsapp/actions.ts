@@ -44,90 +44,44 @@ import {
 } from "@/lib/whatsapp/web-bridge";
 import { buildWebBridgeDiagnostics } from "@/lib/whatsapp/web-bridge-diagnostics";
 import {
-    WHATSAPP_CALLING_RUNTIME_MODE,
+    WHATSAPP_CALLING_PROVIDER,
     checkCallingReadiness,
-    getWhatsAppCallBridgeBaseUrl,
-    refreshBaileysCallBridgeHealth,
-    startBrowserCallBridgeSession,
 } from "@/lib/whatsapp/calling";
 
 const MASKED_SECRET = "********";
 
-function isPersistentCallBridgeAuthPath(value: unknown) {
-    const path = String(value || "").trim();
-    return Boolean(path && !path.startsWith(".data/") && !path.includes("/.next/") && !path.includes("/releases/"));
-}
-
 function serializeWhatsAppCallingConfig(config: any) {
-    const metadata = config?.metadata && typeof config.metadata === "object" ? config.metadata : {};
-    const health = metadata?.health && typeof metadata.health === "object" ? metadata.health : {};
-    const start = metadata?.start && typeof metadata.start === "object" ? metadata.start : {};
-    const hasLiveHealth = Object.prototype.hasOwnProperty.call(metadata, "health");
-    const liveStatus = hasLiveHealth ? String(health.status || "").trim().toLowerCase() : "";
-    const liveIsOffline = hasLiveHealth && (liveStatus === "offline" || (health.ok === false && !health.sessionId && Number(health.sessionCount || 0) === 0));
     if (!config) {
         return {
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysCallBridgeStatus: "offline",
-            baileysSessionId: "",
-            bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(),
-            lastBaileysHeartbeatAt: null,
-            mediaStatus: "signaling_only",
+            provider: WHATSAPP_CALLING_PROVIDER,
+            status: "not_configured",
+            phoneNumberId: "",
+            wabaId: "",
+            callingEnabled: false,
+            webhooksEnabled: false,
+            mediaMode: "sip",
+            sipEndpoint: "",
             mediaNotes: "",
             lastReadinessStatus: null,
             lastReadinessCheckedAt: null,
             lastError: "",
-            pairingCode: "",
-            qr: "",
-            authPath: process.env.WHATSAPP_BROWSER_CALL_PROFILE_DIR || "/home/martin/whatsapp-call-browser-profile",
-            authPathPersistent: isPersistentCallBridgeAuthPath(process.env.WHATSAPP_BROWSER_CALL_PROFILE_DIR || "/home/martin/whatsapp-call-browser-profile"),
-            simulated: false,
-            chromeReady: false,
-            whatsappWebPaired: false,
-            callButtonAvailable: false,
-            audioSinkReady: false,
-            ffmpegReady: false,
-            fakeMicEnabled: false,
-            recordingDir: "",
-            capabilities: {
-                offerCall: false,
-            },
+            metadata: {},
         };
     }
-    const authPath = start.authPath || health.profileDir || process.env.WHATSAPP_BROWSER_CALL_PROFILE_DIR || "/home/martin/whatsapp-call-browser-profile";
-    const pairingCode = hasLiveHealth ? (health.pairingCode || "") : (start.pairingCode || "");
-    const qr = hasLiveHealth ? (health.qr || "") : (start.qr || "");
-    const lastHeartbeatAt = liveIsOffline
-        ? null
-        : health.lastHeartbeatAt
-            ? new Date(health.lastHeartbeatAt).toISOString()
-            : config.lastBaileysHeartbeatAt?.toISOString?.() || null;
     return {
-        callingRuntimeMode: config.callingRuntimeMode || WHATSAPP_CALLING_RUNTIME_MODE,
-        baileysCallBridgeStatus: config.baileysCallBridgeStatus || "offline",
-        baileysSessionId: config.baileysSessionId || "",
-        bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(config.bridgeBaseUrl),
-        lastBaileysHeartbeatAt: lastHeartbeatAt,
-        mediaStatus: config.mediaStatus || "signaling_only",
+        provider: config.provider || WHATSAPP_CALLING_PROVIDER,
+        status: config.status || "not_configured",
+        phoneNumberId: config.phoneNumberId || "",
+        wabaId: config.wabaId || "",
+        callingEnabled: Boolean(config.callingEnabled),
+        webhooksEnabled: Boolean(config.webhooksEnabled),
+        mediaMode: config.mediaMode || "sip",
+        sipEndpoint: config.sipEndpoint || "",
         mediaNotes: config.mediaNotes || "",
         lastReadinessStatus: config.lastReadinessStatus || null,
         lastReadinessCheckedAt: config.lastReadinessCheckedAt?.toISOString?.() || null,
         lastError: config.lastError || "",
-        pairingCode,
-        qr,
-        authPath,
-        authPathPersistent: isPersistentCallBridgeAuthPath(authPath),
-        simulated: hasLiveHealth ? health.simulated === true : start.simulated === true,
-        chromeReady: health.chromeReady === true,
-        whatsappWebPaired: health.whatsappWebPaired === true,
-        callButtonAvailable: health.callButtonAvailable === true,
-        audioSinkReady: health.audioSinkReady === true,
-        ffmpegReady: health.ffmpegReady === true,
-        fakeMicEnabled: health.fakeMicEnabled === true,
-        recordingDir: health.recordingDir || "",
-        capabilities: {
-            offerCall: hasLiveHealth ? health.callButtonAvailable === true : start.callButtonAvailable === true,
-        },
+        metadata: config.metadata && typeof config.metadata === "object" ? config.metadata : {},
     };
 }
 
@@ -360,7 +314,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         listWhatsAppChannels(location.id),
         getWhatsAppWebBridgeSession(location.id),
         getWhatsAppWebBridgeHealth(800),
-        (db as any).whatsAppCallBridgeConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
+        (db as any).whatsAppCallingConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
     ]);
 
     return {
@@ -418,26 +372,48 @@ export async function getWhatsAppWebBridgeDiagnostics(locationId?: string | null
 
 export async function updateWhatsAppCallingSettings(input: {
     locationId?: string | null;
-    baileysSessionId?: string | null;
-    bridgeBaseUrl?: string | null;
+    phoneNumberId?: string | null;
+    wabaId?: string | null;
+    callingEnabled?: boolean | null;
+    webhooksEnabled?: boolean | null;
+    mediaMode?: string | null;
+    sipEndpoint?: string | null;
     mediaNotes?: string | null;
 }) {
     const { location } = await resolveAdminContext(input.locationId || null);
-    const config = await (db as any).whatsAppCallBridgeConfig.upsert({
+    const selectedChannel = input.phoneNumberId
+        ? await (db as any).whatsAppChannel.findFirst({
+            where: { locationId: location.id, phoneNumberId: String(input.phoneNumberId).trim() },
+        }).catch(() => null)
+        : null;
+    const phoneNumberId = String(input.phoneNumberId || selectedChannel?.phoneNumberId || "").trim() || null;
+    const wabaId = String(input.wabaId || selectedChannel?.wabaId || "").trim() || null;
+    const mediaMode = ["sip", "browser_webrtc", "manual_sdp", "provider_managed"].includes(String(input.mediaMode || ""))
+        ? String(input.mediaMode)
+        : "sip";
+    const config = await (db as any).whatsAppCallingConfig.upsert({
         where: { locationId: location.id },
         create: {
             locationId: location.id,
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysCallBridgeStatus: "offline",
-            baileysSessionId: String(input.baileysSessionId || location.id).trim() || location.id,
-            bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(input.bridgeBaseUrl),
-            mediaStatus: "signaling_only",
+            provider: WHATSAPP_CALLING_PROVIDER,
+            status: input.callingEnabled ? "ready" : "not_configured",
+            phoneNumberId,
+            wabaId,
+            callingEnabled: input.callingEnabled === true,
+            webhooksEnabled: input.webhooksEnabled === true,
+            mediaMode,
+            sipEndpoint: input.sipEndpoint ? String(input.sipEndpoint).trim() : null,
             mediaNotes: input.mediaNotes ? String(input.mediaNotes).trim() : null,
         },
         update: {
-            callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
-            baileysSessionId: String(input.baileysSessionId || location.id).trim() || location.id,
-            bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(input.bridgeBaseUrl),
+            provider: WHATSAPP_CALLING_PROVIDER,
+            status: input.callingEnabled ? "ready" : "not_configured",
+            phoneNumberId,
+            wabaId,
+            callingEnabled: input.callingEnabled === true,
+            webhooksEnabled: input.webhooksEnabled === true,
+            mediaMode,
+            sipEndpoint: input.sipEndpoint ? String(input.sipEndpoint).trim() : null,
             mediaNotes: input.mediaNotes ? String(input.mediaNotes).trim() : null,
         },
     });
@@ -453,40 +429,12 @@ export async function updateWhatsAppCallingSettings(input: {
 
 export async function checkWhatsAppCallingReadinessAction(locationId?: string | null) {
     const { location } = await resolveAdminContext(locationId || null);
-    await refreshBaileysCallBridgeHealth(location.id).catch(() => undefined);
     const readiness = await checkCallingReadiness(location.id);
-    const config = await (db as any).whatsAppCallBridgeConfig.findUnique({
+    const config = await (db as any).whatsAppCallingConfig.findUnique({
         where: { locationId: location.id },
     }).catch(() => null);
     return {
         success: true as const,
-        readiness,
-        config: serializeWhatsAppCallingConfig(config),
-    };
-}
-
-export async function startWhatsAppCallingBridgeAction(input?: {
-    locationId?: string | null;
-    phoneNumber?: string | null;
-    resetAuth?: boolean | null;
-}) {
-    const { location } = await resolveAdminContext(input?.locationId || null);
-    const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
-        where: { locationId: location.id },
-    }).catch(() => null);
-    const result = await startBrowserCallBridgeSession({
-        locationId: location.id,
-        bridgeBaseUrl: existing?.bridgeBaseUrl || null,
-    });
-    await refreshBaileysCallBridgeHealth(location.id).catch(() => undefined);
-    const config = await (db as any).whatsAppCallBridgeConfig.findUnique({
-        where: { locationId: location.id },
-    }).catch(() => null);
-    const readiness = await checkCallingReadiness(location.id);
-    revalidatePath("/admin/settings/integrations/whatsapp");
-    return {
-        success: result.success,
-        result,
         readiness,
         config: serializeWhatsAppCallingConfig(config),
     };
