@@ -331,6 +331,7 @@ export async function startBaileysCallBridgeSession(input: {
     sessionId?: string | null;
     bridgeBaseUrl?: string | null;
     phoneNumber?: string | null;
+    resetAuth?: boolean;
 }): Promise<BaileysCallBridgeStartResult> {
     const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
         where: { locationId: input.locationId },
@@ -353,6 +354,7 @@ export async function startBaileysCallBridgeSession(input: {
             method: "POST",
             body: JSON.stringify({
                 phoneNumber: input.phoneNumber || null,
+                resetAuth: input.resetAuth === true,
             }),
         }
     );
@@ -360,6 +362,11 @@ export async function startBaileysCallBridgeSession(input: {
     const health = await bridgeFetch(bridgeBaseUrl, "/health", { method: "GET" }).catch(() => null);
     const status = normalizeBridgeStatus(health?.status || response?.status);
     const mediaStatus = normalizeMediaStatus(health?.mediaStatus);
+    const lastError = health?.ok === false
+        ? String(health?.error || "Bridge unhealthy.")
+        : response?.success === false
+            ? String(response?.error || response?.errorMessage || "Bridge start failed.")
+            : null;
     const updated = await (db as any).whatsAppCallBridgeConfig.upsert({
         where: { locationId: input.locationId },
         create: {
@@ -370,7 +377,7 @@ export async function startBaileysCallBridgeSession(input: {
             bridgeBaseUrl,
             lastBaileysHeartbeatAt: health?.lastHeartbeatAt ? new Date(health.lastHeartbeatAt) : new Date(),
             mediaStatus,
-            lastError: response?.success === false ? String(response?.error || response?.errorMessage || "Bridge start failed.") : null,
+            lastError,
             metadata: { start: response, health },
         },
         update: {
@@ -380,7 +387,7 @@ export async function startBaileysCallBridgeSession(input: {
             bridgeBaseUrl,
             lastBaileysHeartbeatAt: health?.lastHeartbeatAt ? new Date(health.lastHeartbeatAt) : new Date(),
             mediaStatus,
-            lastError: response?.success === false ? String(response?.error || response?.errorMessage || "Bridge start failed.") : null,
+            lastError,
             metadata: {
                 ...((existing?.metadata && typeof existing.metadata === "object") ? existing.metadata : {}),
                 start: response,

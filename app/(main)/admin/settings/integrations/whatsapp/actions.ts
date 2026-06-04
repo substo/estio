@@ -457,6 +457,7 @@ export async function checkWhatsAppCallingReadinessAction(locationId?: string | 
 export async function startWhatsAppCallingBridgeAction(input?: {
     locationId?: string | null;
     phoneNumber?: string | null;
+    resetAuth?: boolean | null;
 }) {
     const { location } = await resolveAdminContext(input?.locationId || null);
     const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
@@ -467,6 +468,7 @@ export async function startWhatsAppCallingBridgeAction(input?: {
         sessionId: existing?.baileysSessionId || location.id,
         bridgeBaseUrl: existing?.bridgeBaseUrl || null,
         phoneNumber: input?.phoneNumber || null,
+        resetAuth: input?.resetAuth === true,
     });
     await refreshBaileysCallBridgeHealth(location.id).catch(() => undefined);
     const config = await (db as any).whatsAppCallBridgeConfig.findUnique({

@@ -1,5 +1,6 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 
 type BridgeSession = {
     sessionId: string;
@@ -130,6 +131,10 @@ async function loadBaileysRuntime(): Promise<any | null> {
 
 function sanitizeSessionId(sessionId: string) {
     return String(sessionId || "default").replace(/[^a-zA-Z0-9_.-]+/g, "_");
+}
+
+function getAuthPath(sessionId: string) {
+    return `${AUTH_ROOT}/${sanitizeSessionId(sessionId)}`;
 }
 
 function getSocketFactory(baileys: any) {
@@ -332,7 +337,7 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
         };
     }
 
-    const authPath = `${AUTH_ROOT}/${sanitizeSessionId(session.sessionId)}`;
+    const authPath = getAuthPath(session.sessionId);
     const { state, saveCreds } = await baileys.useMultiFileAuthState(authPath);
     const version = typeof baileys.fetchLatestBaileysVersion === "function"
         ? (await baileys.fetchLatestBaileysVersion().catch(() => null))?.version
@@ -378,6 +383,10 @@ async function startSession(session: BridgeSession, body: any = {}) {
     session.pairingCode = null;
     session.qr = null;
     session.reconnectAttempts = 0;
+
+    if (body?.resetAuth === true) {
+        await rm(getAuthPath(session.sessionId), { recursive: true, force: true }).catch(() => undefined);
+    }
 
     if (SIMULATE) {
         session.status = "ready";

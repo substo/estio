@@ -483,6 +483,7 @@ export default function WhatsAppSettingsPage() {
             const result = await startWhatsAppCallingBridgeAction({
                 locationId: settings.locationId || null,
                 phoneNumber: callBridgePairingPhone || null,
+                resetAuth: callBridgeUnhealthy,
             });
             if (result?.success) {
                 setCallingReadiness(result.readiness || null);
