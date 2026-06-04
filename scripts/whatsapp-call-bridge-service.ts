@@ -12,6 +12,8 @@ type BridgeSession = {
     calls: Map<string, BridgeCall>;
     error?: string | null;
     socket?: any;
+    reconnectAttempts: number;
+    reconnectTimer?: ReturnType<typeof setTimeout> | null;
     capabilities: {
         offerCall: boolean;
     };
@@ -107,6 +109,8 @@ function getSession(sessionId: string): BridgeSession {
         mediaStatus: "signaling_only",
         calls: new Map(),
         error: null,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
         capabilities: {
             offerCall: false,
         },
@@ -173,7 +177,52 @@ function findCallByWhatsAppCallId(session: BridgeSession, whatsappCallId: string
     return activeCalls.length === 1 ? activeCalls[0] : null;
 }
 
-function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds?: () => Promise<void>) {
+function getDisconnectStatusCode(update: any) {
+    return Number(
+        update?.lastDisconnect?.error?.output?.statusCode
+        || update?.lastDisconnect?.error?.statusCode
+        || update?.lastDisconnect?.error?.data?.attrs?.code
+        || update?.lastDisconnect?.error?.data?.code
+        || 0
+    );
+}
+
+function shouldReconnectAfterClose(update: any) {
+    const statusCode = getDisconnectStatusCode(update);
+    const message = String(update?.lastDisconnect?.error?.message || "").toLowerCase();
+    return statusCode === 515 || message.includes("restart required");
+}
+
+function scheduleBaileysReconnect(session: BridgeSession, baileys: any) {
+    if (session.reconnectTimer) return;
+    if (session.reconnectAttempts >= 3) {
+        session.status = "unhealthy";
+        session.error = "Baileys requested restart repeatedly after pairing.";
+        return;
+    }
+
+    session.reconnectAttempts += 1;
+    session.status = "pairing";
+    session.qr = null;
+    session.pairingCode = null;
+    session.error = "WhatsApp accepted pairing; reconnecting with saved credentials.";
+    session.reconnectTimer = setTimeout(() => {
+        session.reconnectTimer = null;
+        closeSocket(session.socket);
+        session.socket = null;
+        void createBaileysSocket(session, baileys, { skipPairing: true }).then((result) => {
+            if (!result.success) {
+                session.status = "unhealthy";
+                session.error = result.error || "Baileys reconnect failed.";
+            }
+        }).catch((error: any) => {
+            session.status = "unhealthy";
+            session.error = error?.message || "Baileys reconnect failed.";
+        });
+    }, 1500);
+}
+
+function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() => Promise<void>) | undefined, baileys: any) {
     if (!socket?.ev?.on) return;
 
     if (saveCreds) {
@@ -193,9 +242,15 @@ function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds?: () =
         if (update?.connection === "open") {
             session.status = "ready";
             session.qr = null;
+            session.pairingCode = null;
             session.error = null;
+            session.reconnectAttempts = 0;
         }
         if (update?.connection === "close") {
+            if (shouldReconnectAfterClose(update)) {
+                scheduleBaileysReconnect(session, baileys);
+                return;
+            }
             session.status = "unhealthy";
             session.error = update?.lastDisconnect?.error?.message || "Baileys connection closed.";
         }
@@ -268,10 +323,10 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
     });
     session.socket = socket;
     session.capabilities.offerCall = typeof socket.offerCall === "function";
-    bindBaileysEvents(session, socket, saveCreds);
+    bindBaileysEvents(session, socket, saveCreds, baileys);
 
     const phoneNumber = String(body?.phoneNumber || process.env.WHATSAPP_CALL_BRIDGE_PAIRING_PHONE || "").replace(/\D/g, "");
-    if (phoneNumber && typeof socket.requestPairingCode === "function") {
+    if (!body?.skipPairing && phoneNumber && typeof socket.requestPairingCode === "function") {
         session.pairingCode = await socket.requestPairingCode(phoneNumber).catch(() => null);
     }
 
@@ -288,6 +343,10 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
 
 async function startSession(session: BridgeSession, body: any = {}) {
     closeSocket(session.socket);
+    if (session.reconnectTimer) {
+        clearTimeout(session.reconnectTimer);
+        session.reconnectTimer = null;
+    }
     session.socket = null;
     session.status = "pairing";
     session.startedAt = new Date().toISOString();
@@ -295,6 +354,7 @@ async function startSession(session: BridgeSession, body: any = {}) {
     session.error = null;
     session.pairingCode = null;
     session.qr = null;
+    session.reconnectAttempts = 0;
 
     if (SIMULATE) {
         session.status = "ready";
