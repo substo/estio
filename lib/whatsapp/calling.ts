@@ -565,6 +565,11 @@ export async function refreshBaileysCallBridgeHealth(locationId: string) {
     const status = normalizeBridgeStatus(health?.status || (health?.ok ? "ready" : "offline"));
     const mediaStatus = normalizeMediaStatus(health?.mediaStatus || existing?.mediaStatus);
     const sessionId = String(health?.sessionId || existing?.baileysSessionId || locationId).trim();
+    const heartbeatAt = health?.lastHeartbeatAt
+        ? new Date(health.lastHeartbeatAt)
+        : health?.ok
+            ? new Date()
+            : null;
     const updated = await (db as any).whatsAppCallBridgeConfig.upsert({
         where: { locationId },
         create: {
@@ -573,7 +578,7 @@ export async function refreshBaileysCallBridgeHealth(locationId: string) {
             baileysCallBridgeStatus: status,
             baileysSessionId: sessionId,
             bridgeBaseUrl,
-            lastBaileysHeartbeatAt: health?.ok ? new Date() : null,
+            lastBaileysHeartbeatAt: heartbeatAt,
             mediaStatus,
             lastError: health?.ok ? null : String(health?.error || "Bridge unhealthy."),
             metadata: { health },
@@ -582,7 +587,7 @@ export async function refreshBaileysCallBridgeHealth(locationId: string) {
             baileysCallBridgeStatus: status,
             baileysSessionId: sessionId,
             bridgeBaseUrl,
-            lastBaileysHeartbeatAt: health?.ok ? new Date() : existing?.lastBaileysHeartbeatAt || null,
+            lastBaileysHeartbeatAt: heartbeatAt,
             mediaStatus,
             lastError: health?.ok ? null : String(health?.error || "Bridge unhealthy."),
             metadata: {

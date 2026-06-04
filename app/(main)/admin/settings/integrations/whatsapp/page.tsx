@@ -260,6 +260,8 @@ export default function WhatsAppSettingsPage() {
     const [callBridgePolling, setCallBridgePolling] = useState(false);
     const [callBridgeQrDataUrl, setCallBridgeQrDataUrl] = useState("");
     const callBridgeUnhealthy = settings.whatsappCallingConfig.baileysCallBridgeStatus === "unhealthy";
+    const callBridgeOffline = settings.whatsappCallingConfig.baileysCallBridgeStatus === "offline";
+    const hasCallBridgePairingMaterial = Boolean(settings.whatsappCallingConfig.pairingCode || settings.whatsappCallingConfig.qr);
 
     // Embedded Signup State
     const [appId, setAppId] = useState(process.env.NEXT_PUBLIC_META_APP_ID || "");
@@ -1144,12 +1146,16 @@ export default function WhatsAppSettingsPage() {
                                 <div className="space-y-1">
                                     <Label>Call Capability</Label>
                                     <div className="rounded-md border px-3 py-2 text-sm">
-                                        {settings.whatsappCallingConfig.capabilities?.offerCall ? "offerCall available" : "offerCall not detected"}
+                                        {callBridgeOffline
+                                            ? "Start bridge to detect"
+                                            : settings.whatsappCallingConfig.capabilities?.offerCall
+                                                ? "offerCall available"
+                                                : "offerCall not detected"}
                                     </div>
                                 </div>
                             </div>
 
-                            {(!settings.whatsappCallingConfig.authPathPersistent || settings.whatsappCallingConfig.pairingCode || settings.whatsappCallingConfig.qr || settings.whatsappCallingConfig.simulated || callBridgePolling) && (
+                            {(!settings.whatsappCallingConfig.authPathPersistent || hasCallBridgePairingMaterial || settings.whatsappCallingConfig.simulated || callBridgePolling || callBridgeOffline) && (
                                 <div className="space-y-3 rounded-md border bg-muted/20 p-3 text-sm">
                                     {callBridgePolling && (
                                         <div className="flex items-center gap-2 text-sky-700">
@@ -1167,7 +1173,21 @@ export default function WhatsAppSettingsPage() {
                                             Configure WHATSAPP_CALL_BRIDGE_AUTH_DIR to a persistent server path before production pairing.
                                         </div>
                                     )}
-                                    {(settings.whatsappCallingConfig.pairingCode || settings.whatsappCallingConfig.qr) && (
+                                    {callBridgeOffline && !hasCallBridgePairingMaterial && !callBridgePolling && (
+                                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-4">
+                                            <div>
+                                                <div className="font-medium text-foreground">Call bridge is not paired</div>
+                                                <div className="mt-1 text-sm text-muted-foreground">
+                                                    Generate a QR code, then scan it from WhatsApp Linked devices before it expires.
+                                                </div>
+                                            </div>
+                                            <Button type="button" onClick={handleStartCallBridge} disabled={callingBusy || callBridgePolling}>
+                                                {callingBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
+                                                Generate QR
+                                            </Button>
+                                        </div>
+                                    )}
+                                    {hasCallBridgePairingMaterial && (
                                         <div className="grid gap-4 rounded-md border bg-background p-4 md:grid-cols-[260px_1fr]">
                                             <div className="flex min-h-[260px] items-center justify-center rounded-md border bg-white p-3">
                                                 {callBridgeQrDataUrl ? (

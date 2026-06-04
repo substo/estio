@@ -62,6 +62,9 @@ function serializeWhatsAppCallingConfig(config: any) {
     const metadata = config?.metadata && typeof config.metadata === "object" ? config.metadata : {};
     const health = metadata?.health && typeof metadata.health === "object" ? metadata.health : {};
     const start = metadata?.start && typeof metadata.start === "object" ? metadata.start : {};
+    const hasLiveHealth = Object.prototype.hasOwnProperty.call(metadata, "health");
+    const liveStatus = hasLiveHealth ? String(health.status || "").trim().toLowerCase() : "";
+    const liveIsOffline = hasLiveHealth && (liveStatus === "offline" || (health.ok === false && !health.sessionId && Number(health.sessionCount || 0) === 0));
     if (!config) {
         return {
             callingRuntimeMode: WHATSAPP_CALLING_RUNTIME_MODE,
@@ -85,24 +88,31 @@ function serializeWhatsAppCallingConfig(config: any) {
         };
     }
     const authPath = start.authPath || process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge";
+    const pairingCode = hasLiveHealth ? (health.pairingCode || "") : (start.pairingCode || "");
+    const qr = hasLiveHealth ? (health.qr || "") : (start.qr || "");
+    const lastHeartbeatAt = liveIsOffline
+        ? null
+        : health.lastHeartbeatAt
+            ? new Date(health.lastHeartbeatAt).toISOString()
+            : config.lastBaileysHeartbeatAt?.toISOString?.() || null;
     return {
         callingRuntimeMode: config.callingRuntimeMode || WHATSAPP_CALLING_RUNTIME_MODE,
         baileysCallBridgeStatus: config.baileysCallBridgeStatus || "offline",
         baileysSessionId: config.baileysSessionId || "",
         bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(config.bridgeBaseUrl),
-        lastBaileysHeartbeatAt: config.lastBaileysHeartbeatAt?.toISOString?.() || null,
+        lastBaileysHeartbeatAt,
         mediaStatus: config.mediaStatus || "signaling_only",
         mediaNotes: config.mediaNotes || "",
         lastReadinessStatus: config.lastReadinessStatus || null,
         lastReadinessCheckedAt: config.lastReadinessCheckedAt?.toISOString?.() || null,
         lastError: config.lastError || "",
-        pairingCode: health.pairingCode || start.pairingCode || "",
-        qr: health.qr || start.qr || "",
+        pairingCode,
+        qr,
         authPath,
         authPathPersistent: isPersistentCallBridgeAuthPath(authPath),
-        simulated: health.simulated === true || start.simulated === true,
+        simulated: hasLiveHealth ? health.simulated === true : start.simulated === true,
         capabilities: {
-            offerCall: health.capabilities?.offerCall === true || start.capabilities?.offerCall === true,
+            offerCall: hasLiveHealth ? health.capabilities?.offerCall === true : start.capabilities?.offerCall === true,
         },
     };
 }
@@ -333,11 +343,14 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         : "web_bridge";
 
     const whatsappChannels = await listWhatsAppChannels(location.id);
-    const [webBridgeSession, webBridgeHealth, callingConfig] = await Promise.all([
+    const [webBridgeSession, webBridgeHealth, callingHealthResult] = await Promise.all([
         getWhatsAppWebBridgeSession(location.id),
         getWhatsAppWebBridgeHealth(),
-        (db as any).whatsAppCallBridgeConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
+        refreshBaileysCallBridgeHealth(location.id).catch(async () => ({
+            config: await (db as any).whatsAppCallBridgeConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
+        })),
     ]);
+    const callingConfig = callingHealthResult?.config || null;
 
     return {
         // Meta
