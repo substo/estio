@@ -347,7 +347,7 @@ async function clickVoiceCall(to: string) {
     const digits = String(to || "").replace(/\D/g, "");
     if (digits) {
         await page.goto(`https://web.whatsapp.com/send?phone=${digits}`, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => undefined);
-        await page.waitForTimeout(3500);
+        await sleep(3500);
     }
     const selectors = [
         '[aria-label*="Voice call"]',
@@ -358,7 +358,7 @@ async function clickVoiceCall(to: string) {
         const element = await page.$(selector).catch(() => null);
         if (element) {
             await element.click();
-            await page.waitForTimeout(1500);
+            await sleep(1500);
             return await inspectCallUi();
         }
     }
