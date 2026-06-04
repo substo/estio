@@ -127,6 +127,7 @@ export async function GET(request: Request) {
                 spikeResult: metadata.spikeResult || null,
                 errorCode: attempt.errorCode || bridgeCall?.errorCode || null,
                 errorMessage: attempt.errorMessage || bridgeCall?.errorMessage || bridgeCall?.error || null,
+                fallbackCallLink: bridgeCall?.fallbackCallLink || metadata.fallbackCallLink || bridgeEvent.fallbackCallLink || bridgeResult.fallbackCallLink || null,
             },
             bridgeCall: bridgeCall ? {
                 callId: bridgeCall.callId || null,
@@ -134,6 +135,7 @@ export async function GET(request: Request) {
                 status: bridgeCall.status || null,
                 event: bridgeCall.event || null,
                 updatedAt: bridgeCall.updatedAt || null,
+                fallbackCallLink: bridgeCall.fallbackCallLink || null,
             } : null,
         });
     } catch (error) {

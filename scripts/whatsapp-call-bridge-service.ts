@@ -17,6 +17,7 @@ type BridgeSession = {
     reconnectTimer?: ReturnType<typeof setTimeout> | null;
     capabilities: {
         offerCall: boolean;
+        createCallLink: boolean;
     };
 };
 
@@ -35,6 +36,8 @@ type BridgeCall = {
     updatedAt: string;
     raw?: any;
     error?: string | null;
+    fallbackCallLink?: string | null;
+    timeoutTimer?: ReturnType<typeof setTimeout> | null;
 };
 
 const PORT = Number(process.env.WHATSAPP_CALL_BRIDGE_PORT || 3037);
@@ -42,6 +45,7 @@ const SECRET = String(process.env.WHATSAPP_CALL_BRIDGE_SECRET || "");
 const APP_WEBHOOK_URL = String(process.env.WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL || "").trim();
 const SIMULATE = process.env.WHATSAPP_CALL_BRIDGE_SIMULATE === "1";
 const AUTH_ROOT = String(process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge").trim();
+const OFFER_RINGING_TIMEOUT_MS = Math.max(3000, Number(process.env.WHATSAPP_CALL_BRIDGE_OFFER_RINGING_TIMEOUT_MS || 15000));
 const sessions = new Map<string, BridgeSession>();
 
 function closeSocket(socket: any) {
@@ -60,6 +64,13 @@ function closeSocket(socket: any) {
         }
     } catch {
         // Best-effort cleanup. A new socket will replace the stale one.
+    }
+}
+
+function clearCallTimer(call: BridgeCall | null | undefined) {
+    if (call?.timeoutTimer) {
+        clearTimeout(call.timeoutTimer);
+        call.timeoutTimer = null;
     }
 }
 
@@ -97,6 +108,70 @@ async function emitEvent(event: Record<string, any>) {
     }
 }
 
+async function createAudioCallLink(socket: any) {
+    if (!socket || typeof socket.createCallLink !== "function") return null;
+    try {
+        const link = await socket.createCallLink("audio", undefined, 2500);
+        return typeof link === "string" && link.trim() ? link.trim() : null;
+    } catch (error: any) {
+        console.warn("[WhatsApp Call Bridge] Failed to create audio call link:", error?.message || error);
+        return null;
+    }
+}
+
+function scheduleOfferUnconfirmedTimeout(session: BridgeSession, call: BridgeCall) {
+    clearCallTimer(call);
+    call.timeoutTimer = setTimeout(() => {
+        void (async () => {
+            const current = session.calls.get(call.callId);
+            if (!current) return;
+            if (current.event !== "call_offer_sent" || current.status !== "call_attempted") return;
+
+            const fallbackCallLink = await createAudioCallLink(session.socket);
+            current.status = "failed";
+            current.event = "call_media_unknown";
+            current.mediaStatus = "failed";
+            current.updatedAt = new Date().toISOString();
+            current.error = "WhatsApp accepted the Baileys call offer, but no ringing, answer, reject, or timeout event arrived.";
+            current.fallbackCallLink = fallbackCallLink;
+            current.raw = {
+                ...(current.raw || {}),
+                offerUnconfirmedAfterMs: OFFER_RINGING_TIMEOUT_MS,
+                fallbackCallLink,
+            };
+
+            console.warn("[WhatsApp Call Bridge] offerCall unconfirmed", JSON.stringify({
+                sessionId: session.sessionId,
+                callId: current.callId,
+                attemptId: current.attemptId || null,
+                conversationId: current.conversationId || null,
+                contactId: current.contactId || null,
+                to: maskCallTarget(current.to),
+                whatsappCallId: current.whatsappCallId || null,
+                fallbackCallLink: Boolean(fallbackCallLink),
+            }));
+
+            void emitEvent({
+                success: false,
+                event: "call_media_unknown",
+                callId: current.callId,
+                bridgeCallId: current.callId,
+                whatsappCallId: current.whatsappCallId,
+                attemptId: current.attemptId,
+                locationId: current.locationId,
+                conversationId: current.conversationId,
+                contactId: current.contactId,
+                status: current.status,
+                mediaStatus: current.mediaStatus,
+                errorCode: "baileys_offer_unconfirmed",
+                errorMessage: current.error,
+                fallbackCallLink,
+                raw: current.raw,
+            });
+        })();
+    }, OFFER_RINGING_TIMEOUT_MS);
+}
+
 function getSession(sessionId: string): BridgeSession {
     const existing = sessions.get(sessionId);
     if (existing) return existing;
@@ -114,6 +189,7 @@ function getSession(sessionId: string): BridgeSession {
         reconnectTimer: null,
         capabilities: {
             offerCall: false,
+            createCallLink: false,
         },
     };
     sessions.set(sessionId, session);
@@ -342,6 +418,7 @@ function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() =
             if (!call) continue;
 
             const mappedEvent = mapBaileysCallEvent(event);
+            if (mappedEvent !== "call_offer_sent") clearCallTimer(call);
             call.event = mappedEvent;
             call.updatedAt = new Date().toISOString();
             call.whatsappCallId = whatsappCallId || call.whatsappCallId || null;
@@ -401,6 +478,7 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
     });
     session.socket = socket;
     session.capabilities.offerCall = typeof socket.offerCall === "function";
+    session.capabilities.createCallLink = typeof socket.createCallLink === "function";
     bindBaileysEvents(session, socket, saveCreds, baileys);
 
     const phoneNumber = String(body?.phoneNumber || process.env.WHATSAPP_CALL_BRIDGE_PAIRING_PHONE || "").replace(/\D/g, "");
@@ -594,6 +672,7 @@ async function offerCall(session: BridgeSession, body: any) {
         call.whatsappCallId = whatsappCallId;
         call.raw = result;
         session.calls.set(callId, call);
+        scheduleOfferUnconfirmedTimeout(session, call);
         const response = {
             success: true,
             event: "call_offer_sent",
@@ -668,7 +747,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
                 qr: firstSession?.qr || null,
                 error: firstSession?.error || null,
                 lastHeartbeatAt: firstSession?.lastHeartbeatAt || null,
-                capabilities: firstSession?.capabilities || { offerCall: false },
+                capabilities: firstSession?.capabilities || { offerCall: false, createCallLink: false },
             });
         }
 
@@ -714,7 +793,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
             const callId = decodeURIComponent(parts[3]);
             const call = session.calls.get(callId);
             if (!call) return json(res, 404, { success: false, error: "Call not found" });
-            return json(res, 200, { success: true, ...call });
+            const { timeoutTimer: _timeoutTimer, ...serializableCall } = call;
+            return json(res, 200, { success: true, ...serializableCall });
         }
 
         return json(res, 404, { error: "Not found" });

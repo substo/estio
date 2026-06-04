@@ -126,6 +126,7 @@ type WhatsAppCallUiState = {
     callAttemptId?: string | null;
     bridgeCallId?: string | null;
     whatsappCallId?: string | null;
+    fallbackCallLink?: string | null;
     startedAt: number;
     updatedAt?: string | null;
 };
@@ -145,6 +146,7 @@ function mapWhatsAppCallPayloadToState(
     const whatsappCallId = call.whatsappCallId || payload?.whatsappCallId || payload?.providerCallId || null;
     const callAttemptId = call.id || payload?.callAttemptId || payload?.attemptId || previous?.callAttemptId || null;
     const mediaStatus = call.mediaStatus || payload?.mediaStatus || null;
+    const fallbackCallLink = call.fallbackCallLink || payload?.fallbackCallLink || payload?.bridgeCall?.fallbackCallLink || previous?.fallbackCallLink || null;
     const startedAt = previous?.startedAt || Date.now();
     let phase: WhatsAppCallUiPhase = "offer_sent";
     let label = "WhatsApp call offer sent";
@@ -164,10 +166,16 @@ function mapWhatsAppCallPayloadToState(
         phase = "failed";
         label = "WhatsApp call rejected";
         detail = "The customer or WhatsApp rejected the offer.";
-    } else if (rawStatus === "failed" || rawEvent === "call_failed" || rawEvent === "call_timeout" || errorMessage) {
+    } else if (rawStatus === "failed" || rawEvent === "call_failed" || rawEvent === "call_timeout" || rawEvent === "call_media_unknown" || errorMessage) {
         phase = "failed";
-        label = rawEvent === "call_timeout" ? "WhatsApp call timed out" : "WhatsApp call failed";
-        detail = errorMessage || "The bridge did not complete the call offer.";
+        label = rawEvent === "call_media_unknown"
+            ? "Direct WhatsApp call did not ring"
+            : rawEvent === "call_timeout"
+                ? "WhatsApp call timed out"
+                : "WhatsApp call failed";
+        detail = errorMessage || (rawEvent === "call_media_unknown"
+            ? "The Baileys bridge got a WhatsApp call id, but WhatsApp did not report ringing."
+            : "The bridge did not complete the call offer.");
     } else if (rawEvent === "call_ringing" || rawStatus === "ringing") {
         phase = "ringing";
         label = "WhatsApp call ringing";
@@ -185,6 +193,7 @@ function mapWhatsAppCallPayloadToState(
         callAttemptId,
         bridgeCallId,
         whatsappCallId,
+        fallbackCallLink,
         startedAt,
         updatedAt: call.updatedAt || payload?.updatedAt || null,
     };
@@ -441,6 +450,28 @@ export function ConversationComposer({
         }
     };
 
+    const handleSendWhatsAppCallLink = async () => {
+        const link = String(whatsAppCallState?.fallbackCallLink || "").trim();
+        if (!link || sending || isUnavailable) return;
+        try {
+            setSending(true);
+            await onSendMessage(`WhatsApp call link: ${link}`, "WhatsApp");
+            setWhatsAppCallState((current) => current
+                ? {
+                    ...current,
+                    label: "WhatsApp call link sent",
+                    detail: "Direct ringing was not confirmed, so a WhatsApp call link was sent in this chat.",
+                }
+                : current
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to send WhatsApp call link.";
+            setWhatsAppCallRequestError(message);
+        } finally {
+            setSending(false);
+        }
+    };
+
     useEffect(() => {
         if (!conversation || !whatsAppCallState?.callAttemptId) return;
         if (TERMINAL_WHATSAPP_CALL_PHASES.has(whatsAppCallState.phase)) return;
@@ -552,6 +583,29 @@ export function ConversationComposer({
                             {(whatsAppCallState.whatsappCallId || whatsAppCallState.bridgeCallId) && (
                                 <div className="mt-1 truncate font-mono text-[10px] opacity-70">
                                     {whatsAppCallState.whatsappCallId || whatsAppCallState.bridgeCallId}
+                                </div>
+                            )}
+                            {whatsAppCallState.fallbackCallLink && (
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 gap-1.5 rounded-md border-current/20 bg-white/70 px-2 text-[11px] text-current hover:bg-white"
+                                        disabled={sending || isUnavailable}
+                                        onClick={handleSendWhatsAppCallLink}
+                                    >
+                                        {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                        Send call link
+                                    </Button>
+                                    <a
+                                        href={whatsAppCallState.fallbackCallLink}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded-md px-2 py-1 text-[11px] font-medium underline-offset-2 hover:underline"
+                                    >
+                                        Open link
+                                    </a>
                                 </div>
                             )}
                         </div>

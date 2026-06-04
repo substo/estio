@@ -79,6 +79,23 @@ test("Baileys bridge normalization preserves signaling failures", () => {
     assert.equal(result.errorCode, "offer_call_unavailable");
 });
 
+test("Baileys bridge normalization treats unconfirmed offers as failed", () => {
+    const result = normalizeBaileysCallBridgeResult({
+        success: false,
+        event: "call_media_unknown",
+        bridgeCallId: "bridge_123",
+        whatsappCallId: "wa_123",
+        errorCode: "baileys_offer_unconfirmed",
+        errorMessage: "WhatsApp accepted the call offer, but no ringing event arrived.",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.status, "failed");
+    assert.equal(result.bridgeEvent, "call_media_unknown");
+    assert.equal(result.errorCode, "baileys_offer_unconfirmed");
+});
+
 test("readiness allows signaling when Baileys bridge is ready", () => {
     const readiness = checkCallingReadinessFromConfig({
         callingRuntimeMode: "baileys_rnd",

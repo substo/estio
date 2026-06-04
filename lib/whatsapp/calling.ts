@@ -150,7 +150,7 @@ export function normalizeBaileysCallBridgeResult(response: any): WhatsAppCalling
         || null;
     const callId = response?.providerCallId || whatsappCallId || bridgeCallId || response?.id || null;
     const mediaStatus = normalizeMediaStatus(response?.mediaStatus);
-    if (response?.success === false || event === "call_failed") {
+    if (response?.success === false || event === "call_failed" || event === "call_media_unknown") {
         return {
             success: false,
             outcome: "failed",
@@ -160,8 +160,16 @@ export function normalizeBaileysCallBridgeResult(response: any): WhatsAppCalling
             whatsappCallId: whatsappCallId ? String(whatsappCallId) : null,
             bridgeEvent: event || "call_failed",
             mediaStatus,
-            errorCode: response?.errorCode ? String(response.errorCode) : "baileys_call_bridge_failed",
-            errorMessage: response?.errorMessage || response?.error || "Baileys call bridge failed.",
+            errorCode: response?.errorCode
+                ? String(response.errorCode)
+                : event === "call_media_unknown"
+                    ? "baileys_offer_unconfirmed"
+                    : "baileys_call_bridge_failed",
+            errorMessage: response?.errorMessage
+                || response?.error
+                || (event === "call_media_unknown"
+                    ? "WhatsApp accepted the call offer, but no ringing event arrived."
+                    : "Baileys call bridge failed."),
             raw: response,
         };
     }
@@ -867,6 +875,7 @@ export async function updateWhatsAppCallFromBridgeEvent(input: {
                 bridgeCallId: result.bridgeCallId || null,
                 whatsappCallId: result.whatsappCallId || null,
                 mediaStatus: result.mediaStatus || null,
+                fallbackCallLink: input.event?.fallbackCallLink || (attempt.metadata as any)?.fallbackCallLink || null,
             },
         },
     });
