@@ -169,6 +169,7 @@ async function getPage() {
             const browser = await ensureBrowser();
             const pages = await browser.pages();
             const page = pages[0] || await browser.newPage();
+            await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 }).catch(() => undefined);
             await page.goto("https://web.whatsapp.com/", { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => undefined);
             return page;
         })();
