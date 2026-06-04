@@ -284,6 +284,15 @@ async function bridgeFetch(baseUrl: string, path: string, init?: RequestInit & {
     }
 }
 
+export function resolveBaileysCallOfferTarget(input: { phone?: string | null; targetJid?: string | null }) {
+    const phoneDigits = String(input.phone || "").replace(/\D/g, "");
+    if (phoneDigits.length >= 8) return phoneDigits;
+
+    const jid = String(input.targetJid || "").trim().toLowerCase();
+    if (/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(jid)) return jid;
+    return phoneDigits || "";
+}
+
 export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
     constructor(private readonly baseUrl: string = getWhatsAppCallBridgeBaseUrl()) {}
 
@@ -317,7 +326,11 @@ export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
                     method: "POST",
                     timeoutMs: BAILEYS_OFFER_CALL_TIMEOUT_MS,
                     body: JSON.stringify({
-                        to: input.targetJid || input.to,
+                        to: resolveBaileysCallOfferTarget({
+                            phone: input.to,
+                            targetJid: input.targetJid,
+                        }),
+                        targetJid: input.targetJid || null,
                         locationId: input.locationId,
                         conversationId: input.conversationId,
                         contactId: input.contactId,

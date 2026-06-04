@@ -4,6 +4,7 @@ import {
     checkCallingReadinessFromConfig,
     isPositiveWhatsAppCallConsentReply,
     normalizeBaileysCallBridgeResult,
+    resolveBaileysCallOfferTarget,
 } from "./calling";
 
 test("positive WhatsApp call consent replies are detected", () => {
@@ -34,6 +35,20 @@ test("Baileys bridge normalization treats call_offer_sent as signaling success",
     assert.equal(result.bridgeCallId, "bridge_123");
     assert.equal(result.whatsappCallId, "wa_123");
     assert.equal(result.mediaStatus, "signaling_only");
+});
+
+test("Baileys call target prefers phone over WebBridge LID", () => {
+    assert.equal(resolveBaileysCallOfferTarget({
+        phone: "+357 96 407 286",
+        targetJid: "155700009555@lid",
+    }), "35796407286");
+});
+
+test("Baileys call target falls back to JID when phone is missing", () => {
+    assert.equal(resolveBaileysCallOfferTarget({
+        phone: "",
+        targetJid: "155700009555@lid",
+    }), "155700009555@lid");
 });
 
 test("Baileys bridge normalization tracks accepted and media-connected events", () => {

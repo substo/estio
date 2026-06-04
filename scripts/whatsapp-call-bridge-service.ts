@@ -1,5 +1,5 @@
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 
 type BridgeSession = {
@@ -11,6 +11,7 @@ type BridgeSession = {
     qr: string | null;
     mediaStatus: "signaling_only" | "media_probe_started" | "audio_connected" | "failed";
     calls: Map<string, BridgeCall>;
+    recentCallEvents: any[];
     error?: string | null;
     socket?: any;
     reconnectAttempts: number;
@@ -18,6 +19,9 @@ type BridgeSession = {
     capabilities: {
         offerCall: boolean;
         createCallLink: boolean;
+        rejectCall: boolean;
+        getUSyncDevices: boolean;
+        createParticipantNodes: boolean;
     };
 };
 
@@ -37,6 +41,7 @@ type BridgeCall = {
     raw?: any;
     error?: string | null;
     fallbackCallLink?: string | null;
+    diagnostics?: any;
     timeoutTimer?: ReturnType<typeof setTimeout> | null;
 };
 
@@ -46,6 +51,7 @@ const APP_WEBHOOK_URL = String(process.env.WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL 
 const SIMULATE = process.env.WHATSAPP_CALL_BRIDGE_SIMULATE === "1";
 const AUTH_ROOT = String(process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge").trim();
 const OFFER_RINGING_TIMEOUT_MS = Math.max(3000, Number(process.env.WHATSAPP_CALL_BRIDGE_OFFER_RINGING_TIMEOUT_MS || 15000));
+const RECENT_CALL_EVENT_LIMIT = 25;
 const sessions = new Map<string, BridgeSession>();
 
 function closeSocket(socket: any) {
@@ -72,6 +78,35 @@ function clearCallTimer(call: BridgeCall | null | undefined) {
         clearTimeout(call.timeoutTimer);
         call.timeoutTimer = null;
     }
+}
+
+function pushRecentCallEvent(session: BridgeSession, event: any) {
+    session.recentCallEvents.push({
+        receivedAt: new Date().toISOString(),
+        event: sanitizeForJson(event),
+    });
+    if (session.recentCallEvents.length > RECENT_CALL_EVENT_LIMIT) {
+        session.recentCallEvents.splice(0, session.recentCallEvents.length - RECENT_CALL_EVENT_LIMIT);
+    }
+}
+
+function sanitizeForJson(value: any, depth = 0): any {
+    if (value == null) return value;
+    if (depth > 5) return "[depth_limit]";
+    if (value instanceof Uint8Array || Buffer.isBuffer(value)) {
+        return {
+            type: "bytes",
+            length: value.length,
+            previewHex: Buffer.from(value).subarray(0, 16).toString("hex"),
+        };
+    }
+    if (Array.isArray(value)) return value.map((item) => sanitizeForJson(item, depth + 1));
+    if (typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, entry]) => [key, sanitizeForJson(entry, depth + 1)])
+        );
+    }
+    return value;
 }
 
 function json(res: http.ServerResponse, status: number, body: any) {
@@ -138,6 +173,7 @@ function scheduleOfferUnconfirmedTimeout(session: BridgeSession, call: BridgeCal
                 ...(current.raw || {}),
                 offerUnconfirmedAfterMs: OFFER_RINGING_TIMEOUT_MS,
                 fallbackCallLink,
+                diagnostics: current.diagnostics || null,
             };
 
             console.warn("[WhatsApp Call Bridge] offerCall unconfirmed", JSON.stringify({
@@ -187,9 +223,13 @@ function getSession(sessionId: string): BridgeSession {
         error: null,
         reconnectAttempts: 0,
         reconnectTimer: null,
+        recentCallEvents: [],
         capabilities: {
             offerCall: false,
             createCallLink: false,
+            rejectCall: false,
+            getUSyncDevices: false,
+            createParticipantNodes: false,
         },
     };
     sessions.set(sessionId, session);
@@ -365,6 +405,69 @@ function scheduleBaileysReconnect(session: BridgeSession, baileys: any) {
     }, 1500);
 }
 
+async function inspectOfferCallPath(socket: any, targetJid: string, isVideo: boolean) {
+    const diagnostics: Record<string, any> = {
+        targetJid,
+        isVideo,
+        capabilities: {
+            getUSyncDevices: typeof socket?.getUSyncDevices === "function",
+            assertSessions: typeof socket?.assertSessions === "function",
+            createParticipantNodes: typeof socket?.createParticipantNodes === "function",
+        },
+        sourceDerivedOfferChildren: [
+            { tag: "audio", attrs: { enc: "opus", rate: "16000" } },
+            { tag: "audio", attrs: { enc: "opus", rate: "8000" } },
+            ...(isVideo ? [{ tag: "video", attrs: { enc: "vp8", dec: "vp8" } }] : []),
+            { tag: "net", attrs: { medium: "3" } },
+            { tag: "capability", attrs: { ver: "1" }, contentLength: 6 },
+            { tag: "encopt", attrs: { keygen: "2" } },
+            { tag: "destination", attrs: {} },
+            { tag: "device-identity", attrs: {}, conditional: true },
+        ],
+    };
+
+    if (typeof socket?.getUSyncDevices === "function") {
+        try {
+            const devices = await socket.getUSyncDevices([targetJid], true, false);
+            diagnostics.usyncDevices = sanitizeForJson(devices);
+            diagnostics.usyncDeviceCount = Array.isArray(devices) ? devices.length : null;
+            diagnostics.deviceFanout = Array.isArray(devices)
+                ? devices.map((device: any) => ({
+                    user: device?.user || null,
+                    device: device?.device ?? null,
+                    approximateJid: device?.user
+                        ? `${device.user}${device.device ? `:${device.device}` : ""}@s.whatsapp.net`
+                        : null,
+                }))
+                : [];
+        } catch (error: any) {
+            diagnostics.usyncError = error?.message || String(error);
+        }
+    }
+
+    if (
+        typeof socket?.createParticipantNodes === "function"
+        && Array.isArray(diagnostics.deviceFanout)
+        && diagnostics.deviceFanout.length > 0
+    ) {
+        try {
+            const jids = diagnostics.deviceFanout
+                .map((device: any) => device.approximateJid)
+                .filter(Boolean);
+            const result = await socket.createParticipantNodes(jids, {
+                call: { callKey: randomBytes(32) },
+            }, { count: "0" });
+            diagnostics.participantNodeCount = Array.isArray(result?.nodes) ? result.nodes.length : null;
+            diagnostics.shouldIncludeDeviceIdentity = result?.shouldIncludeDeviceIdentity ?? null;
+            diagnostics.participantNodePreview = sanitizeForJson(result?.nodes?.slice?.(0, 2) || []);
+        } catch (error: any) {
+            diagnostics.participantNodeError = error?.message || String(error);
+        }
+    }
+
+    return diagnostics;
+}
+
 function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() => Promise<void>) | undefined, baileys: any) {
     if (!socket?.ev?.on) return;
 
@@ -404,6 +507,7 @@ function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() =
     socket.ev.on("call", (events: any) => {
         const list = Array.isArray(events) ? events : [events];
         for (const event of list) {
+            pushRecentCallEvent(session, event);
             const whatsappCallId = extractWhatsAppCallId(event);
             const call = findCallByWhatsAppCallId(session, whatsappCallId) || findRecentActiveCallForEvent(session, event);
             console.log("[WhatsApp Call Bridge] Baileys call event", JSON.stringify({
@@ -415,9 +519,26 @@ function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() =
                 matchedCallId: call?.callId || null,
                 attemptId: call?.attemptId || null,
             }));
-            if (!call) continue;
 
             const mappedEvent = mapBaileysCallEvent(event);
+            if (!call && whatsappCallId) {
+                const now = new Date().toISOString();
+                const inboundCall: BridgeCall = {
+                    callId: whatsappCallId,
+                    whatsappCallId,
+                    to: String(event?.chatId || event?.from || ""),
+                    status: mappedEvent === "call_offer" ? "call_attempted" : mappedEvent.replace(/^call_/, ""),
+                    event: mappedEvent,
+                    mediaStatus: session.mediaStatus,
+                    createdAt: now,
+                    updatedAt: now,
+                    raw: event,
+                };
+                session.calls.set(inboundCall.callId, inboundCall);
+                continue;
+            }
+            if (!call) continue;
+
             if (mappedEvent !== "call_offer_sent") clearCallTimer(call);
             call.event = mappedEvent;
             call.updatedAt = new Date().toISOString();
@@ -479,6 +600,9 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
     session.socket = socket;
     session.capabilities.offerCall = typeof socket.offerCall === "function";
     session.capabilities.createCallLink = typeof socket.createCallLink === "function";
+    session.capabilities.rejectCall = typeof socket.rejectCall === "function";
+    session.capabilities.getUSyncDevices = typeof socket.getUSyncDevices === "function";
+    session.capabilities.createParticipantNodes = typeof socket.createParticipantNodes === "function";
     bindBaileysEvents(session, socket, saveCreds, baileys);
 
     const phoneNumber = String(body?.phoneNumber || process.env.WHATSAPP_CALL_BRIDGE_PAIRING_PHONE || "").replace(/\D/g, "");
@@ -667,10 +791,15 @@ async function offerCall(session: BridgeSession, body: any) {
 
     try {
         const targetJid = toCallJid(to);
-        const result = await socket.offerCall(targetJid, false);
+        const isVideo = body?.isVideo === true || body?.video === true;
+        const diagnostics = body?.diagnostics === true
+            ? await inspectOfferCallPath(socket, targetJid, isVideo)
+            : null;
+        const result = await socket.offerCall(targetJid, isVideo);
         const whatsappCallId = extractWhatsAppCallId(result);
         call.whatsappCallId = whatsappCallId;
-        call.raw = result;
+        call.diagnostics = diagnostics;
+        call.raw = { result, diagnostics };
         session.calls.set(callId, call);
         scheduleOfferUnconfirmedTimeout(session, call);
         const response = {
@@ -686,11 +815,14 @@ async function offerCall(session: BridgeSession, body: any) {
             status: call.status,
             mediaStatus: call.mediaStatus,
             targetJid,
+            diagnostics,
             raw: result,
         };
         console.log("[WhatsApp Call Bridge] offerCall sent", JSON.stringify({
             ...logContext,
             whatsappCallId,
+            isVideo,
+            usyncDeviceCount: diagnostics?.usyncDeviceCount ?? null,
             resultKeys: result && typeof result === "object" ? Object.keys(result).slice(0, 12) : [],
         }));
         void emitEvent(response);
@@ -747,7 +879,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
                 qr: firstSession?.qr || null,
                 error: firstSession?.error || null,
                 lastHeartbeatAt: firstSession?.lastHeartbeatAt || null,
-                capabilities: firstSession?.capabilities || { offerCall: false, createCallLink: false },
+                capabilities: firstSession?.capabilities || {
+                    offerCall: false,
+                    createCallLink: false,
+                    rejectCall: false,
+                    getUSyncDevices: false,
+                    createParticipantNodes: false,
+                },
+                recentCallEvents: firstSession?.recentCallEvents?.slice(-5) || [],
             });
         }
 
@@ -770,20 +909,40 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
             const body = await readJson(req);
             const callId = String(body?.callId || "");
             const call = callId ? session.calls.get(callId) : null;
+            const whatsappCallId = String(body?.whatsappCallId || call?.whatsappCallId || callId || "").trim();
+            const callFrom = String(body?.from || call?.raw?.from || call?.raw?.chatId || call?.to || "").trim();
+            let bridgeReject: any = null;
+            let bridgeRejectError: string | null = null;
+            if (session.socket && typeof session.socket.rejectCall === "function" && whatsappCallId && callFrom) {
+                try {
+                    bridgeReject = await session.socket.rejectCall(whatsappCallId, callFrom);
+                } catch (error: any) {
+                    bridgeRejectError = error?.message || String(error);
+                }
+            }
             if (call) {
                 call.status = "rejected";
                 call.event = "call_rejected";
                 call.updatedAt = new Date().toISOString();
+                call.raw = {
+                    ...(call.raw || {}),
+                    bridgeReject,
+                    bridgeRejectError,
+                };
             }
             const response = {
                 success: Boolean(call),
                 event: call ? "call_rejected" : "call_failed",
                 callId,
+                whatsappCallId: whatsappCallId || null,
+                from: callFrom || null,
                 attemptId: call?.attemptId || null,
                 locationId: call?.locationId || null,
                 conversationId: call?.conversationId || null,
                 contactId: call?.contactId || null,
                 errorCode: call ? null : "call_not_found",
+                bridgeRejectError,
+                raw: bridgeReject || null,
             };
             void emitEvent(response);
             return json(res, 200, response);
@@ -795,6 +954,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
             if (!call) return json(res, 404, { success: false, error: "Call not found" });
             const { timeoutTimer: _timeoutTimer, ...serializableCall } = call;
             return json(res, 200, { success: true, ...serializableCall });
+        }
+
+        if (method === "GET" && parts[2] === "calls") {
+            const calls = Array.from(session.calls.values()).map((call) => {
+                const { timeoutTimer: _timeoutTimer, ...serializableCall } = call;
+                return serializableCall;
+            });
+            return json(res, 200, {
+                success: true,
+                calls,
+                recentCallEvents: session.recentCallEvents,
+            });
         }
 
         return json(res, 404, { error: "Not found" });
