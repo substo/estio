@@ -83,6 +83,7 @@ export async function findContactsByPhoneDigitsWithFallback(
 ): Promise<Contact[]> {
     const digits = normalizePhoneDigits(phoneOrDigits);
     if (digits.length < MIN_PHONE_MATCH_DIGITS) return [];
+    const take = Math.max(1, Math.min(options.take || 12, 100));
 
     const indexedMatches = await findContactsByIndexedPhoneDigits(client, locationId, digits, options);
     if (indexedMatches.length > 0) return indexedMatches;

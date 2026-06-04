@@ -15,6 +15,13 @@ function createFakeDb(seed?: {
     };
 
     const db = {
+        $queryRaw: async (_strings: TemplateStringsArray, locationId: string, digits: string, take: number) =>
+            state.contacts
+                .filter((contact) => {
+                    const contactDigits = String(contact.phone || "").replace(/\D/g, "");
+                    return contact.locationId === locationId && contactDigits === digits;
+                })
+                .slice(0, take),
         location: {
             findUnique: async ({ where }: any) =>
                 state.locations.find((location) => location.id === where.id) || null,
@@ -26,6 +33,17 @@ function createFakeDb(seed?: {
                     return contact.locationId === where.locationId
                         && (!phoneContains || String(contact.phone || "").includes(phoneContains));
                 }) || null,
+            findMany: async ({ where, take }: any) =>
+                state.contacts
+                    .filter((contact) => {
+                        const clauses = Array.isArray(where.OR) ? where.OR : [{ phone: where.phone }];
+                        return contact.locationId === where.locationId
+                            && clauses.some((clause: any) => {
+                                const phoneContains = clause.phone?.contains;
+                                return !phoneContains || String(contact.phone || "").includes(phoneContains);
+                            });
+                    })
+                    .slice(0, take || state.contacts.length),
             create: async ({ data }: any) => {
                 const contact = { id: `contact_${state.contacts.length + 1}`, ...data };
                 state.contacts.push(contact);
@@ -123,6 +141,24 @@ test("unknown phone creates lead contact and conversation", async () => {
     assert.equal(state.conversations.length, 1);
     assert.equal(state.conversations[0].lastMessageType, "TYPE_SMS");
     assert.equal(state.conversations[0].unreadCount, 1);
+});
+
+test("similar phone suffix does not hijack inbound SMS conversation", async () => {
+    const { db, state } = createFakeDb({
+        contacts: [{ id: "contact_1", locationId: "loc_1", phone: "+35700111222", name: "Similar Suffix" }],
+        conversations: [{ id: "conv_1", locationId: "loc_1", contactId: "contact_1", unreadCount: 0 }],
+    });
+
+    const result = await processSmsRelayInbound(basePayload(), {
+        db,
+        publishConversationRealtimeEvent: async () => {},
+    });
+
+    assert.equal(result.status, "created");
+    assert.equal(state.contacts.length, 2);
+    assert.equal(state.contacts[1].phone, "+35799111222");
+    assert.equal(state.conversations.length, 2);
+    assert.equal(state.messages[0].conversationId, "conv_2");
 });
 
 test("duplicate inbound payload returns duplicate without creating another message", async () => {

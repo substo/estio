@@ -17,6 +17,7 @@
 import crypto from "crypto";
 import db from "@/lib/db";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
+import { findContactsByPhoneDigitsWithFallback } from "@/lib/contacts/phone-lookup";
 
 type SmsRelayInboundDeps = {
     db?: any;
@@ -102,15 +103,9 @@ export async function processSmsRelayInbound(
     // 3. Normalize phone
     const rawFrom = from.replace(/\D/g, "");
     const normalizedFrom = rawFrom.startsWith("+") ? from : `+${rawFrom}`;
-    const searchSuffix = rawFrom.length > 7 ? rawFrom.slice(-7) : rawFrom;
 
     // 4. Find or create contact
-    let contact = await database.contact.findFirst({
-        where: {
-            locationId,
-            phone: { contains: searchSuffix },
-        },
-    });
+    let contact = (await findContactsByPhoneDigitsWithFallback(database, locationId, rawFrom, { take: 1 }))[0] || null;
 
     let isNewContact = false;
     if (!contact) {
