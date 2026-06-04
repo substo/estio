@@ -63,6 +63,7 @@ export type WhatsAppCallingProvider = {
     placeCall(input: {
         locationId: string;
         to: string;
+        targetJid?: string | null;
         conversationId: string;
         contactId: string;
         attemptId: string;
@@ -280,6 +281,7 @@ export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
     async placeCall(input: {
         locationId: string;
         to: string;
+        targetJid?: string | null;
         conversationId: string;
         contactId: string;
         attemptId: string;
@@ -305,7 +307,7 @@ export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
                 {
                     method: "POST",
                     body: JSON.stringify({
-                        to: input.to,
+                        to: input.targetJid || input.to,
                         locationId: input.locationId,
                         conversationId: input.conversationId,
                         contactId: input.contactId,
@@ -903,6 +905,22 @@ async function findRecentWhatsAppConversationActivity(conversationId: string) {
     });
 }
 
+async function findWebBridgeConversationJid(conversationId: string, locationId: string) {
+    const sync = await (db as any).conversationSync.findFirst({
+        where: {
+            conversationId,
+            locationId,
+            provider: "whatsapp_web_bridge",
+            providerConversationId: { not: null },
+        },
+        orderBy: { updatedAt: "desc" },
+        select: { providerConversationId: true },
+    }).catch(() => null);
+    const jid = String(sync?.providerConversationId || "").trim().toLowerCase();
+    if (/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(jid)) return jid;
+    return null;
+}
+
 export async function startWhatsAppCall(input: {
     locationId: string;
     conversationId: string;
@@ -1079,9 +1097,11 @@ export async function startWhatsAppCall(input: {
     });
 
     const provider = input.provider || new BaileysCallBridgeProvider(readiness.bridgeBaseUrl);
+    const targetJid = await findWebBridgeConversationJid(conversation.id, input.locationId);
     const result = await provider.placeCall({
         locationId: input.locationId,
         to: contact.phone || existing.contactPhone || "",
+        targetJid,
         conversationId: conversation.id,
         contactId: contact.id,
         attemptId: existing.id,
@@ -1102,6 +1122,7 @@ export async function startWhatsAppCall(input: {
                 bridgeEvent: result.bridgeEvent || null,
                 bridgeCallId: result.bridgeCallId || null,
                 whatsappCallId: result.whatsappCallId || null,
+                targetJid,
                 mediaStatus: result.mediaStatus || null,
                 spikeResult: result.success
                     ? "baileys_call_signaling_started"

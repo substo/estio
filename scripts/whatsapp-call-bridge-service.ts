@@ -158,6 +158,25 @@ function extractWhatsAppCallId(value: any): string | null {
     return null;
 }
 
+function normalizeCallTarget(value: unknown) {
+    const raw = String(value || "").trim();
+    const lower = raw.toLowerCase();
+    if (/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(lower)) return lower;
+    return raw.replace(/\D/g, "");
+}
+
+function toCallJid(value: string) {
+    if (/@(s\.whatsapp\.net|lid)$/.test(value)) return value;
+    return `${value}@s.whatsapp.net`;
+}
+
+function maskCallTarget(value: string) {
+    if (!value) return null;
+    const [left, domain] = value.split("@");
+    const masked = left.length > 8 ? `${left.slice(0, 4)}...${left.slice(-4)}` : left;
+    return domain ? `${masked}@${domain}` : masked;
+}
+
 function mapBaileysCallEvent(value: any) {
     const rawStatus = String(value?.status || value?.event || value?.tag || value?.type || "").toLowerCase();
     if (rawStatus.includes("ring")) return "call_ringing";
@@ -180,6 +199,28 @@ function findCallByWhatsAppCallId(session: BridgeSession, whatsappCallId: string
         call.status === "call_attempted" || call.status === "accepted"
     ));
     return activeCalls.length === 1 ? activeCalls[0] : null;
+}
+
+function findRecentActiveCallForEvent(session: BridgeSession, event: any) {
+    const eventJids = [
+        event?.chatId,
+        event?.from,
+        event?.attrs?.from,
+        event?.node?.attrs?.from,
+    ].map((value) => String(value || "").toLowerCase()).filter(Boolean);
+    const activeCalls = Array.from(session.calls.values())
+        .filter((call) => call.status === "call_attempted" || call.status === "accepted")
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const recentThreshold = Date.now() - 5 * 60 * 1000;
+    return activeCalls.find((call) => {
+        if (Date.parse(call.createdAt) < recentThreshold) return false;
+        const callTargets = [
+            call.to,
+            toCallJid(call.to),
+            call.raw?.to,
+        ].map((value) => String(value || "").toLowerCase()).filter(Boolean);
+        return eventJids.some((jid) => callTargets.includes(jid));
+    }) || (activeCalls.length === 1 ? activeCalls[0] : null);
 }
 
 function getDisconnectStatusCode(update: any) {
@@ -288,7 +329,16 @@ function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() =
         const list = Array.isArray(events) ? events : [events];
         for (const event of list) {
             const whatsappCallId = extractWhatsAppCallId(event);
-            const call = findCallByWhatsAppCallId(session, whatsappCallId);
+            const call = findCallByWhatsAppCallId(session, whatsappCallId) || findRecentActiveCallForEvent(session, event);
+            console.log("[WhatsApp Call Bridge] Baileys call event", JSON.stringify({
+                sessionId: session.sessionId,
+                whatsappCallId,
+                status: event?.status || event?.event || event?.tag || event?.type || null,
+                chatId: event?.chatId || null,
+                from: event?.from || null,
+                matchedCallId: call?.callId || null,
+                attemptId: call?.attemptId || null,
+            }));
             if (!call) continue;
 
             const mappedEvent = mapBaileysCallEvent(event);
@@ -433,14 +483,14 @@ async function startSession(session: BridgeSession, body: any = {}) {
 async function offerCall(session: BridgeSession, body: any) {
     const now = new Date().toISOString();
     const callId = String(body?.callId || randomUUID());
-    const to = String(body?.to || "").replace(/\D/g, "");
+    const to = normalizeCallTarget(body?.to);
     const logContext = {
         sessionId: session.sessionId,
         callId,
         attemptId: body?.attemptId ? String(body.attemptId) : null,
         conversationId: body?.conversationId ? String(body.conversationId) : null,
         contactId: body?.contactId ? String(body.contactId) : null,
-        to: to ? `${to.slice(0, 4)}...${to.slice(-4)}` : null,
+        to: maskCallTarget(to),
     };
     console.log("[WhatsApp Call Bridge] offerCall request", JSON.stringify(logContext));
     if (!to) {
@@ -538,7 +588,8 @@ async function offerCall(session: BridgeSession, body: any) {
     }
 
     try {
-        const result = await socket.offerCall(`${to}@s.whatsapp.net`, false);
+        const targetJid = toCallJid(to);
+        const result = await socket.offerCall(targetJid, false);
         const whatsappCallId = extractWhatsAppCallId(result);
         call.whatsappCallId = whatsappCallId;
         call.raw = result;
@@ -555,6 +606,7 @@ async function offerCall(session: BridgeSession, body: any) {
             contactId: call.contactId,
             status: call.status,
             mediaStatus: call.mediaStatus,
+            targetJid,
             raw: result,
         };
         console.log("[WhatsApp Call Bridge] offerCall sent", JSON.stringify({
