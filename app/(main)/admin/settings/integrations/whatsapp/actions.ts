@@ -342,10 +342,10 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         ? String(payload.whatsappProviderMode || location.whatsappProviderMode)
         : "web_bridge";
 
-    const whatsappChannels = await listWhatsAppChannels(location.id);
-    const [webBridgeSession, webBridgeHealth, callingConfig] = await Promise.all([
+    const [whatsappChannels, webBridgeSession, webBridgeHealth, callingConfig] = await Promise.all([
+        listWhatsAppChannels(location.id),
         getWhatsAppWebBridgeSession(location.id),
-        getWhatsAppWebBridgeHealth(),
+        getWhatsAppWebBridgeHealth(800),
         (db as any).whatsAppCallBridgeConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
     ]);
 

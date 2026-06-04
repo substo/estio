@@ -248,11 +248,11 @@ async function bridgeFetch(path: string, init?: RequestInit & { timeoutMs?: numb
     }
 }
 
-export async function getWhatsAppWebBridgeHealth(): Promise<WhatsAppWebBridgeHealth> {
+export async function getWhatsAppWebBridgeHealth(timeoutMs = 5_000): Promise<WhatsAppWebBridgeHealth> {
     const baseUrl = getWhatsAppWebBridgeBaseUrl();
     const secret = getWhatsAppWebBridgeSecret();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const timeout = setTimeout(() => controller.abort(), Math.max(250, timeoutMs));
 
     try {
         const response = await fetch(`${baseUrl}/health`, {

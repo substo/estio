@@ -11,7 +11,7 @@ export default function IntegrationsPage() {
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {/* WhatsApp Integration Card */}
-                <Link href="/admin/settings/integrations/whatsapp" className="group block h-full">
+                <Link href="/admin/settings/integrations/whatsapp" prefetch={false} className="group block h-full">
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
                             <div className="flex items-center space-x-3">
@@ -31,7 +31,7 @@ export default function IntegrationsPage() {
                 </Link>
 
                 {/* GoHighLevel Integration Card */}
-                <Link href="/admin/settings/integrations/ghl" className="group block h-full">
+                <Link href="/admin/settings/integrations/ghl" prefetch={false} className="group block h-full">
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
                             <div className="flex items-center space-x-3">
@@ -53,7 +53,7 @@ export default function IntegrationsPage() {
                 </Link>
 
                 {/* SIM Relay Integration Card */}
-                <Link href="/admin/settings/integrations/sms-relay" className="group block h-full">
+                <Link href="/admin/settings/integrations/sms-relay" prefetch={false} className="group block h-full">
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
                             <div className="flex items-center space-x-3">
@@ -73,7 +73,7 @@ export default function IntegrationsPage() {
                 </Link>
 
                 {/* Google Contacts Integration Card */}
-                <Link href="/admin/settings/integrations/google" className="group block h-full">
+                <Link href="/admin/settings/integrations/google" prefetch={false} className="group block h-full">
 
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
@@ -96,7 +96,7 @@ export default function IntegrationsPage() {
                 </Link>
 
                 {/* Microsoft / Outlook Integration Card */}
-                <Link href="/admin/settings/integrations/microsoft" className="group block h-full">
+                <Link href="/admin/settings/integrations/microsoft" prefetch={false} className="group block h-full">
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
                             <div className="flex items-center space-x-3">
@@ -118,7 +118,7 @@ export default function IntegrationsPage() {
                 </Link>
 
                 {/* Provider Sync Operations Card */}
-                <Link href="/admin/settings/integrations/provider-sync" className="group block h-full">
+                <Link href="/admin/settings/integrations/provider-sync" prefetch={false} className="group block h-full">
                     <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
                         <div className="space-y-4">
                             <div className="flex items-center space-x-3">
