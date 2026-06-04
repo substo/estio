@@ -354,8 +354,10 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
     bindBaileysEvents(session, socket, saveCreds, baileys);
 
     const phoneNumber = String(body?.phoneNumber || process.env.WHATSAPP_CALL_BRIDGE_PAIRING_PHONE || "").replace(/\D/g, "");
-    if (!body?.skipPairing && phoneNumber && typeof socket.requestPairingCode === "function") {
-        session.pairingCode = await socket.requestPairingCode(phoneNumber).catch(() => null);
+    const usePairingCode = body?.usePairingCode === true;
+    if (!body?.skipPairing && usePairingCode && phoneNumber && typeof socket.requestPairingCode === "function") {
+        const pairingCode = await socket.requestPairingCode(phoneNumber).catch(() => null);
+        session.pairingCode = pairingCode && String(pairingCode) !== "ABCD1234" ? String(pairingCode) : null;
     }
 
     return {
