@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -110,6 +110,86 @@ const REFINE_DRAFT_ACTIONS = [
     "Add next step",
 ];
 
+type WhatsAppCallUiPhase =
+    | "starting"
+    | "offer_sent"
+    | "ringing"
+    | "accepted"
+    | "ended"
+    | "failed"
+    | "waiting";
+
+type WhatsAppCallUiState = {
+    phase: WhatsAppCallUiPhase;
+    label: string;
+    detail: string;
+    callAttemptId?: string | null;
+    bridgeCallId?: string | null;
+    whatsappCallId?: string | null;
+    startedAt: number;
+    updatedAt?: string | null;
+};
+
+const TERMINAL_WHATSAPP_CALL_PHASES = new Set<WhatsAppCallUiPhase>(["accepted", "ended", "failed"]);
+const WHATSAPP_CALL_WAITING_AFTER_MS = 25_000;
+
+function mapWhatsAppCallPayloadToState(
+    payload: any,
+    previous?: WhatsAppCallUiState | null
+): WhatsAppCallUiState {
+    const call = payload?.call || payload || {};
+    const rawStatus = String(call.status || payload?.status || "").toLowerCase();
+    const rawEvent = String(call.bridgeEvent || payload?.bridgeEvent || call.event || payload?.event || "").toLowerCase();
+    const errorMessage = call.errorMessage || payload?.errorMessage || payload?.error || null;
+    const bridgeCallId = call.bridgeCallId || payload?.bridgeCallId || null;
+    const whatsappCallId = call.whatsappCallId || payload?.whatsappCallId || payload?.providerCallId || null;
+    const callAttemptId = call.id || payload?.callAttemptId || payload?.attemptId || previous?.callAttemptId || null;
+    const mediaStatus = call.mediaStatus || payload?.mediaStatus || null;
+    const startedAt = previous?.startedAt || Date.now();
+    let phase: WhatsAppCallUiPhase = "offer_sent";
+    let label = "WhatsApp call offer sent";
+    let detail = "Waiting for WhatsApp to report ringing.";
+
+    if (rawStatus === "accepted" || rawEvent === "call_accepted" || rawEvent === "call_media_connected") {
+        phase = "accepted";
+        label = "WhatsApp call accepted";
+        detail = mediaStatus === "audio_connected"
+            ? "Audio is connected."
+            : "The customer accepted. Audio is still not implemented in this R&D bridge.";
+    } else if (rawStatus === "ended" || rawEvent === "call_terminated") {
+        phase = "ended";
+        label = "WhatsApp call ended";
+        detail = "The call lifecycle ended.";
+    } else if (rawStatus === "rejected" || rawEvent === "call_rejected") {
+        phase = "failed";
+        label = "WhatsApp call rejected";
+        detail = "The customer or WhatsApp rejected the offer.";
+    } else if (rawStatus === "failed" || rawEvent === "call_failed" || rawEvent === "call_timeout" || errorMessage) {
+        phase = "failed";
+        label = rawEvent === "call_timeout" ? "WhatsApp call timed out" : "WhatsApp call failed";
+        detail = errorMessage || "The bridge did not complete the call offer.";
+    } else if (rawEvent === "call_ringing" || rawStatus === "ringing") {
+        phase = "ringing";
+        label = "WhatsApp call ringing";
+        detail = "Waiting for the customer to answer or reject.";
+    } else if (rawEvent === "call_offer_sent" || rawStatus === "call_attempted") {
+        phase = "offer_sent";
+        label = "WhatsApp call offer sent";
+        detail = "Waiting for WhatsApp to report ringing. Microphone is not requested until real audio is wired.";
+    }
+
+    return {
+        phase,
+        label,
+        detail,
+        callAttemptId,
+        bridgeCallId,
+        whatsappCallId,
+        startedAt,
+        updatedAt: call.updatedAt || payload?.updatedAt || null,
+    };
+}
+
 function resizeComposerTextarea(textarea: HTMLTextAreaElement | null, hasDraft: boolean) {
     if (!textarea) return;
     if (typeof window === "undefined") return;
@@ -168,6 +248,7 @@ export function ConversationComposer({
     const [aiInstruction, setAiInstruction] = useState(EMPTY_AI_INSTRUCTION);
     const [requestingWhatsAppCall, setRequestingWhatsAppCall] = useState(false);
     const [whatsAppCallRequestError, setWhatsAppCallRequestError] = useState<string | null>(null);
+    const [whatsAppCallState, setWhatsAppCallState] = useState<WhatsAppCallUiState | null>(null);
     const {
         generatingDraft,
         selectedModel,
@@ -270,6 +351,7 @@ export function ConversationComposer({
     useEffect(() => {
         setIsRecording(false);
         setWhatsAppCallRequestError(null);
+        setWhatsAppCallState(null);
         clearTranslationPreview();
     }, [clearTranslationPreview, conversation?.id, setIsRecording]);
 
@@ -321,6 +403,12 @@ export function ConversationComposer({
         if (!conversation || requestingWhatsAppCall) return;
         setRequestingWhatsAppCall(true);
         setWhatsAppCallRequestError(null);
+        setWhatsAppCallState({
+            phase: "starting",
+            label: "Starting WhatsApp call",
+            detail: "Checking the bridge and sending a call offer.",
+            startedAt: Date.now(),
+        });
         try {
             const response = await fetch("/api/admin/conversations/whatsapp-call/start", {
                 method: "POST",
@@ -334,13 +422,80 @@ export function ConversationComposer({
             if (!response.ok || !payload?.success) {
                 throw new Error(payload?.errorMessage || payload?.error || "Failed to start WhatsApp call.");
             }
+            setWhatsAppCallState((current) => mapWhatsAppCallPayloadToState(payload, current));
         } catch (error) {
             console.error("Failed to start WhatsApp call:", error);
-            setWhatsAppCallRequestError(error instanceof Error ? error.message : "Failed to start WhatsApp call.");
+            const message = error instanceof Error ? error.message : "Failed to start WhatsApp call.";
+            setWhatsAppCallRequestError(message);
+            setWhatsAppCallState((current) => ({
+                phase: "failed",
+                label: "WhatsApp call failed",
+                detail: message,
+                startedAt: current?.startedAt || Date.now(),
+                callAttemptId: current?.callAttemptId,
+                bridgeCallId: current?.bridgeCallId,
+                whatsappCallId: current?.whatsappCallId,
+            }));
         } finally {
             setRequestingWhatsAppCall(false);
         }
     };
+
+    useEffect(() => {
+        if (!conversation || !whatsAppCallState?.callAttemptId) return;
+        if (TERMINAL_WHATSAPP_CALL_PHASES.has(whatsAppCallState.phase)) return;
+
+        let cancelled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        const poll = async () => {
+            try {
+                const params = new URLSearchParams({ callAttemptId: String(whatsAppCallState.callAttemptId) });
+                const response = await fetch(`/api/admin/conversations/whatsapp-call/status?${params.toString()}`);
+                const payload = await response.json().catch(() => ({}));
+                if (cancelled) return;
+                if (response.ok && payload?.success) {
+                    setWhatsAppCallState((current) => {
+                        if (!current) return mapWhatsAppCallPayloadToState(payload, whatsAppCallState);
+                        const next = mapWhatsAppCallPayloadToState(payload, current);
+                        if (
+                            next.phase === "offer_sent"
+                            && Date.now() - current.startedAt > WHATSAPP_CALL_WAITING_AFTER_MS
+                        ) {
+                            return {
+                                ...next,
+                                phase: "waiting",
+                                label: "Call offer sent, no ringing event yet",
+                                detail: "Baileys returned a WhatsApp call id, but no ringing/answer event has arrived.",
+                            };
+                        }
+                        return next;
+                    });
+                }
+            } catch {
+                if (!cancelled) {
+                    setWhatsAppCallState((current) => current
+                        ? {
+                            ...current,
+                            phase: current.phase === "offer_sent" ? "waiting" : current.phase,
+                            detail: "Waiting for call status. The status API did not respond quickly.",
+                        }
+                        : current
+                    );
+                }
+            } finally {
+                if (!cancelled) {
+                    timeoutId = setTimeout(poll, 2500);
+                }
+            }
+        };
+
+        timeoutId = setTimeout(poll, 1500);
+        return () => {
+            cancelled = true;
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [conversation, whatsAppCallState?.callAttemptId, whatsAppCallState?.phase]);
 
     useEffect(() => {
         onSelectedChannelChange?.(selectedChannel);
@@ -370,6 +525,46 @@ export function ConversationComposer({
                 {whatsAppCallRequestError && (
                     <div className="px-1 pb-1 text-[11px] text-amber-700">
                         {whatsAppCallRequestError}
+                    </div>
+                )}
+
+                {whatsAppCallState && (
+                    <div
+                        className={cn(
+                            "mb-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-xs shadow-sm",
+                            whatsAppCallState.phase === "failed"
+                                ? "border-red-200 bg-red-50 text-red-800"
+                                : whatsAppCallState.phase === "accepted" || whatsAppCallState.phase === "ringing"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                    : "border-sky-200 bg-sky-50 text-sky-800"
+                        )}
+                    >
+                        <div className="mt-0.5 shrink-0">
+                            {whatsAppCallState.phase === "starting" ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                                <PhoneOutgoing className="h-3.5 w-3.5" />
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="font-medium leading-4">{whatsAppCallState.label}</div>
+                            <div className="mt-0.5 leading-4 opacity-85">{whatsAppCallState.detail}</div>
+                            {(whatsAppCallState.whatsappCallId || whatsAppCallState.bridgeCallId) && (
+                                <div className="mt-1 truncate font-mono text-[10px] opacity-70">
+                                    {whatsAppCallState.whatsappCallId || whatsAppCallState.bridgeCallId}
+                                </div>
+                            )}
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 shrink-0 p-0 text-current opacity-70 hover:opacity-100"
+                            onClick={() => setWhatsAppCallState(null)}
+                            title="Dismiss call status"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </Button>
                     </div>
                 )}
 

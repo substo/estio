@@ -434,7 +434,20 @@ async function offerCall(session: BridgeSession, body: any) {
     const now = new Date().toISOString();
     const callId = String(body?.callId || randomUUID());
     const to = String(body?.to || "").replace(/\D/g, "");
+    const logContext = {
+        sessionId: session.sessionId,
+        callId,
+        attemptId: body?.attemptId ? String(body.attemptId) : null,
+        conversationId: body?.conversationId ? String(body.conversationId) : null,
+        contactId: body?.contactId ? String(body.contactId) : null,
+        to: to ? `${to.slice(0, 4)}...${to.slice(-4)}` : null,
+    };
+    console.log("[WhatsApp Call Bridge] offerCall request", JSON.stringify(logContext));
     if (!to) {
+        console.warn("[WhatsApp Call Bridge] offerCall rejected", JSON.stringify({
+            ...logContext,
+            errorCode: "missing_recipient",
+        }));
         return {
             success: false,
             event: "call_failed",
@@ -444,6 +457,11 @@ async function offerCall(session: BridgeSession, body: any) {
     }
 
     if (session.status !== "ready") {
+        console.warn("[WhatsApp Call Bridge] offerCall rejected", JSON.stringify({
+            ...logContext,
+            sessionStatus: session.status,
+            errorCode: "bridge_not_ready",
+        }));
         return {
             success: false,
             event: "call_failed",
@@ -484,6 +502,7 @@ async function offerCall(session: BridgeSession, body: any) {
             simulated: true,
             warning: "Simulated signaling only. Customer phone will not ring.",
         };
+        console.log("[WhatsApp Call Bridge] offerCall simulated", JSON.stringify(logContext));
         void emitEvent(response);
         return response;
     }
@@ -509,6 +528,11 @@ async function offerCall(session: BridgeSession, body: any) {
             errorCode: "offer_call_unavailable",
             errorMessage: call.error,
         };
+        console.warn("[WhatsApp Call Bridge] offerCall unavailable", JSON.stringify({
+            ...logContext,
+            errorCode: response.errorCode,
+            errorMessage: response.errorMessage,
+        }));
         void emitEvent(response);
         return response;
     }
@@ -533,6 +557,11 @@ async function offerCall(session: BridgeSession, body: any) {
             mediaStatus: call.mediaStatus,
             raw: result,
         };
+        console.log("[WhatsApp Call Bridge] offerCall sent", JSON.stringify({
+            ...logContext,
+            whatsappCallId,
+            resultKeys: result && typeof result === "object" ? Object.keys(result).slice(0, 12) : [],
+        }));
         void emitEvent(response);
         return response;
     } catch (error: any) {
@@ -555,6 +584,11 @@ async function offerCall(session: BridgeSession, body: any) {
             errorCode: "offer_call_failed",
             errorMessage: call.error,
         };
+        console.warn("[WhatsApp Call Bridge] offerCall failed", JSON.stringify({
+            ...logContext,
+            errorCode: response.errorCode,
+            errorMessage: response.errorMessage,
+        }));
         void emitEvent(response);
         return response;
     }
