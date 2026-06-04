@@ -14,6 +14,12 @@ const XVFB_DISPLAY = String(process.env.WHATSAPP_BROWSER_CALL_XVFB_DISPLAY || ":
 const START_XVFB = process.env.WHATSAPP_BROWSER_CALL_START_XVFB !== "0";
 const START_PULSEAUDIO = process.env.WHATSAPP_BROWSER_CALL_START_PULSEAUDIO !== "0";
 const USE_FAKE_MIC = process.env.WHATSAPP_BROWSER_CALL_USE_FAKE_MIC !== "0";
+const BROWSER_USER_AGENT = String(process.env.WHATSAPP_BROWSER_CALL_USER_AGENT || "").trim();
+const BROWSER_PLATFORM = String(process.env.WHATSAPP_BROWSER_CALL_PLATFORM || "").trim();
+const VIEWPORT_WIDTH = Number(process.env.WHATSAPP_BROWSER_CALL_VIEWPORT_WIDTH || 1280);
+const VIEWPORT_HEIGHT = Number(process.env.WHATSAPP_BROWSER_CALL_VIEWPORT_HEIGHT || 900);
+const VIEWPORT_IS_MOBILE = process.env.WHATSAPP_BROWSER_CALL_VIEWPORT_IS_MOBILE === "1";
+const VIEWPORT_HAS_TOUCH = process.env.WHATSAPP_BROWSER_CALL_VIEWPORT_HAS_TOUCH === "1";
 
 type CallState = "started" | "ringing" | "recording" | "ended" | "failed";
 
@@ -170,7 +176,19 @@ async function getPage() {
             const pages = await browser.pages();
             const page = pages[0] || await browser.newPage();
             await browser.defaultBrowserContext().overridePermissions("https://web.whatsapp.com", ["microphone", "camera", "notifications"]).catch(() => undefined);
-            await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 }).catch(() => undefined);
+            if (BROWSER_USER_AGENT) await page.setUserAgent(BROWSER_USER_AGENT).catch(() => undefined);
+            if (BROWSER_PLATFORM) {
+                await page.evaluateOnNewDocument((platform) => {
+                    Object.defineProperty(navigator, "platform", { get: () => platform });
+                }, BROWSER_PLATFORM).catch(() => undefined);
+            }
+            await page.setViewport({
+                width: VIEWPORT_WIDTH,
+                height: VIEWPORT_HEIGHT,
+                deviceScaleFactor: 1,
+                isMobile: VIEWPORT_IS_MOBILE,
+                hasTouch: VIEWPORT_HAS_TOUCH,
+            }).catch(() => undefined);
             await page.goto("https://web.whatsapp.com/", { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => undefined);
             return page;
         })();
