@@ -21,6 +21,7 @@ export interface PasteLeadPropertyImportJobData {
     publicReference: string;
     oldCrmPropertyId: string;
     source: LegacyCrmRefCandidate["source"];
+    interestSource?: string | null;
     queuedAt: string;
     pasteLeadTraceId?: string;
 }
@@ -134,6 +135,14 @@ function isUnrecoverableQueueError(error: unknown): boolean {
     return String((error as any)?.name || "") === "UnrecoverableError";
 }
 
+export function shouldApplyPropertyInterestForImportJob(interestSource?: string | null, pasteLeadTraceId?: string | null): boolean {
+    const normalized = String(interestSource || "").trim();
+    if (!normalized) return !String(pasteLeadTraceId || "").startsWith("requirements:");
+    return normalized === "client_inquired_property"
+        || normalized === "agent_note"
+        || normalized === "transcript";
+}
+
 export async function handlePasteLeadPropertyImportJobFailure(args: {
     job?: PasteLeadPropertyImportFailureJob | null;
     err: Error;
@@ -232,11 +241,15 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
         },
     });
 
+    const shouldApplyPropertyInterest = shouldApplyPropertyInterestForImportJob(job.interestSource, job.pasteLeadTraceId);
+
     if (existingProperty) {
-        await applyPropertyInterestToContact({
-            contactId: job.contactId,
-            property: existingProperty,
-        });
+        if (shouldApplyPropertyInterest) {
+            await applyPropertyInterestToContact({
+                contactId: job.contactId,
+                property: existingProperty,
+            });
+        }
         await addPropertyImportConversationNote({
             conversationId: job.conversationId,
             body: `Property ${job.publicReference} linked from existing app record.`,
@@ -299,7 +312,7 @@ export async function processPasteLeadPropertyImportJob(job: PasteLeadPropertyIm
         },
     });
 
-    if (property) {
+    if (property && shouldApplyPropertyInterest) {
         await applyPropertyInterestToContact({
             contactId: job.contactId,
             property,

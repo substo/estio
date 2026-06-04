@@ -498,6 +498,7 @@ export async function resolvePropertyEvidenceForContactActivity(args: {
         publicReference: candidate.publicReference,
         oldCrmPropertyId: candidate.oldCrmPropertyId,
         source: candidate.source,
+        interestSource: candidate.interestSource,
         pasteLeadTraceId: `requirements:${args.contactId}`,
       });
 
