@@ -169,6 +169,7 @@ async function getPage() {
             const browser = await ensureBrowser();
             const pages = await browser.pages();
             const page = pages[0] || await browser.newPage();
+            await browser.defaultBrowserContext().overridePermissions("https://web.whatsapp.com", ["microphone", "camera", "notifications"]).catch(() => undefined);
             await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 }).catch(() => undefined);
             await page.goto("https://web.whatsapp.com/", { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => undefined);
             return page;
@@ -342,6 +343,39 @@ async function inspectInteractiveElements() {
     }).catch(() => []);
 }
 
+async function inspectMediaEnvironment() {
+    if (SIMULATE) return { simulated: true };
+    const page = await getPage();
+    return page.evaluate(async () => {
+        const devices = await navigator.mediaDevices?.enumerateDevices?.().catch(() => []) || [];
+        const queryPermission = async (name: PermissionName) => {
+            try {
+                const status = await navigator.permissions?.query?.({ name });
+                return status?.state || "unknown";
+            } catch {
+                return "unknown";
+            }
+        };
+        return {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            viewport: {
+                width: window.innerWidth,
+                height: window.innerHeight,
+                devicePixelRatio: window.devicePixelRatio,
+            },
+            microphonePermission: await queryPermission("microphone" as PermissionName),
+            cameraPermission: await queryPermission("camera" as PermissionName),
+            devices: devices.map((device) => ({
+                kind: device.kind,
+                hasLabel: Boolean(device.label),
+                deviceIdPresent: Boolean(device.deviceId),
+                groupIdPresent: Boolean(device.groupId),
+            })),
+        };
+    }).catch((error: any) => ({ error: error?.message || "Unable to inspect media environment." }));
+}
+
 async function clickHangupIfVisible() {
     if (SIMULATE) return true;
     const page = await getPage();
@@ -490,6 +524,9 @@ const server = createServer(async (req, res) => {
         }
         if (req.method === "GET" && url.pathname === "/debug/elements") {
             return json(res, 200, { success: true, elements: await inspectInteractiveElements() });
+        }
+        if (req.method === "GET" && url.pathname === "/debug/media") {
+            return json(res, 200, { success: true, media: await inspectMediaEnvironment() });
         }
         if (req.method === "GET" && url.pathname === "/debug/screenshot") {
             if (SIMULATE) return json(res, 200, { success: true, simulated: true });
