@@ -1165,7 +1165,11 @@ export default function WhatsAppSettingsPage() {
                                     )}
                                     {callBridgeUnhealthy && (
                                         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-                                            Pairing expired or failed. Generate a new QR code, then scan it from WhatsApp Linked devices within a few minutes.
+                                            <div className="font-medium">Call bridge is not ready</div>
+                                            <div className="mt-1">
+                                                {settings.whatsappCallingConfig.lastError
+                                                    || "Pairing expired or failed. Generate a new QR code, then scan it from WhatsApp Linked devices within a few minutes."}
+                                            </div>
                                         </div>
                                     )}
                                     {!settings.whatsappCallingConfig.authPathPersistent && (

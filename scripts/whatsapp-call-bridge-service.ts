@@ -187,9 +187,30 @@ function getDisconnectStatusCode(update: any) {
     );
 }
 
+function getDisconnectErrorMessage(update: any) {
+    return String(
+        update?.lastDisconnect?.error?.message
+        || update?.lastDisconnect?.error?.output?.payload?.message
+        || update?.lastDisconnect?.error?.data?.message
+        || ""
+    ).trim();
+}
+
+function summarizeDisconnect(update: any) {
+    const error = update?.lastDisconnect?.error;
+    return {
+        connection: update?.connection || null,
+        statusCode: getDisconnectStatusCode(update) || null,
+        message: getDisconnectErrorMessage(update) || null,
+        outputStatusCode: error?.output?.statusCode || null,
+        outputPayload: error?.output?.payload || null,
+        data: error?.data || null,
+    };
+}
+
 function shouldReconnectAfterClose(update: any) {
     const statusCode = getDisconnectStatusCode(update);
-    const message = String(update?.lastDisconnect?.error?.message || "").toLowerCase();
+    const message = getDisconnectErrorMessage(update).toLowerCase();
     return statusCode === 515 || message.includes("restart required");
 }
 
@@ -247,12 +268,14 @@ function bindBaileysEvents(session: BridgeSession, socket: any, saveCreds: (() =
             session.reconnectAttempts = 0;
         }
         if (update?.connection === "close") {
+            const disconnect = summarizeDisconnect(update);
+            console.warn("[WhatsApp Call Bridge] Baileys connection closed:", JSON.stringify(disconnect));
             if (shouldReconnectAfterClose(update)) {
                 scheduleBaileysReconnect(session, baileys);
                 return;
             }
             session.status = "unhealthy";
-            session.error = update?.lastDisconnect?.error?.message || "Baileys connection closed.";
+            session.error = disconnect.message || disconnect.outputPayload?.error || "Baileys connection closed.";
         }
     });
 
@@ -546,6 +569,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
                 simulation: SIMULATE ? "signaling_only_no_customer_ring" : null,
                 pairingCode: firstSession?.pairingCode || null,
                 qr: firstSession?.qr || null,
+                error: firstSession?.error || null,
                 lastHeartbeatAt: firstSession?.lastHeartbeatAt || null,
                 capabilities: firstSession?.capabilities || { offerCall: false },
             });
