@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import QRCode from "qrcode";
 import {
     getWhatsAppSettings,
     updateWhatsAppSettings,
@@ -257,6 +258,7 @@ export default function WhatsAppSettingsPage() {
     const [callingReadiness, setCallingReadiness] = useState<any>(null);
     const [callBridgePairingPhone, setCallBridgePairingPhone] = useState("");
     const [callBridgePolling, setCallBridgePolling] = useState(false);
+    const [callBridgeQrDataUrl, setCallBridgeQrDataUrl] = useState("");
 
     // Embedded Signup State
     const [appId, setAppId] = useState(process.env.NEXT_PUBLIC_META_APP_ID || "");
@@ -487,7 +489,7 @@ export default function WhatsAppSettingsPage() {
                     description: result.config?.pairingCode
                         ? "Enter the pairing code in WhatsApp linked devices."
                         : result.config?.qr
-                            ? "Scan the QR value from the call bridge worker output or diagnostics."
+                            ? "Scan the QR code shown in this panel."
                             : result.readiness?.errorMessage || "Wait for readiness to report open.",
                     variant: result.readiness?.ready ? "default" : "destructive",
                 });
@@ -874,6 +876,35 @@ export default function WhatsAppSettingsPage() {
         toast({ title: "Copied", description: "Copied to clipboard." });
     };
 
+    useEffect(() => {
+        let cancelled = false;
+        const payload = settings.whatsappCallingConfig.qr;
+        if (!payload) {
+            setCallBridgeQrDataUrl("");
+            return;
+        }
+
+        QRCode.toDataURL(payload, {
+            errorCorrectionLevel: "M",
+            margin: 2,
+            scale: 8,
+            color: {
+                dark: "#111827",
+                light: "#ffffff",
+            },
+        })
+            .then((dataUrl) => {
+                if (!cancelled) setCallBridgeQrDataUrl(dataUrl);
+            })
+            .catch(() => {
+                if (!cancelled) setCallBridgeQrDataUrl("");
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [settings.whatsappCallingConfig.qr]);
+
     if (loading) {
         return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
     }
@@ -1118,35 +1149,98 @@ export default function WhatsAppSettingsPage() {
                             </div>
 
                             {(!settings.whatsappCallingConfig.authPathPersistent || settings.whatsappCallingConfig.pairingCode || settings.whatsappCallingConfig.qr || settings.whatsappCallingConfig.simulated || callBridgePolling) && (
-                                <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs md:grid-cols-2">
+                                <div className="space-y-3 rounded-md border bg-muted/20 p-3 text-sm">
                                     {callBridgePolling && (
-                                        <div className="text-sky-700 md:col-span-2">
+                                        <div className="flex items-center gap-2 text-sky-700">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
                                             Polling bridge health for QR, pairing code, or ready status.
                                         </div>
                                     )}
                                     {!settings.whatsappCallingConfig.authPathPersistent && (
-                                        <div className="text-amber-700 md:col-span-2">
+                                        <div className="text-amber-700">
                                             Configure WHATSAPP_CALL_BRIDGE_AUTH_DIR to a persistent server path before production pairing.
                                         </div>
                                     )}
-                                    {settings.whatsappCallingConfig.pairingCode && (
-                                        <div>
-                                            <div className="font-medium text-foreground">Pairing Code</div>
-                                            <div className="mt-1 rounded border bg-background px-2 py-1 font-mono text-sm">
-                                                {settings.whatsappCallingConfig.pairingCode}
+                                    {(settings.whatsappCallingConfig.pairingCode || settings.whatsappCallingConfig.qr) && (
+                                        <div className="grid gap-4 rounded-md border bg-background p-4 md:grid-cols-[260px_1fr]">
+                                            <div className="flex min-h-[260px] items-center justify-center rounded-md border bg-white p-3">
+                                                {callBridgeQrDataUrl ? (
+                                                    <img
+                                                        src={callBridgeQrDataUrl}
+                                                        alt="WhatsApp call bridge pairing QR code"
+                                                        className="h-56 w-56"
+                                                    />
+                                                ) : (
+                                                    <div className="flex h-56 w-56 items-center justify-center rounded border border-dashed text-center text-xs text-muted-foreground">
+                                                        QR code is being prepared...
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
-                                    )}
-                                    {settings.whatsappCallingConfig.qr && (
-                                        <div>
-                                            <div className="font-medium text-foreground">QR Payload</div>
-                                            <div className="mt-1 max-h-24 overflow-auto break-all rounded border bg-background px-2 py-1 font-mono">
-                                                {settings.whatsappCallingConfig.qr}
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <div className="text-base font-medium text-foreground">Pair the call bridge</div>
+                                                    <div className="mt-1 text-sm text-muted-foreground">
+                                                        Open WhatsApp on the call number, go to Linked devices, and scan this QR code.
+                                                    </div>
+                                                </div>
+                                                {settings.whatsappCallingConfig.pairingCode && (
+                                                    <div className="space-y-1">
+                                                        <Label>Pairing Code</Label>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="flex-1 rounded-md border bg-muted/30 px-3 py-2 font-mono text-lg font-semibold tracking-wider text-foreground">
+                                                                {settings.whatsappCallingConfig.pairingCode}
+                                                            </div>
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="icon"
+                                                                onClick={() => copyToClipboard(settings.whatsappCallingConfig.pairingCode)}
+                                                                aria-label="Copy pairing code"
+                                                            >
+                                                                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                                                    <div className="rounded-md border px-3 py-2">
+                                                        <div className="text-xs uppercase text-muted-foreground">Status</div>
+                                                        <div className="font-medium text-foreground">
+                                                            {settings.whatsappCallingConfig.baileysCallBridgeStatus || "pairing"}
+                                                        </div>
+                                                    </div>
+                                                    <div className="rounded-md border px-3 py-2">
+                                                        <div className="text-xs uppercase text-muted-foreground">Call Signaling</div>
+                                                        <div className="font-medium text-foreground">
+                                                            {settings.whatsappCallingConfig.capabilities?.offerCall ? "Available after pairing" : "Waiting for bridge"}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <Button type="button" variant="outline" onClick={handleCheckCallingReadiness} disabled={callingBusy || callBridgePolling}>
+                                                        <RefreshCw className="mr-2 h-4 w-4" />
+                                                        Refresh
+                                                    </Button>
+                                                    {settings.whatsappCallingConfig.qr && (
+                                                        <Button type="button" variant="ghost" onClick={() => copyToClipboard(settings.whatsappCallingConfig.qr)}>
+                                                            <Copy className="mr-2 h-4 w-4" />
+                                                            Copy Raw QR
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                                {settings.whatsappCallingConfig.qr && (
+                                                    <details className="rounded-md border bg-muted/20 p-3 text-xs">
+                                                        <summary className="cursor-pointer font-medium text-foreground">Debug payload</summary>
+                                                        <div className="mt-2 max-h-24 overflow-auto break-all rounded border bg-background px-2 py-1 font-mono">
+                                                            {settings.whatsappCallingConfig.qr}
+                                                        </div>
+                                                    </details>
+                                                )}
                                             </div>
                                         </div>
                                     )}
                                     {settings.whatsappCallingConfig.simulated && (
-                                        <div className="text-amber-700 md:col-span-2">
+                                        <div className="text-amber-700">
                                             Simulation mode is active. UI plumbing can be tested, but customer phones will not ring.
                                         </div>
                                     )}
