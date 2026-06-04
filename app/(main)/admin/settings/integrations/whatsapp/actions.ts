@@ -48,7 +48,7 @@ import {
     checkCallingReadiness,
     getWhatsAppCallBridgeBaseUrl,
     refreshBaileysCallBridgeHealth,
-    startBaileysCallBridgeSession,
+    startBrowserCallBridgeSession,
 } from "@/lib/whatsapp/calling";
 
 const MASKED_SECRET = "********";
@@ -79,15 +79,22 @@ function serializeWhatsAppCallingConfig(config: any) {
             lastError: "",
             pairingCode: "",
             qr: "",
-            authPath: process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge",
-            authPathPersistent: isPersistentCallBridgeAuthPath(process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge"),
+            authPath: process.env.WHATSAPP_BROWSER_CALL_PROFILE_DIR || "/home/martin/whatsapp-call-browser-profile",
+            authPathPersistent: isPersistentCallBridgeAuthPath(process.env.WHATSAPP_BROWSER_CALL_PROFILE_DIR || "/home/martin/whatsapp-call-browser-profile"),
             simulated: false,
+            chromeReady: false,
+            whatsappWebPaired: false,
+            callButtonAvailable: false,
+            audioSinkReady: false,
+            ffmpegReady: false,
+            fakeMicEnabled: false,
+            recordingDir: "",
             capabilities: {
                 offerCall: false,
             },
         };
     }
-    const authPath = start.authPath || process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge";
+    const authPath = start.authPath || health.profileDir || process.env.WHATSAPP_BROWSER_CALL_PROFILE_DIR || "/home/martin/whatsapp-call-browser-profile";
     const pairingCode = hasLiveHealth ? (health.pairingCode || "") : (start.pairingCode || "");
     const qr = hasLiveHealth ? (health.qr || "") : (start.qr || "");
     const lastHeartbeatAt = liveIsOffline
@@ -111,8 +118,15 @@ function serializeWhatsAppCallingConfig(config: any) {
         authPath,
         authPathPersistent: isPersistentCallBridgeAuthPath(authPath),
         simulated: hasLiveHealth ? health.simulated === true : start.simulated === true,
+        chromeReady: health.chromeReady === true,
+        whatsappWebPaired: health.whatsappWebPaired === true,
+        callButtonAvailable: health.callButtonAvailable === true,
+        audioSinkReady: health.audioSinkReady === true,
+        ffmpegReady: health.ffmpegReady === true,
+        fakeMicEnabled: health.fakeMicEnabled === true,
+        recordingDir: health.recordingDir || "",
         capabilities: {
-            offerCall: hasLiveHealth ? health.capabilities?.offerCall === true : start.capabilities?.offerCall === true,
+            offerCall: hasLiveHealth ? health.callButtonAvailable === true : start.callButtonAvailable === true,
         },
     };
 }
@@ -460,12 +474,9 @@ export async function startWhatsAppCallingBridgeAction(input?: {
     const existing = await (db as any).whatsAppCallBridgeConfig.findUnique({
         where: { locationId: location.id },
     }).catch(() => null);
-    const result = await startBaileysCallBridgeSession({
+    const result = await startBrowserCallBridgeSession({
         locationId: location.id,
-        sessionId: existing?.baileysSessionId || location.id,
         bridgeBaseUrl: existing?.bridgeBaseUrl || null,
-        phoneNumber: input?.phoneNumber || null,
-        resetAuth: input?.resetAuth === true,
     });
     await refreshBaileysCallBridgeHealth(location.id).catch(() => undefined);
     const config = await (db as any).whatsAppCallBridgeConfig.findUnique({

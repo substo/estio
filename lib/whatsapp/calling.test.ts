@@ -4,6 +4,7 @@ import {
     checkCallingReadinessFromConfig,
     isPositiveWhatsAppCallConsentReply,
     normalizeBaileysCallBridgeResult,
+    normalizeBrowserCallBridgeResult,
     resolveBaileysCallOfferTarget,
 } from "./calling";
 
@@ -111,7 +112,156 @@ test("Baileys bridge normalization treats unconfirmed offers as failed", () => {
     assert.equal(result.errorCode, "baileys_offer_unconfirmed");
 });
 
-test("readiness allows signaling when Baileys bridge is ready", () => {
+test("browser bridge normalization tracks started, recording, ended, and failed states", () => {
+    const started = normalizeBrowserCallBridgeResult({
+        success: true,
+        state: "started",
+        callId: "browser_123",
+    });
+    assert.equal(started.success, true);
+    assert.equal(started.status, "call_attempted");
+    assert.equal(started.bridgeCallId, "browser_123");
+
+    const recording = normalizeBrowserCallBridgeResult({
+        success: true,
+        state: "recording",
+        callId: "browser_123",
+        recordingPath: "/tmp/browser_123.wav",
+    });
+    assert.equal(recording.status, "call_attempted");
+    assert.equal(recording.mediaStatus, "audio_connected");
+
+    const ended = normalizeBrowserCallBridgeResult({
+        success: true,
+        state: "ended",
+        callId: "browser_123",
+        recordingPath: "/tmp/browser_123.wav",
+    });
+    assert.equal(ended.status, "ended");
+
+    const failed = normalizeBrowserCallBridgeResult({
+        success: false,
+        state: "failed",
+        errorCode: "browser_call_start_failed",
+    });
+    assert.equal(failed.success, false);
+    assert.equal(failed.status, "failed");
+});
+
+test("readiness allows browser calls when paired, audio sink, and ffmpeg are ready", () => {
+    const readiness = checkCallingReadinessFromConfig({
+        callingRuntimeMode: "whatsapp_web_browser_call_rnd",
+        baileysCallBridgeStatus: "ready",
+        bridgeBaseUrl: "http://127.0.0.1:3038",
+        metadata: {
+            health: {
+                ok: true,
+                status: "ready",
+                chromeReady: true,
+                whatsappWebPaired: true,
+                callButtonAvailable: true,
+                audioSinkReady: true,
+                ffmpegReady: true,
+                profileDir: "/home/martin/whatsapp-call-browser-profile",
+                recordingDir: "/home/martin/whatsapp-call-recordings",
+            },
+        },
+    });
+
+    assert.equal(readiness.ready, true);
+    assert.equal(readiness.outcome, "success");
+    assert.equal(readiness.callingRuntimeMode, "whatsapp_web_browser_call_rnd");
+    assert.equal(readiness.whatsappWebPaired, true);
+    assert.equal(readiness.callButtonAvailable, true);
+    assert.equal(readiness.audioSinkReady, true);
+    assert.equal(readiness.ffmpegReady, true);
+});
+
+test("browser readiness fails when bridge is unreachable", () => {
+    const readiness = checkCallingReadinessFromConfig({
+        callingRuntimeMode: "whatsapp_web_browser_call_rnd",
+        bridgeBaseUrl: "http://127.0.0.1:3038",
+    });
+
+    assert.equal(readiness.ready, false);
+    assert.equal(readiness.errorCode, "browser_call_bridge_unreachable");
+});
+
+test("browser readiness fails when WhatsApp Web is unpaired", () => {
+    const readiness = checkCallingReadinessFromConfig({
+        callingRuntimeMode: "whatsapp_web_browser_call_rnd",
+        metadata: {
+            health: {
+                ok: false,
+                status: "unpaired",
+                chromeReady: true,
+                whatsappWebPaired: false,
+                callButtonAvailable: false,
+                audioSinkReady: true,
+                ffmpegReady: true,
+            },
+        },
+    });
+
+    assert.equal(readiness.ready, false);
+    assert.equal(readiness.errorCode, "whatsapp_web_unpaired");
+});
+
+test("browser readiness treats current-page call button as diagnostic only", () => {
+    const readiness = checkCallingReadinessFromConfig({
+        callingRuntimeMode: "whatsapp_web_browser_call_rnd",
+        metadata: {
+            health: {
+                ok: true,
+                status: "unhealthy",
+                chromeReady: true,
+                whatsappWebPaired: true,
+                callButtonAvailable: false,
+                audioSinkReady: true,
+                ffmpegReady: true,
+            },
+        },
+    });
+
+    assert.equal(readiness.ready, true);
+    assert.equal(readiness.callButtonAvailable, false);
+});
+
+test("browser readiness fails when audio sink or ffmpeg is missing", () => {
+    const audio = checkCallingReadinessFromConfig({
+        callingRuntimeMode: "whatsapp_web_browser_call_rnd",
+        metadata: {
+            health: {
+                ok: true,
+                status: "unhealthy",
+                chromeReady: true,
+                whatsappWebPaired: true,
+                callButtonAvailable: true,
+                audioSinkReady: false,
+                ffmpegReady: true,
+            },
+        },
+    });
+    assert.equal(audio.errorCode, "browser_audio_sink_unavailable");
+
+    const ffmpeg = checkCallingReadinessFromConfig({
+        callingRuntimeMode: "whatsapp_web_browser_call_rnd",
+        metadata: {
+            health: {
+                ok: true,
+                status: "unhealthy",
+                chromeReady: true,
+                whatsappWebPaired: true,
+                callButtonAvailable: true,
+                audioSinkReady: true,
+                ffmpegReady: false,
+            },
+        },
+    });
+    assert.equal(ffmpeg.errorCode, "browser_ffmpeg_unavailable");
+});
+
+test("Baileys runtime remains dormant but can be explicitly configured", () => {
     const readiness = checkCallingReadinessFromConfig({
         callingRuntimeMode: "baileys_rnd",
         baileysCallBridgeStatus: "ready",

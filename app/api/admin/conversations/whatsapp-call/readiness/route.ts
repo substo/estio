@@ -22,6 +22,7 @@ export async function POST(request: Request) {
             conversationId,
             contactId,
             refreshHealth: true,
+            logActivity: false,
         });
 
         return NextResponse.json({ success: true, readiness });

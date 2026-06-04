@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
-import { getWhatsAppCallBridgeBaseUrl } from "@/lib/whatsapp/calling";
+import { WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE, getBaileysCallBridgeBaseUrl, getWhatsAppCallBridgeBaseUrl } from "@/lib/whatsapp/calling";
 
 function serializeError(error: unknown): string {
     if (error instanceof Error) return error.message;
@@ -19,13 +19,19 @@ async function bridgeFetchCall(input: {
     bridgeBaseUrl?: string | null;
     sessionId?: string | null;
     bridgeCallId?: string | null;
+    runtime?: string | null;
 }) {
-    if (!input.sessionId || !input.bridgeCallId) return null;
+    if (!input.bridgeCallId) return null;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 900);
     try {
+        const isBaileys = input.runtime === WHATSAPP_CALLING_BAILEYS_RUNTIME_MODE;
+        const path = isBaileys
+            ? `/sessions/${encodeURIComponent(input.sessionId || "")}/calls/${encodeURIComponent(input.bridgeCallId)}`
+            : `/call/${encodeURIComponent(input.bridgeCallId)}`;
+        if (isBaileys && !input.sessionId) return null;
         const response = await fetch(
-            `${getWhatsAppCallBridgeBaseUrl(input.bridgeBaseUrl)}/sessions/${encodeURIComponent(input.sessionId)}/calls/${encodeURIComponent(input.bridgeCallId)}`,
+            `${isBaileys ? getBaileysCallBridgeBaseUrl(input.bridgeBaseUrl) : getWhatsAppCallBridgeBaseUrl(input.bridgeBaseUrl)}${path}`,
             {
                 method: "GET",
                 signal: controller.signal,
@@ -86,6 +92,7 @@ export async function GET(request: Request) {
                 errorCode: true,
                 errorMessage: true,
                 metadata: true,
+                provider: true,
             },
         });
 
@@ -98,6 +105,7 @@ export async function GET(request: Request) {
             select: {
                 bridgeBaseUrl: true,
                 baileysSessionId: true,
+                callingRuntimeMode: true,
             },
         }).catch(() => null);
 
@@ -108,6 +116,7 @@ export async function GET(request: Request) {
             bridgeBaseUrl: config?.bridgeBaseUrl,
             sessionId: config?.baileysSessionId || location.id,
             bridgeCallId: attempt.bridgeCallId,
+            runtime: attempt.provider || config?.callingRuntimeMode,
         });
 
         return NextResponse.json({
@@ -124,6 +133,9 @@ export async function GET(request: Request) {
                 endedAt: attempt.endedAt?.toISOString?.() || attempt.endedAt,
                 bridgeEvent: bridgeCall?.event || bridgeEvent.event || bridgeResult.event || null,
                 mediaStatus: bridgeCall?.mediaStatus || metadata.mediaStatus || bridgeEvent.mediaStatus || bridgeResult.mediaStatus || null,
+                browserCallState: bridgeCall?.state || metadata.browserCallState || bridgeEvent.browserCallState || bridgeResult.browserCallState || null,
+                recordingPath: bridgeCall?.recordingPath || metadata.recordingPath || bridgeEvent.recordingPath || bridgeResult.recordingPath || null,
+                recordingDurationSeconds: bridgeCall?.recordingDurationSeconds || metadata.recordingDurationSeconds || bridgeEvent.recordingDurationSeconds || bridgeResult.recordingDurationSeconds || null,
                 spikeResult: metadata.spikeResult || null,
                 errorCode: attempt.errorCode || bridgeCall?.errorCode || null,
                 errorMessage: attempt.errorMessage || bridgeCall?.errorMessage || bridgeCall?.error || null,

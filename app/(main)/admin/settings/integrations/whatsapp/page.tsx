@@ -104,16 +104,23 @@ type WhatsAppCallingConfigState = {
     authPath: string;
     authPathPersistent: boolean;
     simulated: boolean;
+    chromeReady: boolean;
+    whatsappWebPaired: boolean;
+    callButtonAvailable: boolean;
+    audioSinkReady: boolean;
+    ffmpegReady: boolean;
+    fakeMicEnabled: boolean;
+    recordingDir: string;
     capabilities: {
         offerCall: boolean;
     };
 };
 
 const EMPTY_CALLING_CONFIG: WhatsAppCallingConfigState = {
-    callingRuntimeMode: "baileys_rnd",
+    callingRuntimeMode: "whatsapp_web_browser_call_rnd",
     baileysCallBridgeStatus: "offline",
     baileysSessionId: "",
-    bridgeBaseUrl: "http://127.0.0.1:3037",
+    bridgeBaseUrl: "http://127.0.0.1:3038",
     lastBaileysHeartbeatAt: null,
     mediaStatus: "signaling_only",
     mediaNotes: "",
@@ -122,9 +129,16 @@ const EMPTY_CALLING_CONFIG: WhatsAppCallingConfigState = {
     lastError: "",
     pairingCode: "",
     qr: "",
-    authPath: ".data/whatsapp-call-bridge",
+    authPath: "/home/martin/whatsapp-call-browser-profile",
     authPathPersistent: false,
     simulated: false,
+    chromeReady: false,
+    whatsappWebPaired: false,
+    callButtonAvailable: false,
+    audioSinkReady: false,
+    ffmpegReady: false,
+    fakeMicEnabled: false,
+    recordingDir: "/home/martin/whatsapp-call-recordings",
     capabilities: {
         offerCall: false,
     },
@@ -1072,14 +1086,14 @@ export default function WhatsAppSettingsPage() {
                         <div className="space-y-4 rounded-md border p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
-                                    <div className="font-medium">Baileys Call Bridge R&amp;D</div>
+                                    <div className="font-medium">WhatsApp Web Browser Call Bridge R&amp;D</div>
                                     <div className="text-sm text-muted-foreground">
-                                        Same-number NOWEB call-signaling spike. Milestone 1 proves outbound ringing; media remains experimental until audio is confirmed.
+                                        Hetzner browser-call proof. Milestone 1 proves outbound ringing and remote audio capture from a persistent WhatsApp Web profile.
                                     </div>
                                 </div>
                                 <Badge variant={callingReadiness?.ready ? "default" : "outline"}>
                                     {callingReadiness?.ready
-                                        ? "Signaling ready"
+                                        ? "Browser call ready"
                                         : callBridgePolling
                                             ? "Pairing check..."
                                             : settings.whatsappCallingConfig.baileysCallBridgeStatus || "offline"}
@@ -1089,10 +1103,10 @@ export default function WhatsAppSettingsPage() {
                             <div className="grid gap-3 md:grid-cols-3">
                                 <div className="space-y-1">
                                     <Label>Runtime Mode</Label>
-                                    <div className="rounded-md border px-3 py-2 text-sm">baileys_rnd</div>
+                                    <div className="rounded-md border px-3 py-2 text-sm">whatsapp_web_browser_call_rnd</div>
                                 </div>
                                 <div className="space-y-1">
-                                    <Label htmlFor="baileysSessionId">Baileys Session ID</Label>
+                                    <Label htmlFor="baileysSessionId">Browser Session ID</Label>
                                     <Input
                                         id="baileysSessionId"
                                         value={settings.whatsappCallingConfig.baileysSessionId}
@@ -1106,11 +1120,11 @@ export default function WhatsAppSettingsPage() {
                                         id="callBridgeBaseUrl"
                                         value={settings.whatsappCallingConfig.bridgeBaseUrl}
                                         onChange={(event) => setCallingConfig({ bridgeBaseUrl: event.target.value })}
-                                        placeholder="http://127.0.0.1:3037"
+                                        placeholder="http://127.0.0.1:3038"
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <Label htmlFor="callBridgePairingPhone">Pairing Phone</Label>
+                                    <Label htmlFor="callBridgePairingPhone">WhatsApp Account Phone</Label>
                                     <Input
                                         id="callBridgePairingPhone"
                                         value={callBridgePairingPhone}
@@ -1119,15 +1133,15 @@ export default function WhatsAppSettingsPage() {
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <Label>Bridge Status</Label>
+                                    <Label>WhatsApp Web Paired</Label>
                                     <div className="rounded-md border px-3 py-2 text-sm">
-                                        {settings.whatsappCallingConfig.baileysCallBridgeStatus || "offline"}
+                                        {settings.whatsappCallingConfig.whatsappWebPaired ? "paired" : settings.whatsappCallingConfig.baileysCallBridgeStatus || "offline"}
                                     </div>
                                 </div>
                                 <div className="space-y-1">
-                                    <Label>Media Status</Label>
+                                    <Label>Chrome / Xvfb</Label>
                                     <div className="rounded-md border px-3 py-2 text-sm">
-                                        {settings.whatsappCallingConfig.mediaStatus || "signaling_only"}
+                                        {settings.whatsappCallingConfig.chromeReady ? "ready" : "not ready"}
                                     </div>
                                 </div>
                                 <div className="space-y-1">
@@ -1139,19 +1153,43 @@ export default function WhatsAppSettingsPage() {
                                     </div>
                                 </div>
                                 <div className="space-y-1">
-                                    <Label>Auth Directory</Label>
+                                    <Label>Profile Directory</Label>
                                     <div className="break-all rounded-md border px-3 py-2 text-sm">
-                                        {settings.whatsappCallingConfig.authPath || ".data/whatsapp-call-bridge"}
+                                        {settings.whatsappCallingConfig.authPath || "/home/martin/whatsapp-call-browser-profile"}
                                     </div>
                                 </div>
                                 <div className="space-y-1">
-                                    <Label>Call Capability</Label>
+                                    <Label>Call Button</Label>
                                     <div className="rounded-md border px-3 py-2 text-sm">
                                         {callBridgeOffline
                                             ? "Start bridge to detect"
                                             : settings.whatsappCallingConfig.capabilities?.offerCall
-                                                ? "offerCall available"
-                                                : "offerCall not detected"}
+                                                ? "available"
+                                                : "not detected"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Audio Sink</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.audioSinkReady ? "ready" : "not ready"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>ffmpeg</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.ffmpegReady ? "ready" : "not ready"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Microphone Input</Label>
+                                    <div className="rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.fakeMicEnabled ? "fake device" : "not configured"}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label>Recording Directory</Label>
+                                    <div className="break-all rounded-md border px-3 py-2 text-sm">
+                                        {settings.whatsappCallingConfig.recordingDir || "/home/martin/whatsapp-call-recordings"}
                                     </div>
                                 </div>
                             </div>
@@ -1175,20 +1213,20 @@ export default function WhatsAppSettingsPage() {
                                     )}
                                     {!settings.whatsappCallingConfig.authPathPersistent && (
                                         <div className="text-amber-700">
-                                            Configure WHATSAPP_CALL_BRIDGE_AUTH_DIR to a persistent server path before production pairing.
+                                            Configure WHATSAPP_BROWSER_CALL_PROFILE_DIR to a persistent server path before production pairing.
                                         </div>
                                     )}
                                     {callBridgeOffline && !hasCallBridgePairingMaterial && !callBridgePolling && (
                                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-4">
                                             <div>
-                                                <div className="font-medium text-foreground">Call bridge is not paired</div>
+                                                <div className="font-medium text-foreground">Browser call bridge is not paired</div>
                                                 <div className="mt-1 text-sm text-muted-foreground">
-                                                    Generate a QR code, then scan it from WhatsApp Linked devices before it expires.
+                                                    Start the persistent browser profile, then scan WhatsApp Web from Linked devices if the browser shows a QR.
                                                 </div>
                                             </div>
                                             <Button type="button" onClick={handleStartCallBridge} disabled={callingBusy || callBridgePolling}>
                                                 {callingBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
-                                                Generate QR
+                                                Start Browser
                                             </Button>
                                         </div>
                                     )}
@@ -1198,7 +1236,7 @@ export default function WhatsAppSettingsPage() {
                                                 {callBridgeQrDataUrl ? (
                                                     <img
                                                         src={callBridgeQrDataUrl}
-                                                        alt="WhatsApp call bridge pairing QR code"
+                                                        alt="WhatsApp browser call bridge pairing QR code"
                                                         className="h-56 w-56"
                                                     />
                                                 ) : (
@@ -1209,7 +1247,7 @@ export default function WhatsAppSettingsPage() {
                                             </div>
                                             <div className="space-y-3">
                                                 <div>
-                                                    <div className="text-base font-medium text-foreground">Pair the call bridge</div>
+                                                    <div className="text-base font-medium text-foreground">Pair the browser call bridge</div>
                                                     <div className="mt-1 text-sm text-muted-foreground">
                                                         Open WhatsApp on the call number, go to Linked devices, and scan this QR code. If WhatsApp rejects it, generate a new QR code and scan the fresh one.
                                                     </div>
@@ -1241,16 +1279,16 @@ export default function WhatsAppSettingsPage() {
                                                         </div>
                                                     </div>
                                                     <div className="rounded-md border px-3 py-2">
-                                                        <div className="text-xs uppercase text-muted-foreground">Call Signaling</div>
+                                                        <div className="text-xs uppercase text-muted-foreground">Call Button</div>
                                                         <div className="font-medium text-foreground">
-                                                            {settings.whatsappCallingConfig.capabilities?.offerCall ? "Available after pairing" : "Waiting for bridge"}
+                                                            {settings.whatsappCallingConfig.capabilities?.offerCall ? "Available" : "Waiting for browser"}
                                                         </div>
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
                                                     <Button type="button" variant={callBridgeUnhealthy ? "default" : "outline"} onClick={handleStartCallBridge} disabled={callingBusy || callBridgePolling}>
                                                         {callBridgePolling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
-                                                        {callBridgeUnhealthy ? "Generate New QR" : "Restart Pairing"}
+                                                        {callBridgeUnhealthy ? "Restart Browser" : "Refresh Pairing"}
                                                     </Button>
                                                     <Button type="button" variant="outline" onClick={handleCheckCallingReadiness} disabled={callingBusy || callBridgePolling}>
                                                         <RefreshCw className="mr-2 h-4 w-4" />
@@ -1289,18 +1327,18 @@ export default function WhatsAppSettingsPage() {
                                     value={settings.whatsappCallingConfig.mediaNotes}
                                     onChange={(event) => setCallingConfig({ mediaNotes: event.target.value })}
                                     rows={3}
-                                    placeholder="Baileys fork, offerCall behavior, ringing result, media probe findings, kill condition..."
+                                    placeholder="Chrome/Xvfb state, WhatsApp Web pairing, call button selector, audio sink, ffmpeg, recording result, kill condition..."
                                 />
                             </div>
 
                             <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground md:grid-cols-3">
                                 <div>
                                     <span className="font-medium text-foreground">Milestone 1: </span>
-                                    {settings.whatsappCallingConfig.baileysCallBridgeStatus === "ready" ? "Signaling can be attempted" : "Bridge not ready"}
+                                    {settings.whatsappCallingConfig.baileysCallBridgeStatus === "ready" ? "Browser call can be attempted" : "Bridge not ready"}
                                 </div>
                                 <div>
                                     <span className="font-medium text-foreground">Milestone 2: </span>
-                                    {settings.whatsappCallingConfig.mediaStatus === "audio_connected" ? "Audio connected" : "Audio unproven"}
+                                    {settings.whatsappCallingConfig.audioSinkReady && settings.whatsappCallingConfig.ffmpegReady ? "Remote audio capture ready" : "Audio capture not ready"}
                                 </div>
                                 <div>
                                     <span className="font-medium text-foreground">Last readiness: </span>

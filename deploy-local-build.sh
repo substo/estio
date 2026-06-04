@@ -23,9 +23,10 @@ WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
 WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
 WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
 REQUIRE_WHATSAPP_BRIDGE_READY="${REQUIRE_WHATSAPP_BRIDGE_READY:-false}"
-WHATSAPP_CALL_BRIDGE_APP_NAME="estio-whatsapp-call-bridge"
-WHATSAPP_CALL_BRIDGE_DEFAULT_PORT=3037
-WHATSAPP_CALL_BRIDGE_AUTH_DIR_DEFAULT="$BASE_DIR/whatsapp-call-bridge-sessions"
+WHATSAPP_CALL_BRIDGE_APP_NAME="estio-whatsapp-browser-call-bridge"
+WHATSAPP_CALL_BRIDGE_DEFAULT_PORT=3038
+WHATSAPP_CALL_BRIDGE_AUTH_DIR_DEFAULT="$BASE_DIR/whatsapp-call-browser-profile"
+WHATSAPP_BROWSER_CALL_RECORDING_DIR_DEFAULT="$BASE_DIR/whatsapp-call-recordings"
 WHATSAPP_CALL_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_CALL_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
 WHATSAPP_CALL_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_CALL_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
 REQUIRE_WHATSAPP_CALL_BRIDGE_READY="${REQUIRE_WHATSAPP_CALL_BRIDGE_READY:-false}"
@@ -771,12 +772,31 @@ if (needsQr || readySessions.length === 0) {
 NODE
     fi
 
-    echo "📞 Ensuring WhatsApp Call Bridge R&D process is running (\$WHATSAPP_CALL_BRIDGE_APP_NAME) on :\$WHATSAPP_CALL_BRIDGE_PORT..."
+    echo "📞 Ensuring WhatsApp Browser Call Bridge R&D process is running (\$WHATSAPP_CALL_BRIDGE_APP_NAME) on :\$WHATSAPP_CALL_BRIDGE_PORT..."
     WHATSAPP_CALL_BRIDGE_AUTH_DIR="\${WHATSAPP_CALL_BRIDGE_AUTH_DIR:-$WHATSAPP_CALL_BRIDGE_AUTH_DIR_DEFAULT}"
+    WHATSAPP_BROWSER_CALL_RECORDING_DIR="\${WHATSAPP_BROWSER_CALL_RECORDING_DIR:-$WHATSAPP_BROWSER_CALL_RECORDING_DIR_DEFAULT}"
     mkdir -p "\$WHATSAPP_CALL_BRIDGE_AUTH_DIR"
+    mkdir -p "\$WHATSAPP_BROWSER_CALL_RECORDING_DIR"
     if echo "\$WHATSAPP_CALL_BRIDGE_AUTH_DIR" | grep -Eq '/estio-app(-blue|-green)?(/|$)'; then
         echo "❌ WHATSAPP_CALL_BRIDGE_AUTH_DIR must be outside release directories. Current: \$WHATSAPP_CALL_BRIDGE_AUTH_DIR"
         exit 1
+    fi
+
+    echo "📦 Checking WhatsApp Browser Call Bridge runtime packages..."
+    MISSING_BROWSER_CALL_PACKAGES=0
+    for command_name in Xvfb pactl pulseaudio ffmpeg; do
+        if ! command -v "\$command_name" >/dev/null 2>&1; then
+            MISSING_BROWSER_CALL_PACKAGES=1
+        fi
+    done
+    if [ "\$MISSING_BROWSER_CALL_PACKAGES" -eq 1 ]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            echo "📦 Installing Xvfb, PulseAudio utilities, and ffmpeg for browser-call proof..."
+            DEBIAN_FRONTEND=noninteractive apt-get update -y
+            DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb pulseaudio pulseaudio-utils ffmpeg
+        else
+            echo "⚠️  apt-get not available; install Xvfb, pulseaudio-utils, pulseaudio, and ffmpeg manually."
+        fi
     fi
 
     WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL=""
@@ -784,12 +804,15 @@ NODE
         WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL=\$(grep -E '^WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
     fi
     if [ -z "\$WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL" ]; then
-        WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL="https://estio.co/api/webhooks/whatsapp-call-bridge"
+        WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL="https://estio.co/api/webhooks/whatsapp-browser-call-bridge"
     fi
 
     CALL_BRIDGE_SECRET=""
     if [ -f "\$SYMLINK_PATH/.env" ]; then
         CALL_BRIDGE_SECRET=\$(grep -E '^WHATSAPP_CALL_BRIDGE_SECRET=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
+    fi
+    if [ -z "\$CALL_BRIDGE_SECRET" ]; then
+        echo "⚠️  WHATSAPP_CALL_BRIDGE_SECRET is missing. Browser call webhooks are rejected in production until this is set."
     fi
 
     probe_whatsapp_call_bridge_health() {
@@ -801,10 +824,10 @@ NODE
     }
 
     CURRENT_CALL_BRIDGE_WEBHOOK_URL=\$(WHATSAPP_CALL_BRIDGE_APP_NAME="\$WHATSAPP_CALL_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_CALL_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL || app?.pm2_env?.env?.WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL || "");' 2>/dev/null || true)
-    CURRENT_CALL_BRIDGE_AUTH_DIR=\$(WHATSAPP_CALL_BRIDGE_APP_NAME="\$WHATSAPP_CALL_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_CALL_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_CALL_BRIDGE_AUTH_DIR || app?.pm2_env?.env?.WHATSAPP_CALL_BRIDGE_AUTH_DIR || "");' 2>/dev/null || true)
+    CURRENT_CALL_BRIDGE_AUTH_DIR=\$(WHATSAPP_CALL_BRIDGE_APP_NAME="\$WHATSAPP_CALL_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_CALL_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_BROWSER_CALL_PROFILE_DIR || app?.pm2_env?.env?.WHATSAPP_BROWSER_CALL_PROFILE_DIR || app?.pm2_env?.WHATSAPP_CALL_BRIDGE_AUTH_DIR || app?.pm2_env?.env?.WHATSAPP_CALL_BRIDGE_AUTH_DIR || "");' 2>/dev/null || true)
     CURRENT_CALL_BRIDGE_CWD=\$(WHATSAPP_CALL_BRIDGE_APP_NAME="\$WHATSAPP_CALL_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_CALL_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.pm_cwd || "");' 2>/dev/null || true)
     CURRENT_CALL_BRIDGE_CODE_HASH=\$(WHATSAPP_CALL_BRIDGE_APP_NAME="\$WHATSAPP_CALL_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_CALL_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_CALL_BRIDGE_CODE_HASH || app?.pm2_env?.env?.WHATSAPP_CALL_BRIDGE_CODE_HASH || "");' 2>/dev/null || true)
-    EXPECTED_CALL_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-call-bridge-service.ts lib/whatsapp/calling.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
+    EXPECTED_CALL_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-browser-call-bridge-service.ts lib/whatsapp/calling.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
     CALL_BRIDGE_HEALTH_JSON=\$(probe_whatsapp_call_bridge_health)
 
     if [ -n "\$CALL_BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_CALL_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_CALL_BRIDGE_AUTH_DIR" = "\$WHATSAPP_CALL_BRIDGE_AUTH_DIR" ] && [ "\$CURRENT_CALL_BRIDGE_CWD" = "\$SYMLINK_PATH" ] && [ -n "\$EXPECTED_CALL_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_CALL_BRIDGE_CODE_HASH" = "\$EXPECTED_CALL_BRIDGE_CODE_HASH" ]; then
@@ -822,26 +845,27 @@ NODE
         if pm2 describe "\$WHATSAPP_CALL_BRIDGE_APP_NAME" > /dev/null 2>&1; then
             pm2 delete "\$WHATSAPP_CALL_BRIDGE_APP_NAME" || true
         fi
-        NODE_ENV=production PROCESS_ROLE=whatsapp-call-bridge WHATSAPP_CALL_BRIDGE_PORT="\$WHATSAPP_CALL_BRIDGE_PORT" WHATSAPP_CALL_BRIDGE_AUTH_DIR="\$WHATSAPP_CALL_BRIDGE_AUTH_DIR" WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_CALL_BRIDGE_SECRET="\$CALL_BRIDGE_SECRET" WHATSAPP_CALL_BRIDGE_CODE_HASH="\$EXPECTED_CALL_BRIDGE_CODE_HASH" \
-            pm2 start npm --name "\$WHATSAPP_CALL_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-call-bridge
+        NODE_ENV=production PROCESS_ROLE=whatsapp-browser-call-bridge WHATSAPP_BROWSER_CALL_START_XVFB=1 WHATSAPP_BROWSER_CALL_START_PULSEAUDIO=1 WHATSAPP_BROWSER_CALL_BRIDGE_PORT="\$WHATSAPP_CALL_BRIDGE_PORT" WHATSAPP_BROWSER_CALL_PROFILE_DIR="\$WHATSAPP_CALL_BRIDGE_AUTH_DIR" WHATSAPP_BROWSER_CALL_RECORDING_DIR="\$WHATSAPP_BROWSER_CALL_RECORDING_DIR" WHATSAPP_BROWSER_CALL_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_CALL_BRIDGE_SECRET="\$CALL_BRIDGE_SECRET" WHATSAPP_CALL_BRIDGE_CODE_HASH="\$EXPECTED_CALL_BRIDGE_CODE_HASH" \
+            pm2 start npm --name "\$WHATSAPP_CALL_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-browser-call-bridge
     fi
-    echo "📞 WhatsApp Call Bridge app webhook: \$WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL"
-    echo "📞 WhatsApp Call Bridge auth dir: \$WHATSAPP_CALL_BRIDGE_AUTH_DIR"
+    echo "📞 WhatsApp Browser Call Bridge app webhook: \$WHATSAPP_CALL_BRIDGE_APP_WEBHOOK_URL"
+    echo "📞 WhatsApp Browser Call Bridge profile dir: \$WHATSAPP_CALL_BRIDGE_AUTH_DIR"
+    echo "📞 WhatsApp Browser Call Bridge recording dir: \$WHATSAPP_BROWSER_CALL_RECORDING_DIR"
 
-    echo "🩺 Waiting for WhatsApp Call Bridge R&D health..."
+    echo "🩺 Waiting for WhatsApp Browser Call Bridge R&D health..."
     CALL_BRIDGE_READY=0
     for i in \$(seq 1 20); do
         CALL_BRIDGE_HEALTH_JSON=\$(probe_whatsapp_call_bridge_health)
         if [ -n "\$CALL_BRIDGE_HEALTH_JSON" ]; then
             CALL_BRIDGE_READY=1
-            echo "✅ WhatsApp Call Bridge R&D service is reachable"
+            echo "✅ WhatsApp Browser Call Bridge R&D service is reachable"
             break
         fi
         sleep 1
     done
 
     if [ "\$CALL_BRIDGE_READY" -ne 1 ]; then
-        echo "⚠️  WhatsApp Call Bridge R&D failed bounded health checks on :\$WHATSAPP_CALL_BRIDGE_PORT."
+        echo "⚠️  WhatsApp Browser Call Bridge R&D failed bounded health checks on :\$WHATSAPP_CALL_BRIDGE_PORT."
         pm2 describe "\$WHATSAPP_CALL_BRIDGE_APP_NAME" || true
         pm2 logs "\$WHATSAPP_CALL_BRIDGE_APP_NAME" --lines 120 --nostream || true
         if [ "$REQUIRE_WHATSAPP_CALL_BRIDGE_READY" = "true" ]; then
@@ -854,18 +878,13 @@ NODE
     if [ -n "\$CALL_BRIDGE_HEALTH_JSON" ]; then
         CALL_BRIDGE_HEALTH_JSON="\$CALL_BRIDGE_HEALTH_JSON" node <<-'NODE'
 const health = JSON.parse(process.env.CALL_BRIDGE_HEALTH_JSON || '{}');
-const sessions = Array.isArray(health.sessions) ? health.sessions : [];
-const readySessions = sessions.filter((session) => session && session.ready);
-const offerCall = Boolean(health.capabilities && health.capabilities.offerCall);
-console.log('📞 WhatsApp Call Bridge health: ok=' + Boolean(health.ok) + ' simulated=' + Boolean(health.simulated) + ' offerCall=' + offerCall + ' sessions=' + sessions.length + ' ready=' + readySessions.length);
-for (const session of sessions) {
-    const status = String(session.status || 'unknown');
-    const ready = Boolean(session.ready);
-    const lastError = session.lastError ? ' lastError=' + session.lastError : '';
-    console.log('   - ' + String(session.sessionId || 'unknown') + ': status=' + status + ' ready=' + ready + ' media=' + String(session.mediaStatus || 'unknown') + lastError);
-}
-if (sessions.length === 0) {
-    console.log('⚠️  WhatsApp Call Bridge is running but no session has been started. Use Settings -> WhatsApp -> Start Call Bridge to pair.');
+console.log('📞 WhatsApp Browser Call Bridge health: ok=' + Boolean(health.ok) + ' status=' + String(health.status || 'unknown') + ' simulated=' + Boolean(health.simulated));
+console.log('   - chromeReady=' + Boolean(health.chromeReady) + ' whatsappWebPaired=' + Boolean(health.whatsappWebPaired) + ' callButtonAvailable=' + Boolean(health.callButtonAvailable));
+console.log('   - audioSinkReady=' + Boolean(health.audioSinkReady) + ' ffmpegReady=' + Boolean(health.ffmpegReady) + ' fakeMicEnabled=' + Boolean(health.fakeMicEnabled) + ' audioSink=' + String(health.audioSink || 'unknown'));
+console.log('   - profileDir=' + String(health.profileDir || 'unknown'));
+console.log('   - recordingDir=' + String(health.recordingDir || 'unknown'));
+if (!health.whatsappWebPaired) {
+    console.log('⚠️  WhatsApp Web is not paired in the browser profile yet. Open Settings -> WhatsApp and start/pair the browser call bridge.');
 }
 NODE
     fi
