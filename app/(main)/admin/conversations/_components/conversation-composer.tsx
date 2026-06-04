@@ -322,7 +322,7 @@ export function ConversationComposer({
         setRequestingWhatsAppCall(true);
         setWhatsAppCallRequestError(null);
         try {
-            const response = await fetch("/api/admin/conversations/whatsapp-call/request", {
+            const response = await fetch("/api/admin/conversations/whatsapp-call/start", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -332,11 +332,11 @@ export function ConversationComposer({
             });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || !payload?.success) {
-                throw new Error(payload?.error || "Failed to request WhatsApp call.");
+                throw new Error(payload?.errorMessage || payload?.error || "Failed to start WhatsApp call.");
             }
         } catch (error) {
-            console.error("Failed to request WhatsApp call:", error);
-            setWhatsAppCallRequestError(error instanceof Error ? error.message : "Failed to request WhatsApp call.");
+            console.error("Failed to start WhatsApp call:", error);
+            setWhatsAppCallRequestError(error instanceof Error ? error.message : "Failed to start WhatsApp call.");
         } finally {
             setRequestingWhatsAppCall(false);
         }
@@ -592,7 +592,7 @@ export function ConversationComposer({
                                         size="sm"
                                         className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
                                         onClick={() => void handleRequestWhatsAppCall()}
-                                        title="Request WhatsApp Call"
+                                        title="Start WhatsApp Call"
                                         disabled={isUnavailable || sending || isRecording || requestingWhatsAppCall}
                                     >
                                         {requestingWhatsAppCall ? (

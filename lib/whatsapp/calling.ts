@@ -4,6 +4,7 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 
 export const WHATSAPP_CALL_REQUEST_BODY = "Can I call you here on WhatsApp about this?";
 export const WHATSAPP_CALLING_RUNTIME_MODE = "baileys_rnd";
+const RECENT_WHATSAPP_CALL_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type WhatsAppCallStatus =
     | "requested"
@@ -623,7 +624,7 @@ export async function refreshBaileysCallBridgeHealth(locationId: string) {
 
 export async function checkCallingReadiness(
     locationId: string,
-    options?: { conversationId?: string | null; contactId?: string | null; refreshHealth?: boolean }
+    options?: { conversationId?: string | null; contactId?: string | null; refreshHealth?: boolean; logActivity?: boolean }
 ): Promise<WhatsAppCallingReadiness> {
     if (options?.refreshHealth) {
         await refreshBaileysCallBridgeHealth(locationId).catch(() => undefined);
@@ -653,7 +654,7 @@ export async function checkCallingReadiness(
         },
     }).catch(() => undefined);
 
-    if (options?.conversationId && options?.contactId) {
+    if (options?.conversationId && options?.contactId && options?.logActivity !== false) {
         await logWhatsAppCallActivity({
             locationId,
             conversationId: options.conversationId,
@@ -690,6 +691,7 @@ export async function requestWhatsAppCallConsent(input: {
         conversationId: conversation.id,
         contactId: contact.id,
         refreshHealth: true,
+        logActivity: false,
     });
     if (!readiness.ready) {
         return {
@@ -867,24 +869,6 @@ export async function updateWhatsAppCallFromBridgeEvent(input: {
         },
     });
 
-    await logWhatsAppCallActivity({
-        locationId: input.locationId,
-        conversationId: attempt.conversationId,
-        contactId: attempt.contactId,
-        action: mapBridgeEventToTimelineAction(eventName, status),
-        fields: {
-            status,
-            event: eventName,
-            callAttemptId: attempt.id,
-            callId: result.providerCallId || result.whatsappCallId || result.bridgeCallId || attempt.providerCallId || null,
-            bridgeCallId: result.bridgeCallId || attempt.bridgeCallId || null,
-            whatsappCallId: result.whatsappCallId || attempt.whatsappCallId || null,
-            mediaStatus: result.mediaStatus || null,
-            errorCode: result.errorCode || null,
-            errorMessage: result.errorMessage || null,
-        },
-    });
-
     return { success: true, callAttemptId: attempt.id, status };
 }
 
@@ -900,6 +884,25 @@ function mapBridgeEventToTimelineAction(eventName: string, status: WhatsAppCallS
     return "WHATSAPP_CALL_PROVIDER_RESULT";
 }
 
+async function findRecentWhatsAppConversationActivity(conversationId: string) {
+    const since = new Date(Date.now() - RECENT_WHATSAPP_CALL_WINDOW_MS);
+    return (db as any).message.findFirst({
+        where: {
+            conversationId,
+            type: "WhatsApp",
+            createdAt: { gte: since },
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+            id: true,
+            createdAt: true,
+            direction: true,
+            source: true,
+            wamId: true,
+        },
+    });
+}
+
 export async function startWhatsAppCall(input: {
     locationId: string;
     conversationId: string;
@@ -912,6 +915,7 @@ export async function startWhatsAppCall(input: {
         conversationId: conversation.id,
         contactId: contact.id,
         refreshHealth: true,
+        logActivity: false,
     });
     if (!readiness.ready) {
         const failedAttempt = input.callAttemptId
@@ -962,7 +966,7 @@ export async function startWhatsAppCall(input: {
         };
     }
 
-    const existing = input.callAttemptId
+    let existing = input.callAttemptId
         ? await (db as any).whatsAppCallAttempt.findFirst({
             where: {
                 id: input.callAttemptId,
@@ -981,8 +985,32 @@ export async function startWhatsAppCall(input: {
             orderBy: { createdAt: "desc" },
         });
 
-    if (!existing) throw new Error("No WhatsApp call request found for this conversation.");
-    if (existing.status !== "consented") {
+    const recentWhatsAppActivity = await findRecentWhatsAppConversationActivity(conversation.id);
+    if (!existing && recentWhatsAppActivity) {
+        existing = await (db as any).whatsAppCallAttempt.create({
+            data: {
+                locationId: input.locationId,
+                conversationId: conversation.id,
+                contactId: contact.id,
+                status: "consented",
+                provider: WHATSAPP_CALLING_RUNTIME_MODE,
+                requestedAt: new Date(),
+                consentedAt: recentWhatsAppActivity.createdAt,
+                consentMessageId: recentWhatsAppActivity.id,
+                contactPhone: contact.phone || null,
+                metadata: {
+                    consentSource: "recent_whatsapp_conversation_24h",
+                    recentMessageId: recentWhatsAppActivity.id,
+                    recentMessageDirection: recentWhatsAppActivity.direction,
+                    recentMessageSource: recentWhatsAppActivity.source || null,
+                    recentWamId: recentWhatsAppActivity.wamId || null,
+                    readiness,
+                },
+            },
+        });
+    }
+
+    if (!existing) {
         await logWhatsAppCallActivity({
             locationId: input.locationId,
             conversationId: conversation.id,
@@ -990,38 +1018,64 @@ export async function startWhatsAppCall(input: {
             action: "WHATSAPP_CALL_FAILED",
             fields: {
                 status: "failed",
-                callAttemptId: existing.id,
-                errorCode: "call_consent_required",
-                errorMessage: "Customer consent is required before starting a WhatsApp call.",
+                errorCode: "recent_whatsapp_activity_required",
+                errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
             },
         });
         return {
             success: false,
             outcome: "failed" as const,
             status: "failed" as const,
-            callAttemptId: existing.id,
-            errorCode: "call_consent_required",
-            errorMessage: "Customer consent is required before starting a WhatsApp call.",
+            errorCode: "recent_whatsapp_activity_required",
+            errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
             readiness,
         };
+    }
+    if (existing.status !== "consented") {
+        if (!recentWhatsAppActivity) {
+            await logWhatsAppCallActivity({
+                locationId: input.locationId,
+                conversationId: conversation.id,
+                contactId: contact.id,
+                action: "WHATSAPP_CALL_FAILED",
+                fields: {
+                    status: "failed",
+                    callAttemptId: existing.id,
+                    errorCode: "recent_whatsapp_activity_required",
+                    errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
+                },
+            });
+            return {
+                success: false,
+                outcome: "failed" as const,
+                status: "failed" as const,
+                callAttemptId: existing.id,
+                errorCode: "recent_whatsapp_activity_required",
+                errorMessage: "A recent WhatsApp conversation is required before starting a WhatsApp call.",
+                readiness,
+            };
+        }
+        existing = await (db as any).whatsAppCallAttempt.update({
+            where: { id: existing.id },
+            data: {
+                status: "consented",
+                consentedAt: recentWhatsAppActivity.createdAt,
+                consentMessageId: recentWhatsAppActivity.id,
+                metadata: {
+                    ...(existing.metadata || {}),
+                    consentSource: "recent_whatsapp_conversation_24h",
+                    recentMessageId: recentWhatsAppActivity.id,
+                    recentMessageDirection: recentWhatsAppActivity.direction,
+                    recentMessageSource: recentWhatsAppActivity.source || null,
+                    recentWamId: recentWhatsAppActivity.wamId || null,
+                },
+            },
+        });
     }
 
     await (db as any).whatsAppCallAttempt.update({
         where: { id: existing.id },
         data: { status: "call_attempted", attemptedAt: new Date() },
-    });
-    await logWhatsAppCallActivity({
-        locationId: input.locationId,
-        conversationId: conversation.id,
-        contactId: contact.id,
-        action: "WHATSAPP_CALL_ATTEMPTED",
-        fields: {
-            status: "call_attempted",
-            callAttemptId: existing.id,
-            runtime: WHATSAPP_CALLING_RUNTIME_MODE,
-            bridgeStatus: readiness.baileysCallBridgeStatus,
-            mediaStatus: readiness.mediaStatus,
-        },
     });
 
     const provider = input.provider || new BaileysCallBridgeProvider(readiness.bridgeBaseUrl);
@@ -1056,24 +1110,26 @@ export async function startWhatsAppCall(input: {
         },
     });
 
-    await logWhatsAppCallActivity({
-        locationId: input.locationId,
-        conversationId: conversation.id,
-        contactId: contact.id,
-        action: result.success ? "WHATSAPP_CALL_SIGNALING_STARTED" : "WHATSAPP_CALL_FAILED",
-        fields: {
-            status: result.status,
-            outcome: result.outcome,
-            callAttemptId: existing.id,
-            callId: result.providerCallId || null,
-            bridgeCallId: result.bridgeCallId || null,
-            whatsappCallId: result.whatsappCallId || null,
-            event: result.bridgeEvent || null,
-            mediaStatus: result.mediaStatus || null,
-            errorCode: result.errorCode || null,
-            errorMessage: result.errorMessage || null,
-        },
-    });
+    if (!result.success) {
+        await logWhatsAppCallActivity({
+            locationId: input.locationId,
+            conversationId: conversation.id,
+            contactId: contact.id,
+            action: "WHATSAPP_CALL_FAILED",
+            fields: {
+                status: result.status,
+                outcome: result.outcome,
+                callAttemptId: existing.id,
+                callId: result.providerCallId || null,
+                bridgeCallId: result.bridgeCallId || null,
+                whatsappCallId: result.whatsappCallId || null,
+                event: result.bridgeEvent || null,
+                mediaStatus: result.mediaStatus || null,
+                errorCode: result.errorCode || null,
+                errorMessage: result.errorMessage || null,
+            },
+        });
+    }
 
     return { success: result.success, callAttemptId: existing.id, ...result };
 }

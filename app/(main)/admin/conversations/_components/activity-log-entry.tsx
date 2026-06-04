@@ -18,6 +18,15 @@ import {
 } from '@/lib/contacts/history-formatting';
 import { getConversationSurfaceTheme, type ConversationSurfaceTheme } from './message-bubble-theme';
 
+const HIDDEN_WHATSAPP_CALL_DEBUG_ACTIONS = new Set([
+    'WHATSAPP_CALL_REQUESTED',
+    'WHATSAPP_CALL_READINESS_CHECKED',
+    'WHATSAPP_CALL_CONSENTED',
+    'WHATSAPP_CALL_ATTEMPTED',
+    'WHATSAPP_CALL_SIGNALING_STARTED',
+    'WHATSAPP_CALL_PROVIDER_RESULT',
+]);
+
 interface ActivityLogEntryProps {
     item: {
         id: string;
@@ -359,6 +368,10 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
             cancelled = true;
         };
     }, [previewOpen, preview, previewPending, sessionThreadId]);
+
+    if (HIDDEN_WHATSAPP_CALL_DEBUG_ACTIONS.has(item.action)) {
+        return null;
+    }
 
     return (
         <div className="flex flex-col items-center justify-center my-2.5 sm:my-3 group">
