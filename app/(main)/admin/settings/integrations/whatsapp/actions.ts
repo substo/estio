@@ -100,7 +100,7 @@ function serializeWhatsAppCallingConfig(config: any) {
         baileysCallBridgeStatus: config.baileysCallBridgeStatus || "offline",
         baileysSessionId: config.baileysSessionId || "",
         bridgeBaseUrl: getWhatsAppCallBridgeBaseUrl(config.bridgeBaseUrl),
-        lastBaileysHeartbeatAt,
+        lastBaileysHeartbeatAt: lastHeartbeatAt,
         mediaStatus: config.mediaStatus || "signaling_only",
         mediaNotes: config.mediaNotes || "",
         lastReadinessStatus: config.lastReadinessStatus || null,

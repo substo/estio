@@ -235,28 +235,42 @@ export function normalizeBaileysCallBridgeResult(response: any): WhatsAppCalling
     };
 }
 
-async function bridgeFetch(baseUrl: string, path: string, init?: RequestInit) {
-    const response = await fetch(`${getWhatsAppCallBridgeBaseUrl(baseUrl)}${path}`, {
-        ...init,
-        headers: {
-            "Content-Type": "application/json",
-            ...(process.env.WHATSAPP_CALL_BRIDGE_SECRET
-                ? { "x-whatsapp-call-bridge-secret": process.env.WHATSAPP_CALL_BRIDGE_SECRET }
-                : {}),
-            ...(init?.headers || {}),
-        },
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
+async function bridgeFetch(baseUrl: string, path: string, init?: RequestInit & { timeoutMs?: number }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.max(500, Number(init?.timeoutMs || 2500)));
+    try {
+        const response = await fetch(`${getWhatsAppCallBridgeBaseUrl(baseUrl)}${path}`, {
+            ...init,
+            signal: controller.signal,
+            headers: {
+                "Content-Type": "application/json",
+                ...(process.env.WHATSAPP_CALL_BRIDGE_SECRET
+                    ? { "x-whatsapp-call-bridge-secret": process.env.WHATSAPP_CALL_BRIDGE_SECRET }
+                    : {}),
+                ...(init?.headers || {}),
+            },
+        });
+        clearTimeout(timeout);
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+            return {
+                success: false,
+                event: "call_failed",
+                errorCode: payload?.errorCode || `bridge_http_${response.status}`,
+                errorMessage: payload?.error || payload?.message || response.statusText,
+                raw: payload,
+            };
+        }
+        return payload;
+    } catch (error: any) {
+        clearTimeout(timeout);
         return {
             success: false,
             event: "call_failed",
-            errorCode: payload?.errorCode || `bridge_http_${response.status}`,
-            errorMessage: payload?.error || payload?.message || response.statusText,
-            raw: payload,
+            errorCode: error?.name === "AbortError" ? "bridge_timeout" : "bridge_unreachable",
+            errorMessage: error?.name === "AbortError" ? "WhatsApp call bridge did not respond quickly." : error?.message || "WhatsApp call bridge is unreachable.",
         };
     }
-    return payload;
 }
 
 export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
