@@ -343,14 +343,11 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         : "web_bridge";
 
     const whatsappChannels = await listWhatsAppChannels(location.id);
-    const [webBridgeSession, webBridgeHealth, callingHealthResult] = await Promise.all([
+    const [webBridgeSession, webBridgeHealth, callingConfig] = await Promise.all([
         getWhatsAppWebBridgeSession(location.id),
         getWhatsAppWebBridgeHealth(),
-        refreshBaileysCallBridgeHealth(location.id).catch(async () => ({
-            config: await (db as any).whatsAppCallBridgeConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
-        })),
+        (db as any).whatsAppCallBridgeConfig.findUnique({ where: { locationId: location.id } }).catch(() => null),
     ]);
-    const callingConfig = callingHealthResult?.config || null;
 
     return {
         // Meta
