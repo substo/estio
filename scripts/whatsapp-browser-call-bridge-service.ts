@@ -312,7 +312,7 @@ async function inspectCallUi() {
     if (SIMULATE) return { callWindowVisible: true, hangupVisible: true, text: "simulated call" };
     const page = await getPage();
     const text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    const hangup = await page.$('[aria-label*="End call"], [aria-label*="Hang up"], [data-icon="call-end"], [data-icon="x"]').catch(() => null);
+    const hangup = await page.$('[aria-label*="End call"], [aria-label*="Hang up"], [data-icon="call-end"]').catch(() => null);
     const callWindowVisible = Boolean(hangup) || /ringing|calling|end call|hang up|ongoing call/i.test(text);
     const errorVisible = /couldn.t place call|call unavailable|failed|unable to call|not available/i.test(text);
     return {
@@ -321,6 +321,24 @@ async function inspectCallUi() {
         errorVisible,
         text: text.slice(0, 2000),
     };
+}
+
+async function inspectInteractiveElements() {
+    if (SIMULATE) return [];
+    const page = await getPage();
+    return page.evaluate(() => {
+        return Array.from(document.querySelectorAll("button,[role='button'],[aria-label],[title]"))
+            .slice(0, 200)
+            .map((element: any) => ({
+                tag: element.tagName,
+                role: element.getAttribute("role"),
+                ariaLabel: element.getAttribute("aria-label"),
+                title: element.getAttribute("title"),
+                text: String(element.innerText || element.textContent || "").trim().slice(0, 120),
+                dataIcon: element.querySelector?.("[data-icon]")?.getAttribute("data-icon") || element.getAttribute("data-icon"),
+                className: String(element.className || "").slice(0, 160),
+            }));
+    }).catch(() => []);
 }
 
 async function clickHangupIfVisible() {
@@ -456,6 +474,9 @@ const server = createServer(async (req, res) => {
                     text: await page.evaluate(() => document.body?.innerText || "").catch(() => ""),
                 };
             return json(res, 200, payload);
+        }
+        if (req.method === "GET" && url.pathname === "/debug/elements") {
+            return json(res, 200, { success: true, elements: await inspectInteractiveElements() });
         }
         if (req.method === "GET" && url.pathname === "/debug/screenshot") {
             if (SIMULATE) return json(res, 200, { success: true, simulated: true });
