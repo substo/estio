@@ -336,7 +336,7 @@ async function inspectInteractiveElements() {
                 title: element.getAttribute("title"),
                 text: String(element.innerText || element.textContent || "").trim().slice(0, 120),
                 dataIcon: element.querySelector?.("[data-icon]")?.getAttribute("data-icon") || element.getAttribute("data-icon"),
-                className: String(element.className || "").slice(0, 160),
+                className: String(element.getAttribute?.("class") || "").slice(0, 160),
             }));
     }).catch(() => []);
 }
@@ -369,13 +369,25 @@ async function clickVoiceCall(to: string) {
     }
     const selectors = [
         '[aria-label*="Voice call"]',
+        '[aria-label*="voice call"]',
+        '[aria-label*="Call"]',
+        '[aria-label*="call"]',
         '[title*="Voice call"]',
+        '[title*="voice call"]',
+        '[title*="Call"]',
+        '[title*="call"]',
         '[data-icon="audio-call"]',
+        '[data-icon="video-call"]',
+        '[data-icon="video-call-outline"]',
+        '[data-icon="call-video"]',
     ];
     for (const selector of selectors) {
         const element = await page.$(selector).catch(() => null);
         if (element) {
-            await element.click();
+            await element.evaluate((node: any) => {
+                const target = node.closest?.("button,[role='button']") || node;
+                target.click();
+            });
             await sleep(1500);
             return await inspectCallUi();
         }
