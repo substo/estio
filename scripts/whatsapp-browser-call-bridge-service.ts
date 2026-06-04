@@ -346,12 +346,16 @@ async function inspectInteractiveElements() {
 async function inspectMediaEnvironment() {
     if (SIMULATE) return { simulated: true };
     const page = await getPage();
-    return page.evaluate(async () => {
-        const devices = await navigator.mediaDevices?.enumerateDevices?.().catch(() => []) || [];
-        const queryPermission = async (name: PermissionName) => {
+    return page.evaluate(`(async () => {
+        const devices = await (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices
+            ? navigator.mediaDevices.enumerateDevices().catch(() => [])
+            : []);
+        const queryPermission = async (name) => {
             try {
-                const status = await navigator.permissions?.query?.({ name });
-                return status?.state || "unknown";
+                const status = await (navigator.permissions && navigator.permissions.query
+                    ? navigator.permissions.query({ name })
+                    : null);
+                return (status && status.state) || "unknown";
             } catch {
                 return "unknown";
             }
@@ -364,8 +368,8 @@ async function inspectMediaEnvironment() {
                 height: window.innerHeight,
                 devicePixelRatio: window.devicePixelRatio,
             },
-            microphonePermission: await queryPermission("microphone" as PermissionName),
-            cameraPermission: await queryPermission("camera" as PermissionName),
+            microphonePermission: await queryPermission("microphone"),
+            cameraPermission: await queryPermission("camera"),
             devices: devices.map((device) => ({
                 kind: device.kind,
                 hasLabel: Boolean(device.label),
@@ -373,7 +377,7 @@ async function inspectMediaEnvironment() {
                 groupIdPresent: Boolean(device.groupId),
             })),
         };
-    }).catch((error: any) => ({ error: error?.message || "Unable to inspect media environment." }));
+    })()`).catch((error: any) => ({ error: error?.message || "Unable to inspect media environment." }));
 }
 
 async function clickHangupIfVisible() {
