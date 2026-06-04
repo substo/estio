@@ -259,6 +259,7 @@ export default function WhatsAppSettingsPage() {
     const [callBridgePairingPhone, setCallBridgePairingPhone] = useState("");
     const [callBridgePolling, setCallBridgePolling] = useState(false);
     const [callBridgeQrDataUrl, setCallBridgeQrDataUrl] = useState("");
+    const callBridgeUnhealthy = settings.whatsappCallingConfig.baileysCallBridgeStatus === "unhealthy";
 
     // Embedded Signup State
     const [appId, setAppId] = useState(process.env.NEXT_PUBLIC_META_APP_ID || "");
@@ -1156,6 +1157,11 @@ export default function WhatsAppSettingsPage() {
                                             Polling bridge health for QR, pairing code, or ready status.
                                         </div>
                                     )}
+                                    {callBridgeUnhealthy && (
+                                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+                                            Pairing expired or failed. Generate a new QR code, then scan it from WhatsApp Linked devices within a few minutes.
+                                        </div>
+                                    )}
                                     {!settings.whatsappCallingConfig.authPathPersistent && (
                                         <div className="text-amber-700">
                                             Configure WHATSAPP_CALL_BRIDGE_AUTH_DIR to a persistent server path before production pairing.
@@ -1180,7 +1186,7 @@ export default function WhatsAppSettingsPage() {
                                                 <div>
                                                     <div className="text-base font-medium text-foreground">Pair the call bridge</div>
                                                     <div className="mt-1 text-sm text-muted-foreground">
-                                                        Open WhatsApp on the call number, go to Linked devices, and scan this QR code.
+                                                        Open WhatsApp on the call number, go to Linked devices, and scan this QR code. If WhatsApp rejects it, generate a new QR code and scan the fresh one.
                                                     </div>
                                                 </div>
                                                 {settings.whatsappCallingConfig.pairingCode && (
@@ -1217,6 +1223,10 @@ export default function WhatsAppSettingsPage() {
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
+                                                    <Button type="button" variant={callBridgeUnhealthy ? "default" : "outline"} onClick={handleStartCallBridge} disabled={callingBusy || callBridgePolling}>
+                                                        {callBridgePolling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
+                                                        {callBridgeUnhealthy ? "Generate New QR" : "Restart Pairing"}
+                                                    </Button>
                                                     <Button type="button" variant="outline" onClick={handleCheckCallingReadiness} disabled={callingBusy || callBridgePolling}>
                                                         <RefreshCw className="mr-2 h-4 w-4" />
                                                         Refresh
@@ -1287,7 +1297,7 @@ export default function WhatsAppSettingsPage() {
                                 </Button>
                                 <Button type="button" variant="outline" onClick={handleStartCallBridge} disabled={callingBusy || callBridgePolling}>
                                     {callBridgePolling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
-                                    {callBridgePolling ? "Polling Bridge" : "Start Call Bridge"}
+                                    {callBridgePolling ? "Polling Bridge" : callBridgeUnhealthy ? "Generate New QR" : "Start Call Bridge"}
                                 </Button>
                                 <Button type="button" variant="outline" onClick={handleCheckCallingReadiness} disabled={callingBusy || callBridgePolling}>
                                     <RefreshCw className="mr-2 h-4 w-4" />

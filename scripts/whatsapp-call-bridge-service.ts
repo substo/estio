@@ -41,6 +41,25 @@ const SIMULATE = process.env.WHATSAPP_CALL_BRIDGE_SIMULATE === "1";
 const AUTH_ROOT = String(process.env.WHATSAPP_CALL_BRIDGE_AUTH_DIR || ".data/whatsapp-call-bridge").trim();
 const sessions = new Map<string, BridgeSession>();
 
+function closeSocket(socket: any) {
+    if (!socket) return;
+    try {
+        if (typeof socket.end === "function") {
+            socket.end(undefined);
+            return;
+        }
+        if (typeof socket.ws?.close === "function") {
+            socket.ws.close();
+            return;
+        }
+        if (typeof socket.logout === "function") {
+            void socket.logout().catch(() => undefined);
+        }
+    } catch {
+        // Best-effort cleanup. A new socket will replace the stale one.
+    }
+}
+
 function json(res: http.ServerResponse, status: number, body: any) {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
@@ -268,10 +287,14 @@ async function createBaileysSocket(session: BridgeSession, baileys: any, body: a
 }
 
 async function startSession(session: BridgeSession, body: any = {}) {
+    closeSocket(session.socket);
+    session.socket = null;
     session.status = "pairing";
     session.startedAt = new Date().toISOString();
     session.lastHeartbeatAt = new Date().toISOString();
     session.error = null;
+    session.pairingCode = null;
+    session.qr = null;
 
     if (SIMULATE) {
         session.status = "ready";
