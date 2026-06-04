@@ -5,6 +5,7 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 export const WHATSAPP_CALL_REQUEST_BODY = "Can I call you here on WhatsApp about this?";
 export const WHATSAPP_CALLING_RUNTIME_MODE = "baileys_rnd";
 const RECENT_WHATSAPP_CALL_WINDOW_MS = 24 * 60 * 60 * 1000;
+const BAILEYS_OFFER_CALL_TIMEOUT_MS = 45_000;
 
 export type WhatsAppCallStatus =
     | "requested"
@@ -314,6 +315,7 @@ export class BaileysCallBridgeProvider implements WhatsAppCallingProvider {
                 `/sessions/${encodeURIComponent(sessionId)}/offer-call`,
                 {
                     method: "POST",
+                    timeoutMs: BAILEYS_OFFER_CALL_TIMEOUT_MS,
                     body: JSON.stringify({
                         to: input.targetJid || input.to,
                         locationId: input.locationId,
