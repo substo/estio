@@ -1,6 +1,7 @@
 import { ghlFetch } from '@/lib/ghl/client';
 import { GHLListResponse, GHLProperty } from '@/lib/ghl/types';
 import db from '@/lib/db';
+import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { Property, PropertyStatus, ListingGoal, PublicationStatus } from '@prisma/client';
 
 const OBJECT_KEY = 'custom_object.property';
@@ -378,7 +379,7 @@ export async function getPropertyById(
     id: string,
     locationId?: string
 ): Promise<GHLProperty | null> {
-    if (accessToken) {
+    if (isGhlIntegrationEnabled() && accessToken) {
         return ghlFetch<GHLProperty>(
             `/objects/${OBJECT_KEY}/records/${id}`,
             accessToken
@@ -404,7 +405,7 @@ export async function getPropertyByReference(
     reference: string,
     locationId?: string
 ): Promise<GHLProperty | null> {
-    if (accessToken) {
+    if (isGhlIntegrationEnabled() && accessToken) {
         // Try to search for it
         // Note: GHL Search API might be fuzzy, so we verify the exact match
         const response = await ghlFetch<GHLListResponse<GHLProperty>>(
@@ -511,7 +512,7 @@ export async function createProperty(
     data: Partial<GHLProperty['properties']>,
     locationId?: string
 ): Promise<GHLProperty> {
-    if (accessToken) {
+    if (isGhlIntegrationEnabled() && accessToken) {
         const ghlProp = await ghlFetch<GHLProperty>(
             `/objects/${OBJECT_KEY}/records`,
             accessToken,
@@ -593,7 +594,7 @@ export async function updateProperty(
     data: Partial<GHLProperty['properties']>,
     locationId?: string
 ): Promise<GHLProperty> {
-    if (accessToken) {
+    if (isGhlIntegrationEnabled() && accessToken) {
         const ghlProp = await ghlFetch<GHLProperty>(
             `/objects/${OBJECT_KEY}/records/${id}`,
             accessToken,
@@ -683,7 +684,7 @@ export async function deleteProperty(
     id: string,
     locationId?: string
 ): Promise<void> {
-    if (accessToken) {
+    if (isGhlIntegrationEnabled() && accessToken) {
         return ghlFetch<void>(
             `/objects/${OBJECT_KEY}/records/${id}`,
             accessToken,
@@ -705,6 +706,10 @@ export async function syncToGHL(
     data: Partial<Property> & { features?: string[] },
     existingGhlId?: string
 ): Promise<string | null> {
+    if (!isGhlIntegrationEnabled()) {
+        return existingGhlId || null;
+    }
+
     try {
         const ghlData: any = {
             property_reference: data.slug,

@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Sparkles, X, TrendingUp, Calendar, Clock, MessageSquare, Mic } from "lucide-react";
-import { getAggregateAIUsage } from "@/app/(main)/admin/conversations/actions";
 import { getLocationAiUsageSummary, type LocationAiUsageSummary } from "@/app/(main)/admin/_actions/ai-usage";
 import {
     Dialog,
@@ -62,17 +61,11 @@ export function AICostBadge() {
 
     const fetchUsage = useCallback(async () => {
         try {
-            const [conversational, unified] = await Promise.all([
-                getAggregateAIUsage().catch((e) => {
-                    console.error("[AICostBadge] Failed to fetch conversation usage:", e);
-                    return null;
-                }),
-                getLocationAiUsageSummary().catch((e) => {
-                    console.error("[AICostBadge] Failed to fetch unified usage:", e);
-                    return null;
-                })
-            ]);
-            if (conversational) setUsage(conversational);
+            const unified = await getLocationAiUsageSummary().catch((e) => {
+                console.error("[AICostBadge] Failed to fetch AI usage:", e);
+                return null;
+            });
+            setUsage(null);
             if (unified) setUnifiedUsage(unified);
         } finally {
             setIsLoading(false);

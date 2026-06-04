@@ -4,6 +4,7 @@ import db from '@/lib/db';
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { updateGHLUser } from '@/lib/ghl/users';
+import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from '@/lib/viewings/datetime';
 
 export async function completeUserProfile(formData: FormData) {
@@ -65,7 +66,7 @@ export async function completeUserProfile(formData: FormData) {
         }
 
         // 3. Sync to GHL
-        if (user.ghlUserId && user.locationRoles.length > 0) {
+        if (isGhlIntegrationEnabled() && user.ghlUserId && user.locationRoles.length > 0) {
             const location = user.locationRoles[0].location;
             if (location.ghlLocationId) {
                 try {

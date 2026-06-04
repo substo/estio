@@ -3,6 +3,7 @@ import { headers } from 'next/headers'
 import { WebhookEvent } from '@clerk/nextjs/server'
 import db from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate'
 
 export async function POST(req: Request) {
     // You can find this in the Clerk Dashboard -> Webhooks -> choose the webhook
@@ -156,7 +157,7 @@ export async function POST(req: Request) {
                     try {
                         // 1. Get the actual GHL Location ID from the DB Location
                         const location = await db.location.findUnique({ where: { id: inviteLocationId } });
-                        if (location?.ghlLocationId) {
+                        if (isGhlIntegrationEnabled() && location?.ghlLocationId) {
                             console.log(`[Webhook GHL Sync] Checking GHL user for ${email} in loc ${location.ghlLocationId}`);
 
                             // 2. Search for existing user in GHL

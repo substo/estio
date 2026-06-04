@@ -160,6 +160,7 @@ import {
     type ConversationChannelCapabilities,
 } from "@/lib/conversations/channel-capabilities";
 import { resolveSmsRelayAvailabilityForLocation } from "@/lib/sms-relay/availability";
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import type { ViewingSyncProviderDecision } from "@/lib/viewings/sync-engine";
 import {
     extractClockTimeFromText,
@@ -6529,12 +6530,16 @@ async function resolveConversationChannelCapabilitiesForLocation(
     let smsCapability = phoneFailure || unavailableChannel("ghl_sms_not_configured");
     let smsRelayCapability = phoneFailure || unavailableChannel("sms_relay_disabled", "Android SMS is disabled for this location.");
     if (hasUsablePhone) {
-        const smsStatus = await checkGHLSMSStatus(location.id);
-        if (smsStatus.status === "configured") {
-            smsCapability = availableChannel();
+        if (isGhlIntegrationEnabled()) {
+            const smsStatus = await checkGHLSMSStatus(location.id);
+            if (smsStatus.status === "configured") {
+                smsCapability = availableChannel();
+            } else {
+                const label = smsStatus.reason || "SMS is not configured for this location.";
+                smsCapability = unavailableChannel("ghl_sms_not_configured", label);
+            }
         } else {
-            const label = smsStatus.reason || "SMS is not configured for this location.";
-            smsCapability = unavailableChannel("ghl_sms_not_configured", label);
+            smsCapability = unavailableChannel("ghl_integration_paused", getGhlIntegrationDisabledReason());
         }
 
         const relayAvailability = await resolveSmsRelayAvailabilityForLocation({
@@ -8533,6 +8538,14 @@ async function checkSmsPhoneEligibility(
         return {
             status: 'ineligible',
             reason: `${contactName}'s phone number "${phoneValue}" is invalid or too short.`,
+            normalizedDigits: rawDigits,
+        };
+    }
+
+    if (!isGhlIntegrationEnabled()) {
+        return {
+            status: 'unknown',
+            reason: getGhlIntegrationDisabledReason(),
             normalizedDigits: rawDigits,
         };
     }

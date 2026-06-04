@@ -16,6 +16,7 @@ import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
 import { findContactsByPhoneDigitsWithFallback, phoneDigitsLikelyMatch } from "@/lib/contacts/phone-lookup";
+import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/status-updates";
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
@@ -1008,7 +1009,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
         // 2. Check GHL (Secondary / Back Layer)
         // We still check GHL to link the ID and prevent duplicates in CRM
-        if (locationDef.ghlAccessToken && locationDef.ghlLocationId) {
+        if (isGhlIntegrationEnabled() && locationDef.ghlAccessToken && locationDef.ghlLocationId) {
             try {
                 const { ghlFetch } = await import("@/lib/ghl/client");
                 const cleanPhone = contactPhone.replace(/\D/g, '');
@@ -1448,7 +1449,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     try {
         // Location already fetched as locationDef
 
-        if (locationDef?.ghlAccessToken && locationDef?.ghlLocationId) {
+        if (isGhlIntegrationEnabled() && locationDef?.ghlAccessToken && locationDef?.ghlLocationId) {
             const isLidOnlyContact = !contact?.phone && !!contact?.lid;
             if (isLidOnlyContact) {
                 console.warn(`[WhatsApp Sync] Skipping GHL sync for LID-only contact ${contact.id} (wamId: ${wamId})`);

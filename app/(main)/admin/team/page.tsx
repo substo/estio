@@ -9,6 +9,7 @@ import { InviteUserDialog } from "./_components/invite-user-dialog";
 import { PendingInvitationsList } from "./_components/pending-invitations-list";
 import { getGHLCalendars } from "./actions";
 import { checkGHLSMTPStatus } from "@/lib/ghl/email";
+import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 
 export default async function TeamPage() {
     const cookieStore = await cookies();
@@ -69,7 +70,7 @@ export default async function TeamPage() {
     const calendars = await getGHLCalendars(locationId);
 
     // Check SMTP Status
-    const smtpStatus = location.ghlLocationId
+    const smtpStatus = isGhlIntegrationEnabled() && location.ghlLocationId
         ? await checkGHLSMTPStatus(location.ghlLocationId)
         : { isConfigured: false };
 

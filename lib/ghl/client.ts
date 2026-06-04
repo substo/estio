@@ -1,5 +1,6 @@
 import { GHL_CONFIG } from '@/config/ghl';
 import { GHLTokenResponse, GHLUser } from './types';
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from './integration-gate';
 
 export class GHLError extends Error {
     public status: number;
@@ -21,6 +22,10 @@ export async function ghlFetch<T>(
     accessToken: string,
     options: RequestInit = {}
 ): Promise<T> {
+    if (!isGhlIntegrationEnabled()) {
+        throw new GHLError(getGhlIntegrationDisabledReason(), 503, { integrationPaused: true });
+    }
+
     const url = endpoint.startsWith('http') ? endpoint : `${GHL_CONFIG.API_BASE_URL}${endpoint}`;
 
     const headers: Record<string, string> = {

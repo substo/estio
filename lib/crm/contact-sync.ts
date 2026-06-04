@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { getContact } from "@/lib/ghl/contacts";
+import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import { generateVisualId } from "@/lib/google/utils";
 
 /**
@@ -10,6 +11,7 @@ import { generateVisualId } from "@/lib/google/utils";
  * 3. Updates the existing contact OR creates a new one
  */
 export async function ensureLocalContactSynced(ghlContactId: string, locationId: string, accessToken: string) {
+    if (!isGhlIntegrationEnabled()) return null;
     if (!ghlContactId) return null;
 
     try {
@@ -94,6 +96,8 @@ export async function ensureLocalContactSynced(ghlContactId: string, locationId:
  * 4. If not found, CREATES it in GHL and links it.
  */
 export async function ensureRemoteContact(contactId: string, ghlLocationId: string, accessToken: string) {
+    if (!isGhlIntegrationEnabled()) return null;
+
     // 1. Get Local Contact
     const contact = await db.contact.findUnique({
         where: { id: contactId },

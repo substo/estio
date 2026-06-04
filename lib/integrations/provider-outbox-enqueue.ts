@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import db from "@/lib/db";
+import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import { enqueueProviderOutboxJob } from "@/lib/integrations/provider-outbox";
 import { enqueueProviderOutboxQueueJob } from "@/lib/queue/provider-outbox";
 
@@ -14,6 +15,8 @@ export async function enqueueGhlContactSync(args: {
     contactId: string;
     payload?: Prisma.InputJsonValue | null;
 }) {
+    if (!isGhlIntegrationEnabled()) return null;
+
     const location = await db.location.findUnique({
         where: { id: args.locationId },
         select: { ghlAccessToken: true, ghlLocationId: true },
@@ -36,6 +39,8 @@ export async function enqueueGhlConversationMirror(args: {
     contactId?: string | null;
     payload?: Prisma.InputJsonValue | null;
 }) {
+    if (!isGhlIntegrationEnabled()) return null;
+
     const location = await db.location.findUnique({
         where: { id: args.locationId },
         select: { ghlAccessToken: true, ghlLocationId: true },
@@ -61,6 +66,8 @@ export async function enqueueGhlMessageMirror(args: {
     body?: string | null;
     payload?: Prisma.InputJsonValue | null;
 }) {
+    if (!isGhlIntegrationEnabled()) return null;
+
     const location = await db.location.findUnique({
         where: { id: args.locationId },
         select: { ghlAccessToken: true, ghlLocationId: true },
@@ -90,6 +97,8 @@ export async function enqueueGhlStatusSync(args: {
     contactId?: string | null;
     payload?: Prisma.InputJsonValue | null;
 }) {
+    if (!isGhlIntegrationEnabled()) return null;
+
     const location = await db.location.findUnique({
         where: { id: args.locationId },
         select: { ghlAccessToken: true, ghlLocationId: true },

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import db from "@/lib/db";
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import { getProviderCapabilities } from "@/lib/integrations/provider-capabilities";
 import { buildProviderOutboxIdempotencyKey } from "@/lib/integrations/provider-outbox-keys";
 
@@ -246,6 +247,9 @@ async function markProviderOutboxDisabled(row: any, reason: string, attemptCount
 async function resolveGhlRemoteContact(row: any): Promise<{ remoteContactId?: string; disabled?: string; providerAccountId: string }> {
     const location = row.location;
     const providerAccountId = getProviderAccountId(row);
+    if (!isGhlIntegrationEnabled()) {
+        return { disabled: getGhlIntegrationDisabledReason(), providerAccountId };
+    }
     if (!location?.ghlAccessToken) {
         return { disabled: "GHL is not connected for this location.", providerAccountId };
     }

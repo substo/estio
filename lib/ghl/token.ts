@@ -2,12 +2,17 @@ import db from '@/lib/db';
 import { GHL_CONFIG } from '@/config/ghl';
 import { GHLError } from './client';
 import { GHLTokenResponse } from './types';
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from './integration-gate';
 
 /**
  * Retrieves a valid access token for the given location.
  * Automatically refreshes the token if it is expired or about to expire.
  */
 export async function getAccessToken(locationId: string): Promise<string | null> {
+    if (!isGhlIntegrationEnabled()) {
+        return null;
+    }
+
     const location = await db.location.findUnique({
         where: { ghlLocationId: locationId },
         select: {
@@ -122,6 +127,10 @@ export async function ghlFetchWithAuth<T>(
     endpoint: string,
     options: RequestInit = {}
 ): Promise<T> {
+    if (!isGhlIntegrationEnabled()) {
+        throw new Error(getGhlIntegrationDisabledReason());
+    }
+
     let accessToken = await getAccessToken(locationId);
 
     if (!accessToken) {

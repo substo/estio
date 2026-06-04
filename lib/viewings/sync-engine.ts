@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { ViewingOutbox, Prisma } from '@prisma/client';
 import db from '@/lib/db';
 import { ensureRemoteContact } from '@/lib/crm/contact-sync';
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { GHLError } from '@/lib/ghl/client';
 import {
     createGhlViewingAppointment,
@@ -135,7 +136,7 @@ function getProviderEligibility(viewing: SyncViewingRecord): {
     const availableProviders: ViewingProvider[] = [];
     const skippedProviders: ViewingSyncProviderDecision[] = [];
 
-    if (viewing.contact.location.ghlAccessToken && viewing.contact.location.ghlLocationId && viewing.user.ghlCalendarId) {
+    if (isGhlIntegrationEnabled() && viewing.contact.location.ghlAccessToken && viewing.contact.location.ghlLocationId && viewing.user.ghlCalendarId) {
         availableProviders.push('ghl');
     } else {
         skippedProviders.push({
@@ -183,6 +184,10 @@ async function syncViewingToGhl(job: ViewingOutbox, viewing: SyncViewingRecord):
     const accessToken = viewing.contact.location.ghlAccessToken;
     const ghlLocationId = viewing.contact.location.ghlLocationId;
     const ghlCalendarId = viewing.user.ghlCalendarId;
+
+    if (!isGhlIntegrationEnabled()) {
+        throw new Error(getGhlIntegrationDisabledReason());
+    }
 
     if (!accessToken || !ghlLocationId || !ghlCalendarId) {
         throw new Error('GHL sync unavailable: location not connected or no calendar assigned');

@@ -1,5 +1,6 @@
 import db from '@/lib/db';
 import { GHLError, ghlFetch } from './client';
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from './integration-gate';
 import { getAccessToken } from './token';
 import { GHLLocation } from './types';
 
@@ -153,6 +154,14 @@ function inspectSmsConfiguration(rawLocation: any): { configured: boolean; provi
 }
 
 export async function checkGHLSMSStatus(locationId: string): Promise<GHLSmsStatus> {
+    if (!isGhlIntegrationEnabled()) {
+        return {
+            status: 'unknown',
+            configured: false,
+            reason: getGhlIntegrationDisabledReason(),
+        };
+    }
+
     try {
         const ghlLocationId = await resolveToGHLId(locationId);
         if (!ghlLocationId) {

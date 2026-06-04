@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { getCalendars, createCalendarService } from '@/lib/ghl/calendars';
 import { updateGHLUser, searchGHLUsers, removeGHLUserFromLocation, createGHLUser } from '@/lib/ghl/users';
+import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 
 async function getCurrentLocationId(): Promise<string> {
     const cookieStore = await cookies();
@@ -114,7 +115,7 @@ export async function inviteUserToLocation(formData: FormData) {
 
                 // Restore GHL User if missing (was offboarded)
                 const location = await db.location.findUnique({ where: { id: locationId } });
-                if (location?.ghlLocationId && !user.ghlUserId) {
+                if (isGhlIntegrationEnabled() && location?.ghlLocationId && !user.ghlUserId) {
                     try {
                         console.log(`[Team] Restoring GHL User for ${user.email}...`);
                         const ghlUser = await createGHLUser(location.ghlLocationId, {
@@ -385,7 +386,7 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
             }
 
             // Sync GHL User
-            if (user.ghlUserId && user.locations[0]?.ghlLocationId) {
+            if (isGhlIntegrationEnabled() && user.ghlUserId && user.locations[0]?.ghlLocationId) {
                 try {
                     const { updateGHLUser } = await import('@/lib/ghl/users');
                     // Note: Update user endpoint might not support changing role directly in all GHL versions,
@@ -457,7 +458,7 @@ export async function removeUserFromLocation(userId: string) {
             // If they have a connected GHL User ID and this location has a GHL Location ID...
             const location = await db.location.findUnique({ where: { id: locationId } });
 
-            if (userToRemove.ghlUserId && location?.ghlLocationId) {
+            if (isGhlIntegrationEnabled() && userToRemove.ghlUserId && location?.ghlLocationId) {
                 console.log(`[Team] Offboarding User ${userId} from GHL...`);
                 await removeGHLUserFromLocation(location.ghlLocationId, userToRemove.ghlUserId);
             }
@@ -505,6 +506,10 @@ export async function removeUserFromLocation(userId: string) {
 // ============ GHL CALENDAR MANAGEMENT (from old settings/team) ============
 
 export async function getGHLCalendars(locationId: string) {
+    if (!isGhlIntegrationEnabled()) {
+        return [];
+    }
+
     const location = await db.location.findUnique({
         where: { id: locationId },
         select: { ghlLocationId: true }
@@ -537,6 +542,10 @@ export async function createGHLCalendarForUser(
     data: { name: string; slotDuration: number }
 ) {
     try {
+        if (!isGhlIntegrationEnabled()) {
+            return { success: false, message: 'GHL integration is paused.' };
+        }
+
         const adminUser = await auth();
         if (!adminUser.userId) return { success: false, message: 'Unauthorized' };
 
@@ -635,7 +644,7 @@ export async function updateTeamMemberProfile(formData: FormData) {
         // 4. Sync to GHL
         console.log(`[Team] GHL Sync Check - User: ${existingUser.id}, GHL ID: ${existingUser.ghlUserId}, Roles: ${existingUser.locationRoles.length}`);
 
-        if (existingUser.locationRoles.length > 0) {
+        if (isGhlIntegrationEnabled() && existingUser.locationRoles.length > 0) {
             const location = existingUser.locationRoles[0].location;
             if (location.ghlLocationId) {
                 let ghlUserId = existingUser.ghlUserId;

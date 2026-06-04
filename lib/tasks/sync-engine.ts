@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { ContactTaskOutbox, Prisma } from '@prisma/client';
 import db from '@/lib/db';
 import { ensureRemoteContact } from '@/lib/crm/contact-sync';
+import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { GHLError } from '@/lib/ghl/client';
 import {
   createGhlTaskForContact,
@@ -149,7 +150,7 @@ function selectGoogleSyncUser(task: SyncTaskRecord) {
 function getAvailableProviders(task: SyncTaskRecord): TaskProvider[] {
   const providers: TaskProvider[] = [];
 
-  if (task.location.ghlAccessToken && task.location.ghlLocationId) {
+  if (isGhlIntegrationEnabled() && task.location.ghlAccessToken && task.location.ghlLocationId) {
     providers.push('ghl');
   }
 
@@ -189,6 +190,10 @@ async function syncTaskToGhl(
 ): Promise<TaskSyncOperationResult> {
   const accessToken = task.location.ghlAccessToken;
   const ghlLocationId = task.location.ghlLocationId;
+
+  if (!isGhlIntegrationEnabled()) {
+    throw new Error(getGhlIntegrationDisabledReason());
+  }
 
   if (!accessToken || !ghlLocationId) {
     throw new Error('GHL sync unavailable: location not connected');

@@ -1,6 +1,7 @@
 
 import db from '@/lib/db';
 import { ghlFetch } from "./client";
+import { isGhlIntegrationEnabled } from "./integration-gate";
 import { getAccessToken } from "./token";
 import { GHLLocation } from "./types";
 
@@ -25,6 +26,10 @@ async function resolveToGHLId(identifier: string): Promise<string | null> {
 }
 
 export async function checkGHLSMTPStatus(locationId: string): Promise<{ isConfigured: boolean; providerName?: string }> {
+    if (!isGhlIntegrationEnabled()) {
+        return { isConfigured: false };
+    }
+
     try {
         const ghlLocationId = await resolveToGHLId(locationId);
         if (!ghlLocationId) {
@@ -81,6 +86,10 @@ interface SendEmailParams {
 }
 
 export async function sendGHLEmail(params: SendEmailParams): Promise<{ success: boolean; error?: string }> {
+    if (!isGhlIntegrationEnabled()) {
+        return { success: false, error: 'GHL integration is paused.' };
+    }
+
     console.log(`[sendGHLEmail] START. To: ${params.to}, Subject: ${params.subject}, Identifier: ${params.locationId}`);
     try {
         const ghlLocationId = await resolveToGHLId(params.locationId);

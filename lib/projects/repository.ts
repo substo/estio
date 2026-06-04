@@ -1,5 +1,6 @@
 import { ghlFetch } from '@/lib/ghl/client';
 import db from '@/lib/db';
+import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { Project } from '@prisma/client';
 
 const OBJECT_KEY = 'custom_objects.project';
@@ -138,6 +139,10 @@ export async function syncProjectToGHL(
     accessToken: string,
     project: Project
 ): Promise<string | null> {
+    if (!isGhlIntegrationEnabled()) {
+        return project.ghlProjectId;
+    }
+
     // Loop Prevention: If source is GHL_WEBHOOK, do not sync back
     if (project.source === 'GHL_WEBHOOK') {
         console.log(`Skipping outbound sync for Project ${project.id} (Source: GHL_WEBHOOK)`);

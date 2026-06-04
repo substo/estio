@@ -18,6 +18,7 @@ import crypto from "crypto";
 import db from "@/lib/db";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { findContactsByPhoneDigitsWithFallback } from "@/lib/contacts/phone-lookup";
+import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 
 type SmsRelayInboundDeps = {
     db?: any;
@@ -114,7 +115,7 @@ export async function processSmsRelayInbound(
 
         // Optional: check GHL for existing contact
         let ghlContactId: string | undefined;
-        if (location.ghlLocationId && location.ghlAccessToken) {
+        if (isGhlIntegrationEnabled() && location.ghlLocationId && location.ghlAccessToken) {
             try {
                 if (deps.lookupGhlContactId) {
                     ghlContactId = await deps.lookupGhlContactId({
