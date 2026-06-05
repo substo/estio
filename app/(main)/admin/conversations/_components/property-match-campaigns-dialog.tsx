@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { Check, Link2, Loader2, Megaphone, Pencil, Search, Send, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, Link2, List, Loader2, Megaphone, Pencil, Search, Send, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -78,6 +78,7 @@ type CampaignDetail = {
 };
 
 type Queue = "review" | "sent" | "no";
+type MobileCampaignView = "campaigns" | "review";
 
 function formatMoney(value?: number | null) {
     return Number.isFinite(Number(value)) ? `€${Number(value).toLocaleString()}` : "No price";
@@ -86,6 +87,19 @@ function formatMoney(value?: number | null) {
 function confidenceLabel(value?: number | null) {
     if (!Number.isFinite(Number(value))) return "";
     return `${Math.round(Number(value) * 100)}%`;
+}
+
+function campaignLabel(campaign?: Campaign | null) {
+    return campaign?.title || campaign?.property?.title || "Untitled campaign";
+}
+
+function candidateRequirementLine(candidate: Candidate) {
+    return [
+        candidate.contact?.requirementStatus,
+        candidate.contact?.requirementBedrooms,
+        candidate.contact?.requirementMaxPrice,
+        candidate.contact?.requirementPropertyLocations?.join(", "),
+    ].filter(Boolean).join(" · ");
 }
 
 export function PropertyMatchCampaignsDialog({
@@ -111,6 +125,7 @@ export function PropertyMatchCampaignsDialog({
     const [drafts, setDrafts] = useState<Record<string, string>>({});
     const [busyCandidateId, setBusyCandidateId] = useState<string | null>(null);
     const [error, setError] = useState("");
+    const [mobileView, setMobileView] = useState<MobileCampaignView>("campaigns");
     const [isPending, startTransition] = useTransition();
 
     const selectedProperty = useMemo(
@@ -122,9 +137,12 @@ export function PropertyMatchCampaignsDialog({
         startTransition(async () => {
             const rows = await listPropertyMatchCampaignsAction();
             setCampaigns(rows as Campaign[]);
-            if (!selectedCampaignId && rows[0]?.id) setSelectedCampaignId(rows[0].id);
+            setSelectedCampaignId((current) => {
+                if (current && rows.some((campaign) => campaign.id === current)) return current;
+                return rows[0]?.id || null;
+            });
         });
-    }, [selectedCampaignId]);
+    }, []);
 
     const loadDetail = useCallback((campaignId: string, nextQueue = queue) => {
         startTransition(async () => {
@@ -147,6 +165,7 @@ export function PropertyMatchCampaignsDialog({
 
     useEffect(() => {
         if (!open) return;
+        setMobileView("campaigns");
         loadCampaigns();
         startTransition(async () => {
             const rows = await searchPropertyMatchCampaignPropertiesAction("");
@@ -179,6 +198,7 @@ export function PropertyMatchCampaignsDialog({
                 return;
             }
             setSelectedCampaignId(res.campaignId);
+            setMobileView("review");
             setPriorityNote("");
             const rows = await listPropertyMatchCampaignsAction();
             setCampaigns(rows as Campaign[]);
@@ -201,6 +221,7 @@ export function PropertyMatchCampaignsDialog({
                 return;
             }
             setSelectedCampaignId(res.campaignId);
+            setMobileView("review");
             setPriorityNote("");
             setPropertyUrl("");
             setPropertyText("");
@@ -224,8 +245,9 @@ export function PropertyMatchCampaignsDialog({
 
     const startEditCampaign = (campaign: Campaign) => {
         setSelectedCampaignId(campaign.id);
+        setMobileView("campaigns");
         setEditingCampaignId(campaign.id);
-        setEditTitle(campaign.title || campaign.property?.title || "");
+        setEditTitle(campaignLabel(campaign));
         setEditPriorityNote(campaign.priorityNote || "");
         setError("");
     };
@@ -250,7 +272,7 @@ export function PropertyMatchCampaignsDialog({
     };
 
     const deleteCampaign = (campaign: Campaign) => {
-        const label = campaign.title || campaign.property?.title;
+        const label = campaignLabel(campaign);
         if (!window.confirm(`Delete campaign "${label}"? This removes its candidate review rows too.`)) return;
         setError("");
         startTransition(async () => {
@@ -263,10 +285,16 @@ export function PropertyMatchCampaignsDialog({
             setCampaigns(rows as Campaign[]);
             const nextSelected = selectedCampaignId === campaign.id ? (rows[0]?.id || null) : selectedCampaignId;
             setSelectedCampaignId(nextSelected);
+            if (!nextSelected) setMobileView("campaigns");
             setEditingCampaignId(null);
             if (nextSelected) loadDetail(nextSelected, queue);
             else setDetail(null);
         });
+    };
+
+    const selectCampaign = (campaignId: string) => {
+        setSelectedCampaignId(campaignId);
+        setMobileView("review");
     };
 
     const setQueueAndReload = (nextQueue: Queue) => {
@@ -325,16 +353,52 @@ export function PropertyMatchCampaignsDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="flex h-[min(86vh,780px)] max-w-6xl flex-col overflow-hidden p-0">
-                <DialogHeader className="border-b px-4 py-3">
-                    <DialogTitle className="flex items-center gap-2 text-base">
-                        <Megaphone className="h-4 w-4" />
-                        Property campaigns
-                    </DialogTitle>
+            <DialogContent className="flex h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-[min(92dvh,820px)] sm:w-[calc(100vw-2rem)] sm:max-w-6xl sm:rounded-lg">
+                <DialogHeader className="border-b px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3">
+                    <div className="flex items-center gap-2 pr-8">
+                        {mobileView === "review" ? (
+                            <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 md:hidden"
+                                onClick={() => setMobileView("campaigns")}
+                                aria-label="Back to campaigns"
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                        ) : null}
+                        <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
+                            <Megaphone className="h-4 w-4 shrink-0" />
+                            <span className="truncate">Property campaigns</span>
+                        </DialogTitle>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 md:hidden">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant={mobileView === "campaigns" ? "default" : "outline"}
+                            className="h-9 text-xs"
+                            onClick={() => setMobileView("campaigns")}
+                        >
+                            <List className="mr-1.5 h-3.5 w-3.5" />
+                            Campaigns
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant={mobileView === "review" ? "default" : "outline"}
+                            className="h-9 text-xs"
+                            onClick={() => setMobileView("review")}
+                        >
+                            <Users className="mr-1.5 h-3.5 w-3.5" />
+                            Review
+                        </Button>
+                    </div>
                 </DialogHeader>
 
                 <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
-                    <aside className="flex min-h-0 flex-col border-r bg-slate-50/70 p-3">
+                    <aside className={`${mobileView === "campaigns" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto border-r bg-slate-50/70 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:flex`}>
                         <div className="flex min-h-0 flex-1 flex-col gap-3">
                             <div className="rounded-md border bg-white p-3">
                                 <div className="text-xs font-semibold uppercase text-slate-500">New campaign</div>
@@ -422,10 +486,10 @@ export function PropertyMatchCampaignsDialog({
                                         >
                                             <button
                                                 type="button"
-                                                onClick={() => setSelectedCampaignId(campaign.id)}
+                                                onClick={() => selectCampaign(campaign.id)}
                                                 className="w-full px-2 py-2 text-left"
                                             >
-                                                <div className="truncate font-medium text-slate-900">{campaign.title || campaign.property?.title}</div>
+                                                <div className="truncate font-medium text-slate-900">{campaignLabel(campaign)}</div>
                                                 <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
                                                     <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
                                                     <span>{campaign.yesCount} yes</span>
@@ -448,7 +512,7 @@ export function PropertyMatchCampaignsDialog({
                         </div>
                     </aside>
 
-                    <main className="min-h-0 overflow-hidden">
+                    <main className={`${mobileView === "review" ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
                         {!activeCampaign ? (
                             <div className="flex h-full items-center justify-center text-sm text-slate-500">Create or select a campaign.</div>
                         ) : (
@@ -456,12 +520,12 @@ export function PropertyMatchCampaignsDialog({
                                 <div className="border-b px-4 py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="min-w-0">
-                                            <div className="truncate text-sm font-semibold text-slate-900">{activeCampaign.title || activeCampaign.property?.title}</div>
+                                            <div className="truncate text-sm font-semibold text-slate-900">{campaignLabel(activeCampaign)}</div>
                                             <div className="mt-1 text-xs text-slate-500">
                                                 {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed · {activeCampaign.yesCount} yes · {activeCampaign.maybeCount} maybe · {activeCampaign.noCount} no
                                             </div>
                                         </div>
-                                        <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={processMore} disabled={isPending}>
+                                        <Button type="button" size="sm" variant="outline" className="h-8 w-full text-xs sm:w-auto" onClick={processMore} disabled={isPending}>
                                             {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
                                             Process batch
                                         </Button>
@@ -482,7 +546,7 @@ export function PropertyMatchCampaignsDialog({
                                                     placeholder="Priority note"
                                                 />
                                             </div>
-                                            <div className="mt-2 flex justify-end gap-2">
+                                            <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:justify-end">
                                                 <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setEditingCampaignId(null)}>
                                                     Cancel
                                                 </Button>
@@ -493,24 +557,26 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                         </div>
                                     ) : null}
-                                    <div className="mt-2 flex gap-1">
-                                        {(["review", "sent", "no"] as Queue[]).map((item) => (
-                                            <Button
-                                                key={item}
-                                                type="button"
-                                                size="sm"
-                                                variant={queue === item ? "default" : "outline"}
-                                                className="h-7 px-2 text-xs"
-                                                onClick={() => setQueueAndReload(item)}
-                                            >
-                                                {item === "review" ? "Review" : item === "sent" ? "Approved/Sent" : "No/Skipped"}
-                                            </Button>
-                                        ))}
+                                    <div className="-mx-4 mt-2 overflow-x-auto px-4">
+                                        <div className="flex min-w-max gap-1">
+                                            {(["review", "sent", "no"] as Queue[]).map((item) => (
+                                                <Button
+                                                    key={item}
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={queue === item ? "default" : "outline"}
+                                                    className="h-7 px-2 text-xs"
+                                                    onClick={() => setQueueAndReload(item)}
+                                                >
+                                                    {item === "review" ? "Review" : item === "sent" ? "Approved/Sent" : "No/Skipped"}
+                                                </Button>
+                                            ))}
+                                        </div>
                                     </div>
                                     {error ? <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">{error}</div> : null}
                                 </div>
 
-                                <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                                <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
                                     {detail?.candidates.length === 0 ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">No candidates in this queue.</div>
                                     ) : null}
@@ -524,9 +590,9 @@ export function PropertyMatchCampaignsDialog({
                                             const isBusy = busyCandidateId === candidate.id;
                                             return (
                                                 <div key={candidate.id} className="rounded-md border bg-white p-3">
-                                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                                    <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-between">
                                                         <div className="min-w-0">
-                                                            <div className="flex items-center gap-2">
+                                                            <div className="flex min-w-0 flex-wrap items-center gap-2">
                                                                 <div className="truncate text-sm font-medium text-slate-900">{candidate.contact?.name || "Unnamed contact"}</div>
                                                                 <Badge variant={candidate.aiVerdict === "yes" ? "default" : candidate.aiVerdict === "maybe" ? "secondary" : "outline"} className="h-5 text-[10px]">
                                                                     {candidate.aiVerdict} {confidenceLabel(candidate.confidence)}
@@ -534,16 +600,16 @@ export function PropertyMatchCampaignsDialog({
                                                                 {candidate.preferredChannel ? <Badge variant="outline" className="h-5 text-[10px]">{candidate.preferredChannel}</Badge> : null}
                                                             </div>
                                                             <div className="mt-1 text-xs text-slate-500">
-                                                                {[candidate.contact?.requirementStatus, candidate.contact?.requirementBedrooms, candidate.contact?.requirementMaxPrice, candidate.contact?.requirementPropertyLocations?.join(", ")].filter(Boolean).join(" · ")}
+                                                                {candidateRequirementLine(candidate)}
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-1 sm:flex">
                                                             {candidate.conversationId ? (
-                                                                <Button asChild type="button" size="sm" variant="outline" className="h-7 px-2 text-xs">
+                                                                <Button asChild type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7">
                                                                     <a href={`/admin/conversations?id=${encodeURIComponent(candidate.conversationId)}`}>Open</a>
                                                                 </Button>
                                                             ) : null}
-                                                            <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-slate-500" onClick={() => skipCandidate(candidate)} disabled={isBusy}>
+                                                            <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-slate-500 sm:h-7 sm:w-7" onClick={() => skipCandidate(candidate)} disabled={isBusy}>
                                                                 <X className="h-3.5 w-3.5" />
                                                             </Button>
                                                         </div>
@@ -564,16 +630,16 @@ export function PropertyMatchCampaignsDialog({
                                                                 className="min-h-24 text-sm"
                                                                 placeholder="Generate or write the message draft"
                                                             />
-                                                            <div className="flex flex-wrap justify-end gap-2">
-                                                                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => generateDraft(candidate)} disabled={isBusy || isPending}>
+                                                            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                                                                <Button type="button" size="sm" variant="outline" className="h-9 text-xs sm:h-8" onClick={() => generateDraft(candidate)} disabled={isBusy || isPending}>
                                                                     {isBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
                                                                     Generate draft
                                                                 </Button>
-                                                                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => saveDraft(candidate)} disabled={!draft.trim() || isBusy}>
+                                                                <Button type="button" size="sm" variant="outline" className="h-9 text-xs sm:h-8" onClick={() => saveDraft(candidate)} disabled={!draft.trim() || isBusy}>
                                                                     <Check className="mr-1.5 h-3 w-3" />
                                                                     Approve
                                                                 </Button>
-                                                                <Button type="button" size="sm" className="h-8 text-xs" onClick={() => sendCandidate(candidate)} disabled={!canSend || isBusy}>
+                                                                <Button type="button" size="sm" className="h-9 text-xs sm:h-8" onClick={() => sendCandidate(candidate)} disabled={!canSend || isBusy}>
                                                                     <Send className="mr-1.5 h-3 w-3" />
                                                                     Send
                                                                 </Button>
