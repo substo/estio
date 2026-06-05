@@ -33,7 +33,7 @@ export function PropertyMessageAssist({
     const [propertyText, setPropertyText] = useState("");
     const [importantDetails, setImportantDetails] = useState("");
     const [purpose, setPurpose] = useState<PropertyMessagePurpose>("new_listing");
-    const [length, setLength] = useState<PropertyMessageLength>("medium");
+    const [length, setLength] = useState<PropertyMessageLength>("short");
     const [fetchingUrl, setFetchingUrl] = useState(false);
     const [error, setError] = useState("");
     const [warning, setWarning] = useState("");

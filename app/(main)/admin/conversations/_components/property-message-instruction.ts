@@ -16,9 +16,9 @@ const PURPOSE_COPY: Record<PropertyMessagePurpose, string> = {
 };
 
 const LENGTH_COPY: Record<PropertyMessageLength, string> = {
-    short: "Keep it brief enough for WhatsApp/SMS, around 1-3 short sentences.",
-    medium: "Use a conversational medium length, around 3-5 short sentences.",
-    detailed: "Include the useful property details while still sounding like a human chat message.",
+    short: "Keep it brief enough for WhatsApp/SMS: 2-3 short chat lines.",
+    medium: "Use a conversational medium length: 3-4 short chat lines, not one paragraph.",
+    detailed: "Include the useful property details while still using short chat lines instead of a bulky paragraph.",
 };
 
 function normalizeInstructionField(value: string | undefined, maxLength: number): string {
@@ -32,7 +32,7 @@ function normalizeInstructionField(value: string | undefined, maxLength: number)
 
 export function buildPropertyMessageInstruction(input: PropertyMessageInstructionInput): string {
     const purpose = input.purpose || "new_listing";
-    const length = input.length || "medium";
+    const length = input.length || "short";
     const propertyUrls = [
         ...(input.propertyUrls || []),
         input.propertyUrl || "",
@@ -59,9 +59,15 @@ export function buildPropertyMessageInstruction(input: PropertyMessageInstructio
         isOptionsMessage ? "When there are multiple properties, write one natural options message that helps the client compare them without sounding like a report." : null,
         "If the property appears to match the lead's requirements, mention the strongest matching details conversationally.",
         "If the match is uncertain, phrase it softly and invite them to confirm interest.",
-        "Do not use bullets, headings, Markdown, or a structured property summary.",
+        "Write in WhatsApp/SMS style: each idea on its own short line, with natural line breaks between the hook, key details, next step, and link.",
+        "Never return one bulky paragraph. Do not put more than 1-2 short sentences on the same line or paragraph.",
+        "For a new-listing message, use this mini-story shape: quick personal hook, 2-3 key facts, one light benefit only if useful, then a clear CTA and the URL on its own line.",
+        "State property facts first and benefits lightly. Avoid brochure language, over-explaining investment logic, or salesy claims.",
+        "Use natural texting phrasing where it fits, such as thought you might like this, worth a look, interested in this one, or fancy a look.",
+        "Use at most one simple emoji only if it fits the current conversation tone.",
+        "Do not use bullets, headings, Markdown, numbered lists, or a structured property summary.",
         "Do not invent missing facts, availability, prices, locations, viewings, or promises.",
-        "If a URL is provided and useful, include it naturally, on its own line.",
+        "If a URL is provided and useful, include it naturally, on its own line after a blank line.",
         "",
         "Property source:",
         sourceLines.join("\n\n") || "[No property source text provided]",
