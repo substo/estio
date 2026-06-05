@@ -111,6 +111,7 @@ import {
 import { applyRealtimeMessagePatchToMessages } from './conversation-realtime-message-actions';
 import {
     applyMessageTranslation,
+    applyMessageTranslations,
     applyReplyLanguageOverrideToConversations,
     getConversationMessageType,
 } from './conversation-translation-actions';
@@ -1922,13 +1923,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return { success: false as const, error: String(result?.error || "Failed to translate thread.") };
         }
 
-        try {
-            const refreshed = await fetchMessages(activeConversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
-            if (activeIdRef.current === activeConversationId) {
-                applyRefreshedChatMessages(activeConversationId, refreshed);
+        const translations = Array.isArray((result as any).translations)
+            ? (result as any).translations
+            : [];
+        if (translations.length > 0) {
+            setMessages((prev) => applyMessageTranslations(prev, translations));
+        } else {
+            try {
+                const refreshed = await fetchMessages(activeConversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
+                if (activeIdRef.current === activeConversationId) {
+                    applyRefreshedChatMessages(activeConversationId, refreshed);
+                }
+            } catch {
+                // Ignore refresh errors; optimistic/message-level updates can still continue.
             }
-        } catch {
-            // Ignore refresh errors; optimistic/message-level updates can still continue.
         }
 
         return {

@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { Conversation, Message, MessageTranslationVariant } from '@/lib/ghl/conversations';
 import {
     applyMessageTranslation,
+    applyMessageTranslations,
     applyReplyLanguageOverrideToConversations,
     getConversationMessageType,
 } from './conversation-translation-actions';
@@ -58,6 +59,40 @@ test('applyMessageTranslation keeps original view default when source language i
     assert.equal(message.translation.viewDefault, 'original');
     assert.deepEqual(message.translation.available, [translation]);
     assert.deepEqual(message.translations, [translation]);
+});
+
+test('applyMessageTranslations applies returned thread translations in one pass', () => {
+    const firstTranslation = {
+        targetLanguage: 'en',
+        sourceLanguage: 'el',
+        sourceText: 'γειά',
+        translatedText: 'hello',
+        status: 'completed',
+    } satisfies MessageTranslationVariant;
+    const secondTranslation = {
+        targetLanguage: 'en',
+        sourceLanguage: 'fr',
+        sourceText: 'bonjour',
+        translatedText: 'hello',
+        status: 'completed',
+    } satisfies MessageTranslationVariant;
+
+    const messages = applyMessageTranslations([
+        { id: 'msg-1', detectedLanguage: null, translation: null, translations: [] },
+        { id: 'msg-2', detectedLanguage: null, translation: null, translations: [] },
+        { id: 'msg-3', detectedLanguage: null, translation: null, translations: [] },
+    ] as unknown as Message[], [
+        { messageId: 'msg-1', translation: firstTranslation },
+        { messageId: 'msg-2', translation: secondTranslation },
+    ]) as any[];
+
+    assert.equal(messages[0].translation.active, firstTranslation);
+    assert.equal(messages[0].translation.viewDefault, 'translated');
+    assert.deepEqual(messages[0].translations, [firstTranslation]);
+    assert.equal(messages[1].translation.active, secondTranslation);
+    assert.equal(messages[1].translation.viewDefault, 'translated');
+    assert.deepEqual(messages[1].translations, [secondTranslation]);
+    assert.equal(messages[2].translation, null);
 });
 
 test('applyReplyLanguageOverrideToConversations updates only the matching conversation', () => {

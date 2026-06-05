@@ -5692,6 +5692,11 @@ export async function translateConversationThread(
 
     let translatedCount = 0;
     let cachedCount = 0;
+    const translations: Array<{
+        messageId: string;
+        translation: ReturnType<typeof serializeMessageTranslationCache>;
+        cached: boolean;
+    }> = [];
     const failed: Array<{ messageId: string; error: string }> = [];
 
     for (const row of rows) {
@@ -5699,6 +5704,13 @@ export async function translateConversationThread(
         if (result?.success) {
             translatedCount += 1;
             if ((result as any).cached) cachedCount += 1;
+            if ((result as any).translation) {
+                translations.push({
+                    messageId: row.id,
+                    translation: (result as any).translation,
+                    cached: !!(result as any).cached,
+                });
+            }
         } else {
             failed.push({
                 messageId: row.id,
@@ -5728,6 +5740,7 @@ export async function translateConversationThread(
             translatedCount,
             cachedCount,
             failedCount: failed.length,
+            translations,
             failed,
         };
     }
@@ -5739,6 +5752,7 @@ export async function translateConversationThread(
         translatedCount,
         cachedCount,
         failedCount: failed.length,
+        translations,
         failed,
     };
 }

@@ -113,38 +113,38 @@ export function useChatWindowThreadTranslation({
                 .filter(Boolean);
         if (visibleInboundIds.length === 0) return;
 
+        const previousThreadTranslationMode = threadTranslationMode;
+        setThreadTranslationMode("translated");
+        setTranslationBannerDismissed(true);
+
         if (options?.auto) {
             setAutoTranslatingThread(true);
         } else {
             setTranslatingVisibleThread(true);
         }
-        const toastId = options?.silent
-            ? null
-            : toast.loading(`Translating ${visibleInboundIds.length} visible message${visibleInboundIds.length === 1 ? "" : "s"}...`);
         try {
             const result = await onTranslateVisibleThread(
                 visibleInboundIds,
                 resolvedTranslationTargetLanguage
             );
             if (!result?.success) {
+                setThreadTranslationMode(previousThreadTranslationMode);
                 if (!options?.silent) {
-                    toast.error(result?.error || "Failed to translate visible messages.", toastId ? { id: toastId } : undefined);
+                    toast.error(result?.error || "Failed to translate visible messages.");
                 }
                 return;
             }
-            setThreadTranslationMode("translated");
-            setTranslationBannerDismissed(true);
             if (!options?.silent) {
                 const translatedCount = Number(result.translatedCount || 0);
                 const failedCount = Number(result.failedCount || 0);
-                const message = failedCount > 0
-                    ? `Translated ${translatedCount} message${translatedCount === 1 ? "" : "s"}; ${failedCount} failed.`
-                    : `Translated ${translatedCount} message${translatedCount === 1 ? "" : "s"}.`;
-                toast.success(message, toastId ? { id: toastId } : undefined);
+                if (failedCount > 0) {
+                    toast.warning(`Translated ${translatedCount} message${translatedCount === 1 ? "" : "s"}; ${failedCount} failed.`);
+                }
             }
         } catch (error: any) {
+            setThreadTranslationMode(previousThreadTranslationMode);
             if (!options?.silent) {
-                toast.error(String(error?.message || "Failed to translate visible messages."), toastId ? { id: toastId } : undefined);
+                toast.error(String(error?.message || "Failed to translate visible messages."));
             }
         } finally {
             if (options?.auto) {
@@ -153,7 +153,7 @@ export function useChatWindowThreadTranslation({
                 setTranslatingVisibleThread(false);
             }
         }
-    }, [autoTranslatingThread, eligibleInboundTranslationIds, messages, onTranslateVisibleThread, resolvedTranslationTargetLanguage, translatingVisibleThread]);
+    }, [autoTranslatingThread, eligibleInboundTranslationIds, messages, onTranslateVisibleThread, resolvedTranslationTargetLanguage, threadTranslationMode, translatingVisibleThread]);
 
     useEffect(() => {
         if (!translationReadEnabled || !onTranslateVisibleThread) return;
