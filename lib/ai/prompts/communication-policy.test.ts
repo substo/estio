@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 // @ts-ignore TS5097 required for Node --experimental-strip-types test runner
-import { buildDealProtectiveCommunicationContract, detectLanguageFromText, resolveCommunicationLanguage } from "./communication-policy.ts";
+import {
+    buildConversationalMessagingContract,
+    buildDealProtectiveCommunicationContract,
+    detectLanguageFromText,
+    resolveCommunicationLanguage,
+} from "./communication-policy.ts";
 
 test("resolveCommunicationLanguage prefers contact language over inbound detection", () => {
     const resolution = resolveCommunicationLanguage({
@@ -122,4 +127,25 @@ test("communication contract includes core deal-protective constraints", () => {
     assert.match(contract, /only when the context actually contains uncertainty/i);
     assert.match(contract, /preserve that meaning and phrasing style/i);
     assert.match(contract, /Use these phrasing patterns only when the context genuinely requires them/i);
+});
+
+test("conversational messaging contract constrains chat drafts to short readable replies", () => {
+    const contract = buildConversationalMessagingContract({ channel: "WhatsApp" });
+
+    assert.match(contract, /CONVERSATIONAL MESSAGING CONTRACT/);
+    assert.match(contract, /chat-native wording/i);
+    assert.match(contract, /one clear purpose/i);
+    assert.match(contract, /1-3 short paragraphs or lines/i);
+    assert.match(contract, /Avoid bulky blocks of text/i);
+    assert.match(contract, /Ask at most one clear question/i);
+    assert.match(contract, /Hope you are well/i);
+    assert.match(contract, /Do not add a signature/i);
+});
+
+test("conversational messaging contract keeps email distinct from chat", () => {
+    const contract = buildConversationalMessagingContract({ channel: "Email" });
+
+    assert.match(contract, /Write for email/i);
+    assert.match(contract, /Email may use a little more structure/i);
+    assert.doesNotMatch(contract, /Use chat-native wording, not a CRM paragraph/i);
 });

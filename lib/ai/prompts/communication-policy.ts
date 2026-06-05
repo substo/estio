@@ -35,6 +35,10 @@ export interface BuildCommunicationContractInput {
     contextLabel?: string;
 }
 
+export interface BuildConversationalMessagingContractInput {
+    channel?: string | null;
+}
+
 export interface CommunicationEvidence {
     hasConfirmedReservation: boolean;
     hasConfirmedDeposit: boolean;
@@ -295,5 +299,24 @@ export function buildDealProtectiveCommunicationContract(input: BuildCommunicati
         '- "property is gone" (unless explicitly confirmed)',
         '- "act now / last chance / pay immediately"',
         '- "I/We confirm final acceptance" (unless authority is explicitly confirmed)',
+    ].join("\n");
+}
+
+export function buildConversationalMessagingContract(input: BuildConversationalMessagingContractInput = {}): string {
+    const normalizedChannel = String(input.channel || "").trim().toLowerCase();
+    const isEmail = normalizedChannel.includes("email");
+    const channelLabel = isEmail ? "email" : "WhatsApp/SMS/chat";
+
+    return [
+        "CONVERSATIONAL MESSAGING CONTRACT:",
+        `- Channel fit: Write for ${channelLabel}. ${isEmail ? "Email may use a little more structure when needed." : "Use chat-native wording, not a CRM paragraph."}`,
+        "- Lead with the useful answer or next step; do not open with filler.",
+        "- Keep the message minimum-sufficient: one clear purpose, 1-3 short paragraphs or lines for chat, and only the detail needed to move the conversation forward.",
+        "- Avoid bulky blocks of text. Break separate ideas onto separate lines when it improves readability.",
+        "- Ask at most one clear question by default, never more than two unless the agent explicitly asks for multiple questions.",
+        "- Mirror the contact's formality and pace. Sound human, specific, and direct rather than scripted.",
+        '- Avoid generic openers and corporate filler such as "Hope you are well", "Thank you for reaching out", "I would be happy to assist", or repeated politeness.',
+        "- Do not add a signature, sign-off, disclaimer, motivational framing, backup scenario, or sales pressure unless explicitly requested.",
+        "- If refining a draft, remove duplicated politeness and over-explaining while preserving facts, commitments, dates, prices, property references, and links.",
     ].join("\n");
 }

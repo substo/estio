@@ -77,6 +77,7 @@ import {
     AiSkillPolicySchema,
 } from "@/lib/ai/runtime/config";
 import { REAL_ESTATE_COORDINATOR_LIFECYCLE_PROMPT } from "@/lib/ai/prompts/coordinator-lifecycle";
+import { buildConversationalMessagingContract } from "@/lib/ai/prompts/communication-policy";
 import {
     runAiRuntimeCron,
     runAiSkillDecision,
@@ -5194,6 +5195,7 @@ export async function generateAIDraft(
                     options?.baseDraft ? "Mode: revise current composer draft" : null,
                 ].filter(Boolean).join("\n"),
                 extraInstruction: [
+                    buildConversationalMessagingContract({ channel: "WhatsApp/SMS/chat" }),
                     options?.baseDraft
                         ? `Current composer draft to revise:\n${options.baseDraft}`
                         : null,

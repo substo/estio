@@ -96,16 +96,17 @@ const EMPTY_AI_INSTRUCTION = "";
 
 const CREATE_DRAFT_ACTIONS = [
     "Best next reply",
+    "Short and direct",
     "Ask for budget",
     "Confirm viewing",
     "Send property options",
 ];
 
 const REFINE_DRAFT_ACTIONS = [
-    "Shorter",
+    "Make conversational",
+    "Short and direct",
     "Warmer",
     "More formal",
-    "Clearer",
     "Fix grammar",
     "Add next step",
 ];

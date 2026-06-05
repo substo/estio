@@ -19,6 +19,7 @@ import { getDraftModelWithCachedContext } from "@/lib/ai/draft-context-cache";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import {
+    buildConversationalMessagingContract,
     buildDealProtectiveCommunicationContract,
     detectLanguageFromText,
     inferCommunicationEvidenceFromText,
@@ -810,6 +811,9 @@ export async function generateDraft(context: CoordinationContext) {
             contactPreferredLanguage: languageResolution.contactPreferredLanguage,
             contextLabel: "outbound real-estate communication",
         });
+        const conversationalMessagingContract = buildConversationalMessagingContract({
+            channel: channelName,
+        });
 
         const hasPriorOutbound = messages.some(m => m.direction === "outbound" && m.body.trim().length > 0);
         const isFirstOutreach = !hasPriorOutbound;
@@ -891,6 +895,8 @@ export async function generateDraft(context: CoordinationContext) {
         - Expected reply language: ${languageResolution.expectedLanguage || "en"}
 
         ${communicationContract}
+
+        ${conversationalMessagingContract}
 
         Greeting Cadence:
         - Greeting decision: ${allowNameGreeting ? "Name greeting is ALLOWED." : "Name greeting is NOT ALLOWED."}
@@ -1011,6 +1017,8 @@ export async function generateDraft(context: CoordinationContext) {
         }));
 
         const cachedStaticContext = `${DRAFT_STATIC_CONTEXT_PROMPT}
+
+${conversationalMessagingContract}
 
 Business Profile:
 - Agent Name: ${agentName || "Unknown"}
