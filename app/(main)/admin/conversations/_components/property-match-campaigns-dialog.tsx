@@ -7,6 +7,16 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
     createPropertyMatchCampaignAction,
     createPropertyMatchCampaignFromSourceAction,
     deletePropertyMatchCampaignAction,
@@ -129,6 +139,7 @@ export function PropertyMatchCampaignsDialog({
     const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
     const [editTitle, setEditTitle] = useState("");
     const [editPriorityNote, setEditPriorityNote] = useState("");
+    const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(null);
     const [drafts, setDrafts] = useState<Record<string, string>>({});
     const [busyCandidateId, setBusyCandidateId] = useState<string | null>(null);
     const [error, setError] = useState("");
@@ -320,9 +331,14 @@ export function PropertyMatchCampaignsDialog({
         });
     };
 
-    const deleteCampaign = (campaign: Campaign) => {
-        const label = campaignLabel(campaign);
-        if (!window.confirm(`Delete campaign "${label}"? This removes its candidate review rows too.`)) return;
+    const requestDeleteCampaign = (campaign: Campaign) => {
+        setCampaignToDelete(campaign);
+        setError("");
+    };
+
+    const confirmDeleteCampaign = () => {
+        if (!campaignToDelete) return;
+        const campaign = campaignToDelete;
         setError("");
         startTransition(async () => {
             const res = await deletePropertyMatchCampaignAction(campaign.id);
@@ -335,6 +351,7 @@ export function PropertyMatchCampaignsDialog({
             setSelectedCampaignId(nextSelected);
             if (!nextSelected) setMobileView("campaigns");
             setEditingCampaignId(null);
+            setCampaignToDelete(null);
             if (nextSelected) loadDetail(nextSelected, queue);
             else setDetail(null);
         });
@@ -555,7 +572,7 @@ export function PropertyMatchCampaignsDialog({
                                                 <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEditCampaign(campaign)} title="Edit campaign">
                                                     <Pencil className="h-3.5 w-3.5" />
                                                 </Button>
-                                                <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => deleteCampaign(campaign)} title="Delete campaign">
+                                                <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => requestDeleteCampaign(campaign)} title="Delete campaign">
                                                     <Trash2 className="h-3.5 w-3.5" />
                                                 </Button>
                                             </div>
@@ -710,6 +727,31 @@ export function PropertyMatchCampaignsDialog({
                     </main>
                 </div>
             </DialogContent>
+            <AlertDialog open={!!campaignToDelete} onOpenChange={(nextOpen) => {
+                if (!nextOpen && !isPending) setCampaignToDelete(null);
+            }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete campaign?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will delete "{campaignLabel(campaignToDelete)}" and remove its candidate review rows. Sent messages and contact records will not be deleted.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={(event) => {
+                                event.preventDefault();
+                                confirmDeleteCampaign();
+                            }}
+                            disabled={isPending}
+                            className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                        >
+                            {isPending ? "Deleting..." : "Delete campaign"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </Dialog>
     );
 }
