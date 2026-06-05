@@ -12,6 +12,8 @@ test("extractPropertyUrlContext extracts title, meta description, price, and vis
             <head>
                 <title>Ignored title</title>
                 <meta property="og:title" content="Sea View Apartment" />
+                <meta property="og:image" content="/images/sea-view.jpg" />
+                <meta property="og:site_name" content="Example Estates" />
                 <meta name="description" content="Two bedroom apartment near the sea." />
                 <meta itemprop="price" content="1200" />
                 <meta itemprop="priceCurrency" content="EUR" />
@@ -38,6 +40,9 @@ test("extractPropertyUrlContext extracts title, meta description, price, and vis
 
     assert.equal(result.success, true);
     assert.equal(result.title, "Sea View Apartment");
+    assert.equal(result.description, "Two bedroom apartment near the sea.");
+    assert.equal(result.imageUrl, "https://example.com/images/sea-view.jpg");
+    assert.equal(result.siteName, "Example Estates");
     assert.match(result.sourceText || "", /Description: Two bedroom apartment near the sea/);
     assert.match(result.sourceText || "", /Price: EUR 1200/);
     assert.match(result.sourceText || "", /covered parking and balcony/);

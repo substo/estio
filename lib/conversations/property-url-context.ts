@@ -6,6 +6,9 @@ export type PropertyMessageUrlContextResult = {
     success: boolean;
     url: string;
     title?: string;
+    description?: string;
+    imageUrl?: string;
+    siteName?: string;
     sourceText?: string;
     error?: string;
 };
@@ -99,7 +102,17 @@ function getMetaContent($: ReturnType<typeof load>, selectors: string[]): string
     return "";
 }
 
-function extractReadableText(html: string, url: string): { title: string; sourceText: string } {
+function resolveMetaUrl(value: string, baseUrl: string): string {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    try {
+        return new URL(raw, baseUrl).toString();
+    } catch {
+        return "";
+    }
+}
+
+function extractReadableText(html: string, url: string): { title: string; description: string; imageUrl: string; siteName: string; sourceText: string } {
     const $ = load(html);
     $("script, style, noscript, svg, canvas, iframe, nav, header, footer, form").remove();
     $(".cookie-consent, .popup, .modal, .menu, .navigation, .footer, .header").remove();
@@ -119,6 +132,17 @@ function extractReadableText(html: string, url: string): { title: string; source
         "meta[property='og:description']",
         "meta[name='description']",
         "meta[name='twitter:description']",
+    ]));
+    const imageUrl = resolveMetaUrl(getMetaContent($, [
+        "meta[property='og:image']",
+        "meta[property='og:image:url']",
+        "meta[property='og:image:secure_url']",
+        "meta[name='twitter:image']",
+        "meta[name='twitter:image:src']",
+    ]), url);
+    const siteName = normalizeWhitespace(getMetaContent($, [
+        "meta[property='og:site_name']",
+        "meta[name='application-name']",
     ]));
     const price = normalizeWhitespace(getMetaContent($, [
         "meta[property='product:price:amount']",
@@ -142,7 +166,7 @@ function extractReadableText(html: string, url: string): { title: string; source
         bodyText,
     ].filter(Boolean).join("\n\n")).slice(0, MAX_SOURCE_TEXT_CHARS).trim();
 
-    return { title, sourceText };
+    return { title, description, imageUrl, siteName, sourceText };
 }
 
 async function readResponseTextWithLimit(response: Response, maxBytes: number): Promise<string> {
@@ -238,6 +262,9 @@ export async function extractPropertyUrlContext(
             success: true,
             url: validation.url.toString(),
             title: extracted.title || undefined,
+            description: extracted.description || undefined,
+            imageUrl: extracted.imageUrl || undefined,
+            siteName: extracted.siteName || undefined,
             sourceText: extracted.sourceText,
         };
     } catch (error: any) {

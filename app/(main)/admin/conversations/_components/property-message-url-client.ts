@@ -2,6 +2,9 @@ export type PropertyUrlContextResponse = {
     success: boolean;
     url?: string;
     title?: string;
+    description?: string;
+    imageUrl?: string;
+    siteName?: string;
     sourceText?: string;
     error?: string;
 };

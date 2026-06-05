@@ -26,6 +26,8 @@ import { MessageImageAttachments } from "./message-image-attachments";
 import { MessageSharedContactCards } from "./message-shared-contact-cards";
 import { MessageBubbleActionsMenu, useMessageBubbleActions } from "./message-bubble-actions-menu";
 import { MessageBubbleBody, MessageBubbleTranslationActions } from "./message-bubble-body";
+import { getMessageLinkPreviewCandidate } from "./message-link-preview-actions";
+import { MessageLinkPreviewCard } from "./message-link-preview-card";
 import {
     MessageBubbleChannelHeader,
     MessageBubbleEmailExpandFooter,
@@ -223,6 +225,12 @@ export function MessageBubble({
         attachments,
     });
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
+    const linkPreviewCandidate = useMemo(() => getMessageLinkPreviewCandidate({
+        body: message.body,
+        isEmail,
+        isContactMessage,
+        hasRenderableMediaAttachment,
+    }), [hasRenderableMediaAttachment, isContactMessage, isEmail, message.body]);
     const isMediaRefetchInProgress = ["queued", "processing"].includes(String(webBridgeMedia?.refetch?.status || ""));
     const canRefetchMedia = !!onRefetchMedia && !isMediaRefetchInProgress && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
     const failureFallbackUi = useMemo(() => getWhatsAppFailureFallbackUiState({
@@ -419,6 +427,14 @@ export function MessageBubble({
                         />
                     )}
                 </div>
+
+                {linkPreviewCandidate && (
+                    <MessageLinkPreviewCard
+                        url={linkPreviewCandidate.url}
+                        overflowCount={linkPreviewCandidate.overflowCount}
+                        theme={theme}
+                    />
+                )}
 
                 <MessageBubbleTranslationActions
                     isEmail={isEmail}
