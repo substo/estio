@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAiReviewClaimWhere,
+  buildPriorPropertyShareSearchTerms,
   buildPropertyMatchContactWhere,
   canCandidateDraftOrSend,
   canCandidateEnterHumanReview,
+  findPriorPropertyShareEvidence,
   normalizeAiMatchAssessment,
   propertySourceSnapshot,
   sortPropertyMatchSearchRows,
@@ -139,4 +141,48 @@ test("property source snapshot extracts usable facts from URL and pasted text", 
   assert.equal(snapshot.price, 125000);
   assert.equal(snapshot.propertyLocation, "Peia");
   assert.equal(snapshot.sourceUrl, "https://agency.example/properties/dt4930");
+});
+
+test("prior property share terms include exact reference and URL variants", () => {
+  const terms = buildPriorPropertyShareSearchTerms({
+    reference: "DT4930",
+    sourceUrl: "https://agency.example/properties/dt4930/",
+  });
+
+  assert.deepEqual(terms.referenceTerms, ["DT4930"]);
+  assert.deepEqual(terms.urlTerms, [
+    "https://agency.example/properties/dt4930",
+    "agency.example/properties/dt4930",
+  ]);
+});
+
+test("prior property share evidence detects reference or URL in previous messages", () => {
+  const byReference = findPriorPropertyShareEvidence({
+    snapshot: { reference: "DT4930", sourceUrl: "https://agency.example/properties/dt4930" },
+    messages: [
+      { id: "m1", body: "Sent DT4930 yesterday, let me know.", direction: "outbound", createdAt: "2026-06-05T10:00:00.000Z" },
+    ],
+  });
+  assert.equal(byReference?.alreadyShared, true);
+  assert.deepEqual(byReference?.matchedBy, ["reference"]);
+
+  const byUrl = findPriorPropertyShareEvidence({
+    snapshot: { reference: "DT4930", sourceUrl: "https://agency.example/properties/dt4930" },
+    messages: [
+      { id: "m2", body: "Here is the listing: agency.example/properties/dt4930", direction: "outbound", createdAt: "2026-06-05T10:00:00.000Z" },
+    ],
+  });
+  assert.equal(byUrl?.alreadyShared, true);
+  assert.deepEqual(byUrl?.matchedBy, ["url", "reference"]);
+});
+
+test("prior property share evidence avoids partial reference matches", () => {
+  const evidence = findPriorPropertyShareEvidence({
+    snapshot: { reference: "DT4930" },
+    messages: [
+      { id: "m1", body: "DT4930A is a different reference.", direction: "outbound" },
+    ],
+  });
+
+  assert.equal(evidence, null);
 });

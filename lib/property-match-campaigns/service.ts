@@ -50,6 +50,83 @@ function normalizeSearchToken(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
 }
 
+function normalizeUrlToken(value: unknown): string | null {
+  const text = normalizeText(value, 1200);
+  if (!text) return null;
+  return text.replace(/[)\].,;!?]+$/g, "").replace(/\/+$/g, "");
+}
+
+export function buildPriorPropertyShareSearchTerms(snapshot: AnyRecord): {
+  referenceTerms: string[];
+  urlTerms: string[];
+} {
+  const reference = normalizeText(snapshot.reference, 120);
+  const sourceUrl = normalizeUrlToken(snapshot.sourceUrl);
+  const urlTerms = new Set<string>();
+  if (sourceUrl) {
+    urlTerms.add(sourceUrl);
+    urlTerms.add(sourceUrl.replace(/^https?:\/\//i, ""));
+  }
+
+  return {
+    referenceTerms: reference ? [reference] : [],
+    urlTerms: Array.from(urlTerms).filter((term) => term.length >= 8),
+  };
+}
+
+export function findPriorPropertyShareEvidence(args: {
+  snapshot: AnyRecord;
+  messages: Array<{
+    id?: string | null;
+    body?: string | null;
+    direction?: string | null;
+    createdAt?: Date | string | null;
+  }>;
+}) {
+  const terms = buildPriorPropertyShareSearchTerms(args.snapshot);
+  if (terms.referenceTerms.length === 0 && terms.urlTerms.length === 0) return null;
+
+  for (const message of args.messages) {
+    const body = String(message.body || "");
+    const lowerBody = body.toLowerCase();
+    const matchedBy: string[] = [];
+    const matchedTerms: string[] = [];
+
+    for (const term of terms.urlTerms) {
+      if (lowerBody.includes(term.toLowerCase())) {
+        matchedBy.push("url");
+        matchedTerms.push(term);
+        break;
+      }
+    }
+    for (const term of terms.referenceTerms) {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
+      if (pattern.test(body)) {
+        matchedBy.push("reference");
+        matchedTerms.push(term);
+        break;
+      }
+    }
+
+    if (matchedBy.length > 0) {
+      return {
+        alreadyShared: true,
+        matchedBy: Array.from(new Set(matchedBy)),
+        matchedTerms: Array.from(new Set(matchedTerms)),
+        messageId: message.id || null,
+        messageDirection: message.direction || null,
+        messageCreatedAt: message.createdAt instanceof Date
+          ? message.createdAt.toISOString()
+          : message.createdAt || null,
+        quote: normalizeText(body, 500),
+      };
+    }
+  }
+
+  return null;
+}
+
 export function sortPropertyMatchSearchRows<T extends {
   reference?: string | null;
   title?: string | null;
@@ -321,6 +398,113 @@ export function buildAiReviewClaimWhere(args: {
   };
 }
 
+async function findPriorPropertyShareEvidenceByConversation(args: {
+  snapshot: AnyRecord;
+  conversationIds: string[];
+}) {
+  const conversationIds = Array.from(new Set(args.conversationIds.filter(Boolean)));
+  const terms = buildPriorPropertyShareSearchTerms(args.snapshot);
+  const searchTerms = [...terms.referenceTerms, ...terms.urlTerms];
+  const evidenceByConversationId = new Map<string, ReturnType<typeof findPriorPropertyShareEvidence>>();
+  if (conversationIds.length === 0 || searchTerms.length === 0) return evidenceByConversationId;
+
+  const messages = await db.message.findMany({
+    where: {
+      conversationId: { in: conversationIds },
+      OR: searchTerms.map((term) => ({
+        body: { contains: term, mode: "insensitive" as const },
+      })),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      conversationId: true,
+      direction: true,
+      body: true,
+      createdAt: true,
+    },
+    take: Math.min(1000, conversationIds.length * 10),
+  });
+
+  const messagesByConversationId = new Map<string, typeof messages>();
+  for (const message of messages) {
+    const rows = messagesByConversationId.get(message.conversationId) || [];
+    rows.push(message);
+    messagesByConversationId.set(message.conversationId, rows);
+  }
+
+  for (const conversationId of conversationIds) {
+    const evidence = findPriorPropertyShareEvidence({
+      snapshot: args.snapshot,
+      messages: messagesByConversationId.get(conversationId) || [],
+    });
+    if (evidence) evidenceByConversationId.set(conversationId, evidence);
+  }
+
+  return evidenceByConversationId;
+}
+
+export async function findPriorPropertyShareForCandidate(args: {
+  locationId: string;
+  candidateId: string;
+}) {
+  const candidate = await db.propertyMatchCandidate.findFirst({
+    where: { id: args.candidateId, locationId: args.locationId },
+    select: {
+      id: true,
+      conversationId: true,
+      campaign: { select: { propertySnapshot: true } },
+    },
+  });
+  if (!candidate?.conversationId) return null;
+
+  const evidenceByConversationId = await findPriorPropertyShareEvidenceByConversation({
+    snapshot: (candidate.campaign?.propertySnapshot as AnyRecord) || {},
+    conversationIds: [candidate.conversationId],
+  });
+  return evidenceByConversationId.get(candidate.conversationId) || null;
+}
+
+export async function markPropertyMatchCandidateAlreadyShared(args: {
+  locationId: string;
+  candidateId: string;
+  evidence: AnyRecord;
+}) {
+  const candidate = await db.propertyMatchCandidate.findFirst({
+    where: { id: args.candidateId, locationId: args.locationId },
+    select: { id: true, campaignId: true, evidence: true, score: true },
+  });
+  if (!candidate) return { success: false as const, error: "Candidate not found." };
+
+  await db.propertyMatchCandidate.update({
+    where: { id: candidate.id },
+    data: {
+      aiVerdict: "no",
+      aiReviewStatus: "done",
+      aiReviewLockedAt: null,
+      aiReviewLockedBy: null,
+      reviewerStatus: "rejected",
+      reviewedAt: new Date(),
+      rejectedReason: "Property already shared with this contact.",
+      score: Math.min(Number(candidate.score || 0), -2),
+      confidence: 0.95,
+      evidence: {
+        ...((candidate.evidence as AnyRecord) || {}),
+        priorShare: args.evidence,
+        structured: {
+          ...((candidate.evidence as AnyRecord)?.structured || {}),
+          needsAi: false,
+        },
+      },
+      reasoning: "This property appears to have already been shared with the contact.",
+      matchSummary: "Already shared with this contact.",
+      lastError: null,
+    },
+  });
+  await refreshCampaignCounts(candidate.campaignId);
+  return { success: true as const };
+}
+
 function formatPropertyFacts(snapshot: AnyRecord): string {
   return [
     snapshot.reference ? `Ref: ${snapshot.reference}` : null,
@@ -553,8 +737,9 @@ async function collectPropertyMatchCandidatesBatch(args: {
     take: limit,
   });
 
-  const propertyInput = propertyMatchInput(args.campaign.propertySnapshot || {});
-  const candidateData = contacts.flatMap((contact: any) => {
+  const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
+  const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
+  const baseCandidateData = contacts.flatMap((contact: any) => {
     const conversation = contact.conversations[0];
     if (!conversation?.id) return [];
     const structured = evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput(contact));
@@ -583,11 +768,80 @@ async function collectPropertyMatchCandidatesBatch(args: {
     }];
   });
 
+  const priorShareEvidence = await findPriorPropertyShareEvidenceByConversation({
+    snapshot: propertySnapshotForCampaign,
+    conversationIds: baseCandidateData.map((candidate) => candidate.conversationId),
+  });
+  const candidateData = baseCandidateData.map((candidate) => {
+    const evidence = priorShareEvidence.get(candidate.conversationId);
+    if (!evidence) return candidate;
+    return {
+      ...candidate,
+      aiVerdict: "no",
+      aiReviewStatus: "done",
+      score: Math.min(Number(candidate.score || 0), -2),
+      confidence: 0.95,
+      evidence: {
+        ...(candidate.evidence || {}),
+        priorShare: evidence,
+        structured: {
+          ...(candidate.evidence?.structured || {}),
+          needsAi: false,
+        },
+      },
+      reasoning: [
+        "This property appears to have already been shared with the contact.",
+        evidence.matchedBy?.length ? `Matched by ${evidence.matchedBy.join(" and ")}.` : null,
+      ].filter(Boolean).join(" "),
+      matchSummary: "Already shared with this contact.",
+    };
+  });
+
   if (candidateData.length > 0) {
     await db.propertyMatchCandidate.createMany({
       data: candidateData,
       skipDuplicates: true,
     });
+  }
+  if (priorShareEvidence.size > 0) {
+    const existingSharedCandidates = await db.propertyMatchCandidate.findMany({
+      where: {
+        campaignId: args.campaign.id,
+        locationId: args.locationId,
+        conversationId: { in: Array.from(priorShareEvidence.keys()) },
+        reviewerStatus: { not: "sent" },
+      },
+      select: { id: true, conversationId: true, evidence: true, score: true },
+    });
+    for (const candidate of existingSharedCandidates) {
+      const evidence = priorShareEvidence.get(candidate.conversationId || "");
+      if (!evidence) continue;
+      await db.propertyMatchCandidate.update({
+        where: { id: candidate.id },
+        data: {
+          aiVerdict: "no",
+          aiReviewStatus: "done",
+          aiReviewLockedAt: null,
+          aiReviewLockedBy: null,
+          score: Math.min(Number(candidate.score || 0), -2),
+          confidence: 0.95,
+          evidence: {
+            ...((candidate.evidence as AnyRecord) || {}),
+            priorShare: evidence,
+            structured: {
+              ...((candidate.evidence as AnyRecord)?.structured || {}),
+              needsAi: false,
+            },
+          },
+          reasoning: [
+            "This property appears to have already been shared with the contact.",
+            evidence.matchedBy?.length ? `Matched by ${evidence.matchedBy.join(" and ")}.` : null,
+          ].filter(Boolean).join(" "),
+          matchSummary: "Already shared with this contact.",
+          lastError: null,
+        },
+      });
+    }
   }
 
   const lastCursor = contacts[contacts.length - 1]?.id || args.campaign.collectionCursor || null;
@@ -978,6 +1232,20 @@ export async function updatePropertyMatchCandidateReview(args: {
   if (reviewerStatus === "approved" && !canCandidateDraftOrSend(candidate)) {
     return { success: false as const, error: "AI review must finish before approval." };
   }
+  if (reviewerStatus === "approved") {
+    const priorShare = await findPriorPropertyShareForCandidate({
+      locationId: args.locationId,
+      candidateId: candidate.id,
+    });
+    if (priorShare) {
+      await markPropertyMatchCandidateAlreadyShared({
+        locationId: args.locationId,
+        candidateId: candidate.id,
+        evidence: priorShare,
+      });
+      return { success: false as const, error: "This property was already shared with this contact." };
+    }
+  }
 
   await db.propertyMatchCandidate.update({
     where: { id: candidate.id },
@@ -1006,6 +1274,18 @@ export async function savePropertyMatchCandidateDraft(args: {
   if (!candidate) return { success: false as const, error: "Candidate not found." };
   if (!canCandidateDraftOrSend(candidate)) {
     return { success: false as const, error: "AI review must finish before drafting or approval." };
+  }
+  const priorShare = await findPriorPropertyShareForCandidate({
+    locationId: args.locationId,
+    candidateId: candidate.id,
+  });
+  if (priorShare) {
+    await markPropertyMatchCandidateAlreadyShared({
+      locationId: args.locationId,
+      candidateId: candidate.id,
+      evidence: priorShare,
+    });
+    return { success: false as const, error: "This property was already shared with this contact." };
   }
   const updated = await db.propertyMatchCandidate.update({
     where: { id: candidate.id },

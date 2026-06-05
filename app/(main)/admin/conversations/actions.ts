@@ -97,8 +97,10 @@ import {
     createPropertyMatchCampaign,
     createPropertyMatchCampaignFromSource,
     deletePropertyMatchCampaign,
+    findPriorPropertyShareForCandidate,
     getPropertyMatchCampaignDetail,
     listPropertyMatchCampaigns,
+    markPropertyMatchCandidateAlreadyShared,
     markPropertyMatchCandidateSent,
     processPropertyMatchCampaignBatch,
     savePropertyMatchCandidateDraft,
@@ -6742,6 +6744,19 @@ export async function sendPropertyMatchCandidateAction(candidateId: string, draf
     }
     const body = savedDraft;
     if (!body) return { success: false as const, error: "Draft cannot be empty." };
+
+    const priorShare = await findPriorPropertyShareForCandidate({
+        locationId: location.id,
+        candidateId: candidate.id,
+    });
+    if (priorShare) {
+        await markPropertyMatchCandidateAlreadyShared({
+            locationId: location.id,
+            candidateId: candidate.id,
+            evidence: priorShare as any,
+        });
+        return { success: false as const, error: "This property was already shared with this contact." };
+    }
 
     const resolvedChannel = channel || candidate.preferredChannel || "SMS";
     if (!["SMS", "Email", "WhatsApp", "SMS_RELAY"].includes(resolvedChannel)) {
