@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Check, ChevronLeft, Link2, List, Loader2, Megaphone, Pencil, Search, Send, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -115,6 +115,7 @@ export function PropertyMatchCampaignsDialog({
     const [queue, setQueue] = useState<Queue>("review");
     const [propertyQuery, setPropertyQuery] = useState("");
     const [properties, setProperties] = useState<PropertyResult[]>([]);
+    const [propertySearchLoading, setPropertySearchLoading] = useState(false);
     const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
     const [propertyUrl, setPropertyUrl] = useState("");
     const [propertyText, setPropertyText] = useState("");
@@ -127,6 +128,7 @@ export function PropertyMatchCampaignsDialog({
     const [error, setError] = useState("");
     const [mobileView, setMobileView] = useState<MobileCampaignView>("campaigns");
     const [isPending, startTransition] = useTransition();
+    const propertySearchRequestIdRef = useRef(0);
 
     const selectedProperty = useMemo(
         () => properties.find((property) => property.id === selectedPropertyId) || null,
@@ -163,14 +165,28 @@ export function PropertyMatchCampaignsDialog({
         });
     }, [queue]);
 
+    const loadPropertyOptions = useCallback(async (query: string, limit = 8) => {
+        const requestId = propertySearchRequestIdRef.current + 1;
+        propertySearchRequestIdRef.current = requestId;
+        setPropertySearchLoading(true);
+        const rows = await searchPropertyMatchCampaignPropertiesAction(query, limit);
+        if (propertySearchRequestIdRef.current !== requestId) return;
+        setProperties(rows as PropertyResult[]);
+        setSelectedPropertyId((current) => {
+            if (current && rows.some((property) => property.id === current)) return current;
+            return null;
+        });
+        setPropertySearchLoading(false);
+    }, []);
+
     useEffect(() => {
         if (!open) return;
         setMobileView("campaigns");
+        setPropertyQuery("");
+        setProperties([]);
+        setPropertySearchLoading(false);
+        setSelectedPropertyId(null);
         loadCampaigns();
-        startTransition(async () => {
-            const rows = await searchPropertyMatchCampaignPropertiesAction("");
-            setProperties(rows as PropertyResult[]);
-        });
     }, [loadCampaigns, open]);
 
     useEffect(() => {
@@ -178,11 +194,30 @@ export function PropertyMatchCampaignsDialog({
         loadDetail(selectedCampaignId, queue);
     }, [loadDetail, open, queue, selectedCampaignId]);
 
+    useEffect(() => {
+        if (!open) return;
+        const trimmed = propertyQuery.trim();
+        if (!trimmed) {
+            const timeout = window.setTimeout(() => {
+                void loadPropertyOptions("", 8);
+            }, 250);
+            return () => window.clearTimeout(timeout);
+        }
+        if (trimmed.length < 2) {
+            propertySearchRequestIdRef.current += 1;
+            setPropertySearchLoading(false);
+            setProperties([]);
+            setSelectedPropertyId(null);
+            return;
+        }
+        const timeout = window.setTimeout(() => {
+            void loadPropertyOptions(trimmed, 12);
+        }, 350);
+        return () => window.clearTimeout(timeout);
+    }, [loadPropertyOptions, open, propertyQuery]);
+
     const searchProperties = () => {
-        startTransition(async () => {
-            const rows = await searchPropertyMatchCampaignPropertiesAction(propertyQuery);
-            setProperties(rows as PropertyResult[]);
-        });
+        void loadPropertyOptions(propertyQuery, propertyQuery.trim() ? 12 : 8);
     };
 
     const createCampaignFromProperty = () => {
@@ -399,7 +434,7 @@ export function PropertyMatchCampaignsDialog({
 
                 <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
                     <aside className={`${mobileView === "campaigns" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto border-r bg-slate-50/70 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:flex`}>
-                        <div className="flex min-h-0 flex-1 flex-col gap-3">
+                        <div className="flex flex-col gap-3 md:min-h-0 md:flex-1">
                             <div className="rounded-md border bg-white p-3">
                                 <div className="text-xs font-semibold uppercase text-slate-500">New campaign</div>
                                 <div className="mt-2 flex gap-1">
@@ -413,10 +448,10 @@ export function PropertyMatchCampaignsDialog({
                                         placeholder="Search ref, title, area"
                                     />
                                     <Button type="button" size="icon" variant="outline" className="h-8 w-8" onClick={searchProperties}>
-                                        <Search className="h-3.5 w-3.5" />
+                                        {propertySearchLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
                                     </Button>
                                 </div>
-                                <div className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+                                <div className="mt-2 max-h-32 space-y-1 overflow-y-auto md:max-h-36">
                                     {properties.map((property) => (
                                         <button
                                             key={property.id}
@@ -430,6 +465,12 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                         </button>
                                     ))}
+                                    {!propertySearchLoading && propertyQuery.trim().length === 1 ? (
+                                        <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Type at least 2 characters.</div>
+                                    ) : null}
+                                    {!propertySearchLoading && propertyQuery.trim().length >= 2 && properties.length === 0 ? (
+                                        <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">No matching properties.</div>
+                                    ) : null}
                                 </div>
                                 <Textarea
                                     value={priorityNote}
@@ -476,9 +517,9 @@ export function PropertyMatchCampaignsDialog({
                                 </Button>
                             </div>
 
-                            <div className="flex min-h-0 flex-1 flex-col space-y-1">
+                            <div className="flex flex-col space-y-1 md:min-h-0 md:flex-1">
                                 <div className="px-1 text-xs font-semibold uppercase text-slate-500">Campaigns</div>
-                                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                                <div className="space-y-1 pr-1 md:min-h-0 md:flex-1 md:overflow-y-auto">
                                     {campaigns.map((campaign) => (
                                         <div
                                             key={campaign.id}
