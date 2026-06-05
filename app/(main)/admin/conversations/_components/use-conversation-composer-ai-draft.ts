@@ -8,6 +8,7 @@ import {
     normalizeReplyLanguage,
     REPLY_LANGUAGE_AUTO_VALUE,
 } from "@/lib/ai/reply-language-options";
+import { appendAiStreamText } from "@/lib/ai/stream-text";
 
 type GenerateDraft = (
     instruction?: string,
@@ -156,14 +157,14 @@ export function useConversationComposerAiDraft({
                             firstChunkMs,
                         });
                     }
-                    streamedBuffer += chunk;
+                    streamedBuffer = appendAiStreamText(streamedBuffer, chunk);
                     onDraftChange(streamedBuffer);
                 }
             );
-            if (text) {
-                onDraftChange(text);
-            } else if (streamedBuffer) {
+            if (streamedBuffer) {
                 onDraftChange(streamedBuffer);
+            } else if (text) {
+                onDraftChange(text);
             }
             logComposerDraftTiming("client_click_end", {
                 conversationId: conversation?.id || null,

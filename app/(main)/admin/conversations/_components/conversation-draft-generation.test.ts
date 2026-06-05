@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { appendAiStreamText } from '@/lib/ai/stream-text';
 import { generateDraftWithStreamingFallback, streamDraftViaApi } from './conversation-draft-generation';
+
+test('appendAiStreamText repairs missing spaces between streamed word chunks', () => {
+    const chunks = ['Hi', 'Tony', '.', '\n\n', 'New', 'listing', 'alert', 'in', 'Peyia', '.'];
+    const text = chunks.reduce((buffer, chunk) => appendAiStreamText(buffer, chunk), '');
+
+    assert.equal(text, 'Hi Tony.\n\nNew listing alert in Peyia.');
+});
+
+test('appendAiStreamText preserves intentional joins for punctuation, currency, hyphens, and URLs', () => {
+    assert.equal(appendAiStreamText('Asking €', '149,000'), 'Asking €149,000');
+    assert.equal(appendAiStreamText('1', '-bed'), '1-bed');
+    assert.equal(appendAiStreamText('fully-', 'renovated'), 'fully-renovated');
+    assert.equal(
+        appendAiStreamText('https://www.downtowncyprus.com/properties/ref-', 'dt4930'),
+        'https://www.downtowncyprus.com/properties/ref-dt4930'
+    );
+});
 
 test('generateDraftWithStreamingFallback uses stream result when chunks are supported', async () => {
     const chunks: string[] = [];
