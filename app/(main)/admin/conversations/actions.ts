@@ -92,6 +92,16 @@ import {
     resolveContactPropertyEvidence,
 } from "@/lib/ai/requirements-intelligence/service";
 import {
+    buildCampaignDraftInstruction,
+    createPropertyMatchCampaign,
+    getPropertyMatchCampaignDetail,
+    listPropertyMatchCampaigns,
+    markPropertyMatchCandidateSent,
+    processPropertyMatchCampaignBatch,
+    savePropertyMatchCandidateDraft,
+    updatePropertyMatchCandidateReview,
+} from "@/lib/property-match-campaigns/service";
+import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
     headWhatsAppMediaObject,
@@ -6355,6 +6365,296 @@ export async function rejectContactRequirementProposalAction(proposalId: string,
         actorUserId: actor.userId || null,
         reason,
     });
+}
+
+function serializePropertyMatchCampaign(row: any) {
+    return {
+        id: row.id,
+        createdAt: row.createdAt?.toISOString?.() || null,
+        updatedAt: row.updatedAt?.toISOString?.() || null,
+        title: row.title,
+        status: row.status,
+        propertyId: row.propertyId,
+        property: row.property ? {
+            id: row.property.id,
+            title: row.property.title,
+            reference: row.property.reference,
+            price: row.property.price,
+            city: row.property.city,
+            propertyLocation: row.property.propertyLocation,
+        } : null,
+        totalCandidates: row.totalCandidates || 0,
+        processedCandidates: row.processedCandidates || 0,
+        yesCount: row.yesCount || 0,
+        maybeCount: row.maybeCount || 0,
+        noCount: row.noCount || 0,
+        approvedCount: row.approvedCount || 0,
+        sentCount: row.sentCount || 0,
+        priorityNote: row.priorityNote || null,
+        propertySnapshot: row.propertySnapshot || null,
+        lastError: row.lastError || null,
+    };
+}
+
+function serializePropertyMatchCandidate(row: any) {
+    return {
+        id: row.id,
+        campaignId: row.campaignId,
+        contactId: row.contactId,
+        conversationId: row.conversationId,
+        structuredVerdict: row.structuredVerdict,
+        aiVerdict: row.aiVerdict,
+        reviewerStatus: row.reviewerStatus,
+        confidence: row.confidence,
+        score: row.score,
+        evidence: row.evidence || null,
+        reasoning: row.reasoning || null,
+        matchSummary: row.matchSummary || null,
+        preferredChannel: row.preferredChannel || "SMS",
+        draftBody: row.draftBody || "",
+        draftGeneratedAt: row.draftGeneratedAt?.toISOString?.() || null,
+        sentAt: row.sentAt?.toISOString?.() || null,
+        lastError: row.lastError || null,
+        contact: row.contact ? {
+            id: row.contact.id,
+            name: row.contact.name,
+            email: row.contact.email,
+            phone: row.contact.phone,
+            requirementStatus: row.contact.requirementStatus,
+            requirementBedrooms: row.contact.requirementBedrooms,
+            requirementMaxPrice: row.contact.requirementMaxPrice,
+            requirementPropertyTypes: row.contact.requirementPropertyTypes || [],
+            requirementPropertyLocations: row.contact.requirementPropertyLocations || [],
+            requirementSummary: row.contact.requirementSummary,
+        } : null,
+        conversation: row.conversation ? {
+            id: row.conversation.id,
+            ghlConversationId: row.conversation.ghlConversationId,
+        } : null,
+    };
+}
+
+export async function searchPropertyMatchCampaignPropertiesAction(query?: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return [];
+
+    const trimmed = String(query || "").trim();
+    const rows = await db.property.findMany({
+        where: {
+            locationId: location.id,
+            status: "ACTIVE",
+            publicationStatus: { in: ["PUBLISHED", "DRAFT", "UNLISTED"] },
+            ...(trimmed ? {
+                OR: [
+                    { title: { contains: trimmed, mode: "insensitive" } },
+                    { reference: { contains: trimmed, mode: "insensitive" } },
+                    { city: { contains: trimmed, mode: "insensitive" } },
+                    { propertyLocation: { contains: trimmed, mode: "insensitive" } },
+                ],
+            } : {}),
+        },
+        select: {
+            id: true,
+            title: true,
+            reference: true,
+            goal: true,
+            type: true,
+            price: true,
+            bedrooms: true,
+            city: true,
+            propertyLocation: true,
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: 20,
+    });
+
+    return rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        reference: row.reference,
+        goal: row.goal,
+        type: row.type,
+        price: row.price,
+        bedrooms: row.bedrooms,
+        city: row.city,
+        propertyLocation: row.propertyLocation,
+    }));
+}
+
+export async function createPropertyMatchCampaignAction(input: {
+    propertyId: string;
+    priorityNote?: string | null;
+}) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+
+    const result = await createPropertyMatchCampaign({
+        locationId: location.id,
+        propertyId: String(input?.propertyId || "").trim(),
+        priorityNote: input?.priorityNote || null,
+        actorUserId: actor.userId || null,
+    });
+    revalidatePath("/admin/conversations");
+    return result;
+}
+
+export async function listPropertyMatchCampaignsAction() {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return [];
+    const rows = await listPropertyMatchCampaigns({ locationId: location.id });
+    return rows.map(serializePropertyMatchCampaign);
+}
+
+export async function getPropertyMatchCampaignDetailAction(campaignId: string, queue?: "review" | "sent" | "no") {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+    const detail = await getPropertyMatchCampaignDetail({
+        locationId: location.id,
+        campaignId: String(campaignId || "").trim(),
+        queue,
+    });
+    if (!detail) return { success: false as const, error: "Campaign not found." };
+    return {
+        success: true as const,
+        campaign: serializePropertyMatchCampaign(detail.campaign),
+        candidates: detail.candidates.map(serializePropertyMatchCandidate),
+    };
+}
+
+export async function processPropertyMatchCampaignBatchAction(campaignId: string, limit?: number) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+    const result = await processPropertyMatchCampaignBatch({
+        locationId: location.id,
+        campaignId: String(campaignId || "").trim(),
+        limit,
+        actorUserId: actor.userId || null,
+    });
+    revalidatePath("/admin/conversations");
+    return result;
+}
+
+export async function reviewPropertyMatchCandidateAction(candidateId: string, reviewerStatus: "approved" | "rejected" | "skipped" | "pending", reason?: string | null) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+    return updatePropertyMatchCandidateReview({
+        locationId: location.id,
+        candidateId: String(candidateId || "").trim(),
+        reviewerStatus,
+        actorUserId: actor.userId || null,
+        rejectedReason: reason || null,
+    });
+}
+
+export async function generatePropertyMatchCandidateDraftAction(candidateId: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+
+    const candidate = await (db as any).propertyMatchCandidate.findFirst({
+        where: { id: String(candidateId || "").trim(), locationId: location.id },
+        include: {
+            campaign: true,
+            contact: { select: { id: true } },
+            conversation: { select: { id: true } },
+        },
+    });
+    if (!candidate?.conversationId || !candidate?.contactId) {
+        return { success: false as const, error: "Candidate conversation not found." };
+    }
+
+    const instruction = buildCampaignDraftInstruction({
+        propertySnapshot: candidate.campaign?.propertySnapshot || {},
+        priorityNote: candidate.campaign?.priorityNote || null,
+    });
+    const draftResult = await generateComposerAIDraft(
+        candidate.conversationId,
+        candidate.contactId,
+        instruction,
+        undefined,
+        { mode: "chat" }
+    );
+    const draftBody = String(draftResult?.draft || "").trim();
+    if (!draftBody) return { success: false as const, error: "Draft generation returned an empty draft." };
+
+    const saveResult = await savePropertyMatchCandidateDraft({
+        locationId: location.id,
+        candidateId: candidate.id,
+        draftBody,
+    });
+    if (!saveResult.success) return saveResult;
+
+    return { success: true as const, draft: draftBody };
+}
+
+export async function savePropertyMatchCandidateDraftAction(candidateId: string, draftBody: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+    return savePropertyMatchCandidateDraft({
+        locationId: location.id,
+        candidateId: String(candidateId || "").trim(),
+        draftBody,
+    });
+}
+
+export async function sendPropertyMatchCandidateAction(candidateId: string, draftBody: string, channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY") {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+
+    const candidate = await (db as any).propertyMatchCandidate.findFirst({
+        where: { id: String(candidateId || "").trim(), locationId: location.id },
+        include: {
+            contact: { select: { id: true } },
+            conversation: { select: { id: true } },
+        },
+    });
+    if (!candidate?.conversationId || !candidate?.contactId) {
+        return { success: false as const, error: "Candidate conversation not found." };
+    }
+    if (candidate.reviewerStatus !== "approved") {
+        return { success: false as const, error: "Approve this draft before sending." };
+    }
+    const savedDraft = String(candidate.draftBody || "").trim();
+    const requestedDraft = String(draftBody || "").trim();
+    if (requestedDraft && requestedDraft !== savedDraft) {
+        return { success: false as const, error: "Approve the edited draft before sending." };
+    }
+    const body = savedDraft;
+    if (!body) return { success: false as const, error: "Draft cannot be empty." };
+
+    const resolvedChannel = channel || candidate.preferredChannel || "SMS";
+    if (!["SMS", "Email", "WhatsApp", "SMS_RELAY"].includes(resolvedChannel)) {
+        return { success: false as const, error: "Unsupported message channel." };
+    }
+
+    const sendResult = await sendReply(
+        candidate.conversationId,
+        candidate.contactId,
+        body,
+        resolvedChannel as "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
+        { clientMessageId: randomUUID(), clientSentAt: new Date().toISOString() }
+    );
+    if (!sendResult?.success) {
+        await (db as any).propertyMatchCandidate.update({
+            where: { id: candidate.id },
+            data: { lastError: String((sendResult as any)?.error || "Message send failed.") },
+        });
+        return sendResult;
+    }
+    await markPropertyMatchCandidateSent({
+        locationId: location.id,
+        candidateId: candidate.id,
+    });
+    invalidateConversationReadCaches(candidate.conversationId);
+    return { success: true as const };
 }
 
 // Helper to get location without strict GHL requirement

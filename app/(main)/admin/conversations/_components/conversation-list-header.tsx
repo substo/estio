@@ -4,7 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Archive, CheckSquare, CloudDownload, Inbox, Layers, Loader2, MessageSquare, MoreHorizontal, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Archive, CheckSquare, CloudDownload, Inbox, Layers, Loader2, Megaphone, MessageSquare, MoreHorizontal, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { resolveConversationListWorkflowView } from "./conversation-list-header-state";
 
 interface ConversationListHeaderProps {
@@ -36,6 +36,7 @@ interface ConversationListHeaderProps {
     onEmptyTrash?: () => void;
     onNewConversationClick?: () => void;
     onSyncAllClick?: () => void;
+    onCampaignsClick?: () => void;
     onSearchChange?: (q: string) => void;
 }
 
@@ -68,6 +69,7 @@ export function ConversationListHeader({
     onEmptyTrash,
     onNewConversationClick,
     onSyncAllClick,
+    onCampaignsClick,
     onSearchChange,
 }: ConversationListHeaderProps) {
     const visibleSelectedCount = conversations.filter((conversation) => selectedIds?.has(conversation.id)).length;
@@ -418,6 +420,10 @@ export function ConversationListHeader({
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-44">
+                                            <DropdownMenuItem onClick={onCampaignsClick} className="gap-2">
+                                                <Megaphone className="w-4 h-4" />
+                                                Campaigns
+                                            </DropdownMenuItem>
                                             <DropdownMenuItem onClick={onSyncAllClick} className="gap-2">
                                                 <CloudDownload className="w-4 h-4" />
                                                 Sync WhatsApp

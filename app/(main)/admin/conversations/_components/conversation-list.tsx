@@ -39,6 +39,7 @@ interface ConversationListProps {
     onArchive?: (ids: string[]) => void;
     onNewConversationClick?: () => void;
     onSyncAllClick?: () => void;
+    onCampaignsClick?: () => void;
     onRestore?: (ids: string[]) => void;
     onEmptyTrash?: () => void;
     selectedTaskId?: string | null;
@@ -77,6 +78,7 @@ export function ConversationList({
     onEmptyTrash,
     onNewConversationClick,
     onSyncAllClick,
+    onCampaignsClick,
     selectedTaskId = null,
     onSelectTask,
     searchQuery = "",
@@ -138,6 +140,7 @@ export function ConversationList({
             onEmptyTrash={onEmptyTrash}
             onNewConversationClick={onNewConversationClick}
             onSyncAllClick={onSyncAllClick}
+            onCampaignsClick={onCampaignsClick}
             onSearchChange={onSearchChange}
         />
     );

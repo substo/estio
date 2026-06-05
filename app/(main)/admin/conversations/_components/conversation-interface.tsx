@@ -74,6 +74,7 @@ import { WhatsAppImportModal } from './whatsapp-import-modal';
 import { CreateDealDialog } from './create-deal-dialog';
 import { SyncAllChatsDialog } from './sync-all-chats-dialog';
 import { NewConversationDialog } from './new-conversation-dialog';
+import { PropertyMatchCampaignsDialog } from './property-match-campaigns-dialog';
 import type { NewConversationCreatedResult } from './new-conversation-dialog-helpers';
 import { ConversationWorkspaceLayout } from './conversation-workspace-layout';
 import { useSuggestedResponseQueue } from './use-suggested-response-queue';
@@ -1087,6 +1088,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Sync All & New Conversation Dialog State
     const [syncAllOpen, setSyncAllOpen] = useState(false);
     const [newConversationOpen, setNewConversationOpen] = useState(false);
+    const [propertyCampaignsOpen, setPropertyCampaignsOpen] = useState(false);
 
     useEffect(() => {
         messageSignatureRef.current = getMessageSignature(messages);
@@ -2828,6 +2830,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onEmptyTrash={viewFilter === 'trash' ? handleEmptyTrash : undefined}
             onNewConversationClick={() => setNewConversationOpen(true)}
             onSyncAllClick={() => setSyncAllOpen(true)}
+            onCampaignsClick={() => setPropertyCampaignsOpen(true)}
             disablePreviewCard={isMobileViewport}
         />
     );
@@ -3114,6 +3117,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     const data = await fetchConversations(viewFilter, activeId || undefined);
                     replaceConversationListFromResponse(data);
                 }}
+            />
+
+            <PropertyMatchCampaignsDialog
+                open={propertyCampaignsOpen}
+                onOpenChange={setPropertyCampaignsOpen}
             />
 
             {/* New Conversation Dialog */}
