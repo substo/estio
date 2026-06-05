@@ -470,15 +470,34 @@ export function buildPropertyMatchContactWhere(locationId: string, cursor?: stri
     locationId,
     ...(cursor ? { id: { gt: cursor } } : {}),
     OR: [
+      { contactType: "Lead" },
       { contactType: "Tenant" },
       { leadGoal: { in: SEEKER_LEAD_GOALS } },
     ],
     NOT: [
       { contactType: { in: EXCLUDED_CONTACT_TYPES } },
-      { leadGoal: { in: NON_SEEKER_LEAD_GOALS } },
       { matchingEmailMatchedProperties: { startsWith: "No" } },
     ],
     conversations: { some: { locationId, deletedAt: null } },
+  };
+}
+
+export function nonSeekerLeadGoalMatch(contact: AnyRecord) {
+  if (!NON_SEEKER_LEAD_GOALS.includes(String(contact.leadGoal || ""))) return null;
+  return {
+    verdict: "no" as MatchVerdict,
+    score: -5,
+    confidence: 0.95,
+    evidence: {
+      structured: {
+        matches: [],
+        mismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
+        unknowns: [],
+        needsAi: false,
+      },
+    },
+    reasoning: `Lead goal is ${contact.leadGoal}, so this contact should not receive buyer/renter property match outreach.`,
+    matchSummary: "Lead is not seeking buyer/renter listings.",
   };
 }
 
@@ -800,7 +819,22 @@ async function collectPropertyMatchCandidatesBatch(args: {
   workerId: string;
 }) {
   if (args.campaign.collectionStatus === "done") {
-    return { collected: 0, done: true };
+    const [eligibleContacts, existingCandidates] = await Promise.all([
+      db.contact.count({
+        where: buildPropertyMatchContactWhere(args.locationId),
+      }),
+      db.propertyMatchCandidate.count({
+        where: {
+          campaignId: args.campaign.id,
+          locationId: args.locationId,
+        },
+      }),
+    ]);
+    if (eligibleContacts <= existingCandidates) {
+      return { collected: 0, done: true };
+    }
+    args.campaign.collectionStatus = "pending";
+    args.campaign.collectionCursor = null;
   }
   if (isPropertyMatchCampaignStopped(args.campaign)) {
     return { collected: 0, done: true, stopped: true };
@@ -863,7 +897,8 @@ async function collectPropertyMatchCandidatesBatch(args: {
   const baseCandidateData = contacts.flatMap((contact: any) => {
     const conversation = contact.conversations[0];
     if (!conversation?.id) return [];
-    const structured = evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput(contact));
+    const nonSeekerMatch = nonSeekerLeadGoalMatch(contact);
+    const structured = nonSeekerMatch || evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput(contact));
     const preferredChannel = deriveComposerInitialChannel(conversation as any);
     return [{
       locationId: args.locationId,

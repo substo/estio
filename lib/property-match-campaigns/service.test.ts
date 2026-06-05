@@ -9,6 +9,7 @@ import {
   findPriorPropertyShareEvidence,
   isPropertyMatchCampaignStopped,
   normalizeAiMatchAssessment,
+  nonSeekerLeadGoalMatch,
   propertyMatchCandidateQueue,
   propertyMatchCampaignStatusAfterCounts,
   propertySourceSnapshot,
@@ -126,19 +127,30 @@ test("completed or failed AI candidates can enter human review when verdict is s
   }), false);
 });
 
-test("property match contact filter only admits seeker-style contacts", () => {
+test("property match contact filter includes lead contacts with conversations", () => {
   const where = buildPropertyMatchContactWhere("loc_1", "contact_10") as any;
 
   assert.deepEqual(where.OR, [
+    { contactType: "Lead" },
     { contactType: "Tenant" },
     { leadGoal: { in: ["To Buy", "To Rent"] } },
   ]);
   assert.deepEqual(where.NOT, [
     { contactType: { in: ["Owner", "Agent", "Partner", "Associate", "Maintenance"] } },
-    { leadGoal: { in: ["To List", "To Sell", "Other"] } },
     { matchingEmailMatchedProperties: { startsWith: "No" } },
   ]);
+  assert.deepEqual(where.conversations, { some: { locationId: "loc_1", deletedAt: null } });
   assert.deepEqual(where.id, { gt: "contact_10" });
+});
+
+test("seller-style lead goals are collected but marked as not a match", () => {
+  const result = nonSeekerLeadGoalMatch({ leadGoal: "To List" });
+
+  assert.equal(result?.verdict, "no");
+  assert.equal(result?.confidence, 0.95);
+  assert.equal(result?.evidence.structured.needsAi, false);
+  assert.match(result?.reasoning || "", /To List/);
+  assert.equal(nonSeekerLeadGoalMatch({ leadGoal: "To Buy" }), null);
 });
 
 test("AI review claim filter reclaims stale processing locks", () => {
