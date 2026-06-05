@@ -11050,6 +11050,58 @@ export async function processLegacyCrmLeadEmailForLocation(args: {
 }
 type ConversationSearchMode = "auto" | "contact" | "broad";
 
+async function searchConversationContactPhonesFast(args: {
+    locationId: string;
+    queryDigits: string;
+    limit: number;
+    status?: Extract<ConversationListStatus, "active" | "archived" | "trash">;
+}): Promise<Array<{ conversationId: string; score: number }>> {
+    const queryDigits = args.queryDigits;
+    if (queryDigits.length < 4) return [];
+
+    const queryDigitsShort = queryDigits.length >= 7 ? queryDigits.slice(-10) : queryDigits;
+    const queryDigitsLast7 = queryDigits.length >= 7 ? queryDigits.slice(-7) : "";
+    const phoneE164Query = `+${queryDigits}`;
+    const phoneContainsQuery = `%${queryDigitsShort}%`;
+    const phoneLast7Query = queryDigitsLast7 ? `%${queryDigitsLast7}%` : "";
+    const statusSql =
+        args.status === "active"
+            ? Prisma.sql`c."deletedAt" IS NULL AND c."archivedAt" IS NULL`
+            : args.status === "archived"
+                ? Prisma.sql`c."deletedAt" IS NULL AND c."archivedAt" IS NOT NULL`
+                : args.status === "trash"
+                    ? Prisma.sql`c."deletedAt" IS NOT NULL`
+                    : Prisma.sql`c."deletedAt" IS NULL`;
+
+    return db.$queryRaw<Array<{ conversationId: string; score: number }>>`
+        SELECT
+            c.id AS "conversationId",
+            GREATEST(
+                CASE WHEN regexp_replace(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigits} THEN 120.0 ELSE 0.0 END,
+                CASE WHEN ct.phone = ${phoneE164Query} OR ct.phone = ${queryDigits} THEN 118.0 ELSE 0.0 END,
+                CASE WHEN ${queryDigits.length >= 10} AND regexp_replace(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigitsShort} THEN 112.0 ELSE 0.0 END,
+                CASE WHEN ${queryDigits.length >= 7} AND COALESCE(ct.phone, '') ILIKE ${phoneContainsQuery} THEN 95.0 ELSE 0.0 END,
+                CASE WHEN ${queryDigitsLast7.length > 0} AND COALESCE(ct.phone, '') ILIKE ${phoneLast7Query} THEN 85.0 ELSE 0.0 END
+            ) AS score
+        FROM "Contact" ct
+        JOIN "Conversation" c ON c."contactId" = ct.id
+        WHERE ct."locationId" = ${args.locationId}
+          AND c."locationId" = ${args.locationId}
+          AND ${statusSql}
+          AND ct.phone IS NOT NULL
+          AND (
+            regexp_replace(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigits}
+            OR ct.phone = ${phoneE164Query}
+            OR ct.phone = ${queryDigits}
+            OR (${queryDigits.length >= 10} AND regexp_replace(COALESCE(ct.phone, ''), '\\D', '', 'g') = ${queryDigitsShort})
+            OR (${queryDigits.length >= 7} AND COALESCE(ct.phone, '') ILIKE ${phoneContainsQuery})
+            OR (${queryDigitsLast7.length > 0} AND COALESCE(ct.phone, '') ILIKE ${phoneLast7Query})
+          )
+        ORDER BY score DESC, c."lastMessageAt" DESC, c.id DESC
+        LIMIT ${args.limit};
+    `;
+}
+
 export async function searchConversations(query: string, options?: {
     limit?: number;
     status?: Extract<ConversationListStatus, "active" | "archived" | "trash">;
@@ -11092,6 +11144,7 @@ export async function searchConversations(query: string, options?: {
         let contactHeaderDurationMs = 0;
         let broadDurationMs: number | null = null;
         let broadUsed = false;
+        let fastPhoneUsed = false;
         let rankedRows: Array<{ conversationId: string; score: number }> = [];
 
         const statusSql =
@@ -11116,7 +11169,27 @@ export async function searchConversations(query: string, options?: {
 
         try {
             const contactStartedAt = Date.now();
-            rankedRows = phoneLikeQuery
+            if (phoneLikeQuery) {
+                rankedRows = await withServerTiming("conversations.search.phone_fast", {
+                    traceId,
+                    locationId: location.id,
+                    limit,
+                    queryLength: q.length,
+                    queryDigitsLength: queryDigits.length,
+                    status: statusLabel,
+                    mode: requestedMode,
+                }, async () => searchConversationContactPhonesFast({
+                    locationId: location.id,
+                    queryDigits,
+                    limit,
+                    status,
+                }));
+                fastPhoneUsed = rankedRows.length > 0;
+            }
+
+            rankedRows = rankedRows.length > 0
+                ? rankedRows
+                : phoneLikeQuery
                 ? await withServerTiming("conversations.search.phone", {
                     traceId,
                     locationId: location.id,
@@ -11461,6 +11534,7 @@ export async function searchConversations(query: string, options?: {
                 contactHeaderDurationMs,
                 broadDurationMs,
                 broadUsed,
+                fastPhoneUsed,
                 resultCount: 0,
                 queryLength: q.length,
                 queryDigitsLength: queryDigits.length,
@@ -11493,6 +11567,7 @@ export async function searchConversations(query: string, options?: {
             contactHeaderDurationMs,
             broadDurationMs,
             broadUsed,
+            fastPhoneUsed,
             resultCount: conversations.length,
             queryLength: q.length,
             queryDigitsLength: queryDigits.length,
