@@ -860,6 +860,50 @@ export async function listPropertyMatchCampaigns(args: {
   });
 }
 
+export async function updatePropertyMatchCampaign(args: {
+  locationId: string;
+  campaignId: string;
+  title?: string | null;
+  priorityNote?: string | null;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    select: { id: true },
+  });
+  if (!campaign) return { success: false as const, error: "Campaign not found." };
+
+  const title = normalizeText(args.title, 240);
+  const priorityNote = normalizeText(args.priorityNote, 4000);
+  if (!title) return { success: false as const, error: "Campaign title is required." };
+
+  const updated = await db.propertyMatchCampaign.update({
+    where: { id: campaign.id },
+    data: {
+      title,
+      priorityNote: priorityNote || null,
+    },
+    include: {
+      property: { select: { id: true, title: true, reference: true, price: true, city: true, propertyLocation: true } },
+    },
+  });
+
+  return { success: true as const, campaign: updated };
+}
+
+export async function deletePropertyMatchCampaign(args: {
+  locationId: string;
+  campaignId: string;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    select: { id: true },
+  });
+  if (!campaign) return { success: false as const, error: "Campaign not found." };
+
+  await db.propertyMatchCampaign.delete({ where: { id: campaign.id } });
+  return { success: true as const };
+}
+
 export async function getPropertyMatchCampaignDetail(args: {
   locationId: string;
   campaignId: string;

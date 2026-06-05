@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { Check, Link2, Loader2, Megaphone, Search, Send, X } from "lucide-react";
+import { Check, Link2, Loader2, Megaphone, Pencil, Search, Send, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
     createPropertyMatchCampaignAction,
     createPropertyMatchCampaignFromSourceAction,
+    deletePropertyMatchCampaignAction,
     generatePropertyMatchCandidateDraftAction,
     getPropertyMatchCampaignDetailAction,
     listPropertyMatchCampaignsAction,
@@ -17,6 +18,7 @@ import {
     savePropertyMatchCandidateDraftAction,
     searchPropertyMatchCampaignPropertiesAction,
     sendPropertyMatchCandidateAction,
+    updatePropertyMatchCampaignAction,
 } from "../actions";
 
 type PropertyResult = {
@@ -42,6 +44,7 @@ type Campaign = {
     maybeCount: number;
     noCount: number;
     sentCount: number;
+    priorityNote?: string | null;
 };
 
 type Candidate = {
@@ -102,6 +105,9 @@ export function PropertyMatchCampaignsDialog({
     const [propertyUrl, setPropertyUrl] = useState("");
     const [propertyText, setPropertyText] = useState("");
     const [priorityNote, setPriorityNote] = useState("");
+    const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+    const [editTitle, setEditTitle] = useState("");
+    const [editPriorityNote, setEditPriorityNote] = useState("");
     const [drafts, setDrafts] = useState<Record<string, string>>({});
     const [busyCandidateId, setBusyCandidateId] = useState<string | null>(null);
     const [error, setError] = useState("");
@@ -207,11 +213,59 @@ export function PropertyMatchCampaignsDialog({
 
     const processMore = () => {
         if (!selectedCampaignId) return;
+        setError("");
         startTransition(async () => {
             const res = await processPropertyMatchCampaignBatchAction(selectedCampaignId, 5);
             if (!res.success) setError(res.error || "Batch processing failed.");
             await listPropertyMatchCampaignsAction().then((rows) => setCampaigns(rows as Campaign[]));
             loadDetail(selectedCampaignId, queue);
+        });
+    };
+
+    const startEditCampaign = (campaign: Campaign) => {
+        setSelectedCampaignId(campaign.id);
+        setEditingCampaignId(campaign.id);
+        setEditTitle(campaign.title || campaign.property?.title || "");
+        setEditPriorityNote(campaign.priorityNote || "");
+        setError("");
+    };
+
+    const saveCampaignEdit = () => {
+        if (!editingCampaignId) return;
+        setError("");
+        startTransition(async () => {
+            const res = await updatePropertyMatchCampaignAction(editingCampaignId, {
+                title: editTitle,
+                priorityNote: editPriorityNote,
+            });
+            if (!res.success) {
+                setError(res.error || "Could not update campaign.");
+                return;
+            }
+            setEditingCampaignId(null);
+            const rows = await listPropertyMatchCampaignsAction();
+            setCampaigns(rows as Campaign[]);
+            if (selectedCampaignId) loadDetail(selectedCampaignId, queue);
+        });
+    };
+
+    const deleteCampaign = (campaign: Campaign) => {
+        const label = campaign.title || campaign.property?.title;
+        if (!window.confirm(`Delete campaign "${label}"? This removes its candidate review rows too.`)) return;
+        setError("");
+        startTransition(async () => {
+            const res = await deletePropertyMatchCampaignAction(campaign.id);
+            if (!res.success) {
+                setError(res.error || "Could not delete campaign.");
+                return;
+            }
+            const rows = await listPropertyMatchCampaignsAction();
+            setCampaigns(rows as Campaign[]);
+            const nextSelected = selectedCampaignId === campaign.id ? (rows[0]?.id || null) : selectedCampaignId;
+            setSelectedCampaignId(nextSelected);
+            setEditingCampaignId(null);
+            if (nextSelected) loadDetail(nextSelected, queue);
+            else setDetail(null);
         });
     };
 
@@ -280,8 +334,8 @@ export function PropertyMatchCampaignsDialog({
                 </DialogHeader>
 
                 <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
-                    <aside className="min-h-0 border-r bg-slate-50/70 p-3">
-                        <div className="space-y-3">
+                    <aside className="flex min-h-0 flex-col border-r bg-slate-50/70 p-3">
+                        <div className="flex min-h-0 flex-1 flex-col gap-3">
                             <div className="rounded-md border bg-white p-3">
                                 <div className="text-xs font-semibold uppercase text-slate-500">New campaign</div>
                                 <div className="mt-2 flex gap-1">
@@ -358,24 +412,36 @@ export function PropertyMatchCampaignsDialog({
                                 </Button>
                             </div>
 
-                            <div className="space-y-1">
+                            <div className="flex min-h-0 flex-1 flex-col space-y-1">
                                 <div className="px-1 text-xs font-semibold uppercase text-slate-500">Campaigns</div>
-                                <div className="max-h-[320px] space-y-1 overflow-y-auto">
+                                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                                     {campaigns.map((campaign) => (
-                                        <button
+                                        <div
                                             key={campaign.id}
-                                            type="button"
-                                            onClick={() => setSelectedCampaignId(campaign.id)}
-                                            className={`w-full rounded-md border px-2 py-2 text-left text-xs ${selectedCampaignId === campaign.id ? "border-indigo-300 bg-indigo-50" : "bg-white hover:bg-slate-50"}`}
+                                            className={`rounded-md border text-xs ${selectedCampaignId === campaign.id ? "border-indigo-300 bg-indigo-50" : "bg-white hover:bg-slate-50"}`}
                                         >
-                                            <div className="truncate font-medium text-slate-900">{campaign.property?.title || campaign.title}</div>
-                                            <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
-                                                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
-                                                <span>{campaign.yesCount} yes</span>
-                                                <span>{campaign.maybeCount} maybe</span>
-                                                <span>{campaign.sentCount} sent</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedCampaignId(campaign.id)}
+                                                className="w-full px-2 py-2 text-left"
+                                            >
+                                                <div className="truncate font-medium text-slate-900">{campaign.title || campaign.property?.title}</div>
+                                                <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
+                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
+                                                    <span>{campaign.yesCount} yes</span>
+                                                    <span>{campaign.maybeCount} maybe</span>
+                                                    <span>{campaign.sentCount} sent</span>
+                                                </div>
+                                            </button>
+                                            <div className="flex justify-end gap-1 border-t border-slate-100 px-1 py-1">
+                                                <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEditCampaign(campaign)} title="Edit campaign">
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => deleteCampaign(campaign)} title="Delete campaign">
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
                                             </div>
-                                        </button>
+                                        </div>
                                     ))}
                                 </div>
                             </div>
@@ -390,7 +456,7 @@ export function PropertyMatchCampaignsDialog({
                                 <div className="border-b px-4 py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="min-w-0">
-                                            <div className="truncate text-sm font-semibold text-slate-900">{activeCampaign.property?.title || activeCampaign.title}</div>
+                                            <div className="truncate text-sm font-semibold text-slate-900">{activeCampaign.title || activeCampaign.property?.title}</div>
                                             <div className="mt-1 text-xs text-slate-500">
                                                 {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed · {activeCampaign.yesCount} yes · {activeCampaign.maybeCount} maybe · {activeCampaign.noCount} no
                                             </div>
@@ -400,6 +466,33 @@ export function PropertyMatchCampaignsDialog({
                                             Process batch
                                         </Button>
                                     </div>
+                                    {editingCampaignId === activeCampaign.id ? (
+                                        <div className="mt-3 rounded-md border bg-slate-50 p-3">
+                                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                                                <input
+                                                    value={editTitle}
+                                                    onChange={(event) => setEditTitle(event.target.value)}
+                                                    className="h-8 min-w-0 rounded-md border bg-white px-2 text-xs"
+                                                    placeholder="Campaign title"
+                                                />
+                                                <input
+                                                    value={editPriorityNote}
+                                                    onChange={(event) => setEditPriorityNote(event.target.value)}
+                                                    className="h-8 min-w-0 rounded-md border bg-white px-2 text-xs"
+                                                    placeholder="Priority note"
+                                                />
+                                            </div>
+                                            <div className="mt-2 flex justify-end gap-2">
+                                                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setEditingCampaignId(null)}>
+                                                    Cancel
+                                                </Button>
+                                                <Button type="button" size="sm" className="h-8 text-xs" onClick={saveCampaignEdit} disabled={!editTitle.trim() || isPending}>
+                                                    {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Check className="mr-1.5 h-3 w-3" />}
+                                                    Save
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ) : null}
                                     <div className="mt-2 flex gap-1">
                                         {(["review", "sent", "no"] as Queue[]).map((item) => (
                                             <Button

@@ -96,12 +96,14 @@ import {
     canCandidateDraftOrSend,
     createPropertyMatchCampaign,
     createPropertyMatchCampaignFromSource,
+    deletePropertyMatchCampaign,
     getPropertyMatchCampaignDetail,
     listPropertyMatchCampaigns,
     markPropertyMatchCandidateSent,
     processPropertyMatchCampaignBatch,
     savePropertyMatchCandidateDraft,
     sortPropertyMatchSearchRows,
+    updatePropertyMatchCampaign,
     updatePropertyMatchCandidateReview,
 } from "@/lib/property-match-campaigns/service";
 import { extractPropertyUrlContext } from "@/lib/conversations/property-url-context";
@@ -6582,6 +6584,46 @@ export async function getPropertyMatchCampaignDetailAction(campaignId: string, q
     } catch (error) {
         console.error("[property-match-campaigns] detail load failed", error);
         return { success: false as const, error: "Could not load campaign." };
+    }
+}
+
+export async function updatePropertyMatchCampaignAction(campaignId: string, input: {
+    title?: string | null;
+    priorityNote?: string | null;
+}) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const result = await updatePropertyMatchCampaign({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+            title: input?.title || null,
+            priorityNote: input?.priorityNote || null,
+        });
+        revalidatePath("/admin/conversations");
+        if (!result.success) return result;
+        return { success: true as const, campaign: serializePropertyMatchCampaign(result.campaign) };
+    } catch (error) {
+        console.error("[property-match-campaigns] update campaign failed", error);
+        return { success: false as const, error: "Could not update campaign." };
+    }
+}
+
+export async function deletePropertyMatchCampaignAction(campaignId: string) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const result = await deletePropertyMatchCampaign({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+        });
+        revalidatePath("/admin/conversations");
+        return result;
+    } catch (error) {
+        console.error("[property-match-campaigns] delete campaign failed", error);
+        return { success: false as const, error: "Could not delete campaign." };
     }
 }
 
