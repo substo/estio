@@ -7,8 +7,10 @@ import {
   canCandidateDraftOrSend,
   canCandidateEnterHumanReview,
   findPriorPropertyShareEvidence,
+  isPropertyMatchCampaignStopped,
   normalizeAiMatchAssessment,
   propertyMatchCandidateQueue,
+  propertyMatchCampaignStatusAfterCounts,
   propertySourceSnapshot,
   summarizePropertyMatchCandidateQueues,
   sortPropertyMatchSearchRows,
@@ -64,6 +66,46 @@ test("pending AI candidates cannot enter review or draft flow", () => {
 
   assert.equal(canCandidateEnterHumanReview(candidate), false);
   assert.equal(canCandidateDraftOrSend(candidate), false);
+});
+
+test("stopped property match campaigns preserve canceled status during count refresh decisions", () => {
+  assert.equal(isPropertyMatchCampaignStopped({ status: "canceled", collectionStatus: "pending" }), true);
+  assert.equal(isPropertyMatchCampaignStopped({ status: "processing", collectionStatus: "canceled" }), true);
+  assert.equal(isPropertyMatchCampaignStopped({ status: "processing", collectionStatus: "pending" }), false);
+
+  const stoppedByStatus = propertyMatchCampaignStatusAfterCounts({
+    currentStatus: "canceled",
+    collectionStatus: "done",
+    pendingAiCount: 0,
+  });
+  assert.equal(stoppedByStatus.status, "canceled");
+  assert.equal(stoppedByStatus.processingFinishedAt, null);
+
+  const stoppedByCollection = propertyMatchCampaignStatusAfterCounts({
+    currentStatus: "processing",
+    collectionStatus: "canceled",
+    pendingAiCount: 3,
+  });
+  assert.equal(stoppedByCollection.status, "canceled");
+  assert.equal(stoppedByCollection.processingFinishedAt, null);
+});
+
+test("property match campaign count decisions still move active campaigns forward", () => {
+  const reviewReady = propertyMatchCampaignStatusAfterCounts({
+    currentStatus: "processing",
+    collectionStatus: "done",
+    pendingAiCount: 0,
+  });
+  assert.equal(reviewReady.status, "review");
+  assert.ok(reviewReady.processingFinishedAt instanceof Date);
+
+  const stillProcessing = propertyMatchCampaignStatusAfterCounts({
+    currentStatus: "processing",
+    collectionStatus: "pending",
+    pendingAiCount: 0,
+  });
+  assert.equal(stillProcessing.status, "processing");
+  assert.equal(stillProcessing.processingFinishedAt, null);
 });
 
 test("completed or failed AI candidates can enter human review when verdict is sendable", () => {

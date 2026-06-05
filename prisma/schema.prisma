@@ -2228,7 +2228,7 @@ model PropertyMatchCampaign {
   messageLength  String  @default("short")
   priorityNote   String? @db.Text
   propertySnapshot Json?
-  collectionStatus String  @default("pending") // pending | processing | done | failed
+  collectionStatus String  @default("pending") // pending | processing | done | canceled | failed
   collectionCursor String?
   collectionLockedAt DateTime?
   collectionLockedBy String?

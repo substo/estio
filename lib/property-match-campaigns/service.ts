@@ -28,6 +28,8 @@ const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "s
 const LOW_CONFIDENCE_YES_THRESHOLD = 0.65;
 const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const CONTACT_COLLECTION_BATCH_SIZE = 200;
+const CAMPAIGN_STOPPED_STATUS = "canceled";
+const CAMPAIGN_STOPPED_ERROR = "Processing stopped by user.";
 const SEEKER_LEAD_GOALS = ["To Buy", "To Rent"];
 const NON_SEEKER_LEAD_GOALS = ["To List", "To Sell", "Other"];
 const EXCLUDED_CONTACT_TYPES = ["Owner", "Agent", "Partner", "Associate", "Maintenance"];
@@ -420,6 +422,31 @@ export function isAiReviewTerminal(status: unknown) {
   return status === "done" || status === "failed";
 }
 
+export function isPropertyMatchCampaignStopped(campaign: {
+  status?: unknown;
+  collectionStatus?: unknown;
+} | null | undefined) {
+  return campaign?.status === CAMPAIGN_STOPPED_STATUS || campaign?.collectionStatus === CAMPAIGN_STOPPED_STATUS;
+}
+
+export function propertyMatchCampaignStatusAfterCounts(args: {
+  currentStatus?: unknown;
+  collectionStatus?: unknown;
+  pendingAiCount: number;
+}) {
+  if (args.currentStatus === CAMPAIGN_STOPPED_STATUS || args.collectionStatus === CAMPAIGN_STOPPED_STATUS) {
+    return {
+      status: CAMPAIGN_STOPPED_STATUS,
+      processingFinishedAt: null,
+    };
+  }
+  const readyForReview = args.collectionStatus === "done" && args.pendingAiCount === 0;
+  return {
+    status: readyForReview ? "review" : "processing",
+    processingFinishedAt: readyForReview ? new Date() : null,
+  };
+}
+
 export function canCandidateEnterHumanReview(candidate: {
   reviewerStatus?: unknown;
   aiVerdict?: unknown;
@@ -621,7 +648,7 @@ function formatRequirementFacts(contact: AnyRecord): string {
 async function refreshCampaignCounts(campaignId: string) {
   const campaign = await db.propertyMatchCampaign.findUnique({
     where: { id: campaignId },
-    select: { collectionStatus: true },
+    select: { status: true, collectionStatus: true },
   });
   const rows = await db.propertyMatchCandidate.findMany({
     where: { campaignId },
@@ -629,13 +656,17 @@ async function refreshCampaignCounts(campaignId: string) {
   });
   const queueCounts = summarizePropertyMatchCandidateQueues(rows as any[]);
   const pendingAiCount = queueCounts.pendingAiCount;
-  const isCollectionDone = campaign?.collectionStatus === "done";
   const processedCandidates = Math.max(0, rows.length - pendingAiCount);
   const yesCount = rows.filter((row: any) => row.aiVerdict === "yes").length;
   const maybeCount = rows.filter((row: any) => row.aiVerdict === "maybe").length;
   const noCount = rows.filter((row: any) => row.aiVerdict === "no").length;
   const approvedCount = rows.filter((row: any) => row.reviewerStatus === "approved").length;
   const sentCount = rows.filter((row: any) => row.reviewerStatus === "sent").length;
+  const nextStatus = propertyMatchCampaignStatusAfterCounts({
+    currentStatus: campaign?.status,
+    collectionStatus: campaign?.collectionStatus,
+    pendingAiCount,
+  });
 
   return db.propertyMatchCampaign.update({
     where: { id: campaignId },
@@ -647,8 +678,8 @@ async function refreshCampaignCounts(campaignId: string) {
       noCount,
       approvedCount,
       sentCount,
-      status: isCollectionDone && pendingAiCount === 0 ? "review" : "processing",
-      processingFinishedAt: isCollectionDone && pendingAiCount === 0 ? new Date() : null,
+      status: nextStatus.status,
+      processingFinishedAt: nextStatus.processingFinishedAt,
     },
   });
 }
@@ -771,17 +802,28 @@ async function collectPropertyMatchCandidatesBatch(args: {
   if (args.campaign.collectionStatus === "done") {
     return { collected: 0, done: true };
   }
+  if (isPropertyMatchCampaignStopped(args.campaign)) {
+    return { collected: 0, done: true, stopped: true };
+  }
 
   const limit = Math.max(1, Math.min(500, Number(args.limit || CONTACT_COLLECTION_BATCH_SIZE)));
   const now = new Date();
-  await db.propertyMatchCampaign.update({
-    where: { id: args.campaign.id },
+  const claimed = await db.propertyMatchCampaign.updateMany({
+    where: {
+      id: args.campaign.id,
+      locationId: args.locationId,
+      status: { not: CAMPAIGN_STOPPED_STATUS },
+      collectionStatus: { not: CAMPAIGN_STOPPED_STATUS },
+    },
     data: {
       collectionStatus: "processing",
       collectionLockedAt: now,
       collectionLockedBy: args.workerId,
     },
   });
+  if (claimed.count === 0) {
+    return { collected: 0, done: true, stopped: true };
+  }
 
   const contacts = await db.contact.findMany({
     where: buildPropertyMatchContactWhere(args.locationId, args.campaign.collectionCursor),
@@ -876,6 +918,21 @@ async function collectPropertyMatchCandidatesBatch(args: {
     };
   });
 
+  const beforeWriteCampaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaign.id, locationId: args.locationId },
+    select: { status: true, collectionStatus: true },
+  });
+  if (isPropertyMatchCampaignStopped(beforeWriteCampaign)) {
+    await db.propertyMatchCampaign.updateMany({
+      where: { id: args.campaign.id, collectionLockedBy: args.workerId },
+      data: {
+        collectionLockedAt: null,
+        collectionLockedBy: null,
+      },
+    });
+    return { collected: 0, done: true, stopped: true };
+  }
+
   if (candidateData.length > 0) {
     await db.propertyMatchCandidate.createMany({
       data: candidateData,
@@ -925,8 +982,14 @@ async function collectPropertyMatchCandidatesBatch(args: {
 
   const lastCursor = contacts[contacts.length - 1]?.id || args.campaign.collectionCursor || null;
   const done = contacts.length < limit;
-  await db.propertyMatchCampaign.update({
-    where: { id: args.campaign.id },
+  const finished = await db.propertyMatchCampaign.updateMany({
+    where: {
+      id: args.campaign.id,
+      locationId: args.locationId,
+      status: { not: CAMPAIGN_STOPPED_STATUS },
+      collectionStatus: { not: CAMPAIGN_STOPPED_STATUS },
+      collectionLockedBy: args.workerId,
+    },
     data: {
       collectionStatus: done ? "done" : "pending",
       collectionCursor: lastCursor,
@@ -936,8 +999,81 @@ async function collectPropertyMatchCandidatesBatch(args: {
       lastError: null,
     },
   });
+  if (finished.count === 0) {
+    return { collected: candidateData.length, done: true, stopped: true };
+  }
 
   return { collected: candidateData.length, done };
+}
+
+async function isPropertyMatchCampaignStopRequested(args: {
+  locationId: string;
+  campaignId: string;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    select: { status: true, collectionStatus: true },
+  });
+  return isPropertyMatchCampaignStopped(campaign);
+}
+
+async function releasePropertyMatchAiLocks(args: {
+  locationId: string;
+  campaignId: string;
+  workerId?: string | null;
+}) {
+  return db.propertyMatchCandidate.updateMany({
+    where: {
+      campaignId: args.campaignId,
+      locationId: args.locationId,
+      aiReviewStatus: "processing",
+      ...(args.workerId ? { aiReviewLockedBy: args.workerId } : {}),
+    },
+    data: {
+      aiReviewStatus: "pending",
+      aiReviewLockedAt: null,
+      aiReviewLockedBy: null,
+    },
+  });
+}
+
+export async function cancelPropertyMatchCampaignBatch(args: {
+  locationId: string;
+  campaignId: string;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    select: { id: true },
+  });
+  if (!campaign) return { success: false as const, error: "Campaign not found." };
+
+  const [released] = await db.$transaction([
+    db.propertyMatchCandidate.updateMany({
+      where: {
+        campaignId: campaign.id,
+        locationId: args.locationId,
+        aiReviewStatus: "processing",
+      },
+      data: {
+        aiReviewStatus: "pending",
+        aiReviewLockedAt: null,
+        aiReviewLockedBy: null,
+      },
+    }),
+    db.propertyMatchCampaign.update({
+      where: { id: campaign.id },
+      data: {
+        status: CAMPAIGN_STOPPED_STATUS,
+        collectionStatus: CAMPAIGN_STOPPED_STATUS,
+        collectionLockedAt: null,
+        collectionLockedBy: null,
+        processingFinishedAt: null,
+        lastError: CAMPAIGN_STOPPED_ERROR,
+      },
+    }),
+  ]);
+
+  return { success: true as const, released: released.count };
 }
 
 async function scoreCandidateWithAi(args: {
@@ -1068,11 +1204,45 @@ export async function processPropertyMatchCampaignBatch(args: {
     Math.random().toString(36).slice(2),
   ].join(":");
 
+  const campaignForProcessing = isPropertyMatchCampaignStopped(campaign)
+    ? await db.propertyMatchCampaign.update({
+      where: { id: campaign.id },
+      data: {
+        status: "processing",
+        collectionStatus: campaign.collectionStatus === "done" ? "done" : "pending",
+        collectionLockedAt: null,
+        collectionLockedBy: null,
+        lastError: null,
+        processingStartedAt: campaign.processingStartedAt || new Date(),
+        processingFinishedAt: null,
+      },
+    })
+    : campaign;
+
   const collection = await collectPropertyMatchCandidatesBatch({
     locationId: args.locationId,
-    campaign,
+    campaign: campaignForProcessing,
     workerId,
   });
+  if (collection.stopped || await isPropertyMatchCampaignStopRequested({
+    locationId: args.locationId,
+    campaignId: args.campaignId,
+  })) {
+    await releasePropertyMatchAiLocks({
+      locationId: args.locationId,
+      campaignId: args.campaignId,
+      workerId,
+    });
+    return {
+      success: true as const,
+      collected: collection.collected,
+      processed: 0,
+      failed: 0,
+      remaining: false,
+      stopped: true,
+      status: CAMPAIGN_STOPPED_STATUS,
+    };
+  }
   const refreshedCampaign = await db.propertyMatchCampaign.findFirst({
     where: { id: args.campaignId, locationId: args.locationId },
   });
@@ -1122,6 +1292,26 @@ export async function processPropertyMatchCampaignBatch(args: {
   let processed = 0;
   let failed = 0;
   for (const candidate of candidates) {
+    if (await isPropertyMatchCampaignStopRequested({
+      locationId: args.locationId,
+      campaignId: args.campaignId,
+    })) {
+      await releasePropertyMatchAiLocks({
+        locationId: args.locationId,
+        campaignId: args.campaignId,
+        workerId,
+      });
+      const stopped = await refreshCampaignCounts(campaign.id);
+      return {
+        success: true as const,
+        collected: collection.collected,
+        processed,
+        failed,
+        remaining: false,
+        stopped: true,
+        status: stopped.status,
+      };
+    }
     try {
       const ai = await scoreCandidateWithAi({
         locationId: args.locationId,
@@ -1129,8 +1319,13 @@ export async function processPropertyMatchCampaignBatch(args: {
         candidate,
         actorUserId: args.actorUserId || null,
       });
-      await db.propertyMatchCandidate.update({
-        where: { id: candidate.id },
+      const updatedCandidate = await db.propertyMatchCandidate.updateMany({
+        where: {
+          id: candidate.id,
+          locationId: args.locationId,
+          aiReviewStatus: "processing",
+          aiReviewLockedBy: workerId,
+        },
         data: {
           aiVerdict: ai.verdict,
           confidence: ai.confidence,
@@ -1143,11 +1338,33 @@ export async function processPropertyMatchCampaignBatch(args: {
           lastError: null,
         },
       });
+      if (updatedCandidate.count === 0) {
+        await releasePropertyMatchAiLocks({
+          locationId: args.locationId,
+          campaignId: args.campaignId,
+          workerId,
+        });
+        const stopped = await refreshCampaignCounts(campaign.id);
+        return {
+          success: true as const,
+          collected: collection.collected,
+          processed,
+          failed,
+          remaining: false,
+          stopped: stopped.status === CAMPAIGN_STOPPED_STATUS,
+          status: stopped.status,
+        };
+      }
       processed += 1;
     } catch (error: any) {
       failed += 1;
-      await db.propertyMatchCandidate.update({
-        where: { id: candidate.id },
+      await db.propertyMatchCandidate.updateMany({
+        where: {
+          id: candidate.id,
+          locationId: args.locationId,
+          aiReviewStatus: "processing",
+          aiReviewLockedBy: workerId,
+        },
         data: {
           aiVerdict: "maybe",
           confidence: 0.4,

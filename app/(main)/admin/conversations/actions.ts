@@ -94,6 +94,7 @@ import {
 import {
     buildCampaignDraftInstruction,
     canCandidateDraftOrSend,
+    cancelPropertyMatchCampaignBatch,
     createPropertyMatchCampaign,
     createPropertyMatchCampaignFromSource,
     deletePropertyMatchCampaign,
@@ -6401,6 +6402,7 @@ function serializePropertyMatchCampaign(row: any) {
         queueCounts: row.queueCounts || null,
         priorityNote: row.priorityNote || null,
         propertySnapshot: row.propertySnapshot || null,
+        collectionStatus: row.collectionStatus || null,
         lastError: row.lastError || null,
     };
 }
@@ -6659,6 +6661,23 @@ export async function processPropertyMatchCampaignBatchAction(campaignId: string
     } catch (error) {
         console.error("[property-match-campaigns] batch processing failed", error);
         return { success: false as const, error: "Batch processing failed." };
+    }
+}
+
+export async function cancelPropertyMatchCampaignBatchAction(campaignId: string) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const result = await cancelPropertyMatchCampaignBatch({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+        });
+        revalidatePath("/admin/conversations");
+        return result;
+    } catch (error) {
+        console.error("[property-match-campaigns] cancel batch failed", error);
+        return { success: false as const, error: "Could not stop batch processing." };
     }
 }
 

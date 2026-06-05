@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Check, ChevronLeft, Link2, List, Loader2, Megaphone, Pencil, Search, Send, Trash2, Users, X } from "lucide-react";
+import { Check, ChevronLeft, Link2, List, Loader2, Megaphone, Pencil, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,6 +17,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+    cancelPropertyMatchCampaignBatchAction,
     createPropertyMatchCampaignAction,
     createPropertyMatchCampaignFromSourceAction,
     deletePropertyMatchCampaignAction,
@@ -57,6 +58,8 @@ type Campaign = {
     sentCount: number;
     queueCounts?: QueueCounts | null;
     priorityNote?: string | null;
+    collectionStatus?: string | null;
+    lastError?: string | null;
 };
 
 type QueueCounts = {
@@ -161,6 +164,15 @@ function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
     };
 }
 
+function campaignIsStopped(campaign?: Campaign | null) {
+    return campaign?.status === "canceled" || campaign?.collectionStatus === "canceled";
+}
+
+function campaignCanStop(campaign?: Campaign | null) {
+    if (!campaign || campaignIsStopped(campaign)) return false;
+    return campaign.status === "processing" || campaign.collectionStatus === "processing" || campaignQueueCounts(campaign).pendingAiCount > 0;
+}
+
 function queueEmptyLabel(queue: Queue) {
     if (queue === "review") return "No contacts need review.";
     if (queue === "approved") return "No approved drafts waiting to send.";
@@ -203,6 +215,8 @@ export function PropertyMatchCampaignsDialog({
     const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(null);
     const [drafts, setDrafts] = useState<Record<string, string>>({});
     const [busyCandidateId, setBusyCandidateId] = useState<string | null>(null);
+    const [processingCampaignId, setProcessingCampaignId] = useState<string | null>(null);
+    const [cancelingCampaignId, setCancelingCampaignId] = useState<string | null>(null);
     const [error, setError] = useState("");
     const [mobileView, setMobileView] = useState<MobileCampaignView>("campaigns");
     const [isPending, startTransition] = useTransition();
@@ -325,7 +339,12 @@ export function PropertyMatchCampaignsDialog({
             setMobileView("review");
             setPriorityNote("");
             await refreshCampaigns();
-            await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
+            setProcessingCampaignId(res.campaignId);
+            try {
+                await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
+            } finally {
+                setProcessingCampaignId(null);
+            }
             loadDetail(res.campaignId, "review");
         });
     };
@@ -349,7 +368,12 @@ export function PropertyMatchCampaignsDialog({
             setPropertyUrl("");
             setPropertyText("");
             await refreshCampaigns();
-            await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
+            setProcessingCampaignId(res.campaignId);
+            try {
+                await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
+            } finally {
+                setProcessingCampaignId(null);
+            }
             loadDetail(res.campaignId, "review");
         });
     };
@@ -357,11 +381,35 @@ export function PropertyMatchCampaignsDialog({
     const processMore = () => {
         if (!selectedCampaignId) return;
         setError("");
+        const campaignId = selectedCampaignId;
+        setProcessingCampaignId(campaignId);
         startTransition(async () => {
-            const res = await processPropertyMatchCampaignBatchAction(selectedCampaignId, 5);
-            if (!res.success) setError(res.error || "Batch processing failed.");
-            await refreshCampaigns();
-            loadDetail(selectedCampaignId, queue);
+            try {
+                const res = await processPropertyMatchCampaignBatchAction(campaignId, 5);
+                if (!res.success) setError(res.error || "Batch processing failed.");
+                await refreshCampaigns();
+                loadDetail(campaignId, queue);
+            } finally {
+                setProcessingCampaignId(null);
+            }
+        });
+    };
+
+    const stopProcessing = () => {
+        if (!selectedCampaignId) return;
+        setError("");
+        const campaignId = selectedCampaignId;
+        setCancelingCampaignId(campaignId);
+        startTransition(async () => {
+            try {
+                const res = await cancelPropertyMatchCampaignBatchAction(campaignId);
+                if (!res.success) setError(res.error || "Could not stop batch processing.");
+                setProcessingCampaignId((current) => (current === campaignId ? null : current));
+                await refreshCampaigns();
+                loadDetail(campaignId, queue);
+            } finally {
+                setCancelingCampaignId(null);
+            }
         });
     };
 
@@ -493,6 +541,10 @@ export function PropertyMatchCampaignsDialog({
     };
 
     const activeCampaign = detail?.campaign || campaigns.find((campaign) => campaign.id === selectedCampaignId) || null;
+    const activeCampaignIsProcessing = processingCampaignId === activeCampaign?.id || campaignCanStop(activeCampaign);
+    const activeCampaignIsCanceling = cancelingCampaignId === activeCampaign?.id;
+    const activeCampaignIsStopped = campaignIsStopped(activeCampaign);
+    const activeCampaignIsBatchBusy = processingCampaignId === activeCampaign?.id;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -691,10 +743,36 @@ export function PropertyMatchCampaignsDialog({
                                                 })}
                                             </div>
                                         </div>
-                                        <Button type="button" size="sm" variant="outline" className="h-8 w-full text-xs sm:w-auto" onClick={processMore} disabled={isPending}>
-                                            {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
-                                            Process batch
-                                        </Button>
+                                        <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 text-xs"
+                                                onClick={processMore}
+                                                disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling}
+                                            >
+                                                {activeCampaignIsBatchBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+                                                {activeCampaignIsStopped ? "Resume batch" : "Process batch"}
+                                            </Button>
+                                            {activeCampaignIsProcessing ? (
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-8 text-xs text-red-600 hover:text-red-700"
+                                                    onClick={stopProcessing}
+                                                    disabled={activeCampaignIsCanceling}
+                                                >
+                                                    {activeCampaignIsCanceling ? (
+                                                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                        <StopCircle className="mr-1.5 h-3 w-3" />
+                                                    )}
+                                                    {activeCampaignIsCanceling ? "Stopping..." : "Stop"}
+                                                </Button>
+                                            ) : null}
+                                        </div>
                                     </div>
                                     {editingCampaignId === activeCampaign.id ? (
                                         <div className="mt-3 rounded-md border bg-slate-50 p-3">
