@@ -10,6 +10,7 @@ import {
     getStaleWhatsAppWebBridgeNonReadyReason,
 } from "../lib/whatsapp/web-bridge-readiness";
 import { isWhatsAppWebBridgeStaleError } from "../lib/whatsapp/web-bridge-stale";
+import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -591,12 +592,31 @@ async function sendMessage(sessionId: string, payload: any) {
     }
 
     try {
+        const text = String(payload.text || "");
+        const preview = getWhatsAppLinkPreviewDecision(text);
         const sent = await withStaleRecovery(session, () => withTimeout(
-            session.client.sendMessage(to, String(payload.text || "")),
+            session.client.sendMessage(to, text, preview.shouldRequestPreview ? { linkPreview: true } : undefined),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`
         ));
-        return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
+        const messageId = sent?.id?._serialized || sent?.id?.id || "";
+        if (preview.shouldRequestPreview) {
+            const sentLinks = Array.isArray(sent?.links) ? sent.links.length : null;
+            console.log("[WhatsApp Web Bridge] Text URL send completed", {
+                sessionId,
+                toKind: /@lid$/i.test(to) ? "lid" : /@c\.us$/i.test(to) ? "phone" : "other",
+                urlHost: preview.host,
+                linkPreviewRequested: true,
+                sentLinks,
+                messageId,
+            });
+        }
+        return {
+            messageId,
+            linkPreviewRequested: preview.shouldRequestPreview,
+            linkPreviewHost: preview.host,
+            sentLinksCount: Array.isArray(sent?.links) ? sent.links.length : undefined,
+        };
     } catch (error: any) {
         throw new Error(`WhatsApp Web send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
     }

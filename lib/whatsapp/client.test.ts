@@ -23,6 +23,19 @@ test("buildCloudTextPayload normalizes recipients and text shape", () => {
     });
 });
 
+test("buildCloudTextPayload requests URL previews for HTTP links", () => {
+    assert.deepEqual(buildCloudTextPayload("+1 (555) 123-4567", "hello https://example.com/listing"), {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: "15551234567",
+        type: "text",
+        text: {
+            preview_url: true,
+            body: "hello https://example.com/listing",
+        },
+    });
+});
+
 test("buildCloudMediaPayload supports document metadata", () => {
     const payload = buildCloudMediaPayload("+357 99 000000", {
         mediaType: "document",

@@ -3,6 +3,7 @@ import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { getLegacyCryptr } from "@/lib/security/legacy-cryptr";
+import { getWhatsAppLinkPreviewDecision } from "@/lib/whatsapp/link-preview";
 
 export const WHATSAPP_CLOUD_PROVIDER = "whatsapp_cloud";
 export const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || "v21.0";
@@ -323,13 +324,14 @@ async function graphRequest<T = any>(
 
 export function buildCloudTextPayload(to: string, body: string) {
     const recipient = normalizeWhatsAppRecipient(to);
+    const preview = getWhatsAppLinkPreviewDecision(body);
     return {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to: recipient,
         type: "text",
         text: {
-            preview_url: false,
+            preview_url: preview.shouldRequestPreview,
             body: String(body || ""),
         },
     };
