@@ -126,6 +126,8 @@ interface ChatWindowProps {
 }
 
 import { MessageBubble } from "./message-bubble";
+import { MessageImageGroup } from "./message-image-group";
+import { groupAdjacentWhatsAppImageMessages } from "./message-image-grouping";
 
 import { ConversationComposer } from "./conversation-composer";
 
@@ -323,6 +325,10 @@ export function ChatWindow({
     const conversationChannelLabel = conversationChannelInfo.name;
     const conversationLifecycle = getConversationLifecycleUi(conversation.status);
     const surfaceTheme = getConversationSurfaceTheme(activeSurfaceChannel);
+    const groupedTimelineItems = useMemo(
+        () => groupAdjacentWhatsAppImageMessages(timelineItems),
+        [timelineItems]
+    );
     const hasMobileMoreActions = (
         selectionBatch.length > 0
         || (!!isWhatsAppConversation && !!onSync)
@@ -743,7 +749,7 @@ export function ChatWindow({
                         </div>
                     )}
 
-                    {timelineItems.map((item) => {
+                    {groupedTimelineItems.map((item) => {
                         if (item.kind === 'activity') {
                             return (
                                 <div key={`activity-${item.activity.id}`} className="min-w-0 max-w-full overflow-x-hidden">
@@ -751,6 +757,30 @@ export function ChatWindow({
                                         item={item.activity}
                                         contactName={conversation.contactName}
                                         surfaceTheme={surfaceTheme}
+                                    />
+                                </div>
+                            );
+                        }
+                        if (item.kind === "image-group") {
+                            const latestMessage = item.group.messages[item.group.messages.length - 1];
+                            const enableMountAnimation = getEnableMountAnimation(latestMessage.id);
+                            return (
+                                <div
+                                    key={item.group.id}
+                                    ref={(node) => {
+                                        for (const message of item.group.messages) {
+                                            messageRefs.current[message.id] = node;
+                                        }
+                                    }}
+                                    className={cn(
+                                        "rounded-xl transition-colors min-w-0 max-w-full overflow-x-hidden",
+                                        item.group.messages.some((message) => highlightedMessageId === message.id) && surfaceTheme.highlightedMessageClassName,
+                                        enableMountAnimation && "animate-in fade-in slide-in-from-bottom-2 duration-300"
+                                    )}
+                                >
+                                    <MessageImageGroup
+                                        group={item.group}
+                                        contactName={conversation.contactName}
                                     />
                                 </div>
                             );

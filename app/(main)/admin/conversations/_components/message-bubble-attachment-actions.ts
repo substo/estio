@@ -150,6 +150,19 @@ export function deriveBodyVCardDownloadHref(body?: string | null): string | null
     return `data:text/vcard;charset=utf-8,${encodeURIComponent(value)}`;
 }
 
+export function deriveAttachmentDownloadUrl(url: string): string {
+    try {
+        if (url.includes("/api/media/attachments/")) {
+            const parsed = new URL(url, "http://localhost");
+            parsed.searchParams.set("download", "1");
+            return `${parsed.pathname}${parsed.search}`;
+        }
+    } catch {
+        // Fall through to original URL.
+    }
+    return url;
+}
+
 export function classifyMessageAttachments(attachments: NormalizedMessageAttachment[]): ClassifiedMessageAttachments {
     const imageAttachments = attachments.filter((attachment) => {
         const mimeType = (attachment.mimeType || "").toLowerCase();

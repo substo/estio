@@ -12,6 +12,7 @@ import {
 } from "./message-selection-actions";
 import {
     classifyMessageAttachments,
+    deriveAttachmentDownloadUrl,
     deriveBodyVCardDownloadHref,
     deriveMediaUnavailableState,
     deriveSharedContactsFromMessageBody,
@@ -239,18 +240,7 @@ export function MessageBubble({
         contactPhone,
     }), [contactPhone, message, smsRelayEnabled]);
 
-    const getDownloadUrl = useCallback((url: string) => {
-        try {
-            if (url.includes("/api/media/attachments/")) {
-                const parsed = new URL(url, "http://localhost");
-                parsed.searchParams.set("download", "1");
-                return `${parsed.pathname}${parsed.search}`;
-            }
-        } catch {
-            // Fall through to original URL
-        }
-        return url;
-    }, []);
+    const getDownloadUrl = useCallback(deriveAttachmentDownloadUrl, []);
 
     const handleRefetchMedia = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();

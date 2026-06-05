@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     classifyMessageAttachments,
+    deriveAttachmentDownloadUrl,
     deriveBodyVCardDownloadHref,
     deriveMediaUnavailableState,
     deriveSharedContactsFromMessageBody,
@@ -121,6 +122,21 @@ test('deriveSharedContactsFromMessageBody and deriveBodyVCardDownloadHref preser
         `data:text/vcard;charset=utf-8,${encodeURIComponent(vcard)}`
     );
     assert.equal(deriveBodyVCardDownloadHref('plain body'), null);
+});
+
+test('deriveAttachmentDownloadUrl marks local attachment URLs for download', () => {
+    assert.equal(
+        deriveAttachmentDownloadUrl('/api/media/attachments/att_1'),
+        '/api/media/attachments/att_1?download=1'
+    );
+    assert.equal(
+        deriveAttachmentDownloadUrl('/api/media/attachments/att_1?preview=1'),
+        '/api/media/attachments/att_1?preview=1&download=1'
+    );
+    assert.equal(
+        deriveAttachmentDownloadUrl('https://example.test/photo.jpg'),
+        'https://example.test/photo.jpg'
+    );
 });
 
 test('deriveMediaUnavailableState preserves WhatsApp web bridge unavailable detection', () => {

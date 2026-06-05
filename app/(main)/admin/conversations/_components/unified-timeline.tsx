@@ -19,6 +19,8 @@ import {
 import { cn } from '@/lib/utils';
 import type { ComposerChannel } from './use-conversation-composer-translation-preview';
 import { getConversationChannelInfo } from './conversation-channel-info';
+import { MessageImageGroup } from "./message-image-group";
+import { groupAdjacentWhatsAppImageMessages } from "./message-image-grouping";
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -123,6 +125,13 @@ export function UnifiedTimeline({
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(composerConversation));
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const events = useMemo(() => (Array.isArray(timelineEvents) ? timelineEvents : []), [timelineEvents]);
+    const groupedEvents = useMemo(() => {
+        const normalizedEvents = events.map((event) => {
+            if (event?.kind === "activity") return { kind: "activity" as const, activity: event };
+            return { kind: "message" as const, message: event?.kind === "message" ? event.message : event };
+        });
+        return groupAdjacentWhatsAppImageMessages(normalizedEvents);
+    }, [events]);
     const surfaceTheme = getConversationSurfaceTheme(activeSurfaceChannel);
     const {
         timelineRef,
@@ -225,28 +234,38 @@ export function UnifiedTimeline({
                             !loading && events.length > 0 && !isTimelineReady && "opacity-0"
                         )}
                     >
-                        {events.map((event) => {
-                            if (event?.kind === "activity") {
+                        {groupedEvents.map((event) => {
+                            if (event.kind === "activity") {
                                 return (
                                     <ActivityLogEntry
-                                        key={event.id}
+                                        key={event.activity.id}
                                         item={{
-                                            id: event.id,
-                                            createdAt: event.createdAt,
-                                            action: event.action,
-                                            changes: event.changes,
-                                            user: event.user || null,
+                                            id: event.activity.id,
+                                            createdAt: event.activity.createdAt,
+                                            action: event.activity.action,
+                                            changes: event.activity.changes,
+                                            user: event.activity.user || null,
                                         }}
-                                        contactName={event.contactName || undefined}
+                                        contactName={event.activity.contactName || undefined}
                                         surfaceTheme={surfaceTheme}
                                     />
                                 );
                             }
 
-                            const message = event?.kind === "message" ? event.message : event;
+                            if (event.kind === "image-group") {
+                                return (
+                                    <MessageImageGroup
+                                        key={event.group.id}
+                                        group={event.group}
+                                        contactName={event.group.messages[0]?.contactName}
+                                    />
+                                );
+                            }
+
+                            const message = event.message;
                             return (
                                 <MessageBubble
-                                    key={event?.id || message?.id}
+                                    key={message?.id}
                                     message={message}
                                     contactName={message?.senderName || message?.contactName}
                                     contactEmail={message?.senderEmail || message?.contactEmail}
