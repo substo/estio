@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { getWhatsAppMediaObjectBytes, parseR2Uri } from "@/lib/whatsapp/media-r2";
 
 const AUDIO_TRANSCRIPTION_DEFAULT_MODEL = GEMINI_FLASH_STABLE_FALLBACK || "gemini-2.5-flash";
@@ -260,6 +261,23 @@ export async function transcribeAttachmentWithGoogle(input: AudioTranscriptionJo
                 completionTokens: readUsageInt(usage, "candidatesTokenCount"),
                 totalTokens: readUsageInt(usage, "totalTokenCount"),
                 completedAt,
+            },
+        });
+
+        await securelyRecordAiUsage({
+            locationId: input.locationId,
+            resourceType: "message_transcript",
+            resourceId: transcript.id,
+            featureArea: "audio_transcription",
+            action: "audio_transcribe",
+            provider: "google_gemini",
+            model: resolvedModel,
+            inputTokens: readUsageInt(usage, "promptTokenCount") || 0,
+            outputTokens: readUsageInt(usage, "candidatesTokenCount") || 0,
+            metadata: {
+                source: "transcribeAttachmentWithGoogle",
+                messageId: input.messageId,
+                attachmentId: input.attachmentId,
             },
         });
 

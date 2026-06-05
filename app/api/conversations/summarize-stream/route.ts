@@ -5,6 +5,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { calculateRunCostFromUsage } from "@/lib/ai/pricing";
+import { securelyRecordConversationAiUsage } from "@/lib/ai/usage-metering";
 import { revalidatePath } from "next/cache";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 
@@ -395,6 +396,20 @@ export async function POST(req: NextRequest) {
                             completionTokens: usage.completionTokens,
                             totalTokens: usage.totalTokens,
                             cost: costEstimate.amount,
+                        },
+                    });
+
+                    await securelyRecordConversationAiUsage({
+                        locationId: location.id,
+                        conversationId: conversation.id,
+                        action: "selection_summary_stream",
+                        provider: "google_gemini",
+                        model: modelId,
+                        inputTokens: usage.promptTokens,
+                        outputTokens: usage.completionTokens,
+                        metadata: {
+                            source: "summarize-stream",
+                            cached: false,
                         },
                     });
                 } catch (traceError) {

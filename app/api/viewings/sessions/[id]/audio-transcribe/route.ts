@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 
 export const runtime = "nodejs";
@@ -64,8 +65,9 @@ export async function POST(
 
     const bytes = Buffer.from(await file.arrayBuffer());
     const genAI = new GoogleGenerativeAI(apiKey);
+    const modelName = asString(session.translationModel) || "gemini-2.5-flash";
     const model = genAI.getGenerativeModel({
-        model: asString(session.translationModel) || "gemini-2.5-flash",
+        model: modelName,
         generationConfig: {
             temperature: 0,
             responseMimeType: "text/plain",
@@ -87,6 +89,30 @@ export async function POST(
         if (!transcript) {
             return NextResponse.json({ success: false, error: "Transcript was empty." }, { status: 422 });
         }
+
+        const usage = (result.response.usageMetadata || {}) as Record<string, unknown>;
+        const readUsage = (key: string) => {
+            const value = Number(usage[key]);
+            return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+        };
+
+        await securelyRecordAiUsage({
+            locationId: session.locationId,
+            resourceType: "viewing_session",
+            resourceId: session.id,
+            featureArea: "audio_transcription",
+            action: "viewing_session_audio_transcribe",
+            provider: "google_gemini",
+            model: modelName,
+            inputTokens: readUsage("promptTokenCount"),
+            outputTokens: readUsage("candidatesTokenCount"),
+            metadata: {
+                source: "viewing-session-audio-transcribe",
+                sessionId: session.id,
+                mimeType: asString(file.type) || "audio/webm",
+                size: file.size,
+            },
+        });
 
         return NextResponse.json({
             success: true,

@@ -12,7 +12,7 @@ import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { checkGHLSMSStatus } from "@/lib/ghl/sms";
 import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
-import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import { securelyRecordAiUsage, securelyRecordConversationAiUsage } from "@/lib/ai/usage-metering";
 import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { z } from "zod";
@@ -530,6 +530,12 @@ async function runMessageTranslationLLM(args: {
         model: modelId,
         usage,
     };
+}
+
+function normalizeUsageProvider(provider: string | null | undefined): string {
+    const normalized = String(provider || "").trim().toLowerCase();
+    if (!normalized || normalized === "google") return "google_gemini";
+    return normalized;
 }
 
 async function resolveConversationTranslationModel(locationId: string): Promise<string> {
@@ -5396,6 +5402,22 @@ export async function previewTranslatedReply(
             modelOverride: translationModel,
         });
 
+        await securelyRecordConversationAiUsage({
+            locationId: location.id,
+            conversationId: conversation.id,
+            action: "preview_translated_reply",
+            provider: normalizeUsageProvider(translation.provider),
+            model: translation.model,
+            inputTokens: translation.usage.promptTokens || 0,
+            outputTokens: translation.usage.completionTokens || 0,
+            metadata: {
+                source: "previewTranslatedReply",
+                channel: normalizedChannel,
+                targetLanguage: resolvedTargetLanguage,
+                cached: false,
+            },
+        });
+
         return {
             success: true as const,
             channel: normalizedChannel,
@@ -5452,6 +5474,21 @@ export async function translateSelectedText(
             sourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
+        });
+
+        await securelyRecordConversationAiUsage({
+            locationId: location.id,
+            conversationId: conversation.id,
+            action: "translate_selected_text",
+            provider: normalizeUsageProvider(translation.provider),
+            model: translation.model,
+            inputTokens: translation.usage.promptTokens || 0,
+            outputTokens: translation.usage.completionTokens || 0,
+            metadata: {
+                source: "translateSelectedText",
+                targetLanguage: resolvedTargetLanguage,
+                cached: false,
+            },
         });
 
         return {
@@ -5584,6 +5621,22 @@ export async function translateConversationMessage(
                 messageId: message.id,
                 targetLanguage: resolvedTargetLanguage,
                 cacheId: stored.id,
+            },
+        });
+
+        await securelyRecordConversationAiUsage({
+            locationId: location.id,
+            conversationId: message.conversation.id,
+            action: "translate_message",
+            provider: normalizeUsageProvider(translation.provider),
+            model: translation.model,
+            inputTokens: translation.usage.promptTokens || 0,
+            outputTokens: translation.usage.completionTokens || 0,
+            metadata: {
+                source: "translateConversationMessage",
+                messageId: message.id,
+                targetLanguage: resolvedTargetLanguage,
+                cached: false,
             },
         });
 

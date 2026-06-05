@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { VIEWING_SESSION_EVENT_TYPES } from "@/lib/viewings/sessions/types";
@@ -31,6 +32,12 @@ function asNumber(value: unknown, fallback: number = 0): number {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return fallback;
     return parsed;
+}
+
+function normalizeAiUsageProvider(value: unknown): string {
+    const normalized = asString(value).toLowerCase();
+    if (!normalized || normalized === "google") return "google_gemini";
+    return normalized;
 }
 
 export function resolveViewingSessionUsageAuthority(
@@ -124,6 +131,34 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
             estimatedCostUsd: usage.estimatedCostUsd,
             actualCostUsd: usage.actualCostUsd,
             totalTokens: usage.totalTokens,
+        },
+    });
+
+    await securelyRecordAiUsage({
+        locationId,
+        resourceType: "viewing_session",
+        resourceId: sessionId,
+        featureArea: "viewing_session",
+        action: "viewing_session_usage",
+        provider: normalizeAiUsageProvider(usage.provider),
+        model: asString(usage.model) || "unknown",
+        inputTokens,
+        outputTokens,
+        metadata: {
+            source: "recordViewingSessionUsage",
+            sessionId,
+            usageId: usage.id,
+            phase: usage.phase,
+            transportStatus: usage.transportStatus,
+            usageAuthority,
+            costAuthority,
+            inputAudioSeconds: usage.inputAudioSeconds,
+            outputAudioSeconds: usage.outputAudioSeconds,
+            toolCalls: usage.toolCalls,
+            estimatedCostUsd,
+            actualCostUsd,
+            originalProvider: usage.provider,
+            originalMetadata: input.metadata || null,
         },
     });
 
