@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { Check, Loader2, Megaphone, Search, Send, X } from "lucide-react";
+import { Check, Link2, Loader2, Megaphone, Search, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
     createPropertyMatchCampaignAction,
+    createPropertyMatchCampaignFromSourceAction,
     generatePropertyMatchCandidateDraftAction,
     getPropertyMatchCampaignDetailAction,
     listPropertyMatchCampaignsAction,
@@ -98,6 +99,8 @@ export function PropertyMatchCampaignsDialog({
     const [propertyQuery, setPropertyQuery] = useState("");
     const [properties, setProperties] = useState<PropertyResult[]>([]);
     const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
+    const [propertyUrl, setPropertyUrl] = useState("");
+    const [propertyText, setPropertyText] = useState("");
     const [priorityNote, setPriorityNote] = useState("");
     const [drafts, setDrafts] = useState<Record<string, string>>({});
     const [busyCandidateId, setBusyCandidateId] = useState<string | null>(null);
@@ -157,7 +160,7 @@ export function PropertyMatchCampaignsDialog({
         });
     };
 
-    const createCampaign = () => {
+    const createCampaignFromProperty = () => {
         if (!selectedPropertyId) return;
         setError("");
         startTransition(async () => {
@@ -171,6 +174,30 @@ export function PropertyMatchCampaignsDialog({
             }
             setSelectedCampaignId(res.campaignId);
             setPriorityNote("");
+            const rows = await listPropertyMatchCampaignsAction();
+            setCampaigns(rows as Campaign[]);
+            await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
+            loadDetail(res.campaignId, "review");
+        });
+    };
+
+    const createCampaignFromSource = () => {
+        if (!propertyUrl.trim() && !propertyText.trim()) return;
+        setError("");
+        startTransition(async () => {
+            const res = await createPropertyMatchCampaignFromSourceAction({
+                propertyUrl,
+                propertyText,
+                priorityNote,
+            });
+            if (!res.success) {
+                setError(res.error || "Could not create campaign.");
+                return;
+            }
+            setSelectedCampaignId(res.campaignId);
+            setPriorityNote("");
+            setPropertyUrl("");
+            setPropertyText("");
             const rows = await listPropertyMatchCampaignsAction();
             setCampaigns(rows as Campaign[]);
             await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
@@ -265,7 +292,7 @@ export function PropertyMatchCampaignsDialog({
                                             if (event.key === "Enter") searchProperties();
                                         }}
                                         className="h-8 min-w-0 flex-1 rounded-md border px-2 text-xs"
-                                        placeholder="Search property"
+                                        placeholder="Search ref, title, area"
                                     />
                                     <Button type="button" size="icon" variant="outline" className="h-8 w-8" onClick={searchProperties}>
                                         <Search className="h-3.5 w-3.5" />
@@ -298,10 +325,36 @@ export function PropertyMatchCampaignsDialog({
                                     size="sm"
                                     className="mt-2 h-8 w-full text-xs"
                                     disabled={!selectedProperty || isPending}
-                                    onClick={createCampaign}
+                                    onClick={createCampaignFromProperty}
                                 >
                                     {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Megaphone className="mr-1.5 h-3 w-3" />}
                                     Create campaign
+                                </Button>
+                                <div className="my-3 border-t" />
+                                <div className="text-xs font-semibold uppercase text-slate-500">Website source</div>
+                                <input
+                                    value={propertyUrl}
+                                    onChange={(event) => setPropertyUrl(event.target.value)}
+                                    className="mt-2 h-8 w-full rounded-md border px-2 text-xs"
+                                    placeholder="Official property URL"
+                                />
+                                <Textarea
+                                    value={propertyText}
+                                    onChange={(event) => setPropertyText(event.target.value)}
+                                    rows={3}
+                                    className="mt-2 min-h-20 text-xs"
+                                    placeholder="Paste property text if the page cannot be read"
+                                />
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="mt-2 h-8 w-full text-xs"
+                                    disabled={(!propertyUrl.trim() && !propertyText.trim()) || isPending}
+                                    onClick={createCampaignFromSource}
+                                >
+                                    {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Link2 className="mr-1.5 h-3 w-3" />}
+                                    Create from URL/text
                                 </Button>
                             </div>
 

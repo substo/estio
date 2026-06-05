@@ -2219,7 +2219,7 @@ model PropertyMatchCampaign {
   updatedAt DateTime @updatedAt
 
   locationId      String
-  propertyId      String
+  propertyId      String?
   createdByUserId String?
 
   title          String
@@ -2228,6 +2228,11 @@ model PropertyMatchCampaign {
   messageLength  String  @default("short")
   priorityNote   String? @db.Text
   propertySnapshot Json?
+  collectionStatus String  @default("pending") // pending | processing | done | failed
+  collectionCursor String?
+  collectionLockedAt DateTime?
+  collectionLockedBy String?
+  collectionFinishedAt DateTime?
 
   totalCandidates     Int @default(0)
   processedCandidates Int @default(0)
@@ -2242,11 +2247,12 @@ model PropertyMatchCampaign {
   lastError            String? @db.Text
 
   location      Location                 @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  property      Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property      Property?                @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   createdByUser User?                    @relation("PropertyMatchCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   candidates    PropertyMatchCandidate[]
 
   @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([locationId, collectionStatus, createdAt(sort: Asc)])
   @@index([propertyId, createdAt(sort: Desc)])
 }
 

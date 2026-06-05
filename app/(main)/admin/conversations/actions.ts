@@ -93,14 +93,18 @@ import {
 } from "@/lib/ai/requirements-intelligence/service";
 import {
     buildCampaignDraftInstruction,
+    canCandidateDraftOrSend,
     createPropertyMatchCampaign,
+    createPropertyMatchCampaignFromSource,
     getPropertyMatchCampaignDetail,
     listPropertyMatchCampaigns,
     markPropertyMatchCandidateSent,
     processPropertyMatchCampaignBatch,
     savePropertyMatchCandidateDraft,
+    sortPropertyMatchSearchRows,
     updatePropertyMatchCandidateReview,
 } from "@/lib/property-match-campaigns/service";
+import { extractPropertyUrlContext } from "@/lib/conversations/property-url-context";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
@@ -6439,65 +6443,116 @@ export async function searchPropertyMatchCampaignPropertiesAction(query?: string
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return [];
 
-    const trimmed = String(query || "").trim();
-    const rows = await db.property.findMany({
-        where: {
-            locationId: location.id,
-            status: "ACTIVE",
-            publicationStatus: { in: ["PUBLISHED", "DRAFT", "UNLISTED"] },
-            ...(trimmed ? {
-                OR: [
-                    { title: { contains: trimmed, mode: "insensitive" } },
-                    { reference: { contains: trimmed, mode: "insensitive" } },
-                    { city: { contains: trimmed, mode: "insensitive" } },
-                    { propertyLocation: { contains: trimmed, mode: "insensitive" } },
-                ],
-            } : {}),
-        },
-        select: {
-            id: true,
-            title: true,
-            reference: true,
-            goal: true,
-            type: true,
-            price: true,
-            bedrooms: true,
-            city: true,
-            propertyLocation: true,
-        },
-        orderBy: [{ updatedAt: "desc" }],
-        take: 20,
-    });
+    try {
+        const trimmed = String(query || "").trim();
+        const rows = await db.property.findMany({
+            where: {
+                locationId: location.id,
+                status: "ACTIVE",
+                publicationStatus: { in: ["PUBLISHED", "DRAFT", "UNLISTED"] },
+                ...(trimmed ? {
+                    OR: [
+                        { title: { contains: trimmed, mode: "insensitive" } },
+                        { reference: { contains: trimmed, mode: "insensitive" } },
+                        { slug: { contains: trimmed, mode: "insensitive" } },
+                        { city: { contains: trimmed, mode: "insensitive" } },
+                        { propertyLocation: { contains: trimmed, mode: "insensitive" } },
+                    ],
+                } : {}),
+            },
+            select: {
+                id: true,
+                title: true,
+                reference: true,
+                goal: true,
+                type: true,
+                price: true,
+                bedrooms: true,
+                city: true,
+                propertyLocation: true,
+                slug: true,
+                updatedAt: true,
+            },
+            orderBy: [{ updatedAt: "desc" }],
+            take: trimmed ? 60 : 20,
+        });
 
-    return rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        reference: row.reference,
-        goal: row.goal,
-        type: row.type,
-        price: row.price,
-        bedrooms: row.bedrooms,
-        city: row.city,
-        propertyLocation: row.propertyLocation,
-    }));
+        return sortPropertyMatchSearchRows(trimmed, rows).slice(0, 20).map((row) => ({
+            id: row.id,
+            title: row.title,
+            reference: row.reference,
+            goal: row.goal,
+            type: row.type,
+            price: row.price,
+            bedrooms: row.bedrooms,
+            city: row.city,
+            propertyLocation: row.propertyLocation,
+        }));
+    } catch (error) {
+        console.error("[property-match-campaigns] property search failed", error);
+        return [];
+    }
 }
 
 export async function createPropertyMatchCampaignAction(input: {
     propertyId: string;
     priorityNote?: string | null;
 }) {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const actor = await resolveLocationActorContext(location.id);
-    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
 
-    const result = await createPropertyMatchCampaign({
-        locationId: location.id,
-        propertyId: String(input?.propertyId || "").trim(),
-        priorityNote: input?.priorityNote || null,
-        actorUserId: actor.userId || null,
-    });
-    revalidatePath("/admin/conversations");
-    return result;
+        const result = await createPropertyMatchCampaign({
+            locationId: location.id,
+            propertyId: String(input?.propertyId || "").trim(),
+            priorityNote: input?.priorityNote || null,
+            actorUserId: actor.userId || null,
+        });
+        revalidatePath("/admin/conversations");
+        return result;
+    } catch (error) {
+        console.error("[property-match-campaigns] create campaign failed", error);
+        return { success: false as const, error: "Could not create campaign." };
+    }
+}
+
+export async function createPropertyMatchCampaignFromSourceAction(input: {
+    propertyUrl?: string | null;
+    propertyText?: string | null;
+    priorityNote?: string | null;
+}) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+
+        const propertyUrl = String(input?.propertyUrl || "").trim();
+        const propertyText = String(input?.propertyText || "").trim();
+        let extracted: Awaited<ReturnType<typeof extractPropertyUrlContext>> | null = null;
+        if (propertyUrl) {
+            extracted = await extractPropertyUrlContext(propertyUrl);
+            if (!extracted.success && !propertyText) {
+                return { success: false as const, error: extracted.error || "Could not read that property URL." };
+            }
+        }
+
+        const result = await createPropertyMatchCampaignFromSource({
+            locationId: location.id,
+            propertyUrl: extracted?.success ? extracted.url : propertyUrl || null,
+            propertyText,
+            extractedTitle: extracted?.success ? extracted.title || null : null,
+            extractedDescription: extracted?.success ? extracted.description || null : null,
+            extractedText: extracted?.success ? extracted.sourceText || null : null,
+            priorityNote: input?.priorityNote || null,
+            actorUserId: actor.userId || null,
+        });
+        revalidatePath("/admin/conversations");
+        return result;
+    } catch (error) {
+        console.error("[property-match-campaigns] create source campaign failed", error);
+        return { success: false as const, error: "Could not create campaign from URL/text." };
+    }
 }
 
 export async function listPropertyMatchCampaignsAction() {
@@ -6509,34 +6564,44 @@ export async function listPropertyMatchCampaignsAction() {
 }
 
 export async function getPropertyMatchCampaignDetailAction(campaignId: string, queue?: "review" | "sent" | "no") {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const actor = await resolveLocationActorContext(location.id);
-    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
-    const detail = await getPropertyMatchCampaignDetail({
-        locationId: location.id,
-        campaignId: String(campaignId || "").trim(),
-        queue,
-    });
-    if (!detail) return { success: false as const, error: "Campaign not found." };
-    return {
-        success: true as const,
-        campaign: serializePropertyMatchCampaign(detail.campaign),
-        candidates: detail.candidates.map(serializePropertyMatchCandidate),
-    };
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const detail = await getPropertyMatchCampaignDetail({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+            queue,
+        });
+        if (!detail) return { success: false as const, error: "Campaign not found." };
+        return {
+            success: true as const,
+            campaign: serializePropertyMatchCampaign(detail.campaign),
+            candidates: detail.candidates.map(serializePropertyMatchCandidate),
+        };
+    } catch (error) {
+        console.error("[property-match-campaigns] detail load failed", error);
+        return { success: false as const, error: "Could not load campaign." };
+    }
 }
 
 export async function processPropertyMatchCampaignBatchAction(campaignId: string, limit?: number) {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const actor = await resolveLocationActorContext(location.id);
-    if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
-    const result = await processPropertyMatchCampaignBatch({
-        locationId: location.id,
-        campaignId: String(campaignId || "").trim(),
-        limit,
-        actorUserId: actor.userId || null,
-    });
-    revalidatePath("/admin/conversations");
-    return result;
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const result = await processPropertyMatchCampaignBatch({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+            limit,
+            actorUserId: actor.userId || null,
+        });
+        revalidatePath("/admin/conversations");
+        return result;
+    } catch (error) {
+        console.error("[property-match-campaigns] batch processing failed", error);
+        return { success: false as const, error: "Batch processing failed." };
+    }
 }
 
 export async function reviewPropertyMatchCandidateAction(candidateId: string, reviewerStatus: "approved" | "rejected" | "skipped" | "pending", reason?: string | null) {
@@ -6557,7 +6622,7 @@ export async function generatePropertyMatchCandidateDraftAction(candidateId: str
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
 
-    const candidate = await (db as any).propertyMatchCandidate.findFirst({
+    const candidate = await db.propertyMatchCandidate.findFirst({
         where: { id: String(candidateId || "").trim(), locationId: location.id },
         include: {
             campaign: true,
@@ -6567,6 +6632,9 @@ export async function generatePropertyMatchCandidateDraftAction(candidateId: str
     });
     if (!candidate?.conversationId || !candidate?.contactId) {
         return { success: false as const, error: "Candidate conversation not found." };
+    }
+    if (!canCandidateDraftOrSend(candidate)) {
+        return { success: false as const, error: "AI review must finish before drafting." };
     }
 
     const instruction = buildCampaignDraftInstruction({
@@ -6609,7 +6677,7 @@ export async function sendPropertyMatchCandidateAction(candidateId: string, draf
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
 
-    const candidate = await (db as any).propertyMatchCandidate.findFirst({
+    const candidate = await db.propertyMatchCandidate.findFirst({
         where: { id: String(candidateId || "").trim(), locationId: location.id },
         include: {
             contact: { select: { id: true } },
@@ -6618,6 +6686,9 @@ export async function sendPropertyMatchCandidateAction(candidateId: string, draf
     });
     if (!candidate?.conversationId || !candidate?.contactId) {
         return { success: false as const, error: "Candidate conversation not found." };
+    }
+    if (!canCandidateDraftOrSend(candidate)) {
+        return { success: false as const, error: "AI review must finish before sending." };
     }
     if (candidate.reviewerStatus !== "approved") {
         return { success: false as const, error: "Approve this draft before sending." };
@@ -6643,7 +6714,7 @@ export async function sendPropertyMatchCandidateAction(candidateId: string, draf
         { clientMessageId: randomUUID(), clientSentAt: new Date().toISOString() }
     );
     if (!sendResult?.success) {
-        await (db as any).propertyMatchCandidate.update({
+        await db.propertyMatchCandidate.update({
             where: { id: candidate.id },
             data: { lastError: String((sendResult as any)?.error || "Message send failed.") },
         });

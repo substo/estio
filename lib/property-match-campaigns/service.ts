@@ -17,6 +17,24 @@ type AnyRecord = Record<string, any>;
 const CAMPAIGN_STATUSES = new Set(["draft", "processing", "review", "completed", "canceled", "failed"]);
 const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "skipped"]);
 const LOW_CONFIDENCE_YES_THRESHOLD = 0.65;
+const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
+const CONTACT_COLLECTION_BATCH_SIZE = 200;
+const SEEKER_LEAD_GOALS = ["To Buy", "To Rent"];
+const NON_SEEKER_LEAD_GOALS = ["To List", "To Sell", "Other"];
+const EXCLUDED_CONTACT_TYPES = ["Owner", "Agent", "Partner", "Associate", "Maintenance"];
+const PROPERTY_TYPE_HINTS = [
+  "Studio",
+  "Apartment",
+  "House",
+  "Villa",
+  "Townhouse",
+  "Maisonette",
+  "Penthouse",
+  "Office",
+  "Shop",
+  "Plot",
+  "Land",
+];
 
 function normalizeText(value: unknown, max = 4000): string | null {
   const text = String(value || "").trim();
@@ -26,6 +44,40 @@ function normalizeText(value: unknown, max = 4000): string | null {
 function normalizeVerdict(value: unknown): MatchVerdict {
   const text = String(value || "").trim().toLowerCase();
   return text === "yes" || text === "no" || text === "maybe" ? text : "maybe";
+}
+
+function normalizeSearchToken(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+export function sortPropertyMatchSearchRows<T extends {
+  reference?: string | null;
+  title?: string | null;
+  slug?: string | null;
+  city?: string | null;
+  propertyLocation?: string | null;
+  updatedAt?: Date | string | null;
+}>(query: string, rows: T[]): T[] {
+  const token = normalizeSearchToken(query);
+  if (!token) return rows;
+  const score = (row: T) => {
+    const reference = normalizeSearchToken(row.reference);
+    const title = normalizeSearchToken(row.title);
+    const slug = normalizeSearchToken(row.slug);
+    const location = normalizeSearchToken([row.propertyLocation, row.city].filter(Boolean).join(" "));
+    if (reference === token) return 0;
+    if (reference.startsWith(token)) return 1;
+    if (reference.includes(token)) return 2;
+    if (slug === token || slug.includes(token)) return 3;
+    if (title.includes(token)) return 4;
+    if (location.includes(token)) return 5;
+    return 6;
+  };
+  return [...rows].sort((a, b) => {
+    const scoreDiff = score(a) - score(b);
+    if (scoreDiff !== 0) return scoreDiff;
+    return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
+  });
 }
 
 function extractJsonObject(text: string): AnyRecord {
@@ -93,6 +145,83 @@ function propertySnapshot(property: AnyRecord) {
   };
 }
 
+function extractReferenceFromSource(text: string): string | null {
+  const explicit = text.match(/\b(?:ref(?:erence)?\.?|ref\s*no\.?)\s*[:#-]?\s*([A-Z]{1,6}\s*-?\s*\d{2,8})\b/i);
+  const loose = explicit || text.match(/\b([A-Z]{1,6}\s*-?\s*\d{2,8})\b/);
+  return loose?.[1] ? loose[1].replace(/\s|-/g, "").toUpperCase() : null;
+}
+
+function extractPriceFromSource(text: string): number | null {
+  const match = text.match(/(?:€|eur\s*)\s*([0-9][0-9.,\s]{2,})/i);
+  if (!match?.[1]) return null;
+  const normalized = match[1].replace(/[\s,.](?=\d{3}\b)/g, "").replace(",", ".");
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractBedroomsFromSource(text: string): number | null {
+  const studio = /\bstudio\b/i.test(text);
+  if (studio) return 0;
+  const match = text.match(/\b([0-9]+)\s*(?:bed|beds|bedroom|bedrooms)\b/i);
+  if (!match?.[1]) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractTypeFromSource(text: string): string | null {
+  const found = PROPERTY_TYPE_HINTS.find((type) => new RegExp(`\\b${type}\\b`, "i").test(text));
+  return found || null;
+}
+
+function extractGoalFromSource(text: string): string | null {
+  if (/\b(for\s+rent|to\s+rent|rent\b|per\s+month|\/month|pcm)\b/i.test(text)) return "Rent";
+  if (/\b(for\s+sale|to\s+buy|sale\b|buy\b|asking\s+price)\b/i.test(text)) return "Sale";
+  return null;
+}
+
+function extractLocationFromSource(text: string): string | null {
+  const match = text.match(/\b(?:location|area|city)\s*[:#-]\s*([^\n,;|]{2,80})/i);
+  return normalizeText(match?.[1], 120);
+}
+
+export function propertySourceSnapshot(args: {
+  url?: string | null;
+  sourceText?: string | null;
+  title?: string | null;
+  description?: string | null;
+  linkedProperty?: AnyRecord | null;
+}) {
+  const sourceText = normalizeText(args.sourceText, 12000);
+  const combined = [
+    args.title ? `Title: ${args.title}` : null,
+    args.description ? `Description: ${args.description}` : null,
+    sourceText,
+    args.url ? `Source URL: ${args.url}` : null,
+  ].filter(Boolean).join("\n");
+  const linked = args.linkedProperty ? propertySnapshot(args.linkedProperty) : {};
+  const reference = linked.reference || extractReferenceFromSource(combined);
+  const title = normalizeText(args.title, 240)
+    || linked.title
+    || (reference ? `Property ${reference}` : "Website property campaign");
+
+  return {
+    ...linked,
+    id: linked.id || null,
+    title,
+    reference,
+    goal: linked.goal || extractGoalFromSource(combined),
+    type: linked.type || extractTypeFromSource(combined),
+    price: linked.price ?? extractPriceFromSource(combined),
+    currency: linked.currency || "EUR",
+    bedrooms: linked.bedrooms ?? extractBedroomsFromSource(combined),
+    city: linked.city || null,
+    propertyLocation: linked.propertyLocation || extractLocationFromSource(combined),
+    sourceUrl: normalizeText(args.url, 1200),
+    sourceText,
+    description: linked.description || normalizeText(args.description || sourceText, 1600),
+  };
+}
+
 function propertyMatchInput(property: AnyRecord): PropertyMatchInput {
   return {
     goal: property.goal,
@@ -132,6 +261,66 @@ function evidenceForStructuredMatch(result: ReturnType<typeof evaluateStructured
   };
 }
 
+export function isAiReviewTerminal(status: unknown) {
+  return status === "done" || status === "failed";
+}
+
+export function canCandidateEnterHumanReview(candidate: {
+  reviewerStatus?: unknown;
+  aiVerdict?: unknown;
+  aiReviewStatus?: unknown;
+}) {
+  return candidate.reviewerStatus === "pending"
+    && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
+    && isAiReviewTerminal(candidate.aiReviewStatus);
+}
+
+export function canCandidateDraftOrSend(candidate: {
+  aiVerdict?: unknown;
+  aiReviewStatus?: unknown;
+}) {
+  return (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
+    && isAiReviewTerminal(candidate.aiReviewStatus);
+}
+
+export function buildPropertyMatchContactWhere(locationId: string, cursor?: string | null) {
+  return {
+    locationId,
+    ...(cursor ? { id: { gt: cursor } } : {}),
+    OR: [
+      { contactType: "Tenant" },
+      { leadGoal: { in: SEEKER_LEAD_GOALS } },
+    ],
+    NOT: [
+      { contactType: { in: EXCLUDED_CONTACT_TYPES } },
+      { leadGoal: { in: NON_SEEKER_LEAD_GOALS } },
+      { matchingEmailMatchedProperties: { startsWith: "No" } },
+    ],
+    conversations: { some: { locationId, deletedAt: null } },
+  };
+}
+
+export function buildAiReviewClaimWhere(args: {
+  campaignId: string;
+  locationId: string;
+  staleLockedBefore: Date;
+  ids?: string[];
+}) {
+  return {
+    ...(args.ids?.length ? { id: { in: args.ids } } : {}),
+    campaignId: args.campaignId,
+    locationId: args.locationId,
+    reviewerStatus: "pending",
+    OR: [
+      { aiReviewStatus: "pending" },
+      {
+        aiReviewStatus: "processing",
+        aiReviewLockedAt: { lt: args.staleLockedBefore },
+      },
+    ],
+  };
+}
+
 function formatPropertyFacts(snapshot: AnyRecord): string {
   return [
     snapshot.reference ? `Ref: ${snapshot.reference}` : null,
@@ -144,7 +333,9 @@ function formatPropertyFacts(snapshot: AnyRecord): string {
     snapshot.propertyLocation || snapshot.city ? `Location: ${[snapshot.propertyLocation, snapshot.city].filter(Boolean).join(", ")}` : null,
     snapshot.condition ? `Condition: ${snapshot.condition}` : null,
     Array.isArray(snapshot.features) && snapshot.features.length ? `Features: ${snapshot.features.slice(0, 12).join(", ")}` : null,
+    snapshot.sourceUrl ? `Source URL: ${snapshot.sourceUrl}` : null,
     snapshot.description ? `Description: ${snapshot.description}` : null,
+    snapshot.sourceText ? `Source text: ${normalizeText(snapshot.sourceText, 1800)}` : null,
   ].filter(Boolean).join("\n");
 }
 
@@ -166,11 +357,16 @@ function formatRequirementFacts(contact: AnyRecord): string {
 }
 
 async function refreshCampaignCounts(campaignId: string) {
-  const rows = await (db as any).propertyMatchCandidate.findMany({
+  const campaign = await db.propertyMatchCampaign.findUnique({
+    where: { id: campaignId },
+    select: { collectionStatus: true },
+  });
+  const rows = await db.propertyMatchCandidate.findMany({
     where: { campaignId },
     select: { aiVerdict: true, aiReviewStatus: true, reviewerStatus: true },
   });
   const pendingAiCount = rows.filter((row: any) => row.aiReviewStatus === "pending" || row.aiReviewStatus === "processing").length;
+  const isCollectionDone = campaign?.collectionStatus === "done";
   const processedCandidates = Math.max(0, rows.length - pendingAiCount);
   const yesCount = rows.filter((row: any) => row.aiVerdict === "yes").length;
   const maybeCount = rows.filter((row: any) => row.aiVerdict === "maybe").length;
@@ -178,7 +374,7 @@ async function refreshCampaignCounts(campaignId: string) {
   const approvedCount = rows.filter((row: any) => row.reviewerStatus === "approved").length;
   const sentCount = rows.filter((row: any) => row.reviewerStatus === "sent").length;
 
-  return (db as any).propertyMatchCampaign.update({
+  return db.propertyMatchCampaign.update({
     where: { id: campaignId },
     data: {
       totalCandidates: rows.length,
@@ -188,8 +384,8 @@ async function refreshCampaignCounts(campaignId: string) {
       noCount,
       approvedCount,
       sentCount,
-      status: pendingAiCount > 0 ? "processing" : "review",
-      processingFinishedAt: pendingAiCount > 0 ? null : new Date(),
+      status: isCollectionDone && pendingAiCount === 0 ? "review" : "processing",
+      processingFinishedAt: isCollectionDone && pendingAiCount === 0 ? new Date() : null,
     },
   });
 }
@@ -227,19 +423,105 @@ export async function createPropertyMatchCampaign(args: {
   if (!property) return { success: false as const, error: "Property not found." };
 
   const snapshot = propertySnapshot(property as any);
-  const contacts = await db.contact.findMany({
-    where: {
+  const campaign = await db.propertyMatchCampaign.create({
+    data: {
       locationId: args.locationId,
-      OR: [
-        { contactType: { in: ["Lead", "Tenant"] } },
-        { leadGoal: { in: ["To Buy", "To Rent"] } },
-      ],
-      NOT: [
-        { contactType: { in: ["Owner", "Agent", "Partner", "Associate", "Maintenance"] } },
-        { matchingEmailMatchedProperties: { startsWith: "No" } },
-      ],
-      conversations: { some: { locationId: args.locationId, deletedAt: null } },
+      propertyId: property.id,
+      createdByUserId: args.actorUserId || null,
+      title: `${property.title} match campaign`,
+      status: "processing",
+      priorityNote: normalizeText(args.priorityNote, 2000),
+      propertySnapshot: snapshot,
+      collectionStatus: "pending",
+      processingStartedAt: new Date(),
     },
+  });
+
+  await refreshCampaignCounts(campaign.id);
+  return { success: true as const, campaignId: campaign.id };
+}
+
+export async function createPropertyMatchCampaignFromSource(args: {
+  locationId: string;
+  propertyUrl?: string | null;
+  propertyText?: string | null;
+  extractedTitle?: string | null;
+  extractedDescription?: string | null;
+  extractedText?: string | null;
+  actorUserId?: string | null;
+  priorityNote?: string | null;
+}) {
+  const sourceText = [
+    normalizeText(args.extractedText, 8000),
+    normalizeText(args.propertyText, 8000),
+  ].filter(Boolean).join("\n\n");
+  const snapshotWithoutLink = propertySourceSnapshot({
+    url: args.propertyUrl,
+    sourceText,
+    title: args.extractedTitle,
+    description: args.extractedDescription,
+  });
+  const reference = normalizeText(snapshotWithoutLink.reference, 120);
+  const linkedProperty = reference
+    ? await db.property.findFirst({
+      where: {
+        locationId: args.locationId,
+        reference: { equals: reference, mode: "insensitive" },
+      },
+    })
+    : null;
+  const snapshot = propertySourceSnapshot({
+    url: args.propertyUrl,
+    sourceText,
+    title: args.extractedTitle,
+    description: args.extractedDescription,
+    linkedProperty: linkedProperty as any,
+  });
+  if (!snapshot.sourceText && !snapshot.title && !snapshot.reference) {
+    return { success: false as const, error: "Add a property URL or pasted property text." };
+  }
+
+  const campaign = await db.propertyMatchCampaign.create({
+    data: {
+      locationId: args.locationId,
+      propertyId: linkedProperty?.id || null,
+      createdByUserId: args.actorUserId || null,
+      title: `${snapshot.reference || snapshot.title} match campaign`,
+      status: "processing",
+      priorityNote: normalizeText(args.priorityNote, 2000),
+      propertySnapshot: snapshot,
+      collectionStatus: "pending",
+      processingStartedAt: new Date(),
+    },
+  });
+
+  await refreshCampaignCounts(campaign.id);
+  return { success: true as const, campaignId: campaign.id, linkedPropertyId: linkedProperty?.id || null };
+}
+
+async function collectPropertyMatchCandidatesBatch(args: {
+  locationId: string;
+  campaign: AnyRecord;
+  limit?: number;
+  workerId: string;
+}) {
+  if (args.campaign.collectionStatus === "done") {
+    return { collected: 0, done: true };
+  }
+
+  const limit = Math.max(1, Math.min(500, Number(args.limit || CONTACT_COLLECTION_BATCH_SIZE)));
+  const now = new Date();
+  await db.propertyMatchCampaign.update({
+    where: { id: args.campaign.id },
+    data: {
+      collectionStatus: "processing",
+      collectionLockedAt: now,
+      collectionLockedBy: args.workerId,
+    },
+  });
+
+  const contacts = await db.contact.findMany({
+    where: buildPropertyMatchContactWhere(args.locationId, args.campaign.collectionCursor),
     select: {
       id: true,
       name: true,
@@ -270,23 +552,11 @@ export async function createPropertyMatchCampaign(args: {
         },
       },
     },
-    take: 1200,
+    orderBy: { id: "asc" },
+    take: limit,
   });
 
-  const campaign = await (db as any).propertyMatchCampaign.create({
-    data: {
-      locationId: args.locationId,
-      propertyId: property.id,
-      createdByUserId: args.actorUserId || null,
-      title: `${property.title} match campaign`,
-      status: "processing",
-      priorityNote: normalizeText(args.priorityNote, 2000),
-      propertySnapshot: snapshot,
-      processingStartedAt: new Date(),
-    },
-  });
-
-  const propertyInput = propertyMatchInput(property as any);
+  const propertyInput = propertyMatchInput(args.campaign.propertySnapshot || {});
   const candidateData = contacts.flatMap((contact: any) => {
     const conversation = contact.conversations[0];
     if (!conversation?.id) return [];
@@ -294,7 +564,7 @@ export async function createPropertyMatchCampaign(args: {
     const preferredChannel = deriveComposerInitialChannel(conversation as any);
     return [{
       locationId: args.locationId,
-      campaignId: campaign.id,
+      campaignId: args.campaign.id,
       contactId: contact.id,
       conversationId: conversation.id,
       structuredVerdict: structured.verdict,
@@ -317,14 +587,27 @@ export async function createPropertyMatchCampaign(args: {
   });
 
   if (candidateData.length > 0) {
-    await (db as any).propertyMatchCandidate.createMany({
+    await db.propertyMatchCandidate.createMany({
       data: candidateData,
       skipDuplicates: true,
     });
   }
 
-  await refreshCampaignCounts(campaign.id);
-  return { success: true as const, campaignId: campaign.id };
+  const lastCursor = contacts[contacts.length - 1]?.id || args.campaign.collectionCursor || null;
+  const done = contacts.length < limit;
+  await db.propertyMatchCampaign.update({
+    where: { id: args.campaign.id },
+    data: {
+      collectionStatus: done ? "done" : "pending",
+      collectionCursor: lastCursor,
+      collectionLockedAt: null,
+      collectionLockedBy: null,
+      collectionFinishedAt: done ? new Date() : null,
+      lastError: null,
+    },
+  });
+
+  return { collected: candidateData.length, done };
 }
 
 async function scoreCandidateWithAi(args: {
@@ -441,7 +724,7 @@ export async function processPropertyMatchCampaignBatch(args: {
   actorUserId?: string | null;
   limit?: number;
 }) {
-  const campaign = await (db as any).propertyMatchCampaign.findFirst({
+  const campaign = await db.propertyMatchCampaign.findFirst({
     where: { id: args.campaignId, locationId: args.locationId },
   });
   if (!campaign) return { success: false as const, error: "Campaign not found." };
@@ -454,26 +737,37 @@ export async function processPropertyMatchCampaignBatch(args: {
     Date.now(),
     Math.random().toString(36).slice(2),
   ].join(":");
-  const claimable = await (db as any).propertyMatchCandidate.findMany({
-    where: {
+
+  const collection = await collectPropertyMatchCandidatesBatch({
+    locationId: args.locationId,
+    campaign,
+    workerId,
+  });
+  const refreshedCampaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+  });
+  if (!refreshedCampaign) return { success: false as const, error: "Campaign not found." };
+
+  const staleLockedBefore = new Date(Date.now() - AI_REVIEW_LOCK_TIMEOUT_MS);
+  const claimable = await db.propertyMatchCandidate.findMany({
+    where: buildAiReviewClaimWhere({
       campaignId: campaign.id,
       locationId: args.locationId,
-      reviewerStatus: "pending",
-      aiReviewStatus: "pending",
-    },
+      staleLockedBefore,
+    }),
     orderBy: { createdAt: "asc" },
     select: { id: true },
     take: limit,
   });
   const claimableIds = claimable.map((candidate: any) => candidate.id);
   if (claimableIds.length > 0) {
-    await (db as any).propertyMatchCandidate.updateMany({
-      where: {
-        id: { in: claimableIds },
+    await db.propertyMatchCandidate.updateMany({
+      where: buildAiReviewClaimWhere({
+        ids: claimableIds,
         campaignId: campaign.id,
         locationId: args.locationId,
-        aiReviewStatus: "pending",
-      },
+        staleLockedBefore,
+      }),
       data: {
         aiReviewStatus: "processing",
         aiReviewLockedAt: new Date(),
@@ -483,7 +777,7 @@ export async function processPropertyMatchCampaignBatch(args: {
   }
 
   const candidates = claimableIds.length > 0
-    ? await (db as any).propertyMatchCandidate.findMany({
+    ? await db.propertyMatchCandidate.findMany({
       where: {
         id: { in: claimableIds },
         locationId: args.locationId,
@@ -501,11 +795,11 @@ export async function processPropertyMatchCampaignBatch(args: {
     try {
       const ai = await scoreCandidateWithAi({
         locationId: args.locationId,
-        campaign,
+        campaign: refreshedCampaign,
         candidate,
         actorUserId: args.actorUserId || null,
       });
-      await (db as any).propertyMatchCandidate.update({
+      await db.propertyMatchCandidate.update({
         where: { id: candidate.id },
         data: {
           aiVerdict: ai.verdict,
@@ -522,7 +816,7 @@ export async function processPropertyMatchCampaignBatch(args: {
       processed += 1;
     } catch (error: any) {
       failed += 1;
-      await (db as any).propertyMatchCandidate.update({
+      await db.propertyMatchCandidate.update({
         where: { id: candidate.id },
         data: {
           aiVerdict: "maybe",
@@ -547,6 +841,7 @@ export async function processPropertyMatchCampaignBatch(args: {
   const updated = await refreshCampaignCounts(campaign.id);
   return {
     success: true as const,
+    collected: collection.collected,
     processed,
     failed,
     remaining: updated.status === "processing",
@@ -558,7 +853,7 @@ export async function listPropertyMatchCampaigns(args: {
   locationId: string;
   limit?: number;
 }) {
-  return (db as any).propertyMatchCampaign.findMany({
+  return db.propertyMatchCampaign.findMany({
     where: { locationId: args.locationId },
     include: {
       property: { select: { id: true, title: true, reference: true, price: true, city: true, propertyLocation: true } },
@@ -573,7 +868,7 @@ export async function getPropertyMatchCampaignDetail(args: {
   campaignId: string;
   queue?: "review" | "sent" | "no";
 }) {
-  const campaign = await (db as any).propertyMatchCampaign.findFirst({
+  const campaign = await db.propertyMatchCampaign.findFirst({
     where: { id: args.campaignId, locationId: args.locationId },
     include: {
       property: { select: { id: true, title: true, reference: true, price: true, city: true, propertyLocation: true } },
@@ -586,9 +881,9 @@ export async function getPropertyMatchCampaignDetail(args: {
     ? { reviewerStatus: { in: ["sent", "approved"] } }
     : queue === "no"
       ? { OR: [{ aiVerdict: "no" }, { reviewerStatus: { in: ["rejected", "skipped"] } }] }
-      : { reviewerStatus: "pending", aiVerdict: { in: ["yes", "maybe"] } };
+      : { reviewerStatus: "pending", aiVerdict: { in: ["yes", "maybe"] }, aiReviewStatus: { in: ["done", "failed"] } };
 
-  const candidates = await (db as any).propertyMatchCandidate.findMany({
+  const candidates = await db.propertyMatchCandidate.findMany({
     where: {
       campaignId: campaign.id,
       locationId: args.locationId,
@@ -633,14 +928,17 @@ export async function updatePropertyMatchCandidateReview(args: {
   if (!REVIEWER_STATUSES.has(reviewerStatus)) {
     return { success: false as const, error: "Invalid review status." };
   }
-  const candidate = await (db as any).propertyMatchCandidate.findFirst({
+  const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
-    select: { id: true, campaignId: true, reviewerStatus: true },
+    select: { id: true, campaignId: true, reviewerStatus: true, aiVerdict: true, aiReviewStatus: true },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
   if (candidate.reviewerStatus === "sent") return { success: false as const, error: "Sent candidates cannot be changed." };
+  if (reviewerStatus === "approved" && !canCandidateDraftOrSend(candidate)) {
+    return { success: false as const, error: "AI review must finish before approval." };
+  }
 
-  await (db as any).propertyMatchCandidate.update({
+  await db.propertyMatchCandidate.update({
     where: { id: candidate.id },
     data: {
       reviewerStatus,
@@ -660,12 +958,15 @@ export async function savePropertyMatchCandidateDraft(args: {
 }) {
   const draftBody = normalizeText(args.draftBody, 12000);
   if (!draftBody) return { success: false as const, error: "Draft cannot be empty." };
-  const candidate = await (db as any).propertyMatchCandidate.findFirst({
+  const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
-    select: { id: true },
+    select: { id: true, aiVerdict: true, aiReviewStatus: true },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
-  const updated = await (db as any).propertyMatchCandidate.update({
+  if (!canCandidateDraftOrSend(candidate)) {
+    return { success: false as const, error: "AI review must finish before drafting or approval." };
+  }
+  const updated = await db.propertyMatchCandidate.update({
     where: { id: candidate.id },
     data: {
       draftBody,
@@ -681,12 +982,12 @@ export async function markPropertyMatchCandidateSent(args: {
   locationId: string;
   candidateId: string;
 }) {
-  const candidate = await (db as any).propertyMatchCandidate.findFirst({
+  const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
     select: { id: true, campaignId: true },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
-  await (db as any).propertyMatchCandidate.update({
+  await db.propertyMatchCandidate.update({
     where: { id: candidate.id },
     data: {
       reviewerStatus: "sent",
