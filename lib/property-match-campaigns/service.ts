@@ -546,7 +546,6 @@ async function collectPropertyMatchCandidatesBatch(args: {
         select: {
           id: true,
           lastMessageType: true,
-          type: true,
         },
       },
     },
