@@ -546,8 +546,6 @@ async function collectPropertyMatchCandidatesBatch(args: {
         select: {
           id: true,
           lastMessageType: true,
-          lastMessageSource: true,
-          lastMessageChannel: true,
           type: true,
         },
       },
