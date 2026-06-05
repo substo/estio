@@ -80,6 +80,12 @@ type CampaignDetail = {
 type Queue = "review" | "sent" | "no";
 type MobileCampaignView = "campaigns" | "review";
 
+const RECENT_PROPERTY_LIMIT = 8;
+const PROPERTY_SEARCH_LIMIT = 12;
+const MIN_PROPERTY_SEARCH_LENGTH = 2;
+const RECENT_PROPERTY_DEBOUNCE_MS = 250;
+const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
+
 function formatMoney(value?: number | null) {
     return Number.isFinite(Number(value)) ? `€${Number(value).toLocaleString()}` : "No price";
 }
@@ -135,16 +141,22 @@ export function PropertyMatchCampaignsDialog({
         [properties, selectedPropertyId],
     );
 
+    const refreshCampaigns = useCallback(async () => {
+        const rows = await listPropertyMatchCampaignsAction();
+        const campaignRows = rows as Campaign[];
+        setCampaigns(campaignRows);
+        return campaignRows;
+    }, []);
+
     const loadCampaigns = useCallback(() => {
         startTransition(async () => {
-            const rows = await listPropertyMatchCampaignsAction();
-            setCampaigns(rows as Campaign[]);
+            const rows = await refreshCampaigns();
             setSelectedCampaignId((current) => {
                 if (current && rows.some((campaign) => campaign.id === current)) return current;
                 return rows[0]?.id || null;
             });
         });
-    }, []);
+    }, [refreshCampaigns]);
 
     const loadDetail = useCallback((campaignId: string, nextQueue = queue) => {
         startTransition(async () => {
@@ -165,7 +177,7 @@ export function PropertyMatchCampaignsDialog({
         });
     }, [queue]);
 
-    const loadPropertyOptions = useCallback(async (query: string, limit = 8) => {
+    const loadPropertyOptions = useCallback(async (query: string, limit = RECENT_PROPERTY_LIMIT) => {
         const requestId = propertySearchRequestIdRef.current + 1;
         propertySearchRequestIdRef.current = requestId;
         setPropertySearchLoading(true);
@@ -179,15 +191,20 @@ export function PropertyMatchCampaignsDialog({
         setPropertySearchLoading(false);
     }, []);
 
-    useEffect(() => {
-        if (!open) return;
-        setMobileView("campaigns");
+    const clearPropertyPicker = useCallback(() => {
+        propertySearchRequestIdRef.current += 1;
         setPropertyQuery("");
         setProperties([]);
         setPropertySearchLoading(false);
         setSelectedPropertyId(null);
+    }, []);
+
+    useEffect(() => {
+        if (!open) return;
+        setMobileView("campaigns");
+        clearPropertyPicker();
         loadCampaigns();
-    }, [loadCampaigns, open]);
+    }, [clearPropertyPicker, loadCampaigns, open]);
 
     useEffect(() => {
         if (!open || !selectedCampaignId) return;
@@ -199,11 +216,11 @@ export function PropertyMatchCampaignsDialog({
         const trimmed = propertyQuery.trim();
         if (!trimmed) {
             const timeout = window.setTimeout(() => {
-                void loadPropertyOptions("", 8);
-            }, 250);
+                void loadPropertyOptions("", RECENT_PROPERTY_LIMIT);
+            }, RECENT_PROPERTY_DEBOUNCE_MS);
             return () => window.clearTimeout(timeout);
         }
-        if (trimmed.length < 2) {
+        if (trimmed.length < MIN_PROPERTY_SEARCH_LENGTH) {
             propertySearchRequestIdRef.current += 1;
             setPropertySearchLoading(false);
             setProperties([]);
@@ -211,13 +228,13 @@ export function PropertyMatchCampaignsDialog({
             return;
         }
         const timeout = window.setTimeout(() => {
-            void loadPropertyOptions(trimmed, 12);
-        }, 350);
+            void loadPropertyOptions(trimmed, PROPERTY_SEARCH_LIMIT);
+        }, PROPERTY_SEARCH_DEBOUNCE_MS);
         return () => window.clearTimeout(timeout);
     }, [loadPropertyOptions, open, propertyQuery]);
 
     const searchProperties = () => {
-        void loadPropertyOptions(propertyQuery, propertyQuery.trim() ? 12 : 8);
+        void loadPropertyOptions(propertyQuery, propertyQuery.trim() ? PROPERTY_SEARCH_LIMIT : RECENT_PROPERTY_LIMIT);
     };
 
     const createCampaignFromProperty = () => {
@@ -235,8 +252,7 @@ export function PropertyMatchCampaignsDialog({
             setSelectedCampaignId(res.campaignId);
             setMobileView("review");
             setPriorityNote("");
-            const rows = await listPropertyMatchCampaignsAction();
-            setCampaigns(rows as Campaign[]);
+            await refreshCampaigns();
             await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
             loadDetail(res.campaignId, "review");
         });
@@ -260,8 +276,7 @@ export function PropertyMatchCampaignsDialog({
             setPriorityNote("");
             setPropertyUrl("");
             setPropertyText("");
-            const rows = await listPropertyMatchCampaignsAction();
-            setCampaigns(rows as Campaign[]);
+            await refreshCampaigns();
             await processPropertyMatchCampaignBatchAction(res.campaignId, 5);
             loadDetail(res.campaignId, "review");
         });
@@ -273,7 +288,7 @@ export function PropertyMatchCampaignsDialog({
         startTransition(async () => {
             const res = await processPropertyMatchCampaignBatchAction(selectedCampaignId, 5);
             if (!res.success) setError(res.error || "Batch processing failed.");
-            await listPropertyMatchCampaignsAction().then((rows) => setCampaigns(rows as Campaign[]));
+            await refreshCampaigns();
             loadDetail(selectedCampaignId, queue);
         });
     };
@@ -300,8 +315,7 @@ export function PropertyMatchCampaignsDialog({
                 return;
             }
             setEditingCampaignId(null);
-            const rows = await listPropertyMatchCampaignsAction();
-            setCampaigns(rows as Campaign[]);
+            await refreshCampaigns();
             if (selectedCampaignId) loadDetail(selectedCampaignId, queue);
         });
     };
@@ -316,8 +330,7 @@ export function PropertyMatchCampaignsDialog({
                 setError(res.error || "Could not delete campaign.");
                 return;
             }
-            const rows = await listPropertyMatchCampaignsAction();
-            setCampaigns(rows as Campaign[]);
+            const rows = await refreshCampaigns();
             const nextSelected = selectedCampaignId === campaign.id ? (rows[0]?.id || null) : selectedCampaignId;
             setSelectedCampaignId(nextSelected);
             if (!nextSelected) setMobileView("campaigns");
@@ -378,7 +391,7 @@ export function PropertyMatchCampaignsDialog({
             if (!res.success) setError((res as any).error || "Message send failed.");
             setBusyCandidateId(null);
             if (selectedCampaignId) {
-                await listPropertyMatchCampaignsAction().then((rows) => setCampaigns(rows as Campaign[]));
+                await refreshCampaigns();
                 loadDetail(selectedCampaignId, queue);
             }
         });
@@ -465,7 +478,7 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                         </button>
                                     ))}
-                                    {!propertySearchLoading && propertyQuery.trim().length === 1 ? (
+                                    {!propertySearchLoading && propertyQuery.trim().length > 0 && propertyQuery.trim().length < MIN_PROPERTY_SEARCH_LENGTH ? (
                                         <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Type at least 2 characters.</div>
                                     ) : null}
                                     {!propertySearchLoading && propertyQuery.trim().length >= 2 && properties.length === 0 ? (

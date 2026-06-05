@@ -6442,14 +6442,20 @@ function serializePropertyMatchCandidate(row: any) {
     };
 }
 
-export async function searchPropertyMatchCampaignPropertiesAction(query?: string, limit = 12) {
+const DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT = 12;
+const MAX_PROPERTY_MATCH_SEARCH_LIMIT = 25;
+
+export async function searchPropertyMatchCampaignPropertiesAction(query?: string, limit = DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return [];
 
     try {
         const trimmed = String(query || "").trim();
-        const cappedLimit = Math.min(Math.max(Math.floor(Number(limit) || 12), 1), 25);
+        const cappedLimit = Math.min(
+            Math.max(Math.floor(Number(limit) || DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT), 1),
+            MAX_PROPERTY_MATCH_SEARCH_LIMIT,
+        );
         const rows = await db.property.findMany({
             where: {
                 locationId: location.id,
