@@ -8,7 +8,9 @@ import {
   canCandidateEnterHumanReview,
   findPriorPropertyShareEvidence,
   normalizeAiMatchAssessment,
+  propertyMatchCandidateQueue,
   propertySourceSnapshot,
+  summarizePropertyMatchCandidateQueues,
   sortPropertyMatchSearchRows,
 } from "./service";
 
@@ -115,6 +117,34 @@ test("AI review claim filter reclaims stale processing locks", () => {
       aiReviewLockedAt: { lt: staleLockedBefore },
     },
   ]);
+});
+
+test("property match queue classifier separates campaign work outcomes", () => {
+  const rows = [
+    { reviewerStatus: "pending", aiVerdict: "yes", aiReviewStatus: "done" },
+    { reviewerStatus: "approved", aiVerdict: "yes", aiReviewStatus: "done" },
+    { reviewerStatus: "sent", aiVerdict: "yes", aiReviewStatus: "done" },
+    { reviewerStatus: "skipped", aiVerdict: "maybe", aiReviewStatus: "done" },
+    { reviewerStatus: "rejected", aiVerdict: "maybe", aiReviewStatus: "done" },
+    { reviewerStatus: "pending", aiVerdict: "no", aiReviewStatus: "done" },
+    { reviewerStatus: "pending", aiVerdict: "no", aiReviewStatus: "done", evidence: { priorShare: { alreadyShared: true } } },
+    { reviewerStatus: "pending", aiVerdict: "maybe", aiReviewStatus: "processing" },
+  ];
+
+  assert.equal(propertyMatchCandidateQueue(rows[0]), "review");
+  assert.equal(propertyMatchCandidateQueue(rows[6]), "already_shared");
+  assert.equal(propertyMatchCandidateQueue(rows[7]), "processing");
+  assert.deepEqual(summarizePropertyMatchCandidateQueues(rows), {
+    allCount: 8,
+    pendingAiCount: 1,
+    reviewCount: 1,
+    approvedCount: 1,
+    sentCount: 1,
+    skippedCount: 1,
+    rejectedCount: 1,
+    notMatchCount: 1,
+    alreadySharedCount: 1,
+  });
 });
 
 test("property campaign search ranks exact references before noisy title matches", () => {

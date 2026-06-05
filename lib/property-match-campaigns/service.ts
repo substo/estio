@@ -13,6 +13,15 @@ import {
 } from "@/lib/property-match-campaigns/matching";
 
 type AnyRecord = Record<string, any>;
+export type PropertyMatchCampaignQueue =
+  | "review"
+  | "approved"
+  | "sent"
+  | "skipped"
+  | "rejected"
+  | "not_match"
+  | "already_shared"
+  | "all";
 
 const CAMPAIGN_STATUSES = new Set(["draft", "processing", "review", "completed", "canceled", "failed"]);
 const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "skipped"]);
@@ -35,6 +44,75 @@ const PROPERTY_TYPE_HINTS = [
   "Plot",
   "Land",
 ];
+
+export function hasPriorPropertyShareEvidence(candidate: {
+  evidence?: unknown;
+  matchSummary?: unknown;
+  reasoning?: unknown;
+}): boolean {
+  const evidence = (candidate.evidence || {}) as AnyRecord;
+  return Boolean(evidence.priorShare)
+    || String(candidate.matchSummary || "").toLowerCase().includes("already shared")
+    || String(candidate.reasoning || "").toLowerCase().includes("already been shared");
+}
+
+export function propertyMatchCandidateQueue(candidate: {
+  aiVerdict?: unknown;
+  aiReviewStatus?: unknown;
+  reviewerStatus?: unknown;
+  evidence?: unknown;
+  matchSummary?: unknown;
+  reasoning?: unknown;
+}): PropertyMatchCampaignQueue | "processing" {
+  const reviewerStatus = String(candidate.reviewerStatus || "pending");
+  const aiVerdict = String(candidate.aiVerdict || "maybe");
+  const aiReviewStatus = String(candidate.aiReviewStatus || "done");
+
+  if (reviewerStatus === "sent") return "sent";
+  if (reviewerStatus === "approved") return "approved";
+  if (reviewerStatus === "skipped") return "skipped";
+  if (reviewerStatus === "rejected") return "rejected";
+  if (hasPriorPropertyShareEvidence(candidate)) return "already_shared";
+  if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
+  if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
+  if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
+  return "not_match";
+}
+
+export function summarizePropertyMatchCandidateQueues(rows: Array<{
+  aiVerdict?: unknown;
+  aiReviewStatus?: unknown;
+  reviewerStatus?: unknown;
+  evidence?: unknown;
+  matchSummary?: unknown;
+  reasoning?: unknown;
+}>) {
+  const counts = {
+    allCount: rows.length,
+    pendingAiCount: 0,
+    reviewCount: 0,
+    approvedCount: 0,
+    sentCount: 0,
+    skippedCount: 0,
+    rejectedCount: 0,
+    notMatchCount: 0,
+    alreadySharedCount: 0,
+  };
+
+  for (const row of rows) {
+    const queue = propertyMatchCandidateQueue(row);
+    if (queue === "processing") counts.pendingAiCount += 1;
+    else if (queue === "review") counts.reviewCount += 1;
+    else if (queue === "approved") counts.approvedCount += 1;
+    else if (queue === "sent") counts.sentCount += 1;
+    else if (queue === "skipped") counts.skippedCount += 1;
+    else if (queue === "rejected") counts.rejectedCount += 1;
+    else if (queue === "not_match") counts.notMatchCount += 1;
+    else if (queue === "already_shared") counts.alreadySharedCount += 1;
+  }
+
+  return counts;
+}
 
 function normalizeText(value: unknown, max = 4000): string | null {
   const text = String(value || "").trim();
@@ -549,7 +627,8 @@ async function refreshCampaignCounts(campaignId: string) {
     where: { campaignId },
     select: { aiVerdict: true, aiReviewStatus: true, reviewerStatus: true },
   });
-  const pendingAiCount = rows.filter((row: any) => row.aiReviewStatus === "pending" || row.aiReviewStatus === "processing").length;
+  const queueCounts = summarizePropertyMatchCandidateQueues(rows as any[]);
+  const pendingAiCount = queueCounts.pendingAiCount;
   const isCollectionDone = campaign?.collectionStatus === "done";
   const processedCandidates = Math.max(0, rows.length - pendingAiCount);
   const yesCount = rows.filter((row: any) => row.aiVerdict === "yes").length;
@@ -1104,7 +1183,7 @@ export async function listPropertyMatchCampaigns(args: {
   locationId: string;
   limit?: number;
 }) {
-  return db.propertyMatchCampaign.findMany({
+  const campaigns = await db.propertyMatchCampaign.findMany({
     where: { locationId: args.locationId },
     include: {
       property: { select: { id: true, title: true, reference: true, price: true, city: true, propertyLocation: true } },
@@ -1112,6 +1191,34 @@ export async function listPropertyMatchCampaigns(args: {
     orderBy: { createdAt: "desc" },
     take: Math.max(1, Math.min(50, Number(args.limit || 20))),
   });
+  return withPropertyMatchQueueCounts(args.locationId, campaigns as any[]);
+}
+
+async function withPropertyMatchQueueCounts(locationId: string, campaigns: AnyRecord[]) {
+  const campaignIds = campaigns.map((campaign) => campaign.id).filter(Boolean);
+  if (campaignIds.length === 0) return campaigns;
+  const candidates = await db.propertyMatchCandidate.findMany({
+    where: { locationId, campaignId: { in: campaignIds } },
+    select: {
+      campaignId: true,
+      aiVerdict: true,
+      aiReviewStatus: true,
+      reviewerStatus: true,
+      evidence: true,
+      matchSummary: true,
+      reasoning: true,
+    },
+  });
+  const byCampaign = new Map<string, any[]>();
+  for (const candidate of candidates as any[]) {
+    const rows = byCampaign.get(candidate.campaignId) || [];
+    rows.push(candidate);
+    byCampaign.set(candidate.campaignId, rows);
+  }
+  return campaigns.map((campaign) => ({
+    ...campaign,
+    queueCounts: summarizePropertyMatchCandidateQueues(byCampaign.get(campaign.id) || []),
+  }));
 }
 
 export async function updatePropertyMatchCampaign(args: {
@@ -1161,7 +1268,7 @@ export async function deletePropertyMatchCampaign(args: {
 export async function getPropertyMatchCampaignDetail(args: {
   locationId: string;
   campaignId: string;
-  queue?: "review" | "sent" | "no";
+  queue?: PropertyMatchCampaignQueue;
 }) {
   const campaign = await db.propertyMatchCampaign.findFirst({
     where: { id: args.campaignId, locationId: args.locationId },
@@ -1172,11 +1279,7 @@ export async function getPropertyMatchCampaignDetail(args: {
   if (!campaign) return null;
 
   const queue = args.queue || "review";
-  const candidateWhere = queue === "sent"
-    ? { reviewerStatus: { in: ["sent", "approved"] } }
-    : queue === "no"
-      ? { OR: [{ aiVerdict: "no" }, { reviewerStatus: { in: ["rejected", "skipped"] } }] }
-      : { reviewerStatus: "pending", aiVerdict: { in: ["yes", "maybe"] }, aiReviewStatus: { in: ["done", "failed"] } };
+  const candidateWhere = propertyMatchCandidateWhereForQueue(queue);
 
   const candidates = await db.propertyMatchCandidate.findMany({
     where: {
@@ -1209,7 +1312,35 @@ export async function getPropertyMatchCampaignDetail(args: {
     take: 100,
   });
 
-  return { campaign, candidates };
+  const [campaignWithCounts] = await withPropertyMatchQueueCounts(args.locationId, [campaign as any]);
+  return { campaign: campaignWithCounts || campaign, candidates };
+}
+
+function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) {
+  if (queue === "all") return {};
+  if (queue === "review") return { reviewerStatus: "pending", aiVerdict: { in: ["yes", "maybe"] }, aiReviewStatus: { in: ["done", "failed"] } };
+  if (queue === "approved") return { reviewerStatus: "approved" };
+  if (queue === "sent") return { reviewerStatus: "sent" };
+  if (queue === "skipped") return { reviewerStatus: "skipped" };
+  if (queue === "rejected") return { reviewerStatus: "rejected" };
+  if (queue === "already_shared") {
+    return {
+      OR: [
+        { matchSummary: { contains: "Already shared", mode: "insensitive" } },
+        { reasoning: { contains: "already been shared", mode: "insensitive" } },
+      ],
+    };
+  }
+  return {
+    reviewerStatus: "pending",
+    aiVerdict: "no",
+    NOT: {
+      OR: [
+        { matchSummary: { contains: "Already shared", mode: "insensitive" } },
+        { reasoning: { contains: "already been shared", mode: "insensitive" } },
+      ],
+    },
+  };
 }
 
 export async function updatePropertyMatchCandidateReview(args: {
@@ -1253,7 +1384,9 @@ export async function updatePropertyMatchCandidateReview(args: {
       reviewerStatus,
       reviewedByUserId: args.actorUserId || null,
       reviewedAt: new Date(),
-      rejectedReason: reviewerStatus === "rejected" ? normalizeText(args.rejectedReason, 1000) : null,
+      rejectedReason: reviewerStatus === "rejected" || reviewerStatus === "skipped"
+        ? normalizeText(args.rejectedReason, 1000)
+        : null,
     },
   });
   await refreshCampaignCounts(candidate.campaignId);

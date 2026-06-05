@@ -6398,6 +6398,7 @@ function serializePropertyMatchCampaign(row: any) {
         noCount: row.noCount || 0,
         approvedCount: row.approvedCount || 0,
         sentCount: row.sentCount || 0,
+        queueCounts: row.queueCounts || null,
         priorityNote: row.priorityNote || null,
         propertySnapshot: row.propertySnapshot || null,
         lastError: row.lastError || null,
@@ -6412,6 +6413,7 @@ function serializePropertyMatchCandidate(row: any) {
         conversationId: row.conversationId,
         structuredVerdict: row.structuredVerdict,
         aiVerdict: row.aiVerdict,
+        aiReviewStatus: row.aiReviewStatus,
         reviewerStatus: row.reviewerStatus,
         confidence: row.confidence,
         score: row.score,
@@ -6421,7 +6423,9 @@ function serializePropertyMatchCandidate(row: any) {
         preferredChannel: row.preferredChannel || "SMS",
         draftBody: row.draftBody || "",
         draftGeneratedAt: row.draftGeneratedAt?.toISOString?.() || null,
+        reviewedAt: row.reviewedAt?.toISOString?.() || null,
         sentAt: row.sentAt?.toISOString?.() || null,
+        rejectedReason: row.rejectedReason || null,
         lastError: row.lastError || null,
         contact: row.contact ? {
             id: row.contact.id,
@@ -6574,7 +6578,10 @@ export async function listPropertyMatchCampaignsAction() {
     return rows.map(serializePropertyMatchCampaign);
 }
 
-export async function getPropertyMatchCampaignDetailAction(campaignId: string, queue?: "review" | "sent" | "no") {
+export async function getPropertyMatchCampaignDetailAction(
+    campaignId: string,
+    queue?: "review" | "approved" | "sent" | "skipped" | "rejected" | "not_match" | "already_shared" | "all",
+) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);

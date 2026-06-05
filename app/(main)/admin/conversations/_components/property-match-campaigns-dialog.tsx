@@ -53,8 +53,22 @@ type Campaign = {
     yesCount: number;
     maybeCount: number;
     noCount: number;
+    approvedCount: number;
     sentCount: number;
+    queueCounts?: QueueCounts | null;
     priorityNote?: string | null;
+};
+
+type QueueCounts = {
+    allCount: number;
+    pendingAiCount: number;
+    reviewCount: number;
+    approvedCount: number;
+    sentCount: number;
+    skippedCount: number;
+    rejectedCount: number;
+    notMatchCount: number;
+    alreadySharedCount: number;
 };
 
 type Candidate = {
@@ -62,12 +76,16 @@ type Candidate = {
     contactId: string;
     conversationId?: string | null;
     aiVerdict: "yes" | "maybe" | "no";
+    aiReviewStatus?: string | null;
     reviewerStatus: string;
     confidence?: number | null;
     matchSummary?: string | null;
     reasoning?: string | null;
     preferredChannel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | string | null;
     draftBody?: string;
+    reviewedAt?: string | null;
+    sentAt?: string | null;
+    rejectedReason?: string | null;
     lastError?: string | null;
     contact?: {
         name?: string | null;
@@ -87,8 +105,19 @@ type CampaignDetail = {
     candidates: Candidate[];
 };
 
-type Queue = "review" | "sent" | "no";
+type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "not_match" | "already_shared" | "all";
 type MobileCampaignView = "campaigns" | "review";
+
+const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueCounts }> = [
+    { value: "review", label: "Review", countKey: "reviewCount" },
+    { value: "approved", label: "Approved", countKey: "approvedCount" },
+    { value: "sent", label: "Sent", countKey: "sentCount" },
+    { value: "skipped", label: "Skipped", countKey: "skippedCount" },
+    { value: "rejected", label: "Rejected", countKey: "rejectedCount" },
+    { value: "not_match", label: "Not match", countKey: "notMatchCount" },
+    { value: "already_shared", label: "Already shared", countKey: "alreadySharedCount" },
+    { value: "all", label: "All", countKey: "allCount" },
+];
 
 const RECENT_PROPERTY_LIMIT = 8;
 const PROPERTY_SEARCH_LIMIT = 12;
@@ -116,6 +145,38 @@ function candidateRequirementLine(candidate: Candidate) {
         candidate.contact?.requirementMaxPrice,
         candidate.contact?.requirementPropertyLocations?.join(", "),
     ].filter(Boolean).join(" · ");
+}
+
+function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
+    return {
+        allCount: campaign?.queueCounts?.allCount ?? campaign?.totalCandidates ?? 0,
+        pendingAiCount: campaign?.queueCounts?.pendingAiCount ?? Math.max(0, Number(campaign?.totalCandidates || 0) - Number(campaign?.processedCandidates || 0)),
+        reviewCount: campaign?.queueCounts?.reviewCount ?? Math.max(0, Number(campaign?.yesCount || 0) + Number(campaign?.maybeCount || 0) - Number(campaign?.approvedCount || 0) - Number(campaign?.sentCount || 0)),
+        approvedCount: campaign?.queueCounts?.approvedCount ?? campaign?.approvedCount ?? 0,
+        sentCount: campaign?.queueCounts?.sentCount ?? campaign?.sentCount ?? 0,
+        skippedCount: campaign?.queueCounts?.skippedCount ?? 0,
+        rejectedCount: campaign?.queueCounts?.rejectedCount ?? 0,
+        notMatchCount: campaign?.queueCounts?.notMatchCount ?? campaign?.noCount ?? 0,
+        alreadySharedCount: campaign?.queueCounts?.alreadySharedCount ?? 0,
+    };
+}
+
+function queueEmptyLabel(queue: Queue) {
+    if (queue === "review") return "No contacts need review.";
+    if (queue === "approved") return "No approved drafts waiting to send.";
+    if (queue === "sent") return "No sent contacts yet.";
+    if (queue === "skipped") return "No skipped contacts yet.";
+    if (queue === "rejected") return "No rejected contacts yet.";
+    if (queue === "not_match") return "No contacts were marked as not a match.";
+    if (queue === "already_shared") return "No contacts already had this property shared.";
+    return "No candidates in this campaign.";
+}
+
+function formatDecisionDate(value?: string | null) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function PropertyMatchCampaignsDialog({
@@ -381,9 +442,26 @@ export function PropertyMatchCampaignsDialog({
     const skipCandidate = (candidate: Candidate) => {
         setBusyCandidateId(candidate.id);
         startTransition(async () => {
-            await reviewPropertyMatchCandidateAction(candidate.id, "skipped", "Skipped during campaign review");
+            const res = await reviewPropertyMatchCandidateAction(candidate.id, "skipped", "Skipped during campaign review");
+            if (!res.success) setError(res.error || "Could not skip contact.");
             setBusyCandidateId(null);
-            if (selectedCampaignId) loadDetail(selectedCampaignId, queue);
+            if (selectedCampaignId) {
+                await refreshCampaigns();
+                loadDetail(selectedCampaignId, queue);
+            }
+        });
+    };
+
+    const rejectCandidate = (candidate: Candidate) => {
+        setBusyCandidateId(candidate.id);
+        startTransition(async () => {
+            const res = await reviewPropertyMatchCandidateAction(candidate.id, "rejected", "Rejected during campaign review");
+            if (!res.success) setError(res.error || "Could not reject contact.");
+            setBusyCandidateId(null);
+            if (selectedCampaignId) {
+                await refreshCampaigns();
+                loadDetail(selectedCampaignId, queue);
+            }
         });
     };
 
@@ -563,9 +641,15 @@ export function PropertyMatchCampaignsDialog({
                                                 <div className="truncate font-medium text-slate-900">{campaignLabel(campaign)}</div>
                                                 <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
                                                     <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
-                                                    <span>{campaign.yesCount} yes</span>
-                                                    <span>{campaign.maybeCount} maybe</span>
-                                                    <span>{campaign.sentCount} sent</span>
+                                                    <span>{campaignQueueCounts(campaign).reviewCount} review</span>
+                                                    <span>{campaignQueueCounts(campaign).sentCount} sent</span>
+                                                    <span>{campaignQueueCounts(campaign).notMatchCount} no</span>
+                                                </div>
+                                                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-slate-500">
+                                                    <span>{campaignQueueCounts(campaign).approvedCount} approved</span>
+                                                    <span>{campaignQueueCounts(campaign).skippedCount} skipped</span>
+                                                    <span>{campaignQueueCounts(campaign).rejectedCount} rejected</span>
+                                                    <span>{campaignQueueCounts(campaign).alreadySharedCount} shared</span>
                                                 </div>
                                             </button>
                                             <div className="flex justify-end gap-1 border-t border-slate-100 px-1 py-1">
@@ -593,7 +677,18 @@ export function PropertyMatchCampaignsDialog({
                                         <div className="min-w-0">
                                             <div className="truncate text-sm font-semibold text-slate-900">{campaignLabel(activeCampaign)}</div>
                                             <div className="mt-1 text-xs text-slate-500">
-                                                {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed · {activeCampaign.yesCount} yes · {activeCampaign.maybeCount} maybe · {activeCampaign.noCount} no
+                                                {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
+                                                {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
+                                            </div>
+                                            <div className="mt-2 flex flex-wrap gap-1">
+                                                {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
+                                                    const count = campaignQueueCounts(activeCampaign)[item.countKey];
+                                                    return (
+                                                        <Badge key={item.value} variant="outline" className="h-5 px-1.5 text-[10px]">
+                                                            {item.label} {count}
+                                                        </Badge>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                         <Button type="button" size="sm" variant="outline" className="h-8 w-full text-xs sm:w-auto" onClick={processMore} disabled={isPending}>
@@ -630,16 +725,16 @@ export function PropertyMatchCampaignsDialog({
                                     ) : null}
                                     <div className="-mx-4 mt-2 overflow-x-auto px-4">
                                         <div className="flex min-w-max gap-1">
-                                            {(["review", "sent", "no"] as Queue[]).map((item) => (
+                                            {QUEUE_OPTIONS.map((item) => (
                                                 <Button
-                                                    key={item}
+                                                    key={item.value}
                                                     type="button"
                                                     size="sm"
-                                                    variant={queue === item ? "default" : "outline"}
+                                                    variant={queue === item.value ? "default" : "outline"}
                                                     className="h-7 px-2 text-xs"
-                                                    onClick={() => setQueueAndReload(item)}
+                                                    onClick={() => setQueueAndReload(item.value)}
                                                 >
-                                                    {item === "review" ? "Review" : item === "sent" ? "Approved/Sent" : "No/Skipped"}
+                                                    {item.label} {campaignQueueCounts(activeCampaign)[item.countKey]}
                                                 </Button>
                                             ))}
                                         </div>
@@ -649,7 +744,7 @@ export function PropertyMatchCampaignsDialog({
 
                                 <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
                                     {detail?.candidates.length === 0 ? (
-                                        <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">No candidates in this queue.</div>
+                                        <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">{queueEmptyLabel(queue)}</div>
                                     ) : null}
                                     <div className="space-y-3">
                                         {detail?.candidates.map((candidate) => {
@@ -659,40 +754,63 @@ export function PropertyMatchCampaignsDialog({
                                                 && !!savedDraft.trim()
                                                 && draft.trim() === savedDraft.trim();
                                             const isBusy = busyCandidateId === candidate.id;
+                                            const canReview = candidate.reviewerStatus === "pending"
+                                                && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
+                                                && (candidate.aiReviewStatus === "done" || candidate.aiReviewStatus === "failed" || !candidate.aiReviewStatus);
+                                            const showDraftControls = canReview || candidate.reviewerStatus === "approved";
+                                            const decisionDate = candidate.sentAt || candidate.reviewedAt;
                                             return (
                                                 <div key={candidate.id} className="rounded-md border bg-white p-3">
                                                     <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-between">
                                                         <div className="min-w-0">
                                                             <div className="flex min-w-0 flex-wrap items-center gap-2">
                                                                 <div className="truncate text-sm font-medium text-slate-900">{candidate.contact?.name || "Unnamed contact"}</div>
+                                                                <Badge variant="outline" className="h-5 text-[10px]">
+                                                                    {candidate.reviewerStatus}
+                                                                </Badge>
                                                                 <Badge variant={candidate.aiVerdict === "yes" ? "default" : candidate.aiVerdict === "maybe" ? "secondary" : "outline"} className="h-5 text-[10px]">
                                                                     {candidate.aiVerdict} {confidenceLabel(candidate.confidence)}
                                                                 </Badge>
+                                                                {candidate.aiReviewStatus ? <Badge variant="outline" className="h-5 text-[10px]">AI {candidate.aiReviewStatus}</Badge> : null}
                                                                 {candidate.preferredChannel ? <Badge variant="outline" className="h-5 text-[10px]">{candidate.preferredChannel}</Badge> : null}
                                                             </div>
                                                             <div className="mt-1 text-xs text-slate-500">
                                                                 {candidateRequirementLine(candidate)}
                                                             </div>
+                                                            {decisionDate ? (
+                                                                <div className="mt-1 text-[11px] text-slate-500">
+                                                                    {candidate.sentAt ? "Sent" : "Reviewed"} {formatDecisionDate(decisionDate)}
+                                                                </div>
+                                                            ) : null}
                                                         </div>
-                                                        <div className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-1 sm:flex">
+                                                        <div className="grid grid-cols-1 items-center gap-1 sm:flex">
                                                             {candidate.conversationId ? (
                                                                 <Button asChild type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7">
                                                                     <a href={`/admin/conversations?id=${encodeURIComponent(candidate.conversationId)}`}>Open</a>
                                                                 </Button>
                                                             ) : null}
-                                                            <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-slate-500 sm:h-7 sm:w-7" onClick={() => skipCandidate(candidate)} disabled={isBusy}>
-                                                                <X className="h-3.5 w-3.5" />
-                                                            </Button>
+                                                            {canReview ? (
+                                                                <>
+                                                                    <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7" onClick={() => skipCandidate(candidate)} disabled={isBusy}>
+                                                                        <X className="mr-1.5 h-3.5 w-3.5" />
+                                                                        Skip
+                                                                    </Button>
+                                                                    <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs text-red-600 hover:text-red-700 sm:h-7" onClick={() => rejectCandidate(candidate)} disabled={isBusy}>
+                                                                        Reject
+                                                                    </Button>
+                                                                </>
+                                                            ) : null}
                                                         </div>
                                                     </div>
 
                                                     <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-xs text-slate-700">
                                                         <div className="font-medium">{candidate.matchSummary || "Match review"}</div>
                                                         {candidate.reasoning ? <div className="mt-1 text-slate-600">{candidate.reasoning}</div> : null}
+                                                        {candidate.rejectedReason ? <div className="mt-1 text-slate-600">Decision note: {candidate.rejectedReason}</div> : null}
                                                         {candidate.lastError ? <div className="mt-1 text-red-600">{candidate.lastError}</div> : null}
                                                     </div>
 
-                                                    {queue === "review" || draft ? (
+                                                    {showDraftControls ? (
                                                         <div className="mt-2 space-y-2">
                                                             <Textarea
                                                                 value={draft}
