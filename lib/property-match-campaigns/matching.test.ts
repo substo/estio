@@ -250,6 +250,84 @@ test("structured matcher disqualifies leads who stopped searching", () => {
   assert.match(result.disqualifiers?.join(" ") || "", /no longer searching/);
 });
 
+test("structured matcher disqualifies lead contacts whose name clearly says agent", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      contactType: "Lead",
+      contactName: "Maria Property Agent",
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.equal(result.needsAi, false);
+  assert.match(result.disqualifiers?.join(" ") || "", /Agent/);
+  assert.equal(result.dimensions?.find((dimension) => dimension.key === "lead_eligibility")?.status, "no");
+});
+
+test("structured matcher disqualifies lead contacts whose name clearly says owner", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      contactType: "Lead",
+      contactName: "Andreas Owner",
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.equal(result.needsAi, false);
+  assert.match(result.disqualifiers?.join(" ") || "", /Owner/);
+});
+
+test("structured matcher keeps normal buyer/renter leads eligible", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      contactType: "Lead",
+      contactName: "John Buyer",
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+    },
+  );
+
+  assert.notEqual(result.verdict, "no");
+  assert.equal(result.dimensions?.find((dimension) => dimension.key === "lead_eligibility")?.status, "yes");
+});
+
 test("structured matcher rejects explicit minimum size mismatch", () => {
   const result = evaluateStructuredPropertyMatch(
     {

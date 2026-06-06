@@ -1,4 +1,5 @@
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
+import { inferLeadContactRoleFromSignals } from "@/lib/contacts/name-builder";
 
 export type MatchVerdict = "yes" | "maybe" | "no";
 
@@ -329,13 +330,38 @@ export function evaluateStructuredPropertyMatch(
     disqualifiers.push("lead has clearly indicated they are no longer searching");
   }
   const leadGoal = normalize(contact.leadGoal);
-  const contactType = normalize(contact.contactType);
+  const inferredRole = inferLeadContactRoleFromSignals({
+    contactType: display(contact.contactType),
+    name: display(contact.contactName),
+    texts: [
+      display(contact.requirementOtherDetails),
+      display(contact.requirementSummary),
+      display(contact.recentMessagesText),
+    ],
+  });
   if (["to list", "to sell", "other"].includes(leadGoal)) {
     disqualifiers.push(`lead goal is ${contact.leadGoal}, not a buyer or renter requirement`);
   }
+  const contactType = normalize(contact.contactType);
   if (["owner", "agent", "partner", "associate", "maintenance"].includes(contactType)) {
     disqualifiers.push(`contact type is ${contact.contactType}, not a buyer or renter lead`);
+  } else if (inferredRole !== "Lead") {
+    disqualifiers.push(`contact appears to be ${inferredRole}, not a buyer or renter lead`);
   }
+  const eligibilityStatus = disqualifiers.some((item) => /\b(owner|agent|partner|associate|maintenance|buyer or renter)\b/i.test(item))
+    ? "no"
+    : "yes";
+  addDimension(dimensions, {
+    key: "lead_eligibility",
+    label: "Lead Eligibility",
+    propertyValue: "Buyer/renter campaign",
+    requirementValue: inferredRole === "Lead" ? display(contact.contactType) || "Lead" : inferredRole,
+    status: eligibilityStatus,
+    weight: 5,
+    reason: eligibilityStatus === "yes"
+      ? "Contact appears eligible for buyer/renter property outreach."
+      : `Contact appears to be ${inferredRole === "Lead" ? display(contact.contactType) || "non-lead" : inferredRole}, not a buyer/renter lead.`,
+  });
 
   const status = statusMatches(contact.requirementStatus, property.goal);
   if (status === true && !isAny(contact.requirementStatus)) matches.push("listing goal matches requirement status");

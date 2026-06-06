@@ -65,6 +65,28 @@ test("AI match normalizer cannot override structured blockers", () => {
   assert.equal(result.evidence.structured.needsAi, false);
 });
 
+test("AI match normalizer cannot override inferred non-lead disqualifiers", () => {
+  const result = normalizeAiMatchAssessment({
+    verdict: "yes",
+    confidence: 0.95,
+    reasoning: "Looks like a fit",
+  }, {
+    structured: {
+      verdict: "no",
+      disqualifiers: ["contact appears to be Agent, not a buyer or renter lead"],
+      dimensions: [{
+        key: "lead_eligibility",
+        label: "Lead Eligibility",
+        status: "no",
+      }],
+      needsAi: true,
+    },
+  });
+
+  assert.equal(result.verdict, "no");
+  assert.equal(result.evidence.structured.needsAi, false);
+});
+
 test("AI match normalizer clamps invalid confidence and invalid verdict", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "definitely",

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildStructuredLeadDisplayName } from "./name-builder";
+import { buildStructuredLeadDisplayName, inferLeadContactRoleFromSignals } from "./name-builder";
 
 test("buildStructuredLeadDisplayName uses provided display labels and sale goal cleanly", () => {
     const result = buildStructuredLeadDisplayName({
@@ -43,4 +43,48 @@ test("buildStructuredLeadDisplayName includes role and goal when multiple proper
     });
 
     assert.equal(result, "John Doe Lead Sale REF123, DT456");
+});
+
+test("inferLeadContactRoleFromSignals detects explicit owner and agent roles", () => {
+    assert.equal(inferLeadContactRoleFromSignals({
+        parsedRole: "Owner",
+        name: "Rafaela Hadid",
+    }), "Owner");
+
+    assert.equal(inferLeadContactRoleFromSignals({
+        parsedRole: "Agent",
+        name: "Maria",
+    }), "Agent");
+});
+
+test("inferLeadContactRoleFromSignals detects obvious role labels in contact names", () => {
+    assert.equal(inferLeadContactRoleFromSignals({
+        contactType: "Lead",
+        name: "George Owner DT4930",
+    }), "Owner");
+
+    assert.equal(inferLeadContactRoleFromSignals({
+        contactType: "Lead",
+        name: "Nicosia Property Agent",
+    }), "Agent");
+});
+
+test("inferLeadContactRoleFromSignals detects structured role context but avoids weak text", () => {
+    assert.equal(inferLeadContactRoleFromSignals({
+        contactType: "Lead",
+        texts: ["Contact role: landlord"],
+    }), "Owner");
+
+    assert.equal(inferLeadContactRoleFromSignals({
+        contactType: "Lead",
+        texts: ["Client asked whether the owner would accept a lower offer."],
+    }), "Lead");
+});
+
+test("inferLeadContactRoleFromSignals keeps normal buyer and renter leads eligible", () => {
+    assert.equal(inferLeadContactRoleFromSignals({
+        contactType: "Lead",
+        name: "John Buyer",
+        texts: ["Looking for a two-bedroom flat in Paphos."],
+    }), "Lead");
 });

@@ -111,16 +111,62 @@ export function splitLeadPersonName(contact?: BuilderContactData) {
     };
 }
 
-export function inferLeadContactRole(rawLeadText: string, parsedRole?: string | null): "Lead" | "Owner" | "Agent" {
-    const normalizedRole = normalizeWhitespace(parsedRole);
-    if (normalizedRole === "Lead" || normalizedRole === "Owner" || normalizedRole === "Agent") {
-        return normalizedRole;
+export type InferredLeadContactRole = "Lead" | "Owner" | "Agent";
+
+function normalizeRole(value?: string | null): InferredLeadContactRole | null {
+    const text = normalizeWhitespace(value);
+    if (text === "Lead" || text === "Owner" || text === "Agent") return text;
+    return null;
+}
+
+function inferRoleFromName(value?: string | null): Exclude<InferredLeadContactRole, "Lead"> | null {
+    const text = normalizeWhitespace(value).toLowerCase();
+    if (!text) return null;
+    if (/\b(owner|landlord|landlady|vendor|seller)\b/.test(text)) return "Owner";
+    if (/\b(agent|agency|estate agent|realtor|broker|developer|property consultant|sales consultant)\b/.test(text)) return "Agent";
+    return null;
+}
+
+function inferRoleFromContext(value?: string | null): Exclude<InferredLeadContactRole, "Lead"> | null {
+    const text = normalizeWhitespace(value).toLowerCase();
+    if (!text) return null;
+    if (/\b(?:contact\s+type|role|contact\s+role|person\s+type)\s*[:=-]?\s*(owner|landlord|landlady|vendor|seller)\b/.test(text)) return "Owner";
+    if (/\b(?:owner\s+name|landlord\s+name|vendor\s+name|seller\s+name)\b/.test(text)) return "Owner";
+    if (/\b(?:contact\s+type|role|contact\s+role|person\s+type)\s*[:=-]?\s*(agent|agency|estate agent|realtor|broker|developer|property consultant|sales consultant)\b/.test(text)) return "Agent";
+    if (/\b(?:agent\s+name|agency\s+name|listed\s+by|advertised\s+by|developer\s+name|broker\s+name)\b/.test(text)) return "Agent";
+    return null;
+}
+
+export function inferLeadContactRoleFromSignals(args: {
+    parsedRole?: string | null;
+    contactType?: string | null;
+    name?: string | null;
+    texts?: Array<string | null | undefined>;
+}): InferredLeadContactRole {
+    const parsedRole = normalizeRole(args.parsedRole);
+    if (parsedRole && parsedRole !== "Lead") return parsedRole;
+
+    const existingType = normalizeRole(args.contactType);
+    if (existingType && existingType !== "Lead") return existingType;
+
+    const nameRole = inferRoleFromName(args.name);
+    if (nameRole) return nameRole;
+
+    for (const text of args.texts || []) {
+        const contextRole = inferRoleFromContext(text);
+        if (contextRole) return contextRole;
     }
 
-    const text = rawLeadText.toLowerCase();
-    if (/\bowner\b/.test(text)) return "Owner";
-    if (/\bagent\b/.test(text)) return "Agent";
+    if (parsedRole === "Lead" || existingType === "Lead") return "Lead";
     return "Lead";
+}
+
+export function inferLeadContactRole(rawLeadText: string, parsedRole?: string | null): "Lead" | "Owner" | "Agent" {
+    return inferLeadContactRoleFromSignals({
+        parsedRole,
+        name: rawLeadText,
+        texts: [rawLeadText],
+    });
 }
 
 export function formatLeadGoalLabel(status?: "For Rent" | "For Sale" | null | string): "Rent" | "Sale" | "" {
