@@ -288,6 +288,7 @@ export async function verifyContactProfile(args: {
   sourceType?: string;
   sourceIds?: string[];
   actorUserId?: string | null;
+  contactSnapshot?: AnyRecord | null;
 }) {
   const startedAt = Date.now();
   logContactVerificationTiming("scan_start", {
@@ -299,9 +300,13 @@ export async function verifyContactProfile(args: {
     provider: CONTACT_VERIFICATION_PROVIDER,
   });
 
-  const contact = await db.contact.findFirst({
-    where: { id: args.contactId, locationId: args.locationId },
-  });
+  const contactLookupStartedAt = Date.now();
+  const contact = args.contactSnapshot && args.contactSnapshot.id === args.contactId
+    ? args.contactSnapshot
+    : await db.contact.findFirst({
+      where: { id: args.contactId, locationId: args.locationId },
+    });
+  const contactLookupMs = Date.now() - contactLookupStartedAt;
   if (!contact) {
     logContactVerificationTiming("scan_failed", {
       locationId: args.locationId,
@@ -313,15 +318,27 @@ export async function verifyContactProfile(args: {
     return { success: false as const, error: "Contact not found." };
   }
 
-  const pendingProposal = await db.contactRequirementProposal.findFirst({
-    where: {
+  const pendingStartedAt = Date.now();
+  const messagesStartedAt = Date.now();
+  const [pendingProposal, recentMessages] = await Promise.all([
+    db.contactRequirementProposal.findFirst({
+      where: {
+        locationId: args.locationId,
+        contactId: contact.id,
+        proposalType: "verification",
+        status: "pending",
+      },
+      select: { id: true },
+    }),
+    collectRecentMessages({
       locationId: args.locationId,
       contactId: contact.id,
-      proposalType: "verification",
-      status: "pending",
-    },
-    select: { id: true },
-  });
+      conversationId: args.conversationId || null,
+    }),
+  ]);
+  const pendingMs = Date.now() - pendingStartedAt;
+  const messagesMs = Date.now() - messagesStartedAt;
+
   if (pendingProposal) {
     logContactVerificationTiming("scan_skipped_pending", {
       locationId: args.locationId,
@@ -329,17 +346,13 @@ export async function verifyContactProfile(args: {
       conversationId: args.conversationId || null,
       proposalId: pendingProposal.id,
       elapsedMs: Date.now() - startedAt,
+      contactLookupMs,
+      pendingMs,
+      messagesMs,
     });
     return { success: true as const, created: false as const, reason: "A pending contact verification proposal already exists." };
   }
 
-  const messagesStartedAt = Date.now();
-  const recentMessages = await collectRecentMessages({
-    locationId: args.locationId,
-    contactId: contact.id,
-    conversationId: args.conversationId || null,
-  });
-  const messagesMs = Date.now() - messagesStartedAt;
   const assessmentStartedAt = Date.now();
   const assessment = buildContactVerificationAssessment({ contact, recentMessages });
   const assessmentMs = Date.now() - assessmentStartedAt;
@@ -363,6 +376,8 @@ export async function verifyContactProfile(args: {
       hasChanges: assessment.hasChanges,
       recentMessageCount: recentMessages.length,
       durationMs: Date.now() - startedAt,
+      contactLookupMs,
+      pendingMs,
       messagesMs,
       assessmentMs,
     },
@@ -374,6 +389,8 @@ export async function verifyContactProfile(args: {
       contactId: contact.id,
       conversationId: args.conversationId || null,
       elapsedMs: Date.now() - startedAt,
+      contactLookupMs,
+      pendingMs,
       messagesMs,
       assessmentMs,
       recentMessageCount: recentMessages.length,
@@ -418,6 +435,8 @@ export async function verifyContactProfile(args: {
     contactId: contact.id,
     conversationId: args.conversationId || null,
     elapsedMs: Date.now() - startedAt,
+    contactLookupMs,
+    pendingMs,
     messagesMs,
     assessmentMs,
     recentMessageCount: recentMessages.length,

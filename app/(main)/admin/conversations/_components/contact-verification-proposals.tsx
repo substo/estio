@@ -126,7 +126,9 @@ export function ContactVerificationProposals({
                 await reloadContext();
             } else {
                 toast.info(String(result.reason || "No contact profile correction found."));
-                await refresh();
+                if (result.assessment?.hasChanges !== false) {
+                    await refresh();
+                }
             }
         } finally {
             setScanning(false);

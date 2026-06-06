@@ -1693,6 +1693,40 @@ async function getAuthenticatedLocationReadOnly(options?: { requireGhlToken?: bo
     return location;
 }
 
+async function getAuthenticatedLocationActorFastReadOnly(options?: { requireGhlToken?: boolean }) {
+    const requireGhlToken = options?.requireGhlToken === true;
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
+        throw new Error("Unauthorized");
+    }
+
+    const user = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: {
+            id: true,
+            locations: { take: 1 },
+        },
+    });
+    const location = user?.locations?.[0] || null;
+    if (!user || !location) {
+        throw new Error("Unauthorized");
+    }
+    if (requireGhlToken && !location.ghlAccessToken) {
+        throw new Error("Unauthorized or GHL not connected");
+    }
+
+    return {
+        location,
+        actor: {
+            clerkUserId,
+            userId: user.id,
+            isAdmin: false,
+            hasAccess: true,
+            roleSource: "location_role" as const,
+        },
+    };
+}
+
 async function getAuthenticatedLocationExternal() {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: true });
     try {
@@ -6394,8 +6428,7 @@ export async function scanContactVerificationAction(contactId: string, conversat
     logTiming("action_start");
 
     const authStartedAt = Date.now();
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const actor = await resolveLocationActorContext(location.id);
+    const { location, actor } = await getAuthenticatedLocationActorFastReadOnly({ requireGhlToken: false });
     logTiming("action_auth_end", {
         locationId: location.id,
         authMs: Date.now() - authStartedAt,
@@ -6412,7 +6445,21 @@ export async function scanContactVerificationAction(contactId: string, conversat
             locationId: location.id,
             OR: [{ id: contactId }, { ghlContactId: contactId }],
         },
-        select: { id: true },
+        select: {
+            id: true,
+            name: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            contactType: true,
+            leadGoal: true,
+            qualificationStage: true,
+            requirementSummary: true,
+            requirementOtherDetails: true,
+            notes: true,
+            message: true,
+        },
     });
     logTiming("action_contact_lookup_end", {
         locationId: location.id,
@@ -6424,20 +6471,7 @@ export async function scanContactVerificationAction(contactId: string, conversat
         return { success: false as const, error: "Contact not found." };
     }
 
-    let conversationInternalId: string | null = null;
-    if (requestedConversationId) {
-        const conversationLookupStartedAt = Date.now();
-        const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, requestedConversationId),
-            select: { id: true },
-        });
-        conversationInternalId = conversation?.id || null;
-        logTiming("action_conversation_lookup_end", {
-            locationId: location.id,
-            conversationLookupMs: Date.now() - conversationLookupStartedAt,
-            conversationId: conversationInternalId,
-        });
-    }
+    const conversationInternalId = requestedConversationId || null;
 
     const scanStartedAt = Date.now();
     const result = await verifyContactProfile({
@@ -6446,6 +6480,7 @@ export async function scanContactVerificationAction(contactId: string, conversat
         conversationId: conversationInternalId,
         sourceType: "manual_verification",
         actorUserId: actor.userId || null,
+        contactSnapshot: contact,
     });
     logTiming(result.success ? "action_scan_end" : "action_scan_failed", {
         locationId: location.id,
