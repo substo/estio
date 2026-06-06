@@ -1743,6 +1743,43 @@ export async function savePropertyMatchCandidateDraft(args: {
   return { success: true as const, candidate: updated };
 }
 
+export async function savePropertyMatchCandidateGeneratedDraft(args: {
+  locationId: string;
+  candidateId: string;
+  draftBody: string;
+}) {
+  const draftBody = normalizeText(args.draftBody, 12000);
+  if (!draftBody) return { success: false as const, error: "Draft cannot be empty." };
+  const candidate = await db.propertyMatchCandidate.findFirst({
+    where: { id: args.candidateId, locationId: args.locationId },
+    select: { id: true, aiVerdict: true, aiReviewStatus: true },
+  });
+  if (!candidate) return { success: false as const, error: "Candidate not found." };
+  if (!canCandidateDraftOrSend(candidate)) {
+    return { success: false as const, error: "AI review must finish before drafting." };
+  }
+  const priorShare = await findPriorPropertyShareForCandidate({
+    locationId: args.locationId,
+    candidateId: candidate.id,
+  });
+  if (priorShare) {
+    await markPropertyMatchCandidateAlreadyShared({
+      locationId: args.locationId,
+      candidateId: candidate.id,
+      evidence: priorShare,
+    });
+    return { success: false as const, error: "This property was already shared with this contact." };
+  }
+  const updated = await db.propertyMatchCandidate.update({
+    where: { id: candidate.id },
+    data: {
+      draftBody,
+      draftGeneratedAt: new Date(),
+    },
+  });
+  return { success: true as const, candidate: updated };
+}
+
 export async function markPropertyMatchCandidateSent(args: {
   locationId: string;
   candidateId: string;

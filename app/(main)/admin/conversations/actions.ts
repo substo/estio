@@ -105,6 +105,7 @@ import {
     markPropertyMatchCandidateSent,
     processPropertyMatchCampaignBatch,
     savePropertyMatchCandidateDraft,
+    savePropertyMatchCandidateGeneratedDraft,
     sortPropertyMatchSearchRows,
     updatePropertyMatchCampaign,
     updatePropertyMatchCandidateReview,
@@ -6728,7 +6729,7 @@ export async function generatePropertyMatchCandidateDraftAction(candidateId: str
     const draftBody = String(draftResult?.draft || "").trim();
     if (!draftBody) return { success: false as const, error: "Draft generation returned an empty draft." };
 
-    const saveResult = await savePropertyMatchCandidateDraft({
+    const saveResult = await savePropertyMatchCandidateGeneratedDraft({
         locationId: location.id,
         candidateId: candidate.id,
         draftBody,

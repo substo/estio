@@ -227,9 +227,11 @@ function formatDecisionDate(value?: string | null) {
 export function PropertyMatchCampaignsDialog({
     open,
     onOpenChange,
+    onOpenConversation,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onOpenConversation?: (conversationId: string) => void;
 }) {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -289,7 +291,9 @@ export function PropertyMatchCampaignsDialog({
             setDrafts((current) => {
                 const next = { ...current };
                 for (const candidate of res.candidates as Candidate[]) {
-                    if (candidate.draftBody && !next[candidate.id]) next[candidate.id] = candidate.draftBody;
+                    if (candidate.draftBody && (!next[candidate.id] || !next[candidate.id].trim())) {
+                        next[candidate.id] = candidate.draftBody;
+                    }
                 }
                 return next;
             });
@@ -514,7 +518,16 @@ export function PropertyMatchCampaignsDialog({
         startTransition(async () => {
             const res = await generatePropertyMatchCandidateDraftAction(candidate.id);
             if (!res.success) setError(res.error || "Draft generation failed.");
-            if (res.success) setDrafts((current) => ({ ...current, [candidate.id]: res.draft }));
+            if (res.success) {
+                setError("");
+                setDrafts((current) => ({ ...current, [candidate.id]: res.draft }));
+                setDetail((current) => current ? {
+                    ...current,
+                    candidates: current.candidates.map((item) => (
+                        item.id === candidate.id ? { ...item, draftBody: res.draft } : item
+                    )),
+                } : current);
+            }
             setBusyCandidateId(null);
             if (selectedCampaignId) loadDetail(selectedCampaignId, queue);
         });
@@ -547,12 +560,31 @@ export function PropertyMatchCampaignsDialog({
     };
 
     const saveDraft = (candidate: Candidate) => {
+        const draftBody = drafts[candidate.id] || "";
         setBusyCandidateId(candidate.id);
         startTransition(async () => {
-            const res = await savePropertyMatchCandidateDraftAction(candidate.id, drafts[candidate.id] || "");
+            const res = await savePropertyMatchCandidateDraftAction(candidate.id, draftBody);
             if (!res.success) setError(res.error || "Could not save draft.");
+            if (res.success) {
+                setError("");
+                setDrafts((current) => ({ ...current, [candidate.id]: draftBody }));
+                setDetail((current) => current ? {
+                    ...current,
+                    candidates: current.candidates.map((item) => (
+                        item.id === candidate.id
+                            ? {
+                                ...item,
+                                draftBody,
+                                reviewerStatus: "approved",
+                                reviewedAt: new Date().toISOString(),
+                                lastError: null,
+                            }
+                            : item
+                    )),
+                } : current);
+                void refreshCampaigns();
+            }
             setBusyCandidateId(null);
-            if (selectedCampaignId) loadDetail(selectedCampaignId, queue);
         });
     };
 
@@ -571,6 +603,15 @@ export function PropertyMatchCampaignsDialog({
                 loadDetail(selectedCampaignId, queue);
             }
         });
+    };
+
+    const openCandidateConversation = (candidate: Candidate) => {
+        if (!candidate.conversationId) return;
+        if (onOpenConversation) {
+            onOpenConversation(candidate.conversationId);
+            return;
+        }
+        window.location.href = `/admin/conversations?id=${encodeURIComponent(candidate.conversationId)}`;
     };
 
     const activeCampaign = detail?.campaign || campaigns.find((campaign) => campaign.id === selectedCampaignId) || null;
@@ -897,8 +938,8 @@ export function PropertyMatchCampaignsDialog({
                                                         </div>
                                                         <div className="grid grid-cols-1 items-center gap-1 sm:flex">
                                                             {candidate.conversationId ? (
-                                                                <Button asChild type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7">
-                                                                    <a href={`/admin/conversations?id=${encodeURIComponent(candidate.conversationId)}`}>Open</a>
+                                                                <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7" onClick={() => openCandidateConversation(candidate)}>
+                                                                    Open conversation
                                                                 </Button>
                                                             ) : null}
                                                             {canReview ? (

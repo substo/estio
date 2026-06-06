@@ -3122,6 +3122,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             <PropertyMatchCampaignsDialog
                 open={propertyCampaignsOpen}
                 onOpenChange={setPropertyCampaignsOpen}
+                onOpenConversation={(conversationId) => {
+                    setPropertyCampaignsOpen(false);
+                    updateUrl({ id: conversationId, view: 'active', mode: null }, 'push');
+                    handleSelect(conversationId);
+                }}
             />
 
             {/* New Conversation Dialog */}
