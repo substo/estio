@@ -141,6 +141,28 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
   return counts;
 }
 
+function summarizePropertyMatchCampaignCounters(campaign: AnyRecord) {
+  const totalCandidates = Math.max(0, Number(campaign.totalCandidates || 0));
+  const processedCandidates = Math.max(0, Number(campaign.processedCandidates || 0));
+  const approvedCount = Math.max(0, Number(campaign.approvedCount || 0));
+  const sentCount = Math.max(0, Number(campaign.sentCount || 0));
+  const yesCount = Math.max(0, Number(campaign.yesCount || 0));
+  const maybeCount = Math.max(0, Number(campaign.maybeCount || 0));
+  const noCount = Math.max(0, Number(campaign.noCount || 0));
+
+  return {
+    allCount: totalCandidates,
+    pendingAiCount: Math.max(0, totalCandidates - processedCandidates),
+    reviewCount: Math.max(0, yesCount + maybeCount - approvedCount - sentCount),
+    approvedCount,
+    sentCount,
+    skippedCount: 0,
+    rejectedCount: 0,
+    notMatchCount: noCount,
+    alreadySharedCount: 0,
+  };
+}
+
 function normalizeText(value: unknown, max = 4000): string | null {
   const text = String(value || "").trim();
   return text ? text.slice(0, max).trim() : null;
@@ -1615,7 +1637,10 @@ export async function listPropertyMatchCampaigns(args: {
     orderBy: { createdAt: "desc" },
     take: Math.max(1, Math.min(50, Number(args.limit || 20))),
   });
-  return withPropertyMatchQueueCounts(args.locationId, campaigns as any[]);
+  return campaigns.map((campaign) => ({
+    ...campaign,
+    queueCounts: summarizePropertyMatchCampaignCounters(campaign as AnyRecord),
+  }));
 }
 
 async function withPropertyMatchQueueCounts(locationId: string, campaigns: AnyRecord[]) {

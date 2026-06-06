@@ -274,6 +274,7 @@ export function PropertyMatchCampaignsDialog({
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
     const [detail, setDetail] = useState<CampaignDetail | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
     const [queue, setQueue] = useState<Queue>("review");
     const [propertyQuery, setPropertyQuery] = useState("");
     const [properties, setProperties] = useState<PropertyResult[]>([]);
@@ -295,6 +296,8 @@ export function PropertyMatchCampaignsDialog({
     const [mobileView, setMobileView] = useState<MobileCampaignView>("campaigns");
     const [isPending, startTransition] = useTransition();
     const propertySearchRequestIdRef = useRef(0);
+    const detailRequestIdRef = useRef(0);
+    const campaignPrefetchStartedRef = useRef(false);
     const processingRunRef = useRef(0);
 
     const selectedProperty = useMemo(
@@ -319,6 +322,15 @@ export function PropertyMatchCampaignsDialog({
         });
     }, [refreshCampaigns]);
 
+    useEffect(() => {
+        if (open || campaignPrefetchStartedRef.current) return;
+        campaignPrefetchStartedRef.current = true;
+        const timeout = window.setTimeout(() => {
+            loadCampaigns();
+        }, 750);
+        return () => window.clearTimeout(timeout);
+    }, [loadCampaigns, open]);
+
     const applyCampaignDetail = useCallback((res: {
         campaign: unknown;
         candidates: unknown[];
@@ -336,14 +348,24 @@ export function PropertyMatchCampaignsDialog({
     }, []);
 
     const refreshDetail = useCallback(async (campaignId: string, nextQueue = queue) => {
-        const res = await getPropertyMatchCampaignDetailAction(campaignId, nextQueue);
-        if (!res.success) {
-            setError(res.error || "Could not load campaign.");
-            return null;
+        const requestId = detailRequestIdRef.current + 1;
+        detailRequestIdRef.current = requestId;
+        setDetailLoading(true);
+        try {
+            const res = await getPropertyMatchCampaignDetailAction(campaignId, nextQueue);
+            if (detailRequestIdRef.current !== requestId) return null;
+            if (!res.success) {
+                setError(res.error || "Could not load campaign.");
+                return null;
+            }
+            setError("");
+            applyCampaignDetail({ campaign: res.campaign, candidates: res.candidates as unknown[] });
+            return { campaign: res.campaign as Campaign, candidates: res.candidates as Candidate[] };
+        } finally {
+            if (detailRequestIdRef.current === requestId) {
+                setDetailLoading(false);
+            }
         }
-        setError("");
-        applyCampaignDetail({ campaign: res.campaign, candidates: res.candidates as unknown[] });
-        return { campaign: res.campaign as Campaign, candidates: res.candidates as Candidate[] };
     }, [applyCampaignDetail, queue]);
 
     const loadDetail = useCallback((campaignId: string, nextQueue = queue) => {
@@ -623,7 +645,6 @@ export function PropertyMatchCampaignsDialog({
 
     const setQueueAndReload = (nextQueue: Queue) => {
         setQueue(nextQueue);
-        if (selectedCampaignId) loadDetail(selectedCampaignId, nextQueue);
     };
 
     const generateDraft = (candidate: Candidate) => {
@@ -810,7 +831,10 @@ export function PropertyMatchCampaignsDialog({
         window.location.href = `/admin/conversations?id=${encodeURIComponent(candidate.conversationId)}`;
     };
 
-    const activeCampaign = detail?.campaign || campaigns.find((campaign) => campaign.id === selectedCampaignId) || null;
+    const activeCampaign = (detail?.campaign.id === selectedCampaignId ? detail.campaign : null)
+        || campaigns.find((campaign) => campaign.id === selectedCampaignId)
+        || null;
+    const activeDetail = detail?.campaign.id === activeCampaign?.id ? detail : null;
     const activeCampaignIsProcessing = processingCampaignId === activeCampaign?.id || campaignCanStop(activeCampaign);
     const activeCampaignIsCanceling = cancelingCampaignId === activeCampaign?.id;
     const activeCampaignIsStopped = campaignIsStopped(activeCampaign);
@@ -1122,11 +1146,17 @@ export function PropertyMatchCampaignsDialog({
                                 </div>
 
                                 <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-                                    {detail?.candidates.length === 0 ? (
+                                    {detailLoading && !activeDetail ? (
+                                        <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">
+                                            <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
+                                            Loading campaign contacts...
+                                        </div>
+                                    ) : null}
+                                    {!detailLoading && activeDetail?.candidates.length === 0 ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">{queueEmptyLabel(queue)}</div>
                                     ) : null}
                                     <div className="space-y-3">
-                                        {detail?.candidates.map((candidate) => {
+                                        {activeDetail?.candidates.map((candidate) => {
                                             const draft = drafts[candidate.id] ?? candidate.draftBody ?? "";
                                             const savedDraft = candidate.draftBody || "";
                                             const dimensions = candidateStructuredDimensions(candidate);
