@@ -46,13 +46,12 @@ export function MessageLinkPreviewCard({ url, overflowCount = 0, theme }: Messag
         };
     }, [url]);
 
-    if (state.status === "failed") return null;
-
     const preview = state.status === "ready" ? state.preview : null;
     const title = String(preview?.title || fallbackHost || "Link").trim();
     const description = String(preview?.description || "").trim();
     const imageUrl = String(preview?.imageUrl || "").trim();
     const siteLabel = String(preview?.siteName || fallbackHost || "").trim();
+    const isLoading = state.status === "loading" || state.status === "idle";
 
     return (
         <a
@@ -60,37 +59,44 @@ export function MessageLinkPreviewCard({ url, overflowCount = 0, theme }: Messag
             target="_blank"
             rel="noreferrer"
             className={cn(
-                "mt-2 block overflow-hidden rounded-md border text-left no-underline transition hover:brightness-[0.98]",
+                "mt-2 block h-[96px] overflow-hidden rounded-md border text-left no-underline transition hover:brightness-[0.98]",
                 theme.attachmentCardClassName
             )}
             onClick={(event) => event.stopPropagation()}
         >
-            <div className="flex min-h-[76px] w-full">
-                <div className="relative h-auto w-24 shrink-0 bg-slate-100 sm:w-28">
+            <div className="flex h-full w-full">
+                <div className="relative h-full w-24 shrink-0 bg-slate-100 sm:w-28">
                     {imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                             src={imageUrl}
                             alt=""
-                            className="h-full min-h-[76px] w-full object-cover"
+                            className="h-full w-full object-cover"
                             loading="lazy"
                         />
                     ) : (
-                        <div className="flex h-full min-h-[76px] w-full items-center justify-center text-slate-400">
+                        <div className="flex h-full w-full items-center justify-center text-slate-400">
                             <ImageIcon className="h-5 w-5" />
                         </div>
                     )}
                 </div>
-                <div className="min-w-0 flex-1 px-2.5 py-2">
+                <div className="flex min-w-0 flex-1 flex-col px-2.5 py-2">
                     <div className={cn("line-clamp-2 text-xs font-semibold leading-snug", theme.attachmentPrimaryTextClassName)}>
-                        {state.status === "loading" ? "Loading preview..." : title}
+                        {title}
                     </div>
-                    {description && (
+                    {description ? (
                         <div className={cn("mt-1 line-clamp-2 text-[11px] leading-snug", theme.attachmentMutedTextClassName)}>
                             {description}
                         </div>
+                    ) : isLoading ? (
+                        <div className="mt-1 space-y-1" aria-hidden="true">
+                            <div className="h-2 w-11/12 rounded bg-current opacity-10" />
+                            <div className="h-2 w-2/3 rounded bg-current opacity-10" />
+                        </div>
+                    ) : (
+                        <div className="mt-1 h-[26px]" aria-hidden="true" />
                     )}
-                    <div className={cn("mt-1.5 flex min-w-0 items-center gap-1 text-[10px]", theme.attachmentMutedTextClassName)}>
+                    <div className={cn("mt-auto flex min-w-0 items-center gap-1 pt-1.5 text-[10px]", theme.attachmentMutedTextClassName)}>
                         <ExternalLink className="h-3 w-3 shrink-0" />
                         <span className="truncate">{siteLabel || url}</span>
                         {overflowCount > 0 && <span className="shrink-0">+{overflowCount}</span>}
