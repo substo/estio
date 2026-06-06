@@ -6692,12 +6692,14 @@ const DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT = 12;
 const MAX_PROPERTY_MATCH_SEARCH_LIMIT = 25;
 
 export async function searchPropertyMatchCampaignPropertiesAction(query?: string, limit = DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT) {
+    const trimmed = String(query || "").trim();
+    if (trimmed.length < 2) return [];
+
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return [];
 
     try {
-        const trimmed = String(query || "").trim();
         const cappedLimit = Math.min(
             Math.max(Math.floor(Number(limit) || DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT), 1),
             MAX_PROPERTY_MATCH_SEARCH_LIMIT,

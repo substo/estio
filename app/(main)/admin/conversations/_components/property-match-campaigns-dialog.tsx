@@ -150,10 +150,8 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
     { value: "all", label: "All", countKey: "allCount" },
 ];
 
-const RECENT_PROPERTY_LIMIT = 8;
 const PROPERTY_SEARCH_LIMIT = 12;
 const MIN_PROPERTY_SEARCH_LENGTH = 2;
-const RECENT_PROPERTY_DEBOUNCE_MS = 250;
 const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
 const LIVE_BATCH_LIMIT = 1;
 
@@ -374,11 +372,19 @@ export function PropertyMatchCampaignsDialog({
         });
     }, [queue, refreshDetail]);
 
-    const loadPropertyOptions = useCallback(async (query: string, limit = RECENT_PROPERTY_LIMIT) => {
+    const loadPropertyOptions = useCallback(async (query: string, limit = PROPERTY_SEARCH_LIMIT) => {
+        const trimmed = query.trim();
+        if (trimmed.length < MIN_PROPERTY_SEARCH_LENGTH) {
+            propertySearchRequestIdRef.current += 1;
+            setProperties([]);
+            setSelectedPropertyId(null);
+            setPropertySearchLoading(false);
+            return;
+        }
         const requestId = propertySearchRequestIdRef.current + 1;
         propertySearchRequestIdRef.current = requestId;
         setPropertySearchLoading(true);
-        const rows = await searchPropertyMatchCampaignPropertiesAction(query, limit);
+        const rows = await searchPropertyMatchCampaignPropertiesAction(trimmed, limit);
         if (propertySearchRequestIdRef.current !== requestId) return;
         setProperties(rows as PropertyResult[]);
         setSelectedPropertyId((current) => {
@@ -411,12 +417,6 @@ export function PropertyMatchCampaignsDialog({
     useEffect(() => {
         if (!open) return;
         const trimmed = propertyQuery.trim();
-        if (!trimmed) {
-            const timeout = window.setTimeout(() => {
-                void loadPropertyOptions("", RECENT_PROPERTY_LIMIT);
-            }, RECENT_PROPERTY_DEBOUNCE_MS);
-            return () => window.clearTimeout(timeout);
-        }
         if (trimmed.length < MIN_PROPERTY_SEARCH_LENGTH) {
             propertySearchRequestIdRef.current += 1;
             setPropertySearchLoading(false);
@@ -431,7 +431,7 @@ export function PropertyMatchCampaignsDialog({
     }, [loadPropertyOptions, open, propertyQuery]);
 
     const searchProperties = () => {
-        void loadPropertyOptions(propertyQuery, propertyQuery.trim() ? PROPERTY_SEARCH_LIMIT : RECENT_PROPERTY_LIMIT);
+        void loadPropertyOptions(propertyQuery, PROPERTY_SEARCH_LIMIT);
     };
 
     const runCampaignBatchLive = useCallback(async (campaignId: string, nextQueue = queue) => {
@@ -923,6 +923,9 @@ export function PropertyMatchCampaignsDialog({
                                     ))}
                                     {!propertySearchLoading && propertyQuery.trim().length > 0 && propertyQuery.trim().length < MIN_PROPERTY_SEARCH_LENGTH ? (
                                         <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Type at least 2 characters.</div>
+                                    ) : null}
+                                    {!propertySearchLoading && propertyQuery.trim().length === 0 && properties.length === 0 ? (
+                                        <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Search by reference, title, or area.</div>
                                     ) : null}
                                     {!propertySearchLoading && propertyQuery.trim().length >= 2 && properties.length === 0 ? (
                                         <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">No matching properties.</div>
