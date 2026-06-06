@@ -167,8 +167,8 @@ function candidateRequirementLine(candidate: Candidate) {
 
 function candidateStructuredDimensions(candidate: Candidate) {
     return (candidate.evidence?.structured?.dimensions || [])
-        .filter((dimension) => dimension?.label && ["goal", "location", "price", "bedrooms", "type", "condition", "sparse", "status"].includes(String(dimension.key || "")))
-        .slice(0, 7);
+        .filter((dimension) => dimension?.label && ["goal", "location", "price", "bedrooms", "type", "size", "features", "condition", "sparse", "status"].includes(String(dimension.key || "")))
+        .slice(0, 9);
 }
 
 function dimensionStatusClass(status?: string) {

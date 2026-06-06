@@ -249,3 +249,79 @@ test("structured matcher disqualifies leads who stopped searching", () => {
   assert.equal(result.verdict, "no");
   assert.match(result.disqualifiers?.join(" ") || "", /no longer searching/);
 });
+
+test("structured matcher rejects explicit minimum size mismatch", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      areaSqm: 46,
+      city: "Paphos",
+      propertyArea: "Peyia",
+      propertyLocation: "Paphos",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+      requirementOtherDetails: "Needs at least 60m2 covered area.",
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.match(result.hardMismatches?.join(" ") || "", /covered area/);
+});
+
+test("structured matcher compares requested features", () => {
+  const matching = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      areaSqm: 46,
+      city: "Paphos",
+      propertyArea: "Peyia",
+      propertyLocation: "Paphos",
+      features: ["swimming_pool_communal", "parking_covered", "title_deeds_available"],
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+      requirementOtherDetails: "Needs title deeds and pool.",
+    },
+  );
+  assert.notEqual(matching.verdict, "no");
+  assert.equal(matching.dimensions?.find((dimension) => dimension.key === "features")?.status, "yes");
+
+  const missingRequired = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      areaSqm: 46,
+      city: "Paphos",
+      propertyArea: "Peyia",
+      propertyLocation: "Paphos",
+      features: ["parking_covered"],
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+      requirementOtherDetails: "Must have title deeds.",
+    },
+  );
+  assert.equal(missingRequired.verdict, "no");
+  assert.match(missingRequired.hardMismatches?.join(" ") || "", /required feature/);
+});

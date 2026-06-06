@@ -394,10 +394,14 @@ function propertyMatchInput(property: AnyRecord): PropertyMatchInput {
     type: property.type,
     price: property.price,
     bedrooms: property.bedrooms,
+    areaSqm: property.areaSqm,
     city: property.city,
     propertyLocation: property.propertyLocation,
     propertyArea: property.propertyArea,
     condition: property.condition,
+    features: property.features || [],
+    description: property.description,
+    sourceText: property.sourceText,
   };
 }
 

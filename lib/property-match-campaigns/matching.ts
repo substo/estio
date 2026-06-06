@@ -7,10 +7,14 @@ export type PropertyMatchInput = {
   type?: string | null;
   price?: number | null;
   bedrooms?: number | null;
+  areaSqm?: number | null;
   city?: string | null;
   propertyLocation?: string | null;
   propertyArea?: string | null;
   condition?: string | null;
+  features?: string[] | null;
+  description?: string | null;
+  sourceText?: string | null;
 };
 
 export type ContactRequirementInput = {
@@ -228,6 +232,62 @@ function parseMoney(value: unknown): number | null {
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
 }
 
+function requirementText(contact: ContactRequirementInput): string {
+  return [
+    contact.requirementOtherDetails,
+    contact.requirementSummary,
+    contact.recentMessagesText,
+  ].map((item) => display(item)).filter(Boolean).join("\n");
+}
+
+function parseAreaRequirement(text: string): { min: number | null; max: number | null; raw: string | null } {
+  const matches = Array.from(text.matchAll(/\b(?:min(?:imum)?|at\s+least|from|over|above|around|approx(?:imately)?|up\s+to|under|below|max(?:imum)?|less\s+than)?\s*(\d{2,4})\s*(?:m2|m²|sqm|sq\.?\s*m|square\s*(?:met(?:er|re)s?))\b/gi));
+  if (matches.length === 0) return { min: null, max: null, raw: null };
+  let min: number | null = null;
+  let max: number | null = null;
+  for (const match of matches) {
+    const prefix = normalize(match[0].replace(match[1], ""));
+    const value = Number(match[1]);
+    if (!Number.isFinite(value)) continue;
+    if (/\b(up to|under|below|max|maximum|less than)\b/.test(prefix)) {
+      max = max == null ? value : Math.min(max, value);
+    } else {
+      min = min == null ? value : Math.max(min, value);
+    }
+  }
+  return { min, max, raw: matches.map((match) => match[0].trim()).join(", ") };
+}
+
+const FEATURE_PATTERNS: Array<{ key: string; label: string; pattern: RegExp; propertyHints: string[] }> = [
+  { key: "pool", label: "Pool", pattern: /\b(pool|swimming)\b/i, propertyHints: ["pool", "swimming"] },
+  { key: "parking", label: "Parking", pattern: /\b(parking|garage)\b/i, propertyHints: ["parking", "garage"] },
+  { key: "title_deeds", label: "Title deeds", pattern: /\b(title\s*deeds?|deeds)\b/i, propertyHints: ["title_deeds", "title deeds"] },
+  { key: "furnished", label: "Furnished", pattern: /\b(furnished|furniture)\b/i, propertyHints: ["furnished"] },
+  { key: "elevator", label: "Elevator", pattern: /\b(elevator|lift)\b/i, propertyHints: ["elevator", "lift"] },
+  { key: "walking_distance", label: "Walking distance", pattern: /\b(walking\s+distance|walk\s+to|walkable)\b/i, propertyHints: ["walking_distance", "walking distance", "town_walking_distance"] },
+  { key: "beach", label: "Beach proximity", pattern: /\b(beach|sea)\b/i, propertyHints: ["beach", "sea"] },
+  { key: "ground_floor", label: "Ground floor", pattern: /\b(ground\s+floor|no\s+stairs|without\s+stairs)\b/i, propertyHints: ["ground_floor", "ground floor"] },
+  { key: "garden", label: "Garden", pattern: /\b(garden|yard)\b/i, propertyHints: ["garden", "yard"] },
+  { key: "air_conditioning", label: "Air conditioning", pattern: /\b(air\s*conditioning|a\/c|ac\b)\b/i, propertyHints: ["air_conditioning", "air conditioning"] },
+];
+
+function propertyFeatureText(property: PropertyMatchInput): string {
+  return [
+    ...(Array.isArray(property.features) ? property.features : []),
+    property.description,
+    property.sourceText,
+  ].map((item) => display(item)).filter(Boolean).join("\n").toLowerCase();
+}
+
+function detectFeatureRequirements(text: string) {
+  return FEATURE_PATTERNS
+    .filter((feature) => feature.pattern.test(text))
+    .map((feature) => ({
+      ...feature,
+      required: new RegExp(`\\b(must|need(?:s|ed)?|required|essential|only|has to have)\\b[^.\\n]{0,50}${feature.pattern.source}|${feature.pattern.source}[^.\\n]{0,50}\\b(must|need(?:s|ed)?|required|essential|only|has to have)\\b`, "i").test(text),
+    }));
+}
+
 function bedroomRequirementMatches(requirement: unknown, bedrooms: number | null | undefined): boolean | null {
   if (isAny(requirement)) return true;
   const source = normalize(requirement);
@@ -263,6 +323,7 @@ export function evaluateStructuredPropertyMatch(
   const hardMismatches: string[] = [];
   const disqualifiers: string[] = [];
   const recentIntent = detectRecentIntent(contact);
+  const combinedRequirementText = requirementText(contact);
 
   if (recentIntent.stoppedSearch) {
     disqualifiers.push("lead has clearly indicated they are no longer searching");
@@ -451,6 +512,78 @@ export function evaluateStructuredPropertyMatch(
     });
   }
 
+  const areaRequirement = parseAreaRequirement(combinedRequirementText);
+  const propertyAreaSqm = Number.isFinite(Number(property.areaSqm)) ? Number(property.areaSqm) : null;
+  if (areaRequirement.min != null || areaRequirement.max != null || propertyAreaSqm != null) {
+    let areaStatus: MatchVerdict | "unknown" = "unknown";
+    const areaReasons: string[] = [];
+    if (propertyAreaSqm == null && (areaRequirement.min != null || areaRequirement.max != null)) {
+      unknowns.push("property size is missing");
+      areaReasons.push("Property size is missing.");
+    } else if (propertyAreaSqm != null && (areaRequirement.min != null || areaRequirement.max != null)) {
+      areaStatus = "yes";
+      if (areaRequirement.min != null && propertyAreaSqm < areaRequirement.min) {
+        areaStatus = "no";
+        mismatches.push("covered area is below the stated size requirement");
+        hardMismatches.push("covered area is below the stated size requirement");
+        areaReasons.push("Covered area is below the stated minimum.");
+      }
+      if (areaRequirement.max != null && propertyAreaSqm > areaRequirement.max) {
+        areaStatus = "maybe";
+        unknowns.push("covered area is above the stated size preference");
+        areaReasons.push("Covered area is above the stated preference.");
+      }
+      if (areaReasons.length === 0) {
+        matches.push("covered area matches");
+        areaReasons.push("Covered area fits the stated size requirement.");
+      }
+    }
+    addDimension(dimensions, {
+      key: "size",
+      label: "Size",
+      propertyValue: propertyAreaSqm != null ? `${propertyAreaSqm}m2` : null,
+      requirementValue: areaRequirement.raw,
+      status: areaStatus,
+      weight: 2,
+      reason: areaReasons.join(" ") || "No concrete size requirement found.",
+    });
+  }
+
+  const requestedFeatures = detectFeatureRequirements(combinedRequirementText);
+  if (requestedFeatures.length > 0) {
+    const featureText = propertyFeatureText(property);
+    const present: string[] = [];
+    const missing: string[] = [];
+    const requiredMissing: string[] = [];
+    for (const feature of requestedFeatures) {
+      const hasFeature = feature.propertyHints.some((hint) => featureText.includes(hint));
+      if (hasFeature) present.push(feature.label);
+      else {
+        missing.push(feature.label);
+        if (feature.required) requiredMissing.push(feature.label);
+      }
+    }
+    if (present.length > 0) matches.push("requested features match");
+    if (missing.length > 0) unknowns.push("some requested features need review");
+    if (requiredMissing.length > 0) {
+      mismatches.push("required feature appears missing");
+      hardMismatches.push("required feature appears missing");
+    }
+    addDimension(dimensions, {
+      key: "features",
+      label: "Features",
+      propertyValue: present.length ? present.join(", ") : "Not found",
+      requirementValue: requestedFeatures.map((feature) => feature.label).join(", "),
+      status: requiredMissing.length > 0 ? "no" : missing.length > 0 ? "maybe" : "yes",
+      weight: 2,
+      reason: requiredMissing.length > 0
+        ? `Required feature missing: ${requiredMissing.join(", ")}.`
+        : missing.length > 0
+          ? `Some requested features need review: ${missing.join(", ")}.`
+          : "Requested features are present.",
+    });
+  }
+
   const hasUnstructuredRequirements = Boolean(
     normalize(contact.requirementOtherDetails) || normalize(contact.requirementSummary)
   );
@@ -461,6 +594,8 @@ export function evaluateStructuredPropertyMatch(
     minPrice != null || maxPrice != null,
     hasLocationRequirement,
     !isAny(contact.requirementCondition),
+    areaRequirement.min != null || areaRequirement.max != null,
+    requestedFeatures.length > 0,
     hasUnstructuredRequirements,
   ].filter(Boolean).length;
   const sparseLead = concreteRequirementCount <= 1;
