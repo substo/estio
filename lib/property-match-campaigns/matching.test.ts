@@ -152,3 +152,100 @@ test("structured matcher supports multiple acceptable types and locations", () =
   assert.equal(result.verdict, "yes");
   assert.equal(result.mismatches.length, 0);
 });
+
+test("structured matcher rejects different district recent intent even when structured locations are broad", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+      propertyLocation: "Paphos",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Limassol", "Paphos"],
+      requirementOtherDetails: "Interested in Ref. No. DT3294: 1-bed Apartment in Limassol - Agios Ioannis.",
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.match(result.hardMismatches?.join(" ") || "", /different district/);
+});
+
+test("structured matcher keeps same-district different area as maybe", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+      propertyLocation: "Paphos",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+      requirementOtherDetails: "Interested in a 1-bed apartment in Paphos Town.",
+    },
+  );
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.needsAi, true);
+  assert.match(result.unknowns.join(" "), /different local area/);
+});
+
+test("structured matcher does not return yes for sparse broad leads", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementDistrict: "Any District",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMinPrice: "Any",
+      requirementMaxPrice: "Any",
+      requirementPropertyTypes: [],
+      requirementPropertyLocations: [],
+    },
+  );
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.needsAi, true);
+});
+
+test("structured matcher disqualifies leads who stopped searching", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementPropertyLocations: ["Paphos"],
+      recentMessagesText: "Thanks but we already bought a property. Please stop sending.",
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.match(result.disqualifiers?.join(" ") || "", /no longer searching/);
+});

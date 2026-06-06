@@ -48,6 +48,23 @@ test("AI match normalizer preserves high-confidence yes", () => {
   assert.equal(result.confidence, 0.86);
 });
 
+test("AI match normalizer cannot override structured blockers", () => {
+  const result = normalizeAiMatchAssessment({
+    verdict: "yes",
+    confidence: 0.95,
+    reasoning: "Looks good",
+  }, {
+    structured: {
+      verdict: "no",
+      hardMismatches: ["recent lead intent points to a different district/city"],
+      needsAi: true,
+    },
+  });
+
+  assert.equal(result.verdict, "no");
+  assert.equal(result.evidence.structured.needsAi, false);
+});
+
 test("AI match normalizer clamps invalid confidence and invalid verdict", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "definitely",

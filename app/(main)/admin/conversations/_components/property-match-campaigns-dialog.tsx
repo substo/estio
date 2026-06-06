@@ -84,6 +84,21 @@ type Candidate = {
     confidence?: number | null;
     matchSummary?: string | null;
     reasoning?: string | null;
+    evidence?: {
+        structured?: {
+            dimensions?: Array<{
+                key?: string;
+                label?: string;
+                propertyValue?: string | number | null;
+                requirementValue?: string | number | null;
+                status?: "yes" | "maybe" | "no" | "unknown";
+                reason?: string;
+            }>;
+            overallScore?: number;
+            disqualifiers?: string[];
+            hardMismatches?: string[];
+        };
+    } | null;
     preferredChannel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | string | null;
     draftBody?: string;
     reviewedAt?: string | null;
@@ -148,6 +163,24 @@ function candidateRequirementLine(candidate: Candidate) {
         candidate.contact?.requirementMaxPrice,
         candidate.contact?.requirementPropertyLocations?.join(", "),
     ].filter(Boolean).join(" · ");
+}
+
+function candidateStructuredDimensions(candidate: Candidate) {
+    return (candidate.evidence?.structured?.dimensions || [])
+        .filter((dimension) => dimension?.label && ["goal", "location", "price", "bedrooms", "type", "condition", "sparse", "status"].includes(String(dimension.key || "")))
+        .slice(0, 7);
+}
+
+function dimensionStatusClass(status?: string) {
+    if (status === "yes") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    if (status === "no") return "border-red-200 bg-red-50 text-red-800";
+    if (status === "maybe") return "border-amber-200 bg-amber-50 text-amber-800";
+    return "border-slate-200 bg-white text-slate-700";
+}
+
+function formatDimensionValue(value: unknown) {
+    if (value == null || value === "") return "Any";
+    return String(value);
 }
 
 function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
@@ -828,6 +861,7 @@ export function PropertyMatchCampaignsDialog({
                                         {detail?.candidates.map((candidate) => {
                                             const draft = drafts[candidate.id] ?? candidate.draftBody ?? "";
                                             const savedDraft = candidate.draftBody || "";
+                                            const dimensions = candidateStructuredDimensions(candidate);
                                             const canSend = candidate.reviewerStatus === "approved"
                                                 && !!savedDraft.trim()
                                                 && draft.trim() === savedDraft.trim();
@@ -883,6 +917,25 @@ export function PropertyMatchCampaignsDialog({
 
                                                     <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-xs text-slate-700">
                                                         <div className="font-medium">{candidate.matchSummary || "Match review"}</div>
+                                                        {dimensions.length > 0 ? (
+                                                            <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                                                                {dimensions.map((dimension) => (
+                                                                    <div
+                                                                        key={`${candidate.id}-${dimension.key || dimension.label}`}
+                                                                        className={`min-w-0 rounded-md border px-2 py-1.5 ${dimensionStatusClass(dimension.status)}`}
+                                                                        title={dimension.reason || undefined}
+                                                                    >
+                                                                        <div className="flex items-center justify-between gap-2">
+                                                                            <span className="truncate font-medium">{dimension.label}</span>
+                                                                            <span className="shrink-0 text-[10px] uppercase">{dimension.status || "unknown"}</span>
+                                                                        </div>
+                                                                        <div className="mt-0.5 truncate text-[11px] opacity-85">
+                                                                            {formatDimensionValue(dimension.propertyValue)} vs {formatDimensionValue(dimension.requirementValue)}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : null}
                                                         {candidate.reasoning ? <div className="mt-1 text-slate-600">{candidate.reasoning}</div> : null}
                                                         {candidate.rejectedReason ? <div className="mt-1 text-slate-600">Decision note: {candidate.rejectedReason}</div> : null}
                                                         {candidate.lastError ? <div className="mt-1 text-red-600">{candidate.lastError}</div> : null}

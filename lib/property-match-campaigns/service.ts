@@ -10,6 +10,7 @@ import {
   type MatchVerdict,
   type PropertyMatchInput,
   type ContactRequirementInput,
+  type StructuredMatchResult,
 } from "@/lib/property-match-campaigns/matching";
 
 type AnyRecord = Record<string, any>;
@@ -254,7 +255,13 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
     ? Math.max(0, Math.min(1, Number(raw.confidence)))
     : 0.5;
   const requestedVerdict = normalizeVerdict(raw.verdict);
-  const verdict = requestedVerdict === "yes" && confidence < LOW_CONFIDENCE_YES_THRESHOLD
+  const structuredEvidence = fallbackEvidence?.structured || {};
+  const hasStructuredBlocker = structuredEvidence.verdict === "no"
+    || (Array.isArray(structuredEvidence.hardMismatches) && structuredEvidence.hardMismatches.length > 0)
+    || (Array.isArray(structuredEvidence.disqualifiers) && structuredEvidence.disqualifiers.length > 0);
+  const verdict = hasStructuredBlocker
+    ? "no"
+    : requestedVerdict === "yes" && confidence < LOW_CONFIDENCE_YES_THRESHOLD
     ? "maybe"
     : requestedVerdict;
 
@@ -264,6 +271,8 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
     reasoning: normalizeText(raw.reasoning, 3000) || (
       verdict === "maybe" && requestedVerdict === "yes"
         ? "AI confidence was too low for a definite yes; kept for human review."
+        : hasStructuredBlocker
+          ? "Structured matching found a hard mismatch or disqualifier; AI cannot override it."
         : "AI reviewed the ambiguous requirements."
     ),
     matchSummary: normalizeText(raw.matchSummary, 1200) || "AI reviewed the lead against this property.",
@@ -404,16 +413,28 @@ function contactRequirementInput(contact: AnyRecord): ContactRequirementInput {
     requirementPropertyLocations: contact.requirementPropertyLocations || [],
     requirementOtherDetails: contact.requirementOtherDetails,
     requirementSummary: contact.requirementSummary,
+    leadGoal: contact.leadGoal,
+    contactType: contact.contactType,
+    contactName: contact.name,
+    recentMessagesText: Array.isArray(contact.recentMessages)
+      ? contact.recentMessages.map((message: AnyRecord) => message.body).filter(Boolean).join("\n")
+      : contact.recentMessagesText,
   };
 }
 
-function evidenceForStructuredMatch(result: ReturnType<typeof evaluateStructuredPropertyMatch>) {
+function evidenceForStructuredMatch(result: StructuredMatchResult) {
   return {
     structured: {
       matches: result.matches,
       mismatches: result.mismatches,
       unknowns: result.unknowns,
       needsAi: result.needsAi,
+      overallScore: result.score,
+      verdict: result.verdict,
+      dimensions: result.dimensions || [],
+      hardMismatches: result.hardMismatches || [],
+      disqualifiers: result.disqualifiers || [],
+      recentIntent: result.recentIntent || null,
     },
   };
 }
@@ -482,11 +503,32 @@ export function buildPropertyMatchContactWhere(locationId: string, cursor?: stri
   };
 }
 
-export function nonSeekerLeadGoalMatch(contact: AnyRecord) {
+export function nonSeekerLeadGoalMatch(contact: AnyRecord): (StructuredMatchResult & {
+  confidence: number;
+  evidence: AnyRecord;
+  reasoning: string;
+  matchSummary: string;
+}) | null {
   if (!NON_SEEKER_LEAD_GOALS.includes(String(contact.leadGoal || ""))) return null;
   return {
     verdict: "no" as MatchVerdict,
     score: -5,
+    needsAi: false,
+    matches: [],
+    mismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
+    unknowns: [],
+    dimensions: [{
+      key: "status",
+      label: "Lead Status",
+      propertyValue: null,
+      requirementValue: contact.leadGoal,
+      status: "no",
+      weight: 5,
+      score: -5,
+      reason: `Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`,
+    }],
+    hardMismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
+    disqualifiers: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
     confidence: 0.95,
     evidence: {
       structured: {
@@ -494,6 +536,8 @@ export function nonSeekerLeadGoalMatch(contact: AnyRecord) {
         mismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
         unknowns: [],
         needsAi: false,
+        overallScore: -5,
+        verdict: "no",
       },
     },
     reasoning: `Lead goal is ${contact.leadGoal}, so this contact should not receive buyer/renter property match outreach.`,
@@ -885,6 +929,11 @@ async function collectPropertyMatchCandidatesBatch(args: {
         select: {
           id: true,
           lastMessageType: true,
+          messages: {
+            orderBy: { createdAt: "desc" },
+            take: 8,
+            select: { body: true },
+          },
         },
       },
     },
@@ -897,8 +946,12 @@ async function collectPropertyMatchCandidatesBatch(args: {
   const baseCandidateData = contacts.flatMap((contact: any) => {
     const conversation = contact.conversations[0];
     if (!conversation?.id) return [];
+    const recentMessages = [...(conversation.messages || [])].reverse();
     const nonSeekerMatch = nonSeekerLeadGoalMatch(contact);
-    const structured = nonSeekerMatch || evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput(contact));
+    const structured = nonSeekerMatch || evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput({
+      ...contact,
+      recentMessages,
+    }));
     const preferredChannel = deriveComposerInitialChannel(conversation as any);
     return [{
       locationId: args.locationId,
@@ -1150,6 +1203,8 @@ Return JSON only:
 
 Rules:
 - Use structured requirements as hard filters. Do not override a hard mismatch.
+- If structured.disqualifiers or structured.hardMismatches are present, verdict must be no.
+- Treat the structured dimension rows as the source of truth for goal, location, price, bedrooms, type, and stopped-search intent.
 - Use unstructured requirements and summary to decide yes vs maybe.
 - Choose yes only when sending is clearly reasonable.
 - Choose maybe when there is a plausible fit but missing, stale, or ambiguous information.
