@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildStructuredLeadDisplayName, inferLeadContactRoleFromSignals } from "./name-builder";
+import { buildCanonicalContactName, buildStructuredLeadDisplayName, inferLeadContactRoleFromSignals } from "./name-builder";
 
 test("buildStructuredLeadDisplayName uses provided display labels and sale goal cleanly", () => {
     const result = buildStructuredLeadDisplayName({
@@ -23,7 +23,7 @@ test("buildStructuredLeadDisplayName uses provided display labels and sale goal 
         },
     });
 
-    assert.equal(result, "Rafaela Hadid Owner Sale DT4674 3Bdr Apt Paphos");
+    assert.equal(result, "Rafaela Hadid Owner DT4674");
 });
 
 test("buildStructuredLeadDisplayName includes role and goal when multiple property refs exist, omitting property details", () => {
@@ -43,6 +43,29 @@ test("buildStructuredLeadDisplayName includes role and goal when multiple proper
     });
 
     assert.equal(result, "John Doe Lead Sale REF123, DT456");
+});
+
+test("buildCanonicalContactName uses contact role naming for non-leads", () => {
+    const result = buildCanonicalContactName({
+        contact: { name: "Andreas" },
+        contactType: "Owner",
+        rawLeadText: "Owner name: Andreas. Ref DT4930.",
+    });
+
+    assert.equal(result, "Andreas Owner DT4930");
+});
+
+test("buildCanonicalContactName avoids duplicate non-lead role labels", () => {
+    assert.equal(buildCanonicalContactName({
+        contact: { name: "Maria Agent" },
+        contactType: "Agent",
+    }), "Maria Agent");
+
+    assert.equal(buildCanonicalContactName({
+        contact: { name: "Andreas Owner DT4930" },
+        contactType: "Owner",
+        rawLeadText: "Ref DT4930",
+    }), "Andreas Owner DT4930");
 });
 
 test("inferLeadContactRoleFromSignals detects explicit owner and agent roles", () => {

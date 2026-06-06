@@ -9,6 +9,7 @@ import type { ContactIdentityPatch } from "../../contacts/_components/contact-fo
 import { GroupMembersList } from "./group-members-list";
 import { hasFullContactContext, isShellContactContext } from "./conversation-workspace-ui-actions";
 import { ContactRequirementProposals } from "./contact-requirement-proposals";
+import { ContactVerificationProposals } from "./contact-verification-proposals";
 
 const EditContactDialog = dynamic(
     () => import("../../contacts/_components/edit-contact-dialog").then((mod) => mod.EditContactDialog),
@@ -332,6 +333,12 @@ export function CoordinatorContactOverviewCard({
 
                                             {showSearchCriteria && (
                                                 <div className="pt-1.5 border-t">
+                                                    <ContactVerificationProposals
+                                                        conversationId={conversationId}
+                                                        contactId={contact.id}
+                                                        initialProposals={contactContext?.verificationProposals}
+                                                        onContactContextUpdated={onContactContextUpdated}
+                                                    />
                                                     <ContactRequirementProposals
                                                         conversationId={conversationId}
                                                         contactId={contact.id}

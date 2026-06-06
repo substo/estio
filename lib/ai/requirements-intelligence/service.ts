@@ -362,6 +362,7 @@ export async function generateRequirementProposal(args: {
     where: {
       locationId: args.locationId,
       contactId: contact.id,
+      proposalType: "requirements",
       status: "pending",
     },
     select: { id: true },
@@ -527,6 +528,7 @@ ${propertyEvidence.text || "None"}`;
       conversationId: args.conversationId || null,
       sourceType: args.sourceType || "manual",
       sourceIds: args.sourceIds || [],
+      proposalType: "requirements",
       status: "pending",
       currentSnapshot: snapshot as any,
       proposedPatch: proposedPatch as any,
@@ -605,6 +607,7 @@ export async function listPendingRequirementProposals(args: {
     where: {
       locationId: args.locationId,
       contactId: args.contactId,
+      proposalType: "requirements",
       status: "pending",
     },
     orderBy: { createdAt: "desc" },
@@ -619,7 +622,7 @@ export async function approveRequirementProposal(args: {
   editedPatch?: RequirementPatch | null;
 }) {
   const proposal = await db.contactRequirementProposal.findFirst({
-    where: { id: args.proposalId, locationId: args.locationId },
+    where: { id: args.proposalId, locationId: args.locationId, proposalType: "requirements" },
     include: { contact: true },
   });
   if (!proposal) return { success: false as const, error: "Requirement proposal not found." };
@@ -669,6 +672,7 @@ export async function approveRequirementProposal(args: {
       where: {
         id: { not: proposal.id },
         contactId: proposal.contactId,
+        proposalType: "requirements",
         status: "pending",
       },
       data: { status: "superseded" },
@@ -685,7 +689,7 @@ export async function rejectRequirementProposal(args: {
   reason?: string | null;
 }) {
   const proposal = await db.contactRequirementProposal.findFirst({
-    where: { id: args.proposalId, locationId: args.locationId },
+    where: { id: args.proposalId, locationId: args.locationId, proposalType: "requirements" },
     select: { id: true, status: true },
   });
   if (!proposal) return { success: false as const, error: "Requirement proposal not found." };

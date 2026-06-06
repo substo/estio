@@ -2182,6 +2182,7 @@ model ContactRequirementProposal {
 
   sourceType String // message | activity_note | transcript | manual | cron
   sourceIds  Json?
+  proposalType String @default("requirements") // requirements | verification
   status     String @default("pending") // pending | approved | rejected | superseded
 
   currentSnapshot Json?
@@ -2209,7 +2210,9 @@ model ContactRequirementProposal {
   rejectedBy User?         @relation("ContactRequirementProposalRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
 
   @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([locationId, proposalType, status, createdAt(sort: Desc)])
   @@index([contactId, status, createdAt(sort: Desc)])
+  @@index([contactId, proposalType, status, createdAt(sort: Desc)])
   @@index([conversationId, status, createdAt(sort: Desc)])
 }
 

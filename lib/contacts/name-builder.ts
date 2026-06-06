@@ -204,6 +204,71 @@ export function buildStructuredLeadPropertySummary(args: {
     return [bedrooms, propertyType, location].filter(Boolean).join(" ").trim();
 }
 
+export function buildLeadRequirementNameParts(args: {
+    rawLeadText?: string | null;
+    inferredStatus?: "For Rent" | "For Sale" | null | string;
+    matchedProperty?: BuilderPropertyMatchData | null;
+    requirements?: BuilderRequirementsData | null;
+}): string[] {
+    const refs = extractPropertyRefsFromLeadText(args.rawLeadText || "");
+    const goal = formatLeadGoalLabel(args.inferredStatus);
+    const singleRef = refs[0] || normalizeWhitespace(args.matchedProperty?.reference);
+
+    if (refs.length > 1) return [goal, refs.join(", ")].filter(Boolean);
+
+    const propertySummary = buildStructuredLeadPropertySummary({
+        matchedProperty: args.matchedProperty,
+        requirements: args.requirements,
+    });
+    return [goal, singleRef, propertySummary].filter(Boolean);
+}
+
+export function buildCanonicalContactName(args: {
+    contact?: BuilderContactData;
+    contactType?: string | null;
+    rawLeadText?: string | null;
+    inferredStatus?: "For Rent" | "For Sale" | null | string;
+    matchedProperty?: BuilderPropertyMatchData | null;
+    requirements?: BuilderRequirementsData | null;
+    propertyRefs?: string[] | null;
+}): string {
+    const person = splitLeadPersonName(args.contact);
+    const personName = person.fullName
+        || normalizeWhitespace(args.contact?.name)
+        || normalizeWhitespace(args.contact?.email)
+        || normalizeWhitespace(args.contact?.phone)
+        || "Contact";
+    const contactType = normalizeWhitespace(args.contactType || args.contact?.role || "Lead");
+
+    if (contactType && contactType !== "Lead" && contactType !== "Contact" && contactType !== "Tenant") {
+        const refs = (args.propertyRefs || extractPropertyRefsFromLeadText(args.rawLeadText || ""))
+            .map((ref) => normalizeWhitespace(ref).toUpperCase())
+            .filter(Boolean);
+        const lowerName = personName.toLowerCase();
+        const hasRole = new RegExp(`\\b${contactType.toLowerCase()}\\b`).test(lowerName);
+        const hasRef = refs.some((ref) => lowerName.includes(ref.toLowerCase()));
+        return normalizeWhitespace([
+            personName,
+            hasRole ? null : contactType,
+            refs[0] && !hasRef ? refs[0] : null,
+        ].filter(Boolean).join(" "));
+    }
+
+    const role = inferLeadContactRoleFromSignals({
+        parsedRole: args.contact?.role,
+        contactType,
+        name: personName,
+        texts: [args.rawLeadText || ""],
+    });
+    const parts = buildLeadRequirementNameParts({
+        rawLeadText: args.rawLeadText,
+        inferredStatus: args.inferredStatus,
+        matchedProperty: args.matchedProperty,
+        requirements: args.requirements,
+    });
+    return normalizeWhitespace([personName, role, ...parts].filter(Boolean).join(" "));
+}
+
 export function buildStructuredLeadDisplayName(args: {
     contact?: BuilderContactData;
     rawLeadText: string;
@@ -211,30 +276,12 @@ export function buildStructuredLeadDisplayName(args: {
     matchedProperty?: BuilderPropertyMatchData | null;
     requirements?: BuilderRequirementsData | null;
 }): string {
-    const person = splitLeadPersonName(args.contact);
-    const personName = person.fullName
-        || normalizeWhitespace(args.contact?.name)
-        || normalizeWhitespace(args.contact?.email)
-        || normalizeWhitespace(args.contact?.phone)
-        || "Lead";
-    
-    const refs = extractPropertyRefsFromLeadText(args.rawLeadText);
-
-    const role = inferLeadContactRole(args.rawLeadText, args.contact?.role);
-    const goal = formatLeadGoalLabel(args.inferredStatus);
-    const singleRef = refs[0] || normalizeWhitespace(args.matchedProperty?.reference);
-
-    if (refs.length > 1) {
-        // Multiple refs: [Name] [Role] [Goal] [Ref1], [Ref2]
-        return normalizeWhitespace(
-            [personName, role, goal, refs.join(", ")].filter(Boolean).join(" ")
-        );
-    }
-
-    const propertySummary = buildStructuredLeadPropertySummary({
+    return buildCanonicalContactName({
+        contact: args.contact,
+        contactType: args.contact?.role || "Lead",
+        rawLeadText: args.rawLeadText,
+        inferredStatus: args.inferredStatus,
         matchedProperty: args.matchedProperty,
         requirements: args.requirements,
     });
-
-    return [personName, role, goal, singleRef, propertySummary].filter(Boolean).join(" ").trim();
 }

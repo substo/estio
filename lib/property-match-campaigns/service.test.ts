@@ -6,6 +6,7 @@ import {
   buildPropertyMatchContactWhere,
   canCandidateDraftOrSend,
   canCandidateEnterHumanReview,
+  contactCorrectionRoleSupportedByCandidateEvidence,
   findPriorPropertyShareEvidence,
   isPropertyMatchCampaignStopped,
   normalizeAiMatchAssessment,
@@ -190,6 +191,45 @@ test("seller-style lead goals are collected but marked as not a match", () => {
   assert.equal(result?.evidence.structured.needsAi, false);
   assert.match(result?.reasoning || "", /To List/);
   assert.equal(nonSeekerLeadGoalMatch({ leadGoal: "To Buy" }), null);
+});
+
+test("campaign contact correction role must be supported by lead eligibility evidence", () => {
+  const agentEvidence = {
+    structured: {
+      dimensions: [{
+        key: "lead_eligibility",
+        status: "no",
+        requirementValue: "Agent",
+        reason: "Contact appears to be Agent, not a buyer/renter lead.",
+      }],
+      disqualifiers: ["contact appears to be Agent, not a buyer or renter lead"],
+    },
+  };
+
+  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(agentEvidence, "Agent"), true);
+  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(agentEvidence, "Owner"), false);
+  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence({
+    structured: {
+      dimensions: [{ key: "price", status: "no" }],
+      disqualifiers: ["price is above budget"],
+    },
+  }, "Agent"), false);
+});
+
+test("campaign contact correction role supports owner vocabulary", () => {
+  const ownerEvidence = {
+    structured: {
+      dimensions: [{
+        key: "lead_eligibility",
+        status: "no",
+        requirementValue: "Owner",
+      }],
+      disqualifiers: ["contact appears to be landlord, not a buyer or renter lead"],
+    },
+  };
+
+  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(ownerEvidence, "Owner"), true);
+  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(ownerEvidence, "Agent"), false);
 });
 
 test("AI review claim filter reclaims stale processing locks", () => {

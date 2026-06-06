@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
     cancelPropertyMatchCampaignBatchAction,
+    applyContactCorrectionAndRejectCandidateAction,
     createPropertyMatchCampaignAction,
     createPropertyMatchCampaignFromSourceAction,
     deletePropertyMatchCampaignAction,
@@ -109,6 +110,8 @@ type Candidate = {
         name?: string | null;
         phone?: string | null;
         email?: string | null;
+        contactType?: string | null;
+        leadGoal?: string | null;
         requirementStatus?: string | null;
         requirementBedrooms?: string | null;
         requirementMaxPrice?: string | null;
@@ -180,6 +183,19 @@ function candidateStructuredDimensions(candidate: Candidate) {
     return (candidate.evidence?.structured?.dimensions || [])
         .filter((dimension) => dimension?.label && ["goal", "location", "price", "bedrooms", "type", "size", "features", "condition", "sparse", "status"].includes(String(dimension.key || "")))
         .slice(0, 9);
+}
+
+function candidateLeadEligibilityCorrectionRole(candidate: Candidate): "Agent" | "Owner" | null {
+    const dimensions = candidate.evidence?.structured?.dimensions || [];
+    const leadEligibility = dimensions.find((dimension) => dimension?.key === "lead_eligibility" && dimension.status === "no");
+    const roleText = [
+        leadEligibility?.requirementValue,
+        leadEligibility?.reason,
+        ...(candidate.evidence?.structured?.disqualifiers || []),
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    if (/\bagent\b/.test(roleText)) return "Agent";
+    if (/\b(owner|landlord|vendor|seller)\b/.test(roleText)) return "Owner";
+    return null;
 }
 
 function dimensionStatusClass(status?: string) {
@@ -697,6 +713,48 @@ export function PropertyMatchCampaignsDialog({
         );
     };
 
+    const applyContactCorrectionAndReject = (candidate: Candidate, contactType: "Agent" | "Owner") => {
+        const campaignId = selectedCampaignId;
+        setBusyCandidateId(candidate.id);
+        startTransition(async () => {
+            const res = await applyContactCorrectionAndRejectCandidateAction(candidate.id, {
+                contactType,
+                leadGoal: null,
+                qualificationStage: "not_a_lead",
+            });
+            if (!res.success) {
+                setError(res.error || "Could not apply contact correction.");
+                setBusyCandidateId(null);
+                return;
+            }
+            setError("");
+            const reason = `Contact changed to ${contactType} and rejected from campaign.`;
+            setDetail((current) => current ? {
+                ...current,
+                candidates: reviewedCandidateShouldStayVisible(queue)
+                    ? current.candidates.map((item) => (
+                        item.id === candidate.id
+                            ? {
+                                ...item,
+                                reviewerStatus: "rejected",
+                                reviewedAt: new Date().toISOString(),
+                                rejectedReason: reason,
+                                lastError: null,
+                                contact: item.contact ? {
+                                    ...item.contact,
+                                    contactType,
+                                    leadGoal: null,
+                                } : item.contact,
+                            }
+                            : item
+                    ))
+                    : current.candidates.filter((item) => item.id !== candidate.id),
+            } : current);
+            setBusyCandidateId(null);
+            if (campaignId) refreshCampaignCountsInBackground(campaignId);
+        });
+    };
+
     const saveDraft = (candidate: Candidate) => {
         const draftBody = drafts[candidate.id] || "";
         setBusyCandidateId(candidate.id);
@@ -1076,6 +1134,7 @@ export function PropertyMatchCampaignsDialog({
                                                 && !!savedDraft.trim()
                                                 && draft.trim() === savedDraft.trim();
                                             const isBusy = busyCandidateId === candidate.id;
+                                            const correctionRole = candidateLeadEligibilityCorrectionRole(candidate);
                                             const canReview = candidate.reviewerStatus === "pending"
                                                 && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
                                                 && (candidate.aiReviewStatus === "done" || candidate.aiReviewStatus === "failed" || !candidate.aiReviewStatus);
@@ -1171,6 +1230,26 @@ export function PropertyMatchCampaignsDialog({
                                                         {candidate.rejectedReason ? <div className="mt-1 text-slate-600">Decision note: {candidate.rejectedReason}</div> : null}
                                                         {candidate.lastError ? <div className="mt-1 text-red-600">{candidate.lastError}</div> : null}
                                                     </div>
+
+                                                    {correctionRole && candidate.reviewerStatus !== "sent" ? (
+                                                        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-900">
+                                                            <div className="font-medium">Contact may be misclassified as Lead</div>
+                                                            <div className="mt-1 text-[11px] text-amber-800">
+                                                                Apply the contact correction and reject this campaign candidate.
+                                                            </div>
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="mt-2 h-8 border-amber-300 bg-white px-2 text-xs text-amber-900 hover:bg-amber-100"
+                                                                disabled={isBusy}
+                                                                onClick={() => applyContactCorrectionAndReject(candidate, correctionRole)}
+                                                            >
+                                                                {isBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
+                                                                Change to {correctionRole} and reject
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
 
                                                     {showDraftControls ? (
                                                         <div className="mt-2 space-y-2">

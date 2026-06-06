@@ -92,6 +92,14 @@ import {
     resolveContactPropertyEvidence,
 } from "@/lib/ai/requirements-intelligence/service";
 import {
+    approveContactVerificationProposal,
+    listPendingContactVerificationProposals,
+    markContactVerified,
+    rejectContactVerificationProposal,
+    verifyContactProfile,
+} from "@/lib/ai/contact-verification/service";
+import {
+    applyContactCorrectionAndRejectPropertyMatchCandidate,
     buildCampaignDraftInstruction,
     canCandidateDraftOrSend,
     cancelPropertyMatchCampaignBatch,
@@ -6109,10 +6117,17 @@ export async function getContactContext(contactId: string, options?: { refreshEx
         }
     }
 
-    const [leadSources, requirementProposalRows] = await Promise.all([
+    const [leadSources, requirementProposalRows, verificationProposalRows] = await Promise.all([
         getCachedActiveLeadSourceNames(location.id),
         contact?.id
             ? listPendingRequirementProposals({
+                locationId: location.id,
+                contactId: contact.id,
+                limit: 5,
+            })
+            : Promise.resolve([]),
+        contact?.id
+            ? listPendingContactVerificationProposals({
                 locationId: location.id,
                 contactId: contact.id,
                 limit: 5,
@@ -6126,6 +6141,7 @@ export async function getContactContext(contactId: string, options?: { refreshEx
         contact: hydratedContact,
         leadSources,
         requirementProposals: requirementProposalRows.map(serializeRequirementProposal),
+        verificationProposals: verificationProposalRows.map(serializeRequirementProposal),
     };
 }
 
@@ -6140,6 +6156,7 @@ function serializeRequirementProposal(row: any) {
         conversationId: row.conversationId || null,
         sourceType: row.sourceType,
         sourceIds: row.sourceIds || [],
+        proposalType: row.proposalType || "requirements",
         status: row.status,
         currentSnapshot: row.currentSnapshot || null,
         proposedPatch: row.proposedPatch || null,
@@ -6285,6 +6302,25 @@ export async function listContactRequirementProposals(contactId: string) {
     return rows.map(serializeRequirementProposal);
 }
 
+export async function listContactVerificationProposals(contactId: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const contact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    if (!contact) return [];
+
+    const rows = await listPendingContactVerificationProposals({
+        locationId: location.id,
+        contactId: contact.id,
+        limit: 5,
+    });
+    return rows.map(serializeRequirementProposal);
+}
+
 export async function updateContactClientContextAction(conversationId: string, contactId: string) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
@@ -6342,6 +6378,51 @@ export async function updateContactClientContextAction(conversationId: string, c
     };
 }
 
+export async function scanContactVerificationAction(contactId: string, conversationId?: string | null) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const contact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    if (!contact) return { success: false as const, error: "Contact not found." };
+
+    let conversationInternalId: string | null = null;
+    const requestedConversationId = String(conversationId || "").trim();
+    if (requestedConversationId) {
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, requestedConversationId),
+            select: { id: true },
+        });
+        conversationInternalId = conversation?.id || null;
+    }
+
+    const result = await verifyContactProfile({
+        locationId: location.id,
+        contactId: contact.id,
+        conversationId: conversationInternalId,
+        sourceType: "manual_verification",
+        actorUserId: actor.userId || null,
+    });
+    if (!result.success) return result;
+
+    invalidateConversationReadCaches(conversationInternalId || requestedConversationId, { skipPath: true });
+    return {
+        success: true as const,
+        proposalCreated: Boolean(result.created),
+        proposal: result.created ? serializeRequirementProposal(result.proposal) : null,
+        reason: result.created ? null : result.reason,
+        assessment: result.assessment || null,
+    };
+}
+
 export async function approveContactRequirementProposalAction(proposalId: string, editedPatch?: any) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
@@ -6374,6 +6455,76 @@ export async function rejectContactRequirementProposalAction(proposalId: string,
         proposalId,
         actorUserId: actor.userId || null,
         reason,
+    });
+}
+
+export async function applyContactVerificationAction(proposalId: string, editedPatch?: any) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+
+    const result = await approveContactVerificationProposal({
+        locationId: location.id,
+        proposalId,
+        actorUserId: actor.userId || null,
+        editedPatch: editedPatch || null,
+    });
+    if (!result.success) return result;
+
+    if (result.contactId) {
+        revalidatePath(`/admin/contacts/${result.contactId}/view`);
+    }
+    return result;
+}
+
+export async function rejectContactVerificationAction(proposalId: string, reason?: string | null) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+    return rejectContactVerificationProposal({
+        locationId: location.id,
+        proposalId,
+        actorUserId: actor.userId || null,
+        reason,
+    });
+}
+
+export async function markContactVerifiedAction(contactId: string) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+    const contact = await db.contact.findFirst({
+        where: {
+            locationId: location.id,
+            OR: [{ id: contactId }, { ghlContactId: contactId }],
+        },
+        select: { id: true },
+    });
+    if (!contact) return { success: false as const, error: "Contact not found." };
+    return markContactVerified({
+        locationId: location.id,
+        contactId: contact.id,
+        actorUserId: actor.userId || null,
+    });
+}
+
+export async function applyContactCorrectionAndRejectCandidateAction(candidateId: string, patch: any) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized" };
+    }
+    return applyContactCorrectionAndRejectPropertyMatchCandidate({
+        locationId: location.id,
+        candidateId,
+        patch,
+        actorUserId: actor.userId || null,
     });
 }
 
@@ -6435,6 +6586,8 @@ function serializePropertyMatchCandidate(row: any) {
             name: row.contact.name,
             email: row.contact.email,
             phone: row.contact.phone,
+            contactType: row.contact.contactType,
+            leadGoal: row.contact.leadGoal,
             requirementStatus: row.contact.requirementStatus,
             requirementBedrooms: row.contact.requirementBedrooms,
             requirementMaxPrice: row.contact.requirementMaxPrice,

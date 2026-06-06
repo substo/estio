@@ -12,6 +12,11 @@ import {
   type ContactRequirementInput,
   type StructuredMatchResult,
 } from "@/lib/property-match-campaigns/matching";
+import {
+  getContactVerificationPatchChanges,
+  normalizeContactVerificationPatch,
+  type ContactVerificationPatch,
+} from "@/lib/ai/contact-verification/service";
 
 type AnyRecord = Record<string, any>;
 export type PropertyMatchCampaignQueue =
@@ -57,6 +62,25 @@ export function hasPriorPropertyShareEvidence(candidate: {
   return Boolean(evidence.priorShare)
     || String(candidate.matchSummary || "").toLowerCase().includes("already shared")
     || String(candidate.reasoning || "").toLowerCase().includes("already been shared");
+}
+
+export function contactCorrectionRoleSupportedByCandidateEvidence(
+  evidence: unknown,
+  contactType: "Agent" | "Owner",
+): boolean {
+  const structuredEvidence = (((evidence || {}) as AnyRecord).structured || {}) as AnyRecord;
+  const dimensions = Array.isArray(structuredEvidence.dimensions) ? structuredEvidence.dimensions : [];
+  const leadEligibility = dimensions.find((dimension: AnyRecord) => (
+    dimension?.key === "lead_eligibility" && dimension?.status === "no"
+  ));
+  const roleEvidence = [
+    leadEligibility?.requirementValue,
+    leadEligibility?.reason,
+    ...(Array.isArray(structuredEvidence.disqualifiers) ? structuredEvidence.disqualifiers : []),
+  ].map((value) => String(value || "").toLowerCase()).join(" ");
+  return contactType === "Agent"
+    ? Boolean(leadEligibility && /\bagent\b/.test(roleEvidence))
+    : Boolean(leadEligibility && /\b(owner|landlord|vendor|seller)\b/.test(roleEvidence));
 }
 
 export function propertyMatchCandidateQueue(candidate: {
@@ -712,7 +736,7 @@ function formatRequirementFacts(contact: AnyRecord): string {
   ].filter(Boolean).join("\n");
 }
 
-async function refreshCampaignCounts(campaignId: string) {
+export async function refreshCampaignCounts(campaignId: string) {
   const campaign = await db.propertyMatchCampaign.findUnique({
     where: { id: campaignId },
     select: { status: true, collectionStatus: true },
@@ -749,6 +773,95 @@ async function refreshCampaignCounts(campaignId: string) {
       processingFinishedAt: nextStatus.processingFinishedAt,
     },
   });
+}
+
+export async function applyContactCorrectionAndRejectPropertyMatchCandidate(args: {
+  locationId: string;
+  candidateId: string;
+  patch: ContactVerificationPatch;
+  actorUserId?: string | null;
+  rejectedReason?: string | null;
+}) {
+  const candidate = await db.propertyMatchCandidate.findFirst({
+    where: { id: args.candidateId, locationId: args.locationId },
+    include: {
+      contact: {
+        select: {
+          id: true,
+          contactType: true,
+          leadGoal: true,
+          name: true,
+          firstName: true,
+          lastName: true,
+          qualificationStage: true,
+          requirementSummary: true,
+        },
+      },
+    },
+  });
+  if (!candidate) return { success: false as const, error: "Candidate not found." };
+  if (candidate.reviewerStatus === "sent") return { success: false as const, error: "Sent candidates cannot be changed." };
+  if (!candidate.contact) return { success: false as const, error: "Candidate contact not found." };
+
+  const patch = normalizeContactVerificationPatch(args.patch);
+  if (patch.contactType !== "Agent" && patch.contactType !== "Owner") {
+    return { success: false as const, error: "Campaign contact corrections can only change contacts to Agent or Owner." };
+  }
+  if (!contactCorrectionRoleSupportedByCandidateEvidence(candidate.evidence, patch.contactType)) {
+    return { success: false as const, error: "Campaign evidence does not support this contact correction." };
+  }
+  const snapshot = {
+    contactType: candidate.contact.contactType || null,
+    leadGoal: candidate.contact.leadGoal || null,
+    name: candidate.contact.name || null,
+    firstName: candidate.contact.firstName || null,
+    lastName: candidate.contact.lastName || null,
+    qualificationStage: candidate.contact.qualificationStage || null,
+    requirementSummary: candidate.contact.requirementSummary || null,
+  };
+  const changes = getContactVerificationPatchChanges(snapshot, patch);
+  if (changes.length === 0) return { success: false as const, error: "No contact correction changes to apply." };
+
+  const changedPatch = changes.reduce((data, change) => {
+    (data as AnyRecord)[change.field] = change.new;
+    return data;
+  }, {} as ContactVerificationPatch);
+  const note = normalizeText(
+    args.rejectedReason
+    || `Contact corrected to ${changedPatch.contactType || patch.contactType || "non-lead"} and campaign candidate rejected.`,
+    1000
+  );
+
+  await db.$transaction(async (tx) => {
+    await tx.contact.update({
+      where: { id: candidate.contactId },
+      data: changedPatch as any,
+    });
+    await tx.contactHistory.create({
+      data: {
+        contactId: candidate.contactId,
+        userId: args.actorUserId || null,
+        action: "AI_CONTACT_VERIFICATION_UPDATED",
+        changes: {
+          candidateId: candidate.id,
+          campaignId: candidate.campaignId,
+          changes,
+        } as any,
+      },
+    });
+    await tx.propertyMatchCandidate.update({
+      where: { id: candidate.id },
+      data: {
+        reviewerStatus: "rejected",
+        reviewedByUserId: args.actorUserId || null,
+        reviewedAt: new Date(),
+        rejectedReason: note,
+      },
+    });
+  });
+
+  await refreshCampaignCounts(candidate.campaignId);
+  return { success: true as const, updated: true as const, contactId: candidate.contactId, campaignId: candidate.campaignId };
 }
 
 export function buildCampaignDraftInstruction(args: {
@@ -1605,6 +1718,8 @@ export async function getPropertyMatchCampaignDetail(args: {
           name: true,
           email: true,
           phone: true,
+          contactType: true,
+          leadGoal: true,
           requirementStatus: true,
           requirementBedrooms: true,
           requirementMaxPrice: true,
