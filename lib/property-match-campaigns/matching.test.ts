@@ -250,7 +250,7 @@ test("structured matcher disqualifies leads who stopped searching", () => {
   assert.match(result.disqualifiers?.join(" ") || "", /no longer searching/);
 });
 
-test("structured matcher disqualifies lead contacts whose name clearly says agent", () => {
+test("structured matcher does not classify contact identity from agent-like names", () => {
   const result = evaluateStructuredPropertyMatch(
     {
       goal: "SALE",
@@ -271,13 +271,12 @@ test("structured matcher disqualifies lead contacts whose name clearly says agen
     },
   );
 
-  assert.equal(result.verdict, "no");
-  assert.equal(result.needsAi, false);
-  assert.match(result.disqualifiers?.join(" ") || "", /Agent/);
-  assert.equal(result.dimensions?.find((dimension) => dimension.key === "lead_eligibility")?.status, "no");
+  assert.notEqual(result.verdict, "no");
+  assert.equal(result.dimensions?.some((dimension) => dimension.key === "lead_eligibility"), false);
+  assert.doesNotMatch(result.disqualifiers?.join(" ") || "", /Agent/);
 });
 
-test("structured matcher disqualifies lead contacts whose name clearly says owner", () => {
+test("structured matcher does not classify contact identity from owner-like names", () => {
   const result = evaluateStructuredPropertyMatch(
     {
       goal: "SALE",
@@ -298,12 +297,11 @@ test("structured matcher disqualifies lead contacts whose name clearly says owne
     },
   );
 
-  assert.equal(result.verdict, "no");
-  assert.equal(result.needsAi, false);
-  assert.match(result.disqualifiers?.join(" ") || "", /Owner/);
+  assert.notEqual(result.verdict, "no");
+  assert.doesNotMatch(result.disqualifiers?.join(" ") || "", /Owner/);
 });
 
-test("structured matcher keeps normal buyer/renter leads eligible", () => {
+test("structured matcher omits campaign-owned lead eligibility dimension", () => {
   const result = evaluateStructuredPropertyMatch(
     {
       goal: "SALE",
@@ -325,7 +323,7 @@ test("structured matcher keeps normal buyer/renter leads eligible", () => {
   );
 
   assert.notEqual(result.verdict, "no");
-  assert.equal(result.dimensions?.find((dimension) => dimension.key === "lead_eligibility")?.status, "yes");
+  assert.equal(result.dimensions?.some((dimension) => dimension.key === "lead_eligibility"), false);
 });
 
 test("structured matcher rejects explicit minimum size mismatch", () => {

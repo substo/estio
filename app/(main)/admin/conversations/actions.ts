@@ -98,8 +98,8 @@ import {
     rejectContactVerificationProposal,
     verifyContactProfile,
 } from "@/lib/ai/contact-verification/service";
+import { withProfileVerificationInvalidation } from "@/lib/contacts/profile-verification";
 import {
-    applyContactCorrectionAndRejectPropertyMatchCandidate,
     buildCampaignDraftInstruction,
     canCandidateDraftOrSend,
     cancelPropertyMatchCampaignBatch,
@@ -940,11 +940,11 @@ async function ensureRealContactForGroupParticipant(params: {
         if (existing) {
             await db.contact.update({
                 where: { id: existing.id },
-                data: {
+                data: withProfileVerificationInvalidation({
                     ...(participant.lidJid && !existing.lid ? { lid: participant.lidJid } : {}),
                     ...(trustedPhone && !existing.phone ? { phone: trustedPhone } : {}),
                     ...(!existing.name && draftName ? { name: draftName } : {}),
-                },
+                }),
             });
             return existing.id;
         }
@@ -964,11 +964,11 @@ async function ensureRealContactForGroupParticipant(params: {
         if (existingExact) {
             await db.contact.update({
                 where: { id: existingExact.id },
-                data: {
+                data: withProfileVerificationInvalidation({
                     ...(participant.lidJid && !existingExact.lid ? { lid: participant.lidJid } : {}),
                     ...(trustedPhone && !existingExact.phone ? { phone: trustedPhone } : {}),
                     ...(!existingExact.name && draftName ? { name: draftName } : {}),
-                },
+                }),
             });
             await linkConversationParticipantToContact(participant.id, existingExact.id);
             return existingExact.id;
@@ -6596,20 +6596,6 @@ export async function markContactVerifiedAction(contactId: string) {
     return markContactVerified({
         locationId: location.id,
         contactId: contact.id,
-        actorUserId: actor.userId || null,
-    });
-}
-
-export async function applyContactCorrectionAndRejectCandidateAction(candidateId: string, patch: any) {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
-    const actor = await resolveLocationActorContext(location.id);
-    if (!actor.hasAccess) {
-        return { success: false as const, error: "Unauthorized" };
-    }
-    return applyContactCorrectionAndRejectPropertyMatchCandidate({
-        locationId: location.id,
-        candidateId,
-        patch,
         actorUserId: actor.userId || null,
     });
 }

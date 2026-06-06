@@ -48,6 +48,10 @@ import {
   resolveContactConversationStartMessageType,
 } from '@/lib/contacts/conversation-start';
 import {
+  withChangedProfileVerificationInvalidation,
+  withProfileVerificationInvalidation,
+} from '@/lib/contacts/profile-verification';
+import {
   findContactsByPhoneDigitsBatchWithFallback,
   findContactsByPhoneDigitsWithFallback,
   phoneDigitsLikelyMatch,
@@ -941,7 +945,7 @@ async function updateContactCore(
       const contactInput = prepareContactInput(data);
       const updatedContact = await tx.contact.update({
         where: { id: data.contactId },
-        data: contactInput,
+        data: withChangedProfileVerificationInvalidation(contactInput, currentContact),
       });
       savedContactSummary = {
         id: updatedContact.id,
@@ -1487,7 +1491,7 @@ export async function resolveSyncConflict(
 
       await db.contact.update({
         where: { id: contactId },
-        data: {
+        data: withProfileVerificationInvalidation({
           name: googleData.name || contact.name,
           email: googleData.email || contact.email,
           phone: googleData.phone || contact.phone,
@@ -1495,7 +1499,7 @@ export async function resolveSyncConflict(
           googleContactUpdatedAt: googleData.updateTime,
           lastGoogleSync: new Date(),
           error: null // Clear Error
-        }
+        })
       });
 
       if (!options?.skipRevalidate) revalidatePath('/admin/contacts');

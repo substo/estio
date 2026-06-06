@@ -12,11 +12,7 @@ import {
   type ContactRequirementInput,
   type StructuredMatchResult,
 } from "@/lib/property-match-campaigns/matching";
-import {
-  getContactVerificationPatchChanges,
-  normalizeContactVerificationPatch,
-  type ContactVerificationPatch,
-} from "@/lib/ai/contact-verification/service";
+import { verifyContactProfile } from "@/lib/ai/contact-verification/service";
 
 type AnyRecord = Record<string, any>;
 export type PropertyMatchCampaignQueue =
@@ -36,9 +32,6 @@ const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const CONTACT_COLLECTION_BATCH_SIZE = 200;
 const CAMPAIGN_STOPPED_STATUS = "canceled";
 const CAMPAIGN_STOPPED_ERROR = "Processing stopped by user.";
-const SEEKER_LEAD_GOALS = ["To Buy", "To Rent"];
-const NON_SEEKER_LEAD_GOALS = ["To List", "To Sell", "Other"];
-const EXCLUDED_CONTACT_TYPES = ["Owner", "Agent", "Partner", "Associate", "Maintenance"];
 const PROPERTY_TYPE_HINTS = [
   "Studio",
   "Apartment",
@@ -62,25 +55,6 @@ export function hasPriorPropertyShareEvidence(candidate: {
   return Boolean(evidence.priorShare)
     || String(candidate.matchSummary || "").toLowerCase().includes("already shared")
     || String(candidate.reasoning || "").toLowerCase().includes("already been shared");
-}
-
-export function contactCorrectionRoleSupportedByCandidateEvidence(
-  evidence: unknown,
-  contactType: "Agent" | "Owner",
-): boolean {
-  const structuredEvidence = (((evidence || {}) as AnyRecord).structured || {}) as AnyRecord;
-  const dimensions = Array.isArray(structuredEvidence.dimensions) ? structuredEvidence.dimensions : [];
-  const leadEligibility = dimensions.find((dimension: AnyRecord) => (
-    dimension?.key === "lead_eligibility" && dimension?.status === "no"
-  ));
-  const roleEvidence = [
-    leadEligibility?.requirementValue,
-    leadEligibility?.reason,
-    ...(Array.isArray(structuredEvidence.disqualifiers) ? structuredEvidence.disqualifiers : []),
-  ].map((value) => String(value || "").toLowerCase()).join(" ");
-  return contactType === "Agent"
-    ? Boolean(leadEligibility && /\bagent\b/.test(roleEvidence))
-    : Boolean(leadEligibility && /\b(owner|landlord|vendor|seller)\b/.test(roleEvidence));
 }
 
 export function propertyMatchCandidateQueue(candidate: {
@@ -540,59 +514,36 @@ export function buildPropertyMatchContactWhere(locationId: string, cursor?: stri
   return {
     locationId,
     ...(cursor ? { id: { gt: cursor } } : {}),
-    OR: [
-      { contactType: "Lead" },
-      { contactType: "Tenant" },
-      { leadGoal: { in: SEEKER_LEAD_GOALS } },
-    ],
     NOT: [
-      { contactType: { in: EXCLUDED_CONTACT_TYPES } },
       { matchingEmailMatchedProperties: { startsWith: "No" } },
     ],
     conversations: { some: { locationId, deletedAt: null } },
   };
 }
 
-export function nonSeekerLeadGoalMatch(contact: AnyRecord): (StructuredMatchResult & {
-  confidence: number;
-  evidence: AnyRecord;
-  reasoning: string;
-  matchSummary: string;
-}) | null {
-  if (!NON_SEEKER_LEAD_GOALS.includes(String(contact.leadGoal || ""))) return null;
+function buildVerifiedPropertyMatchContactWhere(locationId: string) {
   return {
-    verdict: "no" as MatchVerdict,
-    score: -5,
-    needsAi: false,
-    matches: [],
-    mismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
-    unknowns: [],
-    dimensions: [{
-      key: "status",
-      label: "Lead Status",
-      propertyValue: null,
-      requirementValue: contact.leadGoal,
-      status: "no",
-      weight: 5,
-      score: -5,
-      reason: `Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`,
-    }],
-    hardMismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
-    disqualifiers: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
-    confidence: 0.95,
-    evidence: {
-      structured: {
-        matches: [],
-        mismatches: [`Lead goal is ${contact.leadGoal}, not a buyer or renter requirement.`],
-        unknowns: [],
-        needsAi: false,
-        overallScore: -5,
-        verdict: "no",
-      },
-    },
-    reasoning: `Lead goal is ${contact.leadGoal}, so this contact should not receive buyer/renter property match outreach.`,
-    matchSummary: "Lead is not seeking buyer/renter listings.",
+    ...buildPropertyMatchContactWhere(locationId),
+    profileVerificationStatus: "verified_lead",
   };
+}
+
+async function ensureCampaignContactProfileVerified(args: {
+  locationId: string;
+  contact: AnyRecord;
+  conversationId?: string | null;
+}) {
+  if (args.contact.profileVerificationStatus === "verified_lead") return true;
+  const result = await verifyContactProfile({
+    locationId: args.locationId,
+    contactId: args.contact.id,
+    conversationId: args.conversationId || null,
+    sourceType: "campaign_preflight",
+    contactSnapshot: args.contact,
+  });
+  if (!result.success) return false;
+  if (result.created) return false;
+  return result.assessment?.status === "verified_lead" && result.assessment?.hasChanges === false;
 }
 
 export function buildAiReviewClaimWhere(args: {
@@ -797,95 +748,6 @@ export async function refreshCampaignCounts(campaignId: string) {
   });
 }
 
-export async function applyContactCorrectionAndRejectPropertyMatchCandidate(args: {
-  locationId: string;
-  candidateId: string;
-  patch: ContactVerificationPatch;
-  actorUserId?: string | null;
-  rejectedReason?: string | null;
-}) {
-  const candidate = await db.propertyMatchCandidate.findFirst({
-    where: { id: args.candidateId, locationId: args.locationId },
-    include: {
-      contact: {
-        select: {
-          id: true,
-          contactType: true,
-          leadGoal: true,
-          name: true,
-          firstName: true,
-          lastName: true,
-          qualificationStage: true,
-          requirementSummary: true,
-        },
-      },
-    },
-  });
-  if (!candidate) return { success: false as const, error: "Candidate not found." };
-  if (candidate.reviewerStatus === "sent") return { success: false as const, error: "Sent candidates cannot be changed." };
-  if (!candidate.contact) return { success: false as const, error: "Candidate contact not found." };
-
-  const patch = normalizeContactVerificationPatch(args.patch);
-  if (patch.contactType !== "Agent" && patch.contactType !== "Owner") {
-    return { success: false as const, error: "Campaign contact corrections can only change contacts to Agent or Owner." };
-  }
-  if (!contactCorrectionRoleSupportedByCandidateEvidence(candidate.evidence, patch.contactType)) {
-    return { success: false as const, error: "Campaign evidence does not support this contact correction." };
-  }
-  const snapshot = {
-    contactType: candidate.contact.contactType || null,
-    leadGoal: candidate.contact.leadGoal || null,
-    name: candidate.contact.name || null,
-    firstName: candidate.contact.firstName || null,
-    lastName: candidate.contact.lastName || null,
-    qualificationStage: candidate.contact.qualificationStage || null,
-    requirementSummary: candidate.contact.requirementSummary || null,
-  };
-  const changes = getContactVerificationPatchChanges(snapshot, patch);
-  if (changes.length === 0) return { success: false as const, error: "No contact correction changes to apply." };
-
-  const changedPatch = changes.reduce((data, change) => {
-    (data as AnyRecord)[change.field] = change.new;
-    return data;
-  }, {} as ContactVerificationPatch);
-  const note = normalizeText(
-    args.rejectedReason
-    || `Contact corrected to ${changedPatch.contactType || patch.contactType || "non-lead"} and campaign candidate rejected.`,
-    1000
-  );
-
-  await db.$transaction(async (tx) => {
-    await tx.contact.update({
-      where: { id: candidate.contactId },
-      data: changedPatch as any,
-    });
-    await tx.contactHistory.create({
-      data: {
-        contactId: candidate.contactId,
-        userId: args.actorUserId || null,
-        action: "AI_CONTACT_VERIFICATION_UPDATED",
-        changes: {
-          candidateId: candidate.id,
-          campaignId: candidate.campaignId,
-          changes,
-        } as any,
-      },
-    });
-    await tx.propertyMatchCandidate.update({
-      where: { id: candidate.id },
-      data: {
-        reviewerStatus: "rejected",
-        reviewedByUserId: args.actorUserId || null,
-        reviewedAt: new Date(),
-        rejectedReason: note,
-      },
-    });
-  });
-
-  await refreshCampaignCounts(candidate.campaignId);
-  return { success: true as const, updated: true as const, contactId: candidate.contactId, campaignId: candidate.campaignId };
-}
-
 export function buildCampaignDraftInstruction(args: {
   propertySnapshot: AnyRecord;
   priorityNote?: string | null;
@@ -1004,7 +866,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
   if (args.campaign.collectionStatus === "done") {
     const [eligibleContacts, existingCandidates] = await Promise.all([
       db.contact.count({
-        where: buildPropertyMatchContactWhere(args.locationId),
+        where: buildVerifiedPropertyMatchContactWhere(args.locationId),
       }),
       db.propertyMatchCandidate.count({
         where: {
@@ -1051,6 +913,11 @@ async function collectPropertyMatchCandidatesBatch(args: {
       phone: true,
       contactType: true,
       leadGoal: true,
+      profileVerificationStatus: true,
+      profileVerifiedAt: true,
+      profileVerificationSource: true,
+      profileVerificationConfidence: true,
+      profileVerificationSummary: true,
       requirementStatus: true,
       requirementDistrict: true,
       requirementBedrooms: true,
@@ -1082,12 +949,24 @@ async function collectPropertyMatchCandidatesBatch(args: {
 
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
-  const baseCandidateData = contacts.flatMap((contact: any) => {
+  const verifiedContacts: AnyRecord[] = [];
+  for (const contact of contacts as AnyRecord[]) {
+    const conversation = contact.conversations[0];
+    if (!conversation?.id) continue;
+    if (await ensureCampaignContactProfileVerified({
+      locationId: args.locationId,
+      contact,
+      conversationId: conversation.id,
+    })) {
+      verifiedContacts.push(contact);
+    }
+  }
+
+  const baseCandidateData = verifiedContacts.flatMap((contact: any) => {
     const conversation = contact.conversations[0];
     if (!conversation?.id) return [];
     const recentMessages = [...(conversation.messages || [])].reverse();
-    const nonSeekerMatch = nonSeekerLeadGoalMatch(contact);
-    const structured = nonSeekerMatch || evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput({
+    const structured = evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput({
       ...contact,
       recentMessages,
     }));

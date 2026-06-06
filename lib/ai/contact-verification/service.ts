@@ -8,6 +8,10 @@ import {
   normalizeWhitespace,
   parseContactPersonNameFromDisplayName,
 } from "@/lib/contacts/name-builder";
+import {
+  profileVerificationFields,
+  withProfileVerificationInvalidation,
+} from "@/lib/contacts/profile-verification";
 
 type AnyRecord = Record<string, any>;
 
@@ -43,7 +47,7 @@ export type ContactVerificationStatus =
   | "needs_review"
   | "likely_agent"
   | "likely_owner"
-  | "not_searching";
+  | "not_a_lead";
 
 export type ContactVerificationPatch = Partial<Record<typeof VERIFICATION_FIELDS[number], string | null>>;
 
@@ -129,7 +133,7 @@ function verificationStatusForPatch(patch: ContactVerificationPatch, inferredRol
   const role = patch.contactType || inferredRole;
   if (role === "Agent") return "likely_agent";
   if (role === "Owner") return "likely_owner";
-  if (patch.qualificationStage === "not_a_lead") return "not_searching";
+  if (patch.qualificationStage === "not_a_lead") return "not_a_lead";
   if ((patch.contactType || contact.contactType) === "Lead" && ["To Buy", "To Rent"].includes(String(patch.leadGoal || contact.leadGoal || ""))) {
     return "verified_lead";
   }
@@ -153,6 +157,42 @@ function buildRoleEvidenceText(args: {
     args.contact.requirementSummary,
     ...args.messages.map((message) => message.body),
   ].map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+}
+
+function inferLeadGoalFromText(args: {
+  contact: AnyRecord;
+  evidenceText: string;
+}): { goal: "To Buy" | "To Rent" | null; ambiguous: boolean; reason: string | null } {
+  const currentGoal = normalizeLeadGoal(args.contact.leadGoal);
+  if (currentGoal === "To Buy" || currentGoal === "To Rent") {
+    return { goal: currentGoal, ambiguous: false, reason: null };
+  }
+
+  const requirementStatus = String(args.contact.requirementStatus || "").toLowerCase();
+  const combined = [
+    args.contact.leadGoal,
+    args.contact.requirementStatus,
+    args.contact.requirementSummary,
+    args.contact.requirementOtherDetails,
+    args.evidenceText,
+  ].map((item) => String(item || "")).join("\n").toLowerCase();
+
+  const buyIntent = /\b(buy|buyer|buying|purchase|purchasing|for sale|sale)\b/.test(combined);
+  const rentIntent = /\b(rent|renter|renting|rental|for rent|lease|leasing)\b/.test(combined);
+
+  if (buyIntent && rentIntent) {
+    if (/\brent\b/.test(requirementStatus)) {
+      return { goal: "To Rent", ambiguous: false, reason: "Requirement status resolves mixed buy/rent evidence to rent." };
+    }
+    if (/\b(sale|buy)\b/.test(requirementStatus)) {
+      return { goal: "To Buy", ambiguous: false, reason: "Requirement status resolves mixed buy/rent evidence to buy." };
+    }
+    return { goal: null, ambiguous: true, reason: "Contact has both buy and rent intent signals." };
+  }
+
+  if (buyIntent) return { goal: "To Buy", ambiguous: false, reason: "Strong text indicates buying intent." };
+  if (rentIntent) return { goal: "To Rent", ambiguous: false, reason: "Strong text indicates renting intent." };
+  return { goal: null, ambiguous: false, reason: null };
 }
 
 function addPersonNamePatch(args: {
@@ -211,6 +251,7 @@ export function buildContactVerificationAssessment(args: {
   const evidence: AnyRecord[] = [];
 
   addPersonNamePatch({ contact: args.contact, patch, evidence });
+  const inferredLeadGoal = inferLeadGoalFromText({ contact: args.contact, evidenceText });
 
   if (inferredRole !== "Lead" && String(args.contact.contactType || "") !== inferredRole) {
     patch.contactType = inferredRole;
@@ -244,10 +285,25 @@ export function buildContactVerificationAssessment(args: {
       field: "contactType",
       quote: `Stored contact type is ${args.contact.contactType}.`,
     });
+  } else if (String(args.contact.contactType || "") === "Lead" && inferredLeadGoal.goal && inferredLeadGoal.goal !== args.contact.leadGoal) {
+    patch.leadGoal = inferredLeadGoal.goal;
+    evidence.push({
+      sourceId: "lead_goal_inference",
+      field: "leadGoal",
+      quote: inferredLeadGoal.reason || `Text indicates ${leadGoalProfileLabel(inferredLeadGoal.goal)} intent.`,
+    });
+  } else if (String(args.contact.contactType || "") === "Lead" && inferredLeadGoal.ambiguous) {
+    evidence.push({
+      sourceId: "lead_goal_inference",
+      field: "leadGoal",
+      quote: inferredLeadGoal.reason || "Buy/rent intent is ambiguous.",
+    });
   }
 
   const normalizedPatch = normalizeContactVerificationPatch(patch);
-  const status = verificationStatusForPatch(normalizedPatch, inferredRole, args.contact);
+  const status = inferredLeadGoal.ambiguous && !normalizedPatch.leadGoal
+    ? "needs_review"
+    : verificationStatusForPatch(normalizedPatch, inferredRole, args.contact);
   const leadProfileLabel = leadGoalProfileLabel(normalizedPatch.leadGoal || args.contact.leadGoal);
   const reasoning = status === "verified_lead"
     ? `Contact fields are consistent with a ${leadProfileLabel} lead.`
@@ -265,6 +321,18 @@ export function buildContactVerificationAssessment(args: {
     reasoning,
     hasChanges: getContactVerificationPatchChanges(snapshot, normalizedPatch).length > 0,
   };
+}
+
+function profileVerificationDataForAssessment(args: {
+  assessment: ReturnType<typeof buildContactVerificationAssessment>;
+  sourceType?: string;
+}) {
+  return profileVerificationFields({
+    status: args.assessment.status,
+    source: args.sourceType || "manual_verification",
+    confidence: args.assessment.confidence,
+    summary: args.assessment.reasoning,
+  });
 }
 
 async function collectRecentMessages(args: {
@@ -392,6 +460,13 @@ export async function verifyContactProfile(args: {
   });
 
   if (!assessment.hasChanges) {
+    await db.contact.update({
+      where: { id: contact.id },
+      data: profileVerificationDataForAssessment({
+        assessment,
+        sourceType: args.sourceType || "manual_verification",
+      }),
+    });
     logContactVerificationTiming("scan_complete", {
       locationId: args.locationId,
       contactId: contact.id,
@@ -496,10 +571,31 @@ export async function approveContactVerificationProposal(args: {
   const patch = normalizeContactVerificationPatch(args.editedPatch || proposal.proposedPatch);
   const snapshot = getContactVerificationSnapshot(proposal.contact);
   const changes = getContactVerificationPatchChanges(snapshot, patch);
+  const sourceType = String(proposal.sourceType || "manual_verification");
   if (changes.length === 0) {
-    await db.contactRequirementProposal.update({
-      where: { id: proposal.id },
-      data: { status: "superseded" },
+    const assessment = buildContactVerificationAssessment({ contact: proposal.contact });
+    await db.$transaction(async (tx) => {
+      await tx.contact.update({
+        where: { id: proposal.contactId },
+        data: profileVerificationDataForAssessment({ assessment, sourceType }),
+      });
+      await tx.contactRequirementProposal.update({
+        where: { id: proposal.id },
+        data: {
+          status: "approved",
+          approvedAt: new Date(),
+          approvedByUserId: args.actorUserId,
+        },
+      });
+      await tx.contactRequirementProposal.updateMany({
+        where: {
+          id: { not: proposal.id },
+          contactId: proposal.contactId,
+          proposalType: "verification",
+          status: "pending",
+        },
+        data: { status: "superseded" },
+      });
     });
     return { success: true as const, updated: false as const };
   }
@@ -508,11 +604,20 @@ export async function approveContactVerificationProposal(args: {
     (data as AnyRecord)[change.field] = change.new;
     return data;
   }, {} as ContactVerificationPatch);
+  const assessment = buildContactVerificationAssessment({
+    contact: {
+      ...proposal.contact,
+      ...changedPatch,
+    },
+  });
 
   await db.$transaction(async (tx) => {
     await tx.contact.update({
       where: { id: proposal.contactId },
-      data: changedPatch as any,
+      data: {
+        ...withProfileVerificationInvalidation(changedPatch as any),
+        ...profileVerificationDataForAssessment({ assessment, sourceType }),
+      },
     });
     await tx.contactHistory.create({
       data: {
@@ -583,17 +688,28 @@ export async function markContactVerified(args: {
     select: { id: true, qualificationStage: true },
   });
   if (!contact) return { success: false as const, error: "Contact not found." };
-  await db.contactHistory.create({
-    data: {
-      contactId: contact.id,
-      userId: args.actorUserId,
-      action: "CONTACT_VERIFIED",
-      changes: { qualificationStage: contact.qualificationStage || null } as any,
-    },
-  });
-  await db.contactRequirementProposal.updateMany({
-    where: { contactId: contact.id, proposalType: "verification", status: "pending" },
-    data: { status: "superseded" },
+  await db.$transaction(async (tx) => {
+    await tx.contact.update({
+      where: { id: contact.id },
+      data: profileVerificationFields({
+        status: "verified_lead",
+        source: "manual_mark_verified",
+        confidence: 1,
+        summary: "Contact manually marked as a verified buyer/renter lead.",
+      }),
+    });
+    await tx.contactHistory.create({
+      data: {
+        contactId: contact.id,
+        userId: args.actorUserId,
+        action: "CONTACT_VERIFIED",
+        changes: { qualificationStage: contact.qualificationStage || null } as any,
+      },
+    });
+    await tx.contactRequirementProposal.updateMany({
+      where: { contactId: contact.id, proposalType: "verification", status: "pending" },
+      data: { status: "superseded" },
+    });
   });
   return { success: true as const, contactId: contact.id };
 }

@@ -6,11 +6,9 @@ import {
   buildPropertyMatchContactWhere,
   canCandidateDraftOrSend,
   canCandidateEnterHumanReview,
-  contactCorrectionRoleSupportedByCandidateEvidence,
   findPriorPropertyShareEvidence,
   isPropertyMatchCampaignStopped,
   normalizeAiMatchAssessment,
-  nonSeekerLeadGoalMatch,
   propertyMatchCandidateQueue,
   propertyMatchCampaignStatusAfterCounts,
   propertySourceSnapshot,
@@ -167,69 +165,15 @@ test("completed or failed AI candidates can enter human review when verdict is s
   }), false);
 });
 
-test("property match contact filter includes lead contacts with conversations", () => {
+test("property match contact filter leaves identity to profile verification", () => {
   const where = buildPropertyMatchContactWhere("loc_1", "contact_10") as any;
 
-  assert.deepEqual(where.OR, [
-    { contactType: "Lead" },
-    { contactType: "Tenant" },
-    { leadGoal: { in: ["To Buy", "To Rent"] } },
-  ]);
   assert.deepEqual(where.NOT, [
-    { contactType: { in: ["Owner", "Agent", "Partner", "Associate", "Maintenance"] } },
     { matchingEmailMatchedProperties: { startsWith: "No" } },
   ]);
   assert.deepEqual(where.conversations, { some: { locationId: "loc_1", deletedAt: null } });
   assert.deepEqual(where.id, { gt: "contact_10" });
-});
-
-test("seller-style lead goals are collected but marked as not a match", () => {
-  const result = nonSeekerLeadGoalMatch({ leadGoal: "To List" });
-
-  assert.equal(result?.verdict, "no");
-  assert.equal(result?.confidence, 0.95);
-  assert.equal(result?.evidence.structured.needsAi, false);
-  assert.match(result?.reasoning || "", /To List/);
-  assert.equal(nonSeekerLeadGoalMatch({ leadGoal: "To Buy" }), null);
-});
-
-test("campaign contact correction role must be supported by lead eligibility evidence", () => {
-  const agentEvidence = {
-    structured: {
-      dimensions: [{
-        key: "lead_eligibility",
-        status: "no",
-        requirementValue: "Agent",
-        reason: "Contact appears to be Agent, not a buyer/renter lead.",
-      }],
-      disqualifiers: ["contact appears to be Agent, not a buyer or renter lead"],
-    },
-  };
-
-  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(agentEvidence, "Agent"), true);
-  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(agentEvidence, "Owner"), false);
-  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence({
-    structured: {
-      dimensions: [{ key: "price", status: "no" }],
-      disqualifiers: ["price is above budget"],
-    },
-  }, "Agent"), false);
-});
-
-test("campaign contact correction role supports owner vocabulary", () => {
-  const ownerEvidence = {
-    structured: {
-      dimensions: [{
-        key: "lead_eligibility",
-        status: "no",
-        requirementValue: "Owner",
-      }],
-      disqualifiers: ["contact appears to be landlord, not a buyer or renter lead"],
-    },
-  };
-
-  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(ownerEvidence, "Owner"), true);
-  assert.equal(contactCorrectionRoleSupportedByCandidateEvidence(ownerEvidence, "Agent"), false);
+  assert.equal("OR" in where, false);
 });
 
 test("AI review claim filter reclaims stale processing locks", () => {

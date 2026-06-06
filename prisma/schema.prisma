@@ -618,6 +618,13 @@ model Contact {
   qualificationStage String? @default("unqualified")
   buyerProfile       Json?
 
+  // Contact Profile Verification
+  profileVerifiedAt             DateTime?
+  profileVerificationStatus     String?
+  profileVerificationSource     String?
+  profileVerificationConfidence Float?
+  profileVerificationSummary    String?   @db.Text
+
   insights                   Insight[]
   tasks                      ContactTask[]
   userNotifications          UserNotification[]
@@ -641,6 +648,7 @@ model Contact {
   @@index([legacyCrmOwnerId])
   @@index([phone])
   @@index([lid])
+  @@index([locationId, profileVerificationStatus])
 }
 
 model WhatsAppIdentityMap {

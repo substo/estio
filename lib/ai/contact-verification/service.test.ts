@@ -70,6 +70,79 @@ test("verification leaves real buyer lead unchanged", () => {
   );
 });
 
+test("verification proposes buy lead goal from strong buying text", () => {
+  const result = buildContactVerificationAssessment({
+    contact: {
+      id: "contact_buy",
+      contactType: "Lead",
+      leadGoal: null,
+      name: "Michael",
+      qualificationStage: "unqualified",
+      requirementSummary: "Looking to purchase an apartment in Paphos.",
+    },
+    recentMessages: [{ body: "I want to buy a flat near the sea." }],
+  });
+
+  assert.equal(result.status, "verified_lead");
+  assert.equal(result.proposedPatch.leadGoal, "To Buy");
+  assert.equal(result.hasChanges, true);
+});
+
+test("verification proposes rent lead goal from strong rental text", () => {
+  const result = buildContactVerificationAssessment({
+    contact: {
+      id: "contact_rent",
+      contactType: "Lead",
+      leadGoal: null,
+      name: "Maria",
+      qualificationStage: "unqualified",
+      requirementSummary: "Needs a rental apartment in Paphos.",
+    },
+    recentMessages: [{ body: "I am renting and need something from next month." }],
+  });
+
+  assert.equal(result.status, "verified_lead");
+  assert.equal(result.proposedPatch.leadGoal, "To Rent");
+  assert.equal(result.hasChanges, true);
+});
+
+test("verification keeps mixed buy and rent intent in review without a resolver", () => {
+  const result = buildContactVerificationAssessment({
+    contact: {
+      id: "contact_mixed",
+      contactType: "Lead",
+      leadGoal: null,
+      name: "Alex",
+      firstName: "Alex",
+      qualificationStage: "unqualified",
+      requirementSummary: "Asked about buying or renting in Paphos.",
+    },
+    recentMessages: [{ body: "I might buy, but I am also open to rent." }],
+  });
+
+  assert.equal(result.status, "needs_review");
+  assert.equal(result.proposedPatch.leadGoal, undefined);
+  assert.equal(result.hasChanges, false);
+});
+
+test("verification resolves mixed buy and rent intent from requirement status", () => {
+  const result = buildContactVerificationAssessment({
+    contact: {
+      id: "contact_mixed_resolved",
+      contactType: "Lead",
+      leadGoal: null,
+      requirementStatus: "For Rent",
+      name: "Alex",
+      qualificationStage: "unqualified",
+      requirementSummary: "Asked about buying or renting in Paphos.",
+    },
+    recentMessages: [{ body: "I might buy, but I am also open to rent." }],
+  });
+
+  assert.equal(result.status, "verified_lead");
+  assert.equal(result.proposedPatch.leadGoal, "To Rent");
+});
+
 test("verification proposes clean first and last names from canonical display name", () => {
   const result = buildContactVerificationAssessment({
     contact: {

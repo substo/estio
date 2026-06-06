@@ -29,7 +29,7 @@ function statusLabel(value?: string | null) {
         case "verified_lead": return "Verified lead";
         case "likely_agent": return "Likely agent";
         case "likely_owner": return "Likely owner";
-        case "not_searching": return "Not searching";
+        case "not_a_lead": return "Not a lead";
         default: return "Needs review";
     }
 }
@@ -39,7 +39,7 @@ function statusClass(value?: string | null) {
         case "verified_lead": return "border-emerald-200 bg-emerald-50 text-emerald-700";
         case "likely_agent":
         case "likely_owner": return "border-amber-200 bg-amber-50 text-amber-700";
-        case "not_searching": return "border-slate-200 bg-slate-50 text-slate-700";
+        case "not_a_lead": return "border-slate-200 bg-slate-50 text-slate-700";
         default: return "";
     }
 }
