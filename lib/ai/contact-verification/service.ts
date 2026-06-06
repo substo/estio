@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import {
   buildCanonicalContactName,
   extractPropertyRefsFromLeadText,
@@ -9,6 +10,9 @@ import {
 } from "@/lib/contacts/name-builder";
 
 type AnyRecord = Record<string, any>;
+
+const CONTACT_VERIFICATION_MODEL = "contact-profile-name-agent-v1";
+const CONTACT_VERIFICATION_PROVIDER = "deterministic";
 
 const CONTACT_TYPES = new Set([
   "Lead",
@@ -46,6 +50,14 @@ export type ContactVerificationPatch = Partial<Record<typeof VERIFICATION_FIELDS
 function normalizeText(value: unknown, max = 4000): string | null {
   const normalized = String(value || "").trim();
   return normalized ? normalized.slice(0, max) : null;
+}
+
+function logContactVerificationTiming(event: string, fields: Record<string, unknown> = {}) {
+  console.info("[AI Contact Verification Timing]", JSON.stringify({
+    event,
+    ts: new Date().toISOString(),
+    ...fields,
+  }));
 }
 
 function normalizeContactType(value: unknown): string | null {
@@ -277,10 +289,29 @@ export async function verifyContactProfile(args: {
   sourceIds?: string[];
   actorUserId?: string | null;
 }) {
+  const startedAt = Date.now();
+  logContactVerificationTiming("scan_start", {
+    locationId: args.locationId,
+    contactId: args.contactId,
+    conversationId: args.conversationId || null,
+    sourceType: args.sourceType || "manual_verification",
+    model: CONTACT_VERIFICATION_MODEL,
+    provider: CONTACT_VERIFICATION_PROVIDER,
+  });
+
   const contact = await db.contact.findFirst({
     where: { id: args.contactId, locationId: args.locationId },
   });
-  if (!contact) return { success: false as const, error: "Contact not found." };
+  if (!contact) {
+    logContactVerificationTiming("scan_failed", {
+      locationId: args.locationId,
+      contactId: args.contactId,
+      conversationId: args.conversationId || null,
+      elapsedMs: Date.now() - startedAt,
+      reason: "Contact not found.",
+    });
+    return { success: false as const, error: "Contact not found." };
+  }
 
   const pendingProposal = await db.contactRequirementProposal.findFirst({
     where: {
@@ -292,16 +323,70 @@ export async function verifyContactProfile(args: {
     select: { id: true },
   });
   if (pendingProposal) {
+    logContactVerificationTiming("scan_skipped_pending", {
+      locationId: args.locationId,
+      contactId: contact.id,
+      conversationId: args.conversationId || null,
+      proposalId: pendingProposal.id,
+      elapsedMs: Date.now() - startedAt,
+    });
     return { success: true as const, created: false as const, reason: "A pending contact verification proposal already exists." };
   }
 
+  const messagesStartedAt = Date.now();
   const recentMessages = await collectRecentMessages({
     locationId: args.locationId,
     contactId: contact.id,
     conversationId: args.conversationId || null,
   });
+  const messagesMs = Date.now() - messagesStartedAt;
+  const assessmentStartedAt = Date.now();
   const assessment = buildContactVerificationAssessment({ contact, recentMessages });
+  const assessmentMs = Date.now() - assessmentStartedAt;
+
+  void securelyRecordAiUsage({
+    locationId: args.locationId,
+    userId: args.actorUserId || null,
+    resourceType: "contact",
+    resourceId: contact.id,
+    featureArea: "contact_verification",
+    action: "profile_scan",
+    provider: CONTACT_VERIFICATION_PROVIDER,
+    model: CONTACT_VERIFICATION_MODEL,
+    inputTokens: 0,
+    outputTokens: 0,
+    metadata: {
+      conversationId: args.conversationId || null,
+      sourceType: args.sourceType || "manual_verification",
+      status: assessment.status,
+      inferredRole: assessment.inferredRole,
+      hasChanges: assessment.hasChanges,
+      recentMessageCount: recentMessages.length,
+      durationMs: Date.now() - startedAt,
+      messagesMs,
+      assessmentMs,
+    },
+  });
+
   if (!assessment.hasChanges) {
+    logContactVerificationTiming("scan_complete", {
+      locationId: args.locationId,
+      contactId: contact.id,
+      conversationId: args.conversationId || null,
+      elapsedMs: Date.now() - startedAt,
+      messagesMs,
+      assessmentMs,
+      recentMessageCount: recentMessages.length,
+      status: assessment.status,
+      inferredRole: assessment.inferredRole,
+      hasChanges: false,
+      proposalCreated: false,
+      model: CONTACT_VERIFICATION_MODEL,
+      provider: CONTACT_VERIFICATION_PROVIDER,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    });
     return { success: true as const, created: false as const, reason: assessment.reasoning, assessment };
   }
 
@@ -320,7 +405,32 @@ export async function verifyContactProfile(args: {
       evidence: assessment.evidence,
       confidence: assessment.confidence,
       reasoning: assessment.reasoning,
+      model: CONTACT_VERIFICATION_MODEL,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0,
     },
+  });
+
+  logContactVerificationTiming("scan_complete", {
+    locationId: args.locationId,
+    contactId: contact.id,
+    conversationId: args.conversationId || null,
+    elapsedMs: Date.now() - startedAt,
+    messagesMs,
+    assessmentMs,
+    recentMessageCount: recentMessages.length,
+    status: assessment.status,
+    inferredRole: assessment.inferredRole,
+    hasChanges: true,
+    proposalCreated: true,
+    proposalId: proposal.id,
+    model: CONTACT_VERIFICATION_MODEL,
+    provider: CONTACT_VERIFICATION_PROVIDER,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
   });
 
   return { success: true as const, created: true as const, proposal, assessment };

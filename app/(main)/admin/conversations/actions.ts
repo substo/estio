@@ -6379,12 +6379,34 @@ export async function updateContactClientContextAction(conversationId: string, c
 }
 
 export async function scanContactVerificationAction(contactId: string, conversationId?: string | null) {
+    const startedAt = Date.now();
+    const requestedConversationId = String(conversationId || "").trim();
+    const logTiming = (event: string, fields: Record<string, unknown> = {}) => {
+        console.info("[AI Contact Verification Timing]", JSON.stringify({
+            event,
+            ts: new Date().toISOString(),
+            contactId,
+            requestedConversationId: requestedConversationId || null,
+            elapsedMs: Date.now() - startedAt,
+            ...fields,
+        }));
+    };
+    logTiming("action_start");
+
+    const authStartedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
+    logTiming("action_auth_end", {
+        locationId: location.id,
+        authMs: Date.now() - authStartedAt,
+        hasAccess: actor.hasAccess,
+    });
     if (!actor.hasAccess) {
+        logTiming("action_failed", { reason: "Unauthorized" });
         return { success: false as const, error: "Unauthorized" };
     }
 
+    const contactLookupStartedAt = Date.now();
     const contact = await db.contact.findFirst({
         where: {
             locationId: location.id,
@@ -6392,18 +6414,32 @@ export async function scanContactVerificationAction(contactId: string, conversat
         },
         select: { id: true },
     });
-    if (!contact) return { success: false as const, error: "Contact not found." };
+    logTiming("action_contact_lookup_end", {
+        locationId: location.id,
+        contactLookupMs: Date.now() - contactLookupStartedAt,
+        resolvedContactId: contact?.id || null,
+    });
+    if (!contact) {
+        logTiming("action_failed", { locationId: location.id, reason: "Contact not found." });
+        return { success: false as const, error: "Contact not found." };
+    }
 
     let conversationInternalId: string | null = null;
-    const requestedConversationId = String(conversationId || "").trim();
     if (requestedConversationId) {
+        const conversationLookupStartedAt = Date.now();
         const conversation = await db.conversation.findFirst({
             where: buildConversationReferenceWhere(location.id, requestedConversationId),
             select: { id: true },
         });
         conversationInternalId = conversation?.id || null;
+        logTiming("action_conversation_lookup_end", {
+            locationId: location.id,
+            conversationLookupMs: Date.now() - conversationLookupStartedAt,
+            conversationId: conversationInternalId,
+        });
     }
 
+    const scanStartedAt = Date.now();
     const result = await verifyContactProfile({
         locationId: location.id,
         contactId: contact.id,
@@ -6411,9 +6447,24 @@ export async function scanContactVerificationAction(contactId: string, conversat
         sourceType: "manual_verification",
         actorUserId: actor.userId || null,
     });
+    logTiming(result.success ? "action_scan_end" : "action_scan_failed", {
+        locationId: location.id,
+        conversationId: conversationInternalId || null,
+        resolvedContactId: contact.id,
+        scanMs: Date.now() - scanStartedAt,
+        success: result.success,
+        proposalCreated: Boolean(result.success && result.created),
+        reason: result.success ? result.reason || null : result.error || null,
+    });
     if (!result.success) return result;
 
     invalidateConversationReadCaches(conversationInternalId || requestedConversationId, { skipPath: true });
+    logTiming("action_complete", {
+        locationId: location.id,
+        conversationId: conversationInternalId || null,
+        resolvedContactId: contact.id,
+        proposalCreated: Boolean(result.created),
+    });
     return {
         success: true as const,
         proposalCreated: Boolean(result.created),

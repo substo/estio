@@ -101,10 +101,29 @@ test("verification does not overwrite clean stored human names", () => {
   assert.deepEqual(result.proposedPatch, {});
 });
 
-test("verification cleans noisy stored last name", () => {
+test("verification does not propose property descriptors as last name", () => {
   const result = buildContactVerificationAssessment({
     contact: {
       id: "contact_6",
+      contactType: "Lead",
+      leadGoal: "To Buy",
+      name: "Silvia Lead Sale DT1367 3Bdr Villa Peyia",
+      firstName: "Silvia",
+      lastName: null,
+      qualificationStage: "unqualified",
+    },
+    recentMessages: [{ body: "I will check all later. Thanks" }],
+  });
+
+  assert.equal(result.status, "verified_lead");
+  assert.equal(result.hasChanges, false);
+  assert.deepEqual(result.proposedPatch, {});
+});
+
+test("verification cleans noisy stored last name", () => {
+  const result = buildContactVerificationAssessment({
+    contact: {
+      id: "contact_7",
       contactType: "Lead",
       leadGoal: "To Buy",
       name: "Maria Papadopoulou Agent",

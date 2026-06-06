@@ -132,6 +132,27 @@ function cleanPersonNameToken(value: string): string {
         .trim();
 }
 
+function isContactNameBoundaryToken(value: string): boolean {
+    if (!value) return false;
+    if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(value)) return true;
+    if (/\+?\d[\d().-]{2,}/.test(value)) return true;
+    if (extractPropertyRefsFromLeadText(value).length > 0) return true;
+    const token = cleanPersonNameToken(value).toLowerCase();
+    return !token || PERSON_NAME_STOP_WORDS.has(token);
+}
+
+function leadingPersonNameText(value?: string | null): string {
+    const text = normalizeWhitespace(value);
+    if (!text) return "";
+
+    const parts: string[] = [];
+    for (const rawPart of text.split(/\s+/)) {
+        if (isContactNameBoundaryToken(rawPart)) break;
+        parts.push(rawPart);
+    }
+    return normalizeWhitespace(parts.join(" "));
+}
+
 export function hasContactPersonNameNoise(value?: string | null): boolean {
     const text = normalizeWhitespace(value);
     if (!text) return false;
@@ -151,7 +172,7 @@ export function parseContactPersonNameFromDisplayName(value?: string | null) {
         return { firstName: "", lastName: "", fullName: "" };
     }
 
-    const cleaned = stripContactNameNoise(original);
+    const cleaned = stripContactNameNoise(leadingPersonNameText(original));
     const parts = cleaned
         .split(/\s+/)
         .map(cleanPersonNameToken)
