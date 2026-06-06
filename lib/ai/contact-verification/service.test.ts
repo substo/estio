@@ -63,6 +63,11 @@ test("verification leaves real buyer lead unchanged", () => {
   assert.equal(result.status, "verified_lead");
   assert.equal(result.hasChanges, false);
   assert.deepEqual(result.proposedPatch, {});
+  assert.equal(result.reasoning, "Contact fields are consistent with a buyer lead.");
+  assert.equal(
+    result.evidence.find((item) => item.sourceId === "lead_verification")?.quote,
+    "Contact type and lead goal are consistent with buyer outreach.",
+  );
 });
 
 test("verification proposes clean first and last names from canonical display name", () => {
@@ -81,6 +86,11 @@ test("verification proposes clean first and last names from canonical display na
   assert.equal(result.proposedPatch.firstName, "John");
   assert.equal(result.proposedPatch.lastName, "Smith");
   assert.equal(result.hasChanges, true);
+  assert.equal(result.reasoning, "Contact fields are consistent with a renter lead.");
+  assert.equal(
+    result.evidence.find((item) => item.sourceId === "lead_verification")?.quote,
+    "Contact type and lead goal are consistent with renter outreach.",
+  );
 });
 
 test("verification does not overwrite clean stored human names", () => {

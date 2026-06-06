@@ -136,6 +136,12 @@ function verificationStatusForPatch(patch: ContactVerificationPatch, inferredRol
   return "needs_review";
 }
 
+function leadGoalProfileLabel(goal: unknown): string {
+  if (goal === "To Buy") return "buyer";
+  if (goal === "To Rent") return "renter";
+  return "buyer/renter";
+}
+
 function buildRoleEvidenceText(args: {
   contact: AnyRecord;
   messages: Array<{ body?: string | null }>;
@@ -224,10 +230,11 @@ export function buildContactVerificationAssessment(args: {
       quote: `Name or context indicates ${inferredRole}.`,
     });
   } else if (String(args.contact.contactType || "") === "Lead" && ["To Buy", "To Rent"].includes(String(args.contact.leadGoal || ""))) {
+    const leadProfileLabel = leadGoalProfileLabel(args.contact.leadGoal);
     evidence.push({
       sourceId: "lead_verification",
       field: "contactType",
-      quote: "Contact type and lead goal are consistent with buyer/renter outreach.",
+      quote: `Contact type and lead goal are consistent with ${leadProfileLabel} outreach.`,
     });
   } else if (NON_LEAD_CONTACT_TYPES.has(String(args.contact.contactType || ""))) {
     if (args.contact.leadGoal) patch.leadGoal = null;
@@ -241,8 +248,9 @@ export function buildContactVerificationAssessment(args: {
 
   const normalizedPatch = normalizeContactVerificationPatch(patch);
   const status = verificationStatusForPatch(normalizedPatch, inferredRole, args.contact);
+  const leadProfileLabel = leadGoalProfileLabel(normalizedPatch.leadGoal || args.contact.leadGoal);
   const reasoning = status === "verified_lead"
-    ? "Contact fields are consistent with a buyer/renter lead."
+    ? `Contact fields are consistent with a ${leadProfileLabel} lead.`
     : inferredRole !== "Lead"
       ? `Name or context indicates this contact is ${inferredRole}, not a buyer/renter lead.`
       : "Contact profile needs review before it can be treated as a verified lead.";
