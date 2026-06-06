@@ -6692,6 +6692,7 @@ export async function reviewPropertyMatchCandidateAction(candidateId: string, re
         reviewerStatus,
         actorUserId: actor.userId || null,
         rejectedReason: reason || null,
+        refreshCampaignCount: reviewerStatus !== "skipped" && reviewerStatus !== "rejected",
     });
 }
 

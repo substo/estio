@@ -1660,6 +1660,7 @@ export async function updatePropertyMatchCandidateReview(args: {
   reviewerStatus: string;
   actorUserId?: string | null;
   rejectedReason?: string | null;
+  refreshCampaignCount?: boolean;
 }) {
   const reviewerStatus = String(args.reviewerStatus || "").trim();
   if (!REVIEWER_STATUSES.has(reviewerStatus)) {
@@ -1700,7 +1701,9 @@ export async function updatePropertyMatchCandidateReview(args: {
         : null,
     },
   });
-  await refreshCampaignCounts(candidate.campaignId);
+  if (args.refreshCampaignCount !== false) {
+    await refreshCampaignCounts(candidate.campaignId);
+  }
   return { success: true as const };
 }
 

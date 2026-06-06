@@ -217,6 +217,10 @@ function queueEmptyLabel(queue: Queue) {
     return "No candidates in this campaign.";
 }
 
+function reviewedCandidateShouldStayVisible(queue: Queue) {
+    return queue === "all";
+}
+
 function formatDecisionDate(value?: string | null) {
     if (!value) return "";
     const date = new Date(value);
@@ -533,30 +537,71 @@ export function PropertyMatchCampaignsDialog({
         });
     };
 
-    const skipCandidate = (candidate: Candidate) => {
-        setBusyCandidateId(candidate.id);
-        startTransition(async () => {
-            const res = await reviewPropertyMatchCandidateAction(candidate.id, "skipped", "Skipped during campaign review");
-            if (!res.success) setError(res.error || "Could not skip contact.");
-            setBusyCandidateId(null);
-            if (selectedCampaignId) {
-                await refreshCampaigns();
-                loadDetail(selectedCampaignId, queue);
-            }
+    const refreshCampaignCountsInBackground = (campaignId: string) => {
+        void refreshCampaigns().then((rows) => {
+            const updatedCampaign = rows.find((campaign) => campaign.id === campaignId);
+            if (!updatedCampaign) return;
+            setDetail((current) => (
+                current?.campaign.id === campaignId
+                    ? { ...current, campaign: updatedCampaign }
+                    : current
+            ));
         });
     };
 
-    const rejectCandidate = (candidate: Candidate) => {
+    const reviewCandidateWithoutSending = (
+        candidate: Candidate,
+        reviewerStatus: "skipped" | "rejected",
+        reason: string,
+        errorMessage: string,
+    ) => {
+        const campaignId = selectedCampaignId;
         setBusyCandidateId(candidate.id);
         startTransition(async () => {
-            const res = await reviewPropertyMatchCandidateAction(candidate.id, "rejected", "Rejected during campaign review");
-            if (!res.success) setError(res.error || "Could not reject contact.");
-            setBusyCandidateId(null);
-            if (selectedCampaignId) {
-                await refreshCampaigns();
-                loadDetail(selectedCampaignId, queue);
+            const res = await reviewPropertyMatchCandidateAction(candidate.id, reviewerStatus, reason);
+            if (!res.success) {
+                setError(res.error || errorMessage);
+                setBusyCandidateId(null);
+                return;
             }
+            setError("");
+            setDetail((current) => current ? {
+                ...current,
+                candidates: reviewedCandidateShouldStayVisible(queue)
+                    ? current.candidates.map((item) => (
+                        item.id === candidate.id
+                            ? {
+                                ...item,
+                                reviewerStatus,
+                                reviewedAt: new Date().toISOString(),
+                                rejectedReason: reason,
+                                lastError: null,
+                            }
+                            : item
+                    ))
+                    : current.candidates.filter((item) => item.id !== candidate.id),
+            } : current);
+            setBusyCandidateId(null);
+            if (campaignId) refreshCampaignCountsInBackground(campaignId);
         });
+    };
+
+    const skipCandidate = (candidate: Candidate) => {
+        reviewCandidateWithoutSending(
+            candidate,
+            "skipped",
+            "Skipped for now during campaign review",
+            "Could not skip contact.",
+        );
+    };
+
+    const rejectCandidate = (candidate: Candidate) => {
+        reviewCandidateWithoutSending(
+            candidate,
+            "rejected",
+            "Rejected as not a suitable match during campaign review",
+            "Could not reject contact.",
+        );
     };
 
     const saveDraft = (candidate: Candidate) => {
@@ -944,17 +989,38 @@ export function PropertyMatchCampaignsDialog({
                                                             ) : null}
                                                             {canReview ? (
                                                                 <>
-                                                                    <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7" onClick={() => skipCandidate(candidate)} disabled={isBusy}>
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        className="h-8 px-2 text-xs sm:h-7"
+                                                                        onClick={() => skipCandidate(candidate)}
+                                                                        disabled={isBusy}
+                                                                        title="Skip keeps this out of sending for now without marking the match as wrong."
+                                                                    >
                                                                         <X className="mr-1.5 h-3.5 w-3.5" />
-                                                                        Skip
+                                                                        Skip for now
                                                                     </Button>
-                                                                    <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs text-red-600 hover:text-red-700 sm:h-7" onClick={() => rejectCandidate(candidate)} disabled={isBusy}>
-                                                                        Reject
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        className="h-8 px-2 text-xs text-red-600 hover:text-red-700 sm:h-7"
+                                                                        onClick={() => rejectCandidate(candidate)}
+                                                                        disabled={isBusy}
+                                                                        title="Reject marks this candidate as not a suitable match."
+                                                                    >
+                                                                        Reject match
                                                                     </Button>
                                                                 </>
                                                             ) : null}
                                                         </div>
                                                     </div>
+                                                    {canReview ? (
+                                                        <div className="mt-1 text-[11px] text-slate-500">
+                                                            Skip keeps it out of this send for now. Reject marks it as a bad match.
+                                                        </div>
+                                                    ) : null}
 
                                                     <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-xs text-slate-700">
                                                         <div className="font-medium">{candidate.matchSummary || "Match review"}</div>
