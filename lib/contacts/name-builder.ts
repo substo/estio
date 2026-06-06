@@ -78,6 +78,98 @@ export function normalizeWhitespace(value?: string | null): string {
     return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+const PERSON_NAME_STOP_WORDS = new Set([
+    "lead",
+    "agent",
+    "owner",
+    "tenant",
+    "buyer",
+    "seller",
+    "landlord",
+    "landlady",
+    "vendor",
+    "rent",
+    "rental",
+    "sale",
+    "sell",
+    "list",
+    "listing",
+    "for",
+    "to",
+]);
+
+const COMPANY_NAME_PATTERNS = [
+    /\b(properties|property|estates|estate|developers?|development|realty|agency|group|holdings?|investments?)\b/i,
+    /\b(ltd|limited|llc|plc|inc|corp(?:oration)?|company|co)\b/i,
+];
+
+function isLikelyCompanyName(value?: string | null): boolean {
+    const text = normalizeWhitespace(value);
+    if (!text) return false;
+    return COMPANY_NAME_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function stripContactNameNoise(value?: string | null): string {
+    let text = normalizeWhitespace(value);
+    if (!text) return "";
+
+    text = text
+        .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, " ")
+        .replace(/\+?\d[\d\s().-]{5,}\d/g, " ")
+        .replace(/\bfor\s+(?:rent|sale)\b/gi, " ")
+        .replace(/\bto\s+(?:buy|rent|sell|list)\b/gi, " ");
+
+    for (const ref of extractPropertyRefsFromLeadText(text)) {
+        text = text.replace(new RegExp(`\\b${ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), " ");
+    }
+
+    return normalizeWhitespace(text);
+}
+
+function cleanPersonNameToken(value: string): string {
+    return value
+        .replace(/^[^\p{L}]+|[^\p{L}.'-]+$/gu, "")
+        .trim();
+}
+
+export function hasContactPersonNameNoise(value?: string | null): boolean {
+    const text = normalizeWhitespace(value);
+    if (!text) return false;
+    if (extractPropertyRefsFromLeadText(text).length > 0) return true;
+    if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) return true;
+    if (/\+?\d[\d\s().-]{5,}\d/.test(text)) return true;
+    return text
+        .split(/\s+/)
+        .map(cleanPersonNameToken)
+        .filter(Boolean)
+        .some((part) => PERSON_NAME_STOP_WORDS.has(part.toLowerCase()));
+}
+
+export function parseContactPersonNameFromDisplayName(value?: string | null) {
+    const original = normalizeWhitespace(value);
+    if (!original || isLikelyCompanyName(original)) {
+        return { firstName: "", lastName: "", fullName: "" };
+    }
+
+    const cleaned = stripContactNameNoise(original);
+    const parts = cleaned
+        .split(/\s+/)
+        .map(cleanPersonNameToken)
+        .filter(Boolean)
+        .filter((part) => !PERSON_NAME_STOP_WORDS.has(part.toLowerCase()))
+        .filter((part) => /\p{L}/u.test(part));
+
+    if (!parts.length) return { firstName: "", lastName: "", fullName: "" };
+
+    const firstName = parts[0];
+    const lastName = parts.length > 1 ? parts[1] : "";
+    return {
+        firstName,
+        lastName,
+        fullName: normalizeWhitespace([firstName, lastName].filter(Boolean).join(" ")),
+    };
+}
+
 export function splitLeadPersonName(contact?: BuilderContactData) {
     const explicitFirst = normalizeWhitespace(contact?.firstName);
     const explicitLast = normalizeWhitespace(contact?.lastName);
@@ -91,24 +183,7 @@ export function splitLeadPersonName(contact?: BuilderContactData) {
         };
     }
 
-    if (!fallbackName) {
-        return { firstName: "", lastName: "", fullName: "" };
-    }
-
-    const parts = fallbackName.split(/\s+/).filter(Boolean);
-    if (parts.length === 1) {
-        return {
-            firstName: parts[0],
-            lastName: "",
-            fullName: parts[0],
-        };
-    }
-
-    return {
-        firstName: parts[0],
-        lastName: parts.slice(1).join(" "),
-        fullName: fallbackName,
-    };
+    return parseContactPersonNameFromDisplayName(fallbackName);
 }
 
 export type InferredLeadContactRole = "Lead" | "Owner" | "Agent";

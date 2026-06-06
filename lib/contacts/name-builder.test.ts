@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCanonicalContactName, buildStructuredLeadDisplayName, inferLeadContactRoleFromSignals } from "./name-builder";
+import {
+    buildCanonicalContactName,
+    buildStructuredLeadDisplayName,
+    hasContactPersonNameNoise,
+    inferLeadContactRoleFromSignals,
+    parseContactPersonNameFromDisplayName,
+} from "./name-builder";
 
 test("buildStructuredLeadDisplayName uses provided display labels and sale goal cleanly", () => {
     const result = buildStructuredLeadDisplayName({
@@ -66,6 +72,52 @@ test("buildCanonicalContactName avoids duplicate non-lead role labels", () => {
         contactType: "Owner",
         rawLeadText: "Ref DT4930",
     }), "Andreas Owner DT4930");
+});
+
+test("parseContactPersonNameFromDisplayName removes role and property reference tokens", () => {
+    assert.deepEqual(parseContactPersonNameFromDisplayName("Andreas Owner DT4930"), {
+        firstName: "Andreas",
+        lastName: "",
+        fullName: "Andreas",
+    });
+
+    assert.deepEqual(parseContactPersonNameFromDisplayName("Maria Papadopoulou Agent"), {
+        firstName: "Maria",
+        lastName: "Papadopoulou",
+        fullName: "Maria Papadopoulou",
+    });
+
+    assert.deepEqual(parseContactPersonNameFromDisplayName("John Smith Lead Rent DT4930"), {
+        firstName: "John",
+        lastName: "Smith",
+        fullName: "John Smith",
+    });
+});
+
+test("parseContactPersonNameFromDisplayName avoids company names and contact details", () => {
+    assert.deepEqual(parseContactPersonNameFromDisplayName("ABC Properties Agent"), {
+        firstName: "",
+        lastName: "",
+        fullName: "",
+    });
+
+    assert.deepEqual(parseContactPersonNameFromDisplayName("Cyprus Estates"), {
+        firstName: "",
+        lastName: "",
+        fullName: "",
+    });
+
+    assert.deepEqual(parseContactPersonNameFromDisplayName("Elena Markou +357 99 123456 elena@example.com"), {
+        firstName: "Elena",
+        lastName: "Markou",
+        fullName: "Elena Markou",
+    });
+});
+
+test("hasContactPersonNameNoise detects CRM display tokens without flagging clean names", () => {
+    assert.equal(hasContactPersonNameNoise("Papadopoulou Agent DT4930"), true);
+    assert.equal(hasContactPersonNameNoise("John Smith"), false);
+    assert.equal(hasContactPersonNameNoise("Alexandra Saleh"), false);
 });
 
 test("inferLeadContactRoleFromSignals detects explicit owner and agent roles", () => {

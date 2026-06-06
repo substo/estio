@@ -2,8 +2,10 @@ import db from "@/lib/db";
 import {
   buildCanonicalContactName,
   extractPropertyRefsFromLeadText,
+  hasContactPersonNameNoise,
   inferLeadContactRoleFromSignals,
   normalizeWhitespace,
+  parseContactPersonNameFromDisplayName,
 } from "@/lib/contacts/name-builder";
 
 type AnyRecord = Record<string, any>;
@@ -135,6 +137,40 @@ function buildRoleEvidenceText(args: {
   ].map((item) => String(item || "").trim()).filter(Boolean).join("\n");
 }
 
+function addPersonNamePatch(args: {
+  contact: AnyRecord;
+  patch: ContactVerificationPatch;
+  evidence: AnyRecord[];
+}) {
+  const parsed = parseContactPersonNameFromDisplayName(args.contact.name);
+  if (!parsed.firstName) return;
+
+  const currentFirstName = normalizeWhitespace(args.contact.firstName);
+  const currentLastName = normalizeWhitespace(args.contact.lastName);
+  const nextLastName = parsed.lastName || null;
+  let changed = false;
+
+  if (parsed.firstName && currentFirstName !== parsed.firstName && (!currentFirstName || hasContactPersonNameNoise(currentFirstName))) {
+    args.patch.firstName = parsed.firstName;
+    changed = true;
+  }
+
+  if ((nextLastName || currentLastName) && currentLastName !== (nextLastName || "")) {
+    if (!currentLastName || hasContactPersonNameNoise(currentLastName)) {
+      args.patch.lastName = nextLastName;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    args.evidence.push({
+      sourceId: "display_name_parser",
+      field: "firstName",
+      quote: `Parsed person name from display name "${args.contact.name}".`,
+    });
+  }
+}
+
 export function buildContactVerificationAssessment(args: {
   contact: AnyRecord;
   recentMessages?: Array<{ body?: string | null }>;
@@ -155,6 +191,8 @@ export function buildContactVerificationAssessment(args: {
   const snapshot = getContactVerificationSnapshot(args.contact);
   const patch: ContactVerificationPatch = {};
   const evidence: AnyRecord[] = [];
+
+  addPersonNamePatch({ contact: args.contact, patch, evidence });
 
   if (inferredRole !== "Lead" && String(args.contact.contactType || "") !== inferredRole) {
     patch.contactType = inferredRole;

@@ -44,9 +44,33 @@ function statusClass(value?: string | null) {
     }
 }
 
+const PATCH_FIELD_LABELS: Record<string, string> = {
+    contactType: "Type",
+    leadGoal: "Goal",
+    name: "Display name",
+    firstName: "First name",
+    lastName: "Last name",
+    qualificationStage: "Stage",
+    requirementSummary: "Requirements",
+};
+
 function patchSummary(patch: Record<string, unknown> | null) {
     if (!patch || typeof patch !== "object") return "No profile changes";
-    const parts = Object.entries(patch).map(([field, value]) => `${field}: ${value == null ? "empty" : String(value)}`);
+    const orderedFields = [
+        "contactType",
+        "leadGoal",
+        "name",
+        "firstName",
+        "lastName",
+        "qualificationStage",
+        "requirementSummary",
+    ];
+    const entries = Object.entries(patch).sort(([left], [right]) => {
+        const leftIndex = orderedFields.indexOf(left);
+        const rightIndex = orderedFields.indexOf(right);
+        return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
+    });
+    const parts = entries.map(([field, value]) => `${PATCH_FIELD_LABELS[field] || field}: ${value == null ? "empty" : String(value)}`);
     return parts.length ? parts.join(" · ") : "No profile changes";
 }
 
