@@ -20,11 +20,12 @@ import {
     fetchMessages,
     getConversationWorkspaceCore,
     getConversationWorkspaceSidebar,
+    getContactContext,
     refreshConversation,
     refreshConversationOnDemand,
 } from '../actions';
 import { toast } from '@/components/ui/use-toast';
-import { buildContactContextShell } from './conversation-workspace-ui-actions';
+import { buildContactContextShell, isShellContactContext } from './conversation-workspace-ui-actions';
 import { getMessageSignature } from './conversation-transcript-actions';
 import { fetchConversationMessageWindow } from './conversation-message-window-client';
 
@@ -111,6 +112,7 @@ export function useChatWorkspaceHydration({
     workspaceActivityLimit,
 }: UseChatWorkspaceHydrationParams) {
     const messageWindowRequestTokenRef = useRef(0);
+    const contactContextInFlightRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         if (viewMode !== 'chats') return;
@@ -583,6 +585,31 @@ export function useChatWorkspaceHydration({
             const sidebarStartedAtMs = Date.now();
             workspaceSidebarInFlightRef.current.add(selectedConversationId);
             trackClientRequest("workspace_sidebar_load", { conversationId: selectedConversationId });
+            const shellConversation =
+                selectedConversationCacheRef.current.get(selectedConversationId)
+                || conversationsRef.current.find((conversation) => conversation.id === selectedConversationId)
+                || null;
+            const contactIdForFastPath = shellConversation?.contactId || null;
+            const loadContactContextFirst = async () => {
+                if (!contactIdForFastPath || contactContextInFlightRef.current.has(contactIdForFastPath)) return;
+                contactContextInFlightRef.current.add(contactIdForFastPath);
+                const contactStartedAtMs = Date.now();
+                try {
+                    const contactContext = await getContactContext(contactIdForFastPath, { refreshExternal: false });
+                    if (cancelled || activeIdRef.current !== selectedConversationId || !contactContext?.contact) return;
+                    setWorkspaceContactContext((current: any) => (
+                        !current || isShellContactContext(current) ? contactContext : current
+                    ));
+                    trackClientMetric("sidebar_contact_fast_path_ready_ms", Date.now() - contactStartedAtMs, {
+                        conversationId: selectedConversationId,
+                    });
+                } catch (error) {
+                    console.error("Failed to load contact context fast path", error);
+                } finally {
+                    contactContextInFlightRef.current.delete(contactIdForFastPath);
+                }
+            };
+            void loadContactContextFirst();
             try {
                 const sidebar = await getConversationWorkspaceSidebar(selectedConversationId);
                 if (cancelled || activeIdRef.current !== selectedConversationId) return;

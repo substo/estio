@@ -81,6 +81,7 @@ export function useCoordinatorContactContext({
         }
 
         let cancelled = false;
+        const fetchDelayMs = hasShellContext && lazySidebarDataEnabled ? 1200 : hasShellContext ? 0 : 150;
         const fetchTimer = setTimeout(() => {
             if (cancelled) return;
             setLoadingContext(true);
@@ -92,13 +93,13 @@ export function useCoordinatorContactContext({
                 .finally(() => {
                     if (!cancelled) setLoadingContext(false);
                 });
-        }, hasShellContext ? 0 : 150);
+        }, fetchDelayMs);
 
         return () => {
             cancelled = true;
             clearTimeout(fetchTimer);
         };
-    }, [contactId, initialContactContext]);
+    }, [contactId, initialContactContext, lazySidebarDataEnabled]);
 
     const handleContactSaved = async (patch: ContactIdentityPatch) => {
         if (!patch?.id) return;
