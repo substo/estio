@@ -228,6 +228,7 @@ test("AI review claim filter reclaims stale processing locks", () => {
 
   assert.deepEqual(where.id, { in: ["cand_1", "cand_2"] });
   assert.equal(where.reviewerStatus, "pending");
+  assert.deepEqual(where.contact, { profileVerificationStatus: "verified_lead" });
   assert.deepEqual(where.OR, [
     { aiReviewStatus: "pending" },
     {

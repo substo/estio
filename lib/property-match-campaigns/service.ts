@@ -565,6 +565,7 @@ export function buildAiReviewClaimWhere(args: {
     campaignId: args.campaignId,
     locationId: args.locationId,
     reviewerStatus: "pending",
+    contact: { profileVerificationStatus: "verified_lead" },
     OR: [
       { aiReviewStatus: "pending" },
       {
@@ -573,6 +574,36 @@ export function buildAiReviewClaimWhere(args: {
       },
     ],
   };
+}
+
+async function finalizeUnverifiedPropertyMatchCandidates(args: {
+  locationId: string;
+  campaignId: string;
+}) {
+  return db.propertyMatchCandidate.updateMany({
+    where: {
+      campaignId: args.campaignId,
+      locationId: args.locationId,
+      reviewerStatus: "pending",
+      aiReviewStatus: { in: ["pending", "failed"] },
+      contact: {
+        OR: [
+          { profileVerificationStatus: null },
+          { profileVerificationStatus: { not: "verified_lead" } },
+        ],
+      },
+    },
+    data: {
+      aiVerdict: "no",
+      aiReviewStatus: "done",
+      aiReviewLockedAt: null,
+      aiReviewLockedBy: null,
+      confidence: 0.95,
+      reasoning: "Contact profile is not globally verified as a buyer/renter lead; skipped campaign AI review.",
+      matchSummary: "Needs profile verification before campaign matching.",
+      lastError: null,
+    },
+  });
 }
 
 async function findPriorPropertyShareEvidenceByConversation(args: {
@@ -1367,6 +1398,11 @@ export async function processPropertyMatchCampaignBatch(args: {
   });
   if (!refreshedCampaign) return { success: false as const, error: "Campaign not found." };
 
+  const finalizedUnverified = await finalizeUnverifiedPropertyMatchCandidates({
+    locationId: args.locationId,
+    campaignId: args.campaignId,
+  });
+
   const staleLockedBefore = new Date(Date.now() - AI_REVIEW_LOCK_TIMEOUT_MS);
   const claimable = await db.propertyMatchCandidate.findMany({
     where: buildAiReviewClaimWhere({
@@ -1408,7 +1444,7 @@ export async function processPropertyMatchCampaignBatch(args: {
     })
     : [];
 
-  let processed = 0;
+  let processed = finalizedUnverified.count;
   let failed = 0;
   for (const candidate of candidates) {
     if (await isPropertyMatchCampaignStopRequested({

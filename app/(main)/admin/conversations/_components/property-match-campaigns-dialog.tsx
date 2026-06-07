@@ -152,7 +152,7 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
 const PROPERTY_SEARCH_LIMIT = 12;
 const MIN_PROPERTY_SEARCH_LENGTH = 2;
 const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
-const LIVE_BATCH_LIMIT = 1;
+const LIVE_BATCH_LIMIT = 20;
 
 function formatMoney(value?: number | null) {
     return Number.isFinite(Number(value)) ? `€${Number(value).toLocaleString()}` : "No price";
