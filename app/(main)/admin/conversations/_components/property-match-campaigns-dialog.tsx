@@ -70,6 +70,7 @@ type QueueCounts = {
     sentCount: number;
     skippedCount: number;
     rejectedCount: number;
+    needsProfileVerificationCount: number;
     notMatchCount: number;
     alreadySharedCount: number;
 };
@@ -111,6 +112,7 @@ type Candidate = {
         email?: string | null;
         contactType?: string | null;
         leadGoal?: string | null;
+        profileVerificationStatus?: string | null;
         requirementStatus?: string | null;
         requirementBedrooms?: string | null;
         requirementMaxPrice?: string | null;
@@ -125,7 +127,7 @@ type CampaignDetail = {
     candidates: Candidate[];
 };
 
-type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "not_match" | "already_shared" | "all";
+type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "not_match" | "already_shared" | "all";
 type MobileCampaignView = "campaigns" | "review";
 type BatchProgress = {
     campaignId: string;
@@ -144,6 +146,7 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
     { value: "sent", label: "Sent", countKey: "sentCount" },
     { value: "skipped", label: "Skipped", countKey: "skippedCount" },
     { value: "rejected", label: "Rejected", countKey: "rejectedCount" },
+    { value: "needs_profile_verification", label: "Profile check", countKey: "needsProfileVerificationCount" },
     { value: "not_match", label: "Not match", countKey: "notMatchCount" },
     { value: "already_shared", label: "Already shared", countKey: "alreadySharedCount" },
     { value: "all", label: "All", countKey: "allCount" },
@@ -194,6 +197,12 @@ function formatDimensionValue(value: unknown) {
     return String(value);
 }
 
+function candidateNeedsProfileVerification(candidate: Candidate) {
+    const summary = String(candidate.matchSummary || "").toLowerCase();
+    const reasoning = String(candidate.reasoning || "").toLowerCase();
+    return summary.includes("needs profile verification") || reasoning.includes("not globally verified");
+}
+
 function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
     return {
         allCount: campaign?.queueCounts?.allCount ?? campaign?.totalCandidates ?? 0,
@@ -203,6 +212,7 @@ function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
         sentCount: campaign?.queueCounts?.sentCount ?? campaign?.sentCount ?? 0,
         skippedCount: campaign?.queueCounts?.skippedCount ?? 0,
         rejectedCount: campaign?.queueCounts?.rejectedCount ?? 0,
+        needsProfileVerificationCount: campaign?.queueCounts?.needsProfileVerificationCount ?? 0,
         notMatchCount: campaign?.queueCounts?.notMatchCount ?? campaign?.noCount ?? 0,
         alreadySharedCount: campaign?.queueCounts?.alreadySharedCount ?? 0,
     };
@@ -223,6 +233,7 @@ function queueEmptyLabel(queue: Queue) {
     if (queue === "sent") return "No sent contacts yet.";
     if (queue === "skipped") return "No skipped contacts yet.";
     if (queue === "rejected") return "No rejected contacts yet.";
+    if (queue === "needs_profile_verification") return "No contacts are waiting on profile verification.";
     if (queue === "not_match") return "No contacts were marked as not a match.";
     if (queue === "already_shared") return "No contacts already had this property shared.";
     return "No candidates in this campaign.";
@@ -937,6 +948,9 @@ export function PropertyMatchCampaignsDialog({
                                                 <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
                                                     <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
                                                     <span>{campaignQueueCounts(campaign).reviewCount} review</span>
+                                                    {campaignQueueCounts(campaign).needsProfileVerificationCount ? (
+                                                        <span>{campaignQueueCounts(campaign).needsProfileVerificationCount} profile</span>
+                                                    ) : null}
                                                     <span>{campaignQueueCounts(campaign).sentCount} sent</span>
                                                     <span>{campaignQueueCounts(campaign).notMatchCount} no</span>
                                                 </div>
@@ -974,6 +988,7 @@ export function PropertyMatchCampaignsDialog({
                                             <div className="mt-1 text-xs text-slate-500">
                                                 {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
                                                 {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
+                                                {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} waiting on profile checks` : ""}
                                             </div>
                                             <div className="mt-2 flex flex-wrap gap-1">
                                                 {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
@@ -1043,6 +1058,9 @@ export function PropertyMatchCampaignsDialog({
                                                 {campaignQueueCounts(activeCampaign).pendingAiCount ? (
                                                     <span>{campaignQueueCounts(activeCampaign).pendingAiCount} pending AI</span>
                                                 ) : null}
+                                                {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? (
+                                                    <span>{campaignQueueCounts(activeCampaign).needsProfileVerificationCount} waiting on profile verification</span>
+                                                ) : null}
                                             </div>
                                         </div>
                                     ) : null}
@@ -1107,6 +1125,7 @@ export function PropertyMatchCampaignsDialog({
                                             const draft = drafts[candidate.id] ?? candidate.draftBody ?? "";
                                             const savedDraft = candidate.draftBody || "";
                                             const dimensions = candidateStructuredDimensions(candidate);
+                                            const needsProfileVerification = candidateNeedsProfileVerification(candidate);
                                             const canSend = candidate.reviewerStatus === "approved"
                                                 && !!savedDraft.trim()
                                                 && draft.trim() === savedDraft.trim();
@@ -1129,6 +1148,16 @@ export function PropertyMatchCampaignsDialog({
                                                                     {candidate.aiVerdict} {confidenceLabel(candidate.confidence)}
                                                                 </Badge>
                                                                 {candidate.aiReviewStatus ? <Badge variant="outline" className="h-5 text-[10px]">AI {candidate.aiReviewStatus}</Badge> : null}
+                                                                {needsProfileVerification ? (
+                                                                    <Badge variant="outline" className="h-5 border-amber-200 bg-amber-50 text-[10px] text-amber-800">
+                                                                        Waiting on profile
+                                                                    </Badge>
+                                                                ) : null}
+                                                                {candidate.contact?.profileVerificationStatus ? (
+                                                                    <Badge variant="outline" className="h-5 text-[10px]">
+                                                                        {candidate.contact.profileVerificationStatus}
+                                                                    </Badge>
+                                                                ) : null}
                                                                 {candidate.preferredChannel ? <Badge variant="outline" className="h-5 text-[10px]">{candidate.preferredChannel}</Badge> : null}
                                                             </div>
                                                             <div className="mt-1 text-xs text-slate-500">
@@ -1178,6 +1207,11 @@ export function PropertyMatchCampaignsDialog({
                                                     {canReview ? (
                                                         <div className="mt-1 text-[11px] text-slate-500">
                                                             Skip keeps it out of this send for now. Reject marks it as a bad match.
+                                                        </div>
+                                                    ) : null}
+                                                    {needsProfileVerification ? (
+                                                        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                                                            This contact has not entered matching yet. The campaign is waiting for global contact profile verification; once verified as a buyer/renter lead, the next batch will score the property fit.
                                                         </div>
                                                     ) : null}
 

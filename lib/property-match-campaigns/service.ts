@@ -21,6 +21,7 @@ export type PropertyMatchCampaignQueue =
   | "sent"
   | "skipped"
   | "rejected"
+  | "needs_profile_verification"
   | "not_match"
   | "already_shared"
   | "all";
@@ -32,6 +33,8 @@ const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const CONTACT_COLLECTION_BATCH_SIZE = 200;
 const CAMPAIGN_STOPPED_STATUS = "canceled";
 const CAMPAIGN_STOPPED_ERROR = "Processing stopped by user.";
+const PROFILE_VERIFICATION_BLOCK_SUMMARY = "Needs profile verification before campaign matching.";
+const PROFILE_VERIFICATION_BLOCK_REASON = "Contact profile is not globally verified as a buyer/renter lead; skipped campaign AI review.";
 const PROPERTY_TYPE_HINTS = [
   "Studio",
   "Apartment",
@@ -57,6 +60,17 @@ export function hasPriorPropertyShareEvidence(candidate: {
     || String(candidate.reasoning || "").toLowerCase().includes("already been shared");
 }
 
+export function hasProfileVerificationBlock(candidate: {
+  evidence?: unknown;
+  matchSummary?: unknown;
+  reasoning?: unknown;
+}): boolean {
+  const evidence = (candidate.evidence || {}) as AnyRecord;
+  return Boolean(evidence.profileVerificationBlock)
+    || String(candidate.matchSummary || "").toLowerCase().includes("needs profile verification")
+    || String(candidate.reasoning || "").toLowerCase().includes("not globally verified");
+}
+
 export function propertyMatchCandidateQueue(candidate: {
   aiVerdict?: unknown;
   aiReviewStatus?: unknown;
@@ -76,9 +90,10 @@ export function propertyMatchCandidateQueue(candidate: {
   if (reviewerStatus === "skipped") return "skipped";
   if (reviewerStatus === "rejected") return "rejected";
   if (hasPriorPropertyShareEvidence(candidate)) return "already_shared";
+  if (hasProfileVerificationBlock(candidate)) return "needs_profile_verification";
   if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
   if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
-  if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe") && !candidateProfileIsVerified(candidate)) return "not_match";
+  if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe") && !candidateProfileIsVerified(candidate)) return "needs_profile_verification";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
   return "not_match";
 }
@@ -101,6 +116,7 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
     sentCount: 0,
     skippedCount: 0,
     rejectedCount: 0,
+    needsProfileVerificationCount: 0,
     notMatchCount: 0,
     alreadySharedCount: 0,
   };
@@ -113,6 +129,7 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
     else if (queue === "sent") counts.sentCount += 1;
     else if (queue === "skipped") counts.skippedCount += 1;
     else if (queue === "rejected") counts.rejectedCount += 1;
+    else if (queue === "needs_profile_verification") counts.needsProfileVerificationCount += 1;
     else if (queue === "not_match") counts.notMatchCount += 1;
     else if (queue === "already_shared") counts.alreadySharedCount += 1;
   }
@@ -457,6 +474,84 @@ function evidenceForStructuredMatch(result: StructuredMatchResult) {
   };
 }
 
+function structuredCandidateData(args: {
+  locationId: string;
+  campaignId: string;
+  contact: AnyRecord;
+  propertyInput: PropertyMatchInput;
+}) {
+  const conversation = args.contact.conversations?.[0];
+  if (!conversation?.id) return null;
+  const recentMessages = [...(conversation.messages || [])].reverse();
+  const structured = evaluateStructuredPropertyMatch(args.propertyInput, contactRequirementInput({
+    ...args.contact,
+    recentMessages,
+  }));
+  const preferredChannel = deriveComposerInitialChannel(conversation as any);
+  return {
+    locationId: args.locationId,
+    campaignId: args.campaignId,
+    contactId: args.contact.id,
+    conversationId: conversation.id,
+    structuredVerdict: structured.verdict,
+    aiVerdict: structured.verdict,
+    aiReviewStatus: structured.needsAi ? "pending" : "done",
+    aiReviewLockedAt: null,
+    aiReviewLockedBy: null,
+    reviewerStatus: "pending",
+    score: structured.score,
+    confidence: structured.needsAi ? 0.5 : structured.verdict === "yes" ? 0.9 : 0.85,
+    evidence: evidenceForStructuredMatch(structured),
+    reasoning: structured.mismatches.length
+      ? structured.mismatches.join("; ")
+      : structured.matches.join("; ") || "Needs requirement review.",
+    matchSummary: structured.verdict === "yes"
+      ? "Structured requirements match."
+      : structured.verdict === "no"
+        ? "Hard structured mismatch."
+        : "Structured fit is incomplete or has unstructured requirements.",
+    preferredChannel,
+    lastError: null,
+  };
+}
+
+function profileVerificationBlockCandidateData(args: {
+  locationId: string;
+  campaignId: string;
+  contact: AnyRecord;
+}) {
+  const conversation = args.contact.conversations?.[0];
+  if (!conversation?.id) return null;
+  return {
+    locationId: args.locationId,
+    campaignId: args.campaignId,
+    contactId: args.contact.id,
+    conversationId: conversation.id,
+    structuredVerdict: "no",
+    aiVerdict: "no",
+    aiReviewStatus: "done",
+    aiReviewLockedAt: null,
+    aiReviewLockedBy: null,
+    reviewerStatus: "pending",
+    score: -1,
+    confidence: 0.95,
+    evidence: {
+      profileVerificationBlock: {
+        status: args.contact.profileVerificationStatus || "unknown",
+        summary: args.contact.profileVerificationSummary || null,
+        source: args.contact.profileVerificationSource || "campaign_preflight",
+      },
+      structured: {
+        needsAi: false,
+      },
+    },
+    reasoning: PROFILE_VERIFICATION_BLOCK_REASON,
+    matchSummary: PROFILE_VERIFICATION_BLOCK_SUMMARY,
+    preferredChannel: deriveComposerInitialChannel(conversation as any),
+    lastError: null,
+  };
+}
+
 export function isAiReviewTerminal(status: unknown) {
   return status === "done" || status === "failed";
 }
@@ -599,11 +694,127 @@ async function finalizeUnverifiedPropertyMatchCandidates(args: {
       aiReviewLockedAt: null,
       aiReviewLockedBy: null,
       confidence: 0.95,
-      reasoning: "Contact profile is not globally verified as a buyer/renter lead; skipped campaign AI review.",
-      matchSummary: "Needs profile verification before campaign matching.",
+      reasoning: PROFILE_VERIFICATION_BLOCK_REASON,
+      matchSummary: PROFILE_VERIFICATION_BLOCK_SUMMARY,
       lastError: null,
     },
   });
+}
+
+function profileVerificationBlockWhere() {
+  return {
+    OR: [
+      { matchSummary: { contains: "Needs profile verification", mode: "insensitive" as const } },
+      { reasoning: { contains: "not globally verified", mode: "insensitive" as const } },
+    ],
+  };
+}
+
+async function reopenVerifiedProfileBlockedCandidates(args: {
+  locationId: string;
+  campaign: AnyRecord;
+  limit?: number;
+}) {
+  const rows = await db.propertyMatchCandidate.findMany({
+    where: {
+      campaignId: args.campaign.id,
+      locationId: args.locationId,
+      reviewerStatus: "pending",
+      contact: { profileVerificationStatus: "verified_lead" },
+      ...profileVerificationBlockWhere(),
+    },
+    include: {
+      contact: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          contactType: true,
+          leadGoal: true,
+          profileVerificationStatus: true,
+          profileVerifiedAt: true,
+          profileVerificationSource: true,
+          profileVerificationConfidence: true,
+          profileVerificationSummary: true,
+          requirementStatus: true,
+          requirementDistrict: true,
+          requirementBedrooms: true,
+          requirementMinPrice: true,
+          requirementMaxPrice: true,
+          requirementCondition: true,
+          requirementPropertyTypes: true,
+          requirementPropertyLocations: true,
+          requirementOtherDetails: true,
+          requirementSummary: true,
+          conversations: {
+            where: { locationId: args.locationId, deletedAt: null },
+            orderBy: { lastMessageAt: "desc" },
+            take: 1,
+            select: {
+              id: true,
+              lastMessageType: true,
+              messages: {
+                orderBy: { createdAt: "desc" },
+                take: 8,
+                select: { body: true },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    take: Math.max(1, Math.min(200, Number(args.limit || 100))),
+  });
+
+  const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
+  const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
+  const rebuilt = rows.flatMap((row: AnyRecord) => {
+    const candidate = structuredCandidateData({
+      locationId: args.locationId,
+      campaignId: args.campaign.id,
+      contact: row.contact,
+      propertyInput,
+    });
+    return candidate ? [{ row, candidate }] : [];
+  });
+  const priorShareEvidence = await findPriorPropertyShareEvidenceByConversation({
+    snapshot: propertySnapshotForCampaign,
+    conversationIds: rebuilt.map((item) => item.candidate.conversationId),
+  });
+
+  let reopened = 0;
+  for (const item of rebuilt) {
+    const evidence = priorShareEvidence.get(item.candidate.conversationId);
+    const candidate = evidence ? {
+      ...item.candidate,
+      aiVerdict: "no",
+      aiReviewStatus: "done",
+      score: Math.min(Number(item.candidate.score || 0), -2),
+      confidence: 0.95,
+      evidence: {
+        ...((item.candidate.evidence as AnyRecord) || {}),
+        priorShare: evidence,
+        structured: {
+          ...((item.candidate.evidence as AnyRecord)?.structured || {}),
+          needsAi: false,
+        },
+      },
+      reasoning: [
+        "This property appears to have already been shared with the contact.",
+        evidence.matchedBy?.length ? `Matched by ${evidence.matchedBy.join(" and ")}.` : null,
+      ].filter(Boolean).join(" "),
+      matchSummary: "Already shared with this contact.",
+    } : item.candidate;
+    await db.propertyMatchCandidate.update({
+      where: { id: item.row.id },
+      data: candidate,
+    });
+    reopened += 1;
+  }
+
+  return reopened;
 }
 
 async function findPriorPropertyShareEvidenceByConversation(args: {
@@ -755,7 +966,15 @@ export async function refreshCampaignCounts(campaignId: string) {
   });
   const rows = await db.propertyMatchCandidate.findMany({
     where: { campaignId },
-    select: { aiVerdict: true, aiReviewStatus: true, reviewerStatus: true },
+    select: {
+      aiVerdict: true,
+      aiReviewStatus: true,
+      reviewerStatus: true,
+      evidence: true,
+      matchSummary: true,
+      reasoning: true,
+      contact: { select: { profileVerificationStatus: true } },
+    },
   });
   const queueCounts = summarizePropertyMatchCandidateQueues(rows as any[]);
   const pendingAiCount = queueCounts.pendingAiCount;
@@ -911,6 +1130,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
         where: {
           campaignId: args.campaign.id,
           locationId: args.locationId,
+          contact: { profileVerificationStatus: "verified_lead" },
         },
       }),
     ]);
@@ -989,6 +1209,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
   const verifiedContacts: AnyRecord[] = [];
+  const profileBlockedContacts: AnyRecord[] = [];
   for (const contact of contacts as AnyRecord[]) {
     const conversation = contact.conversations[0];
     if (!conversation?.id) continue;
@@ -998,40 +1219,27 @@ async function collectPropertyMatchCandidatesBatch(args: {
       conversationId: conversation.id,
     })) {
       verifiedContacts.push(contact);
+    } else {
+      profileBlockedContacts.push(contact);
     }
   }
 
-  const baseCandidateData = verifiedContacts.flatMap((contact: any) => {
-    const conversation = contact.conversations[0];
-    if (!conversation?.id) return [];
-    const recentMessages = [...(conversation.messages || [])].reverse();
-    const structured = evaluateStructuredPropertyMatch(propertyInput, contactRequirementInput({
-      ...contact,
-      recentMessages,
-    }));
-    const preferredChannel = deriveComposerInitialChannel(conversation as any);
-    return [{
+  const blockerData = profileBlockedContacts.flatMap((contact: any) => {
+    const candidate = profileVerificationBlockCandidateData({
       locationId: args.locationId,
       campaignId: args.campaign.id,
-      contactId: contact.id,
-      conversationId: conversation.id,
-      structuredVerdict: structured.verdict,
-      aiVerdict: structured.verdict,
-      aiReviewStatus: structured.needsAi ? "pending" : "done",
-      reviewerStatus: "pending",
-      score: structured.score,
-      confidence: structured.needsAi ? 0.5 : structured.verdict === "yes" ? 0.9 : 0.85,
-      evidence: evidenceForStructuredMatch(structured),
-      reasoning: structured.mismatches.length
-        ? structured.mismatches.join("; ")
-        : structured.matches.join("; ") || "Needs requirement review.",
-      matchSummary: structured.verdict === "yes"
-        ? "Structured requirements match."
-        : structured.verdict === "no"
-          ? "Hard structured mismatch."
-          : "Structured fit is incomplete or has unstructured requirements.",
-      preferredChannel,
-    }];
+      contact,
+    });
+    return candidate ? [candidate] : [];
+  });
+  const baseCandidateData = verifiedContacts.flatMap((contact: any) => {
+    const candidate = structuredCandidateData({
+      locationId: args.locationId,
+      campaignId: args.campaign.id,
+      contact,
+      propertyInput,
+    });
+    return candidate ? [candidate] : [];
   });
 
   const priorShareEvidence = await findPriorPropertyShareEvidenceByConversation({
@@ -1081,6 +1289,12 @@ async function collectPropertyMatchCandidatesBatch(args: {
   if (candidateData.length > 0) {
     await db.propertyMatchCandidate.createMany({
       data: candidateData,
+      skipDuplicates: true,
+    });
+  }
+  if (blockerData.length > 0) {
+    await db.propertyMatchCandidate.createMany({
+      data: blockerData,
       skipDuplicates: true,
     });
   }
@@ -1145,10 +1359,10 @@ async function collectPropertyMatchCandidatesBatch(args: {
     },
   });
   if (finished.count === 0) {
-    return { collected: candidateData.length, done: true, stopped: true };
+    return { collected: candidateData.length + blockerData.length, done: true, stopped: true };
   }
 
-  return { collected: candidateData.length, done };
+  return { collected: candidateData.length + blockerData.length, done };
 }
 
 async function isPropertyMatchCampaignStopRequested(args: {
@@ -1398,6 +1612,12 @@ export async function processPropertyMatchCampaignBatch(args: {
   });
   if (!refreshedCampaign) return { success: false as const, error: "Campaign not found." };
 
+  const reopenedProfileBlocked = await reopenVerifiedProfileBlockedCandidates({
+    locationId: args.locationId,
+    campaign: refreshedCampaign,
+    limit: Math.max(50, limit),
+  });
+
   const finalizedUnverified = await finalizeUnverifiedPropertyMatchCandidates({
     locationId: args.locationId,
     campaignId: args.campaignId,
@@ -1444,7 +1664,7 @@ export async function processPropertyMatchCampaignBatch(args: {
     })
     : [];
 
-  let processed = finalizedUnverified.count;
+  let processed = finalizedUnverified.count + reopenedProfileBlocked;
   let failed = 0;
   for (const candidate of candidates) {
     if (await isPropertyMatchCampaignStopRequested({
@@ -1706,6 +1926,12 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
   if (queue === "sent") return { reviewerStatus: "sent" };
   if (queue === "skipped") return { reviewerStatus: "skipped" };
   if (queue === "rejected") return { reviewerStatus: "rejected" };
+  if (queue === "needs_profile_verification") {
+    return {
+      reviewerStatus: "pending",
+      ...profileVerificationBlockWhere(),
+    };
+  }
   if (queue === "already_shared") {
     return {
       OR: [
@@ -1733,6 +1959,7 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
       OR: [
         { matchSummary: { contains: "Already shared", mode: "insensitive" } },
         { reasoning: { contains: "already been shared", mode: "insensitive" } },
+        ...profileVerificationBlockWhere().OR,
       ],
     },
   };

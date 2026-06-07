@@ -261,6 +261,7 @@ test("property match queue classifier separates campaign work outcomes", () => {
     sentCount: 1,
     skippedCount: 1,
     rejectedCount: 1,
+    needsProfileVerificationCount: 0,
     notMatchCount: 1,
     alreadySharedCount: 1,
   });
@@ -274,7 +275,19 @@ test("property match queue blocks unverified legacy yes candidates from review",
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(propertyMatchCandidateQueue(candidate), "not_match");
+  assert.equal(propertyMatchCandidateQueue(candidate), "needs_profile_verification");
+});
+
+test("property match queue separates profile verification blockers from not matches", () => {
+  const candidate = {
+    reviewerStatus: "pending",
+    aiVerdict: "no",
+    aiReviewStatus: "done",
+    matchSummary: "Needs profile verification before campaign matching.",
+    reasoning: "Contact profile is not globally verified as a buyer/renter lead; skipped campaign AI review.",
+  };
+
+  assert.equal(propertyMatchCandidateQueue(candidate), "needs_profile_verification");
 });
 
 test("property campaign search ranks exact references before noisy title matches", () => {
