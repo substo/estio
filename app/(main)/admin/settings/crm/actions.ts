@@ -485,10 +485,8 @@ export async function saveLeadSchema(schema: any, locationId?: string | null) {
 }
 
 export async function analyzeLeadSchema(testUrl: string, locationId?: string | null) {
-    console.log("[Server Action] analyzeLeadSchema called for URL:", testUrl);
     try {
         const { userId } = await auth();
-        console.log("[Server Action] User ID:", userId);
         if (!userId) return { success: false, error: "Unauthorized" };
 
         const context = await resolveAdminContext(locationId || null);
@@ -527,13 +525,11 @@ export async function analyzeLeadSchema(testUrl: string, locationId?: string | n
 
         // Navigate to Test URL
         const page = await puppeteerService.getPage();
-        console.log(`[Lead Analysis] Navigating to ${testUrl}...`);
 
         await page.goto(testUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         // --- Validation: Check if login failed or we're not on the expected page ---
         const currentUrl = page.url();
-        console.log(`[Lead Analysis] Current URL after navigation: ${currentUrl}`);
 
         // Check if we are on the login page (login failed)
         if (currentUrl.includes('/login')) {
@@ -611,7 +607,6 @@ export async function analyzeLeadSchema(testUrl: string, locationId?: string | n
         return { success: false, error: error.message };
     } finally {
         // CLEANUP: Close the browser to prevent hanging instances as requested
-        console.log("[Lead Analysis] Closing browser to cleanup resources.");
         await puppeteerService.close();
     }
 }
