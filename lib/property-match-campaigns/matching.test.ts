@@ -227,6 +227,118 @@ test("structured matcher does not return yes for sparse broad leads", () => {
 
   assert.equal(result.verdict, "maybe");
   assert.equal(result.needsAi, true);
+  assert.equal(result.qualificationEvidence?.anchorCount, 1);
+  assert.equal(result.qualificationEvidence?.broadOnly, true);
+  assert.match(result.qualificationEvidence?.reason || "", /absence of mismatches is not proof/i);
+});
+
+test("structured matcher treats Chris-style broad requirements as insufficient proof", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+      condition: "Renovated",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementDistrict: "Any District",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMinPrice: "Any",
+      requirementMaxPrice: "Any",
+      requirementCondition: "Any Condition",
+      requirementPropertyTypes: [],
+      requirementPropertyLocations: [],
+      recentMessagesText: "? How can I help you?",
+    },
+  );
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.needsAi, true);
+  assert.deepEqual(result.qualificationEvidence?.anchors, ["sale/rent intent matches"]);
+  assert.equal(result.dimensions?.find((dimension) => dimension.key === "sparse")?.status, "maybe");
+});
+
+test("structured matcher keeps broad verified leads as maybe when only one real fit anchor exists", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      profileVerificationStatus: "verified_lead",
+      requirementStatus: "Any",
+      requirementDistrict: "Any District",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMinPrice: "Any",
+      requirementMaxPrice: "Any",
+      requirementCondition: "Any Condition",
+      requirementPropertyTypes: [],
+      requirementPropertyLocations: [],
+    },
+  );
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.qualificationEvidence?.anchorCount, 1);
+  assert.deepEqual(result.qualificationEvidence?.anchors, ["globally verified lead"]);
+});
+
+test("structured matcher does not count generic buy goal text as specific property evidence", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      requirementStatus: "For Sale",
+      requirementDistrict: "Any District",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMinPrice: "Any",
+      requirementMaxPrice: "Any",
+      requirementCondition: "Any Condition",
+      requirementPropertyTypes: [],
+      requirementPropertyLocations: [],
+      requirementOtherDetails: "Goal: To Buy. Source: BUYSELL CYPRUS. Next Action: please contact.",
+    },
+  );
+
+  assert.equal(result.verdict, "maybe");
+  assert.deepEqual(result.qualificationEvidence?.anchors, ["sale/rent intent matches"]);
+});
+
+test("structured matcher returns yes when verified lead has multiple concrete anchors", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "SALE",
+      type: "Apartment",
+      price: 149000,
+      bedrooms: 1,
+      city: "Paphos",
+      propertyArea: "Peyia",
+    },
+    {
+      profileVerificationStatus: "verified_lead",
+      requirementStatus: "For Sale",
+      requirementBedrooms: "1+ Bedrooms",
+      requirementMaxPrice: "€175,000",
+      requirementPropertyTypes: ["Apartment"],
+      requirementPropertyLocations: ["Paphos"],
+    },
+  );
+
+  assert.equal(result.verdict, "yes");
+  assert.ok((result.qualificationEvidence?.anchorCount || 0) >= 2);
 });
 
 test("structured matcher disqualifies leads who stopped searching", () => {

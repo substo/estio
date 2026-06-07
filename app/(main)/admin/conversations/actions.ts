@@ -6660,6 +6660,7 @@ function serializePropertyMatchCandidate(row: any) {
             phone: row.contact.phone,
             contactType: row.contact.contactType,
             leadGoal: row.contact.leadGoal,
+            profileVerificationStatus: row.contact.profileVerificationStatus,
             requirementStatus: row.contact.requirementStatus,
             requirementBedrooms: row.contact.requirementBedrooms,
             requirementMaxPrice: row.contact.requirementMaxPrice,
@@ -6932,7 +6933,7 @@ export async function generatePropertyMatchCandidateDraftAction(candidateId: str
         where: { id: String(candidateId || "").trim(), locationId: location.id },
         include: {
             campaign: true,
-            contact: { select: { id: true } },
+            contact: { select: { id: true, profileVerificationStatus: true } },
             conversation: { select: { id: true } },
         },
     });
@@ -6986,7 +6987,7 @@ export async function sendPropertyMatchCandidateAction(candidateId: string, draf
     const candidate = await db.propertyMatchCandidate.findFirst({
         where: { id: String(candidateId || "").trim(), locationId: location.id },
         include: {
-            contact: { select: { id: true } },
+            contact: { select: { id: true, profileVerificationStatus: true } },
             conversation: { select: { id: true } },
         },
     });

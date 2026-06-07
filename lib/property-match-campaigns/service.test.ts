@@ -47,6 +47,32 @@ test("AI match normalizer preserves high-confidence yes", () => {
   assert.equal(result.confidence, 0.86);
 });
 
+test("AI match normalizer downgrades yes when structured evidence lacks concrete anchors", () => {
+  const result = normalizeAiMatchAssessment({
+    verdict: "yes",
+    confidence: 0.9,
+    matchSummary: "Broad requirements fit everything",
+    reasoning: "No mismatches.",
+  }, {
+    structured: {
+      verdict: "maybe",
+      needsAi: true,
+      qualificationEvidence: {
+        anchorCount: 1,
+        anchors: ["sale/rent intent matches"],
+        sparseLead: true,
+        broadOnly: true,
+        minimumAnchorsForYes: 2,
+        reason: "Only broad or missing requirements are available.",
+      },
+    },
+  });
+
+  assert.equal(result.verdict, "maybe");
+  assert.match(result.reasoning, /lacks enough concrete positive evidence/i);
+  assert.equal(result.evidence.structured.needsAi, false);
+});
+
 test("AI match normalizer cannot override structured blockers", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "yes",
@@ -152,17 +178,32 @@ test("completed or failed AI candidates can enter human review when verdict is s
     reviewerStatus: "pending",
     aiVerdict: "yes",
     aiReviewStatus: "done",
+    contact: { profileVerificationStatus: "verified_lead" },
   }), true);
   assert.equal(canCandidateEnterHumanReview({
     reviewerStatus: "pending",
     aiVerdict: "maybe",
     aiReviewStatus: "failed",
+    contact: { profileVerificationStatus: "verified_lead" },
   }), true);
   assert.equal(canCandidateEnterHumanReview({
     reviewerStatus: "pending",
     aiVerdict: "no",
     aiReviewStatus: "done",
+    contact: { profileVerificationStatus: "verified_lead" },
   }), false);
+});
+
+test("unverified legacy candidates cannot enter review or draft flow", () => {
+  const candidate = {
+    reviewerStatus: "pending",
+    aiVerdict: "yes",
+    aiReviewStatus: "done",
+    contact: { profileVerificationStatus: null },
+  };
+
+  assert.equal(canCandidateEnterHumanReview(candidate), false);
+  assert.equal(canCandidateDraftOrSend(candidate), false);
 });
 
 test("property match contact filter leaves identity to profile verification", () => {
@@ -198,7 +239,7 @@ test("AI review claim filter reclaims stale processing locks", () => {
 
 test("property match queue classifier separates campaign work outcomes", () => {
   const rows = [
-    { reviewerStatus: "pending", aiVerdict: "yes", aiReviewStatus: "done" },
+    { reviewerStatus: "pending", aiVerdict: "yes", aiReviewStatus: "done", contact: { profileVerificationStatus: "verified_lead" } },
     { reviewerStatus: "approved", aiVerdict: "yes", aiReviewStatus: "done" },
     { reviewerStatus: "sent", aiVerdict: "yes", aiReviewStatus: "done" },
     { reviewerStatus: "skipped", aiVerdict: "maybe", aiReviewStatus: "done" },
@@ -222,6 +263,17 @@ test("property match queue classifier separates campaign work outcomes", () => {
     notMatchCount: 1,
     alreadySharedCount: 1,
   });
+});
+
+test("property match queue blocks unverified legacy yes candidates from review", () => {
+  const candidate = {
+    reviewerStatus: "pending",
+    aiVerdict: "yes",
+    aiReviewStatus: "done",
+    contact: { profileVerificationStatus: null },
+  };
+
+  assert.equal(propertyMatchCandidateQueue(candidate), "not_match");
 });
 
 test("property campaign search ranks exact references before noisy title matches", () => {

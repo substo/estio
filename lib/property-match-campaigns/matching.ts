@@ -31,6 +31,7 @@ export type ContactRequirementInput = {
   leadGoal?: string | null;
   contactType?: string | null;
   contactName?: string | null;
+  profileVerificationStatus?: string | null;
   recentMessagesText?: string | null;
 };
 
@@ -55,12 +56,22 @@ export type StructuredMatchResult = {
   dimensions?: MatchDimension[];
   hardMismatches?: string[];
   disqualifiers?: string[];
+  qualificationEvidence?: QualificationEvidence;
   recentIntent?: {
     districts: string[];
     areas: string[];
     stoppedSearch: boolean;
     source: string | null;
   };
+};
+
+export type QualificationEvidence = {
+  anchorCount: number;
+  anchors: string[];
+  sparseLead: boolean;
+  broadOnly: boolean;
+  minimumAnchorsForYes: number;
+  reason: string;
 };
 
 function normalize(value: unknown): string {
@@ -240,6 +251,10 @@ function requirementText(contact: ContactRequirementInput): string {
   ].map((item) => display(item)).filter(Boolean).join("\n");
 }
 
+function hasSpecificPropertyInterest(text: string): boolean {
+  return /\b(ref(?:erence)?\.?\s*(?:no\.?)?\s*[:#-]?\s*[a-z]{1,6}\s*-?\s*\d{2,8}|https?:\/\/|view(?:ing)?|appointment|interested|looking\s+for|budget|bed(?:room|s)?|studio|apartment|villa|house|townhouse|maisonette|penthouse|plot|land)\b/i.test(text);
+}
+
 function parseAreaRequirement(text: string): { min: number | null; max: number | null; raw: string | null } {
   const matches = Array.from(text.matchAll(/\b(?:min(?:imum)?|at\s+least|from|over|above|around|approx(?:imately)?|up\s+to|under|below|max(?:imum)?|less\s+than)?\s*(\d{2,4})\s*(?:m2|m²|sqm|sq\.?\s*m|square\s*(?:met(?:er|re)s?))\b/gi));
   if (matches.length === 0) return { min: null, max: null, raw: null };
@@ -324,12 +339,19 @@ export function evaluateStructuredPropertyMatch(
   const disqualifiers: string[] = [];
   const recentIntent = detectRecentIntent(contact);
   const combinedRequirementText = requirementText(contact);
+  const qualificationAnchors = new Set<string>();
 
   if (recentIntent.stoppedSearch) {
     disqualifiers.push("lead has clearly indicated they are no longer searching");
   }
+  if (contact.profileVerificationStatus === "verified_lead") {
+    qualificationAnchors.add("globally verified lead");
+  }
   const status = statusMatches(contact.requirementStatus, property.goal);
-  if (status === true && !isAny(contact.requirementStatus)) matches.push("listing goal matches requirement status");
+  if (status === true && !isAny(contact.requirementStatus)) {
+    matches.push("listing goal matches requirement status");
+    qualificationAnchors.add("sale/rent intent matches");
+  }
   if (status === false) {
     mismatches.push("listing goal does not match requirement status");
     hardMismatches.push("listing goal does not match requirement status");
@@ -348,7 +370,10 @@ export function evaluateStructuredPropertyMatch(
   const propertyType = normalize(property.type);
   const requiredTypes = normalizeList(contact.requirementPropertyTypes);
   if (requiredTypes.length > 0 && propertyType) {
-    if (includesLoose(requiredTypes, propertyType)) matches.push("property type matches");
+    if (includesLoose(requiredTypes, propertyType)) {
+      matches.push("property type matches");
+      qualificationAnchors.add("property type matches");
+    }
     else {
       mismatches.push("property type does not match");
       hardMismatches.push("property type does not match");
@@ -370,7 +395,10 @@ export function evaluateStructuredPropertyMatch(
   }
 
   const bedroomMatch = bedroomRequirementMatches(contact.requirementBedrooms, property.bedrooms);
-  if (bedroomMatch === true && !isAny(contact.requirementBedrooms)) matches.push("bedrooms match");
+  if (bedroomMatch === true && !isAny(contact.requirementBedrooms)) {
+    matches.push("bedrooms match");
+    qualificationAnchors.add("bedroom requirement matches");
+  }
   if (bedroomMatch === false) {
     mismatches.push("bedrooms do not match");
     hardMismatches.push("bedrooms do not match");
@@ -402,6 +430,7 @@ export function evaluateStructuredPropertyMatch(
       priceReasons.push("below minimum budget");
     } else if (minPrice != null) {
       matches.push("price is above minimum budget");
+      qualificationAnchors.add("budget matches");
       priceReasons.push("above minimum budget");
     }
 
@@ -412,6 +441,7 @@ export function evaluateStructuredPropertyMatch(
       priceReasons.push("exceeds maximum budget");
     } else if (maxPrice != null) {
       matches.push("price is within maximum budget");
+      qualificationAnchors.add("budget matches");
       priceReasons.push("within maximum budget");
     }
   } else if (minPrice != null || maxPrice != null) {
@@ -447,7 +477,10 @@ export function evaluateStructuredPropertyMatch(
     const locationMatches = requirementInfo.areas.some((area) => propertyLocationInfo.areas.includes(area))
       || requiredLocations.some((item) => includesLoose(propertyLocations, item));
     const structuredLocationMatches = hasSpecificRequiredArea ? areaMatches || locationMatches : districtMatches || locationMatches;
-    if (structuredLocationMatches) matches.push("location matches");
+    if (structuredLocationMatches) {
+      matches.push("location matches");
+      qualificationAnchors.add("location matches");
+    }
     else {
       mismatches.push("location does not match");
       hardMismatches.push("location does not match");
@@ -489,6 +522,7 @@ export function evaluateStructuredPropertyMatch(
   if (!isAny(requiredCondition) && propertyCondition) {
     if (propertyCondition.includes(requiredCondition) || requiredCondition.includes(propertyCondition)) {
       matches.push("condition matches");
+      qualificationAnchors.add("condition preference matches");
     } else {
       unknowns.push("condition preference needs review");
     }
@@ -526,6 +560,7 @@ export function evaluateStructuredPropertyMatch(
       }
       if (areaReasons.length === 0) {
         matches.push("covered area matches");
+        qualificationAnchors.add("size requirement matches");
         areaReasons.push("Covered area fits the stated size requirement.");
       }
     }
@@ -554,7 +589,10 @@ export function evaluateStructuredPropertyMatch(
         if (feature.required) requiredMissing.push(feature.label);
       }
     }
-    if (present.length > 0) matches.push("requested features match");
+    if (present.length > 0) {
+      matches.push("requested features match");
+      qualificationAnchors.add("requested features match");
+    }
     if (missing.length > 0) unknowns.push("some requested features need review");
     if (requiredMissing.length > 0) {
       mismatches.push("required feature appears missing");
@@ -578,6 +616,9 @@ export function evaluateStructuredPropertyMatch(
   const hasUnstructuredRequirements = Boolean(
     normalize(contact.requirementOtherDetails) || normalize(contact.requirementSummary)
   );
+  if (hasSpecificPropertyInterest(combinedRequirementText)) {
+    qualificationAnchors.add("specific written or recent interest");
+  }
   const concreteRequirementCount = [
     !isAny(contact.requirementStatus),
     requiredTypes.length > 0,
@@ -589,7 +630,22 @@ export function evaluateStructuredPropertyMatch(
     requestedFeatures.length > 0,
     hasUnstructuredRequirements,
   ].filter(Boolean).length;
-  const sparseLead = concreteRequirementCount <= 1;
+  const minimumAnchorsForYes = 2;
+  const anchorCount = qualificationAnchors.size;
+  const sparseLead = concreteRequirementCount <= 1 || anchorCount < minimumAnchorsForYes;
+  const broadOnly = anchorCount <= 1 && concreteRequirementCount <= 1;
+  const qualificationEvidence: QualificationEvidence = {
+    anchorCount,
+    anchors: Array.from(qualificationAnchors),
+    sparseLead,
+    broadOnly,
+    minimumAnchorsForYes,
+    reason: anchorCount >= minimumAnchorsForYes
+      ? "Enough concrete positive evidence for a confident recommendation."
+      : broadOnly
+        ? "Only broad or missing requirements are available; absence of mismatches is not proof of fit."
+        : "Not enough concrete positive evidence for a confident recommendation.",
+  };
   if (sparseLead) unknowns.push("lead has sparse requirements");
   if (sparseLead) {
     addDimension(dimensions, {
@@ -600,35 +656,35 @@ export function evaluateStructuredPropertyMatch(
       status: "maybe",
       weight: 2,
       score: -1,
-      reason: "Lead has too few concrete requirements for a confident recommendation.",
+      reason: qualificationEvidence.reason,
     });
   }
 
   const score = Math.round(dimensions.reduce((sum, dimension) => sum + dimension.score, 0) * 100) / 100;
 
   if (disqualifiers.length > 0) {
-    return { verdict: "no", score: Math.min(score, -5), needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+    return { verdict: "no", score: Math.min(score, -5), needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
   }
 
   if (hardMismatches.length > 0) {
-    return { verdict: "no", score, needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+    return { verdict: "no", score, needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
   }
 
   if (sparseLead) {
-    return { verdict: "maybe", score, needsAi: true, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+    return { verdict: "maybe", score, needsAi: true, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
   }
 
   if (recentAreaMismatch) {
-    return { verdict: "maybe", score, needsAi: true, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+    return { verdict: "maybe", score, needsAi: true, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
   }
 
-  if (matches.length >= 3 && !hasUnstructuredRequirements && unknowns.length <= 1 && score >= 6) {
-    return { verdict: "yes", score, needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+  if (matches.length >= 3 && !hasUnstructuredRequirements && unknowns.length <= 1 && score >= 6 && anchorCount >= minimumAnchorsForYes) {
+    return { verdict: "yes", score, needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
   }
 
-  if (matches.length >= 2 && !hasUnstructuredRequirements && unknowns.length <= 2 && score >= 5) {
-    return { verdict: "yes", score, needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+  if (matches.length >= 2 && !hasUnstructuredRequirements && unknowns.length <= 2 && score >= 5 && anchorCount >= minimumAnchorsForYes) {
+    return { verdict: "yes", score, needsAi: false, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
   }
 
-  return { verdict: "maybe", score, needsAi: true, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, recentIntent };
+  return { verdict: "maybe", score, needsAi: true, matches, mismatches, unknowns, dimensions, hardMismatches, disqualifiers, qualificationEvidence, recentIntent };
 }

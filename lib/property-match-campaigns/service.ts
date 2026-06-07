@@ -61,6 +61,8 @@ export function propertyMatchCandidateQueue(candidate: {
   aiVerdict?: unknown;
   aiReviewStatus?: unknown;
   reviewerStatus?: unknown;
+  contact?: { profileVerificationStatus?: unknown } | null;
+  profileVerificationStatus?: unknown;
   evidence?: unknown;
   matchSummary?: unknown;
   reasoning?: unknown;
@@ -76,6 +78,7 @@ export function propertyMatchCandidateQueue(candidate: {
   if (hasPriorPropertyShareEvidence(candidate)) return "already_shared";
   if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
   if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
+  if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe") && !candidateProfileIsVerified(candidate)) return "not_match";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
   return "not_match";
 }
@@ -84,6 +87,8 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
   aiVerdict?: unknown;
   aiReviewStatus?: unknown;
   reviewerStatus?: unknown;
+  contact?: { profileVerificationStatus?: unknown } | null;
+  profileVerificationStatus?: unknown;
   evidence?: unknown;
   matchSummary?: unknown;
   reasoning?: unknown;
@@ -113,28 +118,6 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
   }
 
   return counts;
-}
-
-function summarizePropertyMatchCampaignCounters(campaign: AnyRecord) {
-  const totalCandidates = Math.max(0, Number(campaign.totalCandidates || 0));
-  const processedCandidates = Math.max(0, Number(campaign.processedCandidates || 0));
-  const approvedCount = Math.max(0, Number(campaign.approvedCount || 0));
-  const sentCount = Math.max(0, Number(campaign.sentCount || 0));
-  const yesCount = Math.max(0, Number(campaign.yesCount || 0));
-  const maybeCount = Math.max(0, Number(campaign.maybeCount || 0));
-  const noCount = Math.max(0, Number(campaign.noCount || 0));
-
-  return {
-    allCount: totalCandidates,
-    pendingAiCount: Math.max(0, totalCandidates - processedCandidates),
-    reviewCount: Math.max(0, yesCount + maybeCount - approvedCount - sentCount),
-    approvedCount,
-    sentCount,
-    skippedCount: 0,
-    rejectedCount: 0,
-    notMatchCount: noCount,
-    alreadySharedCount: 0,
-  };
 }
 
 function normalizeText(value: unknown, max = 4000): string | null {
@@ -276,11 +259,18 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
     : 0.5;
   const requestedVerdict = normalizeVerdict(raw.verdict);
   const structuredEvidence = fallbackEvidence?.structured || {};
+  const qualificationEvidence = structuredEvidence.qualificationEvidence || null;
   const hasStructuredBlocker = structuredEvidence.verdict === "no"
     || (Array.isArray(structuredEvidence.hardMismatches) && structuredEvidence.hardMismatches.length > 0)
     || (Array.isArray(structuredEvidence.disqualifiers) && structuredEvidence.disqualifiers.length > 0);
+  const lacksPositiveEvidence = Boolean(qualificationEvidence) && (
+    Boolean(qualificationEvidence.sparseLead)
+    || Number(qualificationEvidence.anchorCount || 0) < Number(qualificationEvidence.minimumAnchorsForYes || 2)
+  );
   const verdict = hasStructuredBlocker
     ? "no"
+    : requestedVerdict === "yes" && lacksPositiveEvidence
+    ? "maybe"
     : requestedVerdict === "yes" && confidence < LOW_CONFIDENCE_YES_THRESHOLD
     ? "maybe"
     : requestedVerdict;
@@ -288,13 +278,15 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
   return {
     verdict,
     confidence,
-    reasoning: normalizeText(raw.reasoning, 3000) || (
-      verdict === "maybe" && requestedVerdict === "yes"
-        ? "AI confidence was too low for a definite yes; kept for human review."
-        : hasStructuredBlocker
-          ? "Structured matching found a hard mismatch or disqualifier; AI cannot override it."
-        : "AI reviewed the ambiguous requirements."
-    ),
+    reasoning: verdict === "maybe" && requestedVerdict === "yes" && lacksPositiveEvidence
+      ? "The contact lacks enough concrete positive evidence for a definite recommendation; kept for human review."
+      : normalizeText(raw.reasoning, 3000) || (
+        verdict === "maybe" && requestedVerdict === "yes"
+          ? "AI confidence was too low for a definite yes; kept for human review."
+          : hasStructuredBlocker
+            ? "Structured matching found a hard mismatch or disqualifier; AI cannot override it."
+          : "AI reviewed the ambiguous requirements."
+      ),
     matchSummary: normalizeText(raw.matchSummary, 1200) || "AI reviewed the lead against this property.",
     evidence: {
       ...fallbackEvidence,
@@ -440,6 +432,7 @@ function contactRequirementInput(contact: AnyRecord): ContactRequirementInput {
     leadGoal: contact.leadGoal,
     contactType: contact.contactType,
     contactName: contact.name,
+    profileVerificationStatus: contact.profileVerificationStatus,
     recentMessagesText: Array.isArray(contact.recentMessages)
       ? contact.recentMessages.map((message: AnyRecord) => message.body).filter(Boolean).join("\n")
       : contact.recentMessagesText,
@@ -458,6 +451,7 @@ function evidenceForStructuredMatch(result: StructuredMatchResult) {
       dimensions: result.dimensions || [],
       hardMismatches: result.hardMismatches || [],
       disqualifiers: result.disqualifiers || [],
+      qualificationEvidence: result.qualificationEvidence || null,
       recentIntent: result.recentIntent || null,
     },
   };
@@ -496,18 +490,32 @@ export function canCandidateEnterHumanReview(candidate: {
   reviewerStatus?: unknown;
   aiVerdict?: unknown;
   aiReviewStatus?: unknown;
+  contact?: { profileVerificationStatus?: unknown } | null;
+  profileVerificationStatus?: unknown;
 }) {
   return candidate.reviewerStatus === "pending"
     && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-    && isAiReviewTerminal(candidate.aiReviewStatus);
+    && isAiReviewTerminal(candidate.aiReviewStatus)
+    && candidateProfileIsVerified(candidate);
 }
 
 export function canCandidateDraftOrSend(candidate: {
   aiVerdict?: unknown;
   aiReviewStatus?: unknown;
+  contact?: { profileVerificationStatus?: unknown } | null;
+  profileVerificationStatus?: unknown;
 }) {
   return (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-    && isAiReviewTerminal(candidate.aiReviewStatus);
+    && isAiReviewTerminal(candidate.aiReviewStatus)
+    && candidateProfileIsVerified(candidate);
+}
+
+function candidateProfileIsVerified(candidate: {
+  contact?: { profileVerificationStatus?: unknown } | null;
+  profileVerificationStatus?: unknown;
+}) {
+  return candidate.contact?.profileVerificationStatus === "verified_lead"
+    || candidate.profileVerificationStatus === "verified_lead";
 }
 
 export function buildPropertyMatchContactWhere(locationId: string, cursor?: string | null) {
@@ -1223,6 +1231,9 @@ Rules:
 - Use structured requirements as hard filters. Do not override a hard mismatch.
 - If structured.disqualifiers or structured.hardMismatches are present, verdict must be no.
 - Treat the structured dimension rows as the source of truth for goal, location, price, bedrooms, type, and stopped-search intent.
+- Absence of conflicts is not a match. Broad values like "Any District", "Any Bedrooms", "Any price", empty locations/types, or missing details are neutral, not positive evidence.
+- Choose yes only when there are at least two concrete positive anchors from the contact's requirements or recent messages, such as matching intent, location, type, bedrooms, budget, features, or a similar prior enquiry.
+- Do not use property facts alone as proof. Evidence for yes must quote or reference the contact-side requirement/message that makes the property a close fit.
 - Use unstructured requirements and summary to decide yes vs maybe.
 - Choose yes only when sending is clearly reasonable.
 - Choose maybe when there is a plausible fit but missing, stale, or ambiguous information.
@@ -1516,10 +1527,7 @@ export async function listPropertyMatchCampaigns(args: {
     orderBy: { createdAt: "desc" },
     take: Math.max(1, Math.min(50, Number(args.limit || 20))),
   });
-  return campaigns.map((campaign) => ({
-    ...campaign,
-    queueCounts: summarizePropertyMatchCampaignCounters(campaign as AnyRecord),
-  }));
+  return withPropertyMatchQueueCounts(args.locationId, campaigns as AnyRecord[]);
 }
 
 async function withPropertyMatchQueueCounts(locationId: string, campaigns: AnyRecord[]) {
@@ -1535,6 +1543,7 @@ async function withPropertyMatchQueueCounts(locationId: string, campaigns: AnyRe
       evidence: true,
       matchSummary: true,
       reasoning: true,
+      contact: { select: { profileVerificationStatus: true } },
     },
   });
   const byCampaign = new Map<string, any[]>();
@@ -1624,6 +1633,7 @@ export async function getPropertyMatchCampaignDetail(args: {
           phone: true,
           contactType: true,
           leadGoal: true,
+          profileVerificationStatus: true,
           requirementStatus: true,
           requirementBedrooms: true,
           requirementMaxPrice: true,
@@ -1648,7 +1658,14 @@ export async function getPropertyMatchCampaignDetail(args: {
 
 function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) {
   if (queue === "all") return {};
-  if (queue === "review") return { reviewerStatus: "pending", aiVerdict: { in: ["yes", "maybe"] }, aiReviewStatus: { in: ["done", "failed"] } };
+  if (queue === "review") {
+    return {
+      reviewerStatus: "pending",
+      aiVerdict: { in: ["yes", "maybe"] },
+      aiReviewStatus: { in: ["done", "failed"] },
+      contact: { profileVerificationStatus: "verified_lead" },
+    };
+  }
   if (queue === "approved") return { reviewerStatus: "approved" };
   if (queue === "sent") return { reviewerStatus: "sent" };
   if (queue === "skipped") return { reviewerStatus: "skipped" };
@@ -1663,7 +1680,19 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
   }
   return {
     reviewerStatus: "pending",
-    aiVerdict: "no",
+    OR: [
+      { aiVerdict: "no" },
+      {
+        aiVerdict: { in: ["yes", "maybe"] },
+        aiReviewStatus: { in: ["done", "failed"] },
+        contact: {
+          OR: [
+            { profileVerificationStatus: null },
+            { profileVerificationStatus: { not: "verified_lead" } },
+          ],
+        },
+      },
+    ],
     NOT: {
       OR: [
         { matchSummary: { contains: "Already shared", mode: "insensitive" } },
@@ -1687,7 +1716,14 @@ export async function updatePropertyMatchCandidateReview(args: {
   }
   const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
-    select: { id: true, campaignId: true, reviewerStatus: true, aiVerdict: true, aiReviewStatus: true },
+    select: {
+      id: true,
+      campaignId: true,
+      reviewerStatus: true,
+      aiVerdict: true,
+      aiReviewStatus: true,
+      contact: { select: { profileVerificationStatus: true } },
+    },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
   if (candidate.reviewerStatus === "sent") return { success: false as const, error: "Sent candidates cannot be changed." };
@@ -1735,7 +1771,12 @@ export async function savePropertyMatchCandidateDraft(args: {
   if (!draftBody) return { success: false as const, error: "Draft cannot be empty." };
   const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
-    select: { id: true, aiVerdict: true, aiReviewStatus: true },
+    select: {
+      id: true,
+      aiVerdict: true,
+      aiReviewStatus: true,
+      contact: { select: { profileVerificationStatus: true } },
+    },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
   if (!canCandidateDraftOrSend(candidate)) {
@@ -1774,7 +1815,12 @@ export async function savePropertyMatchCandidateGeneratedDraft(args: {
   if (!draftBody) return { success: false as const, error: "Draft cannot be empty." };
   const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
-    select: { id: true, aiVerdict: true, aiReviewStatus: true },
+    select: {
+      id: true,
+      aiVerdict: true,
+      aiReviewStatus: true,
+      contact: { select: { profileVerificationStatus: true } },
+    },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
   if (!canCandidateDraftOrSend(candidate)) {
@@ -1808,9 +1854,18 @@ export async function markPropertyMatchCandidateSent(args: {
 }) {
   const candidate = await db.propertyMatchCandidate.findFirst({
     where: { id: args.candidateId, locationId: args.locationId },
-    select: { id: true, campaignId: true },
+    select: {
+      id: true,
+      campaignId: true,
+      aiVerdict: true,
+      aiReviewStatus: true,
+      contact: { select: { profileVerificationStatus: true } },
+    },
   });
   if (!candidate) return { success: false as const, error: "Candidate not found." };
+  if (!canCandidateDraftOrSend(candidate)) {
+    return { success: false as const, error: "Contact profile must be verified before sending." };
+  }
   await db.propertyMatchCandidate.update({
     where: { id: candidate.id },
     data: {
