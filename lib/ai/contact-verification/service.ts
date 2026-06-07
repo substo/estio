@@ -335,6 +335,22 @@ function profileVerificationDataForAssessment(args: {
   });
 }
 
+async function reprocessCampaignBlocksForVerifiedContact(args: {
+  locationId: string;
+  contactId: string;
+}) {
+  try {
+    const { reprocessVerifiedContactProfileBlocks } = await import("@/lib/property-match-campaigns/service");
+    await reprocessVerifiedContactProfileBlocks({
+      locationId: args.locationId,
+      contactId: args.contactId,
+      limit: 100,
+    });
+  } catch (error) {
+    console.warn("[contact-verification] Failed to reprocess campaign profile blocks:", error);
+  }
+}
+
 async function collectRecentMessages(args: {
   locationId: string;
   contactId: string;
@@ -365,6 +381,7 @@ export async function verifyContactProfile(args: {
   sourceIds?: string[];
   actorUserId?: string | null;
   contactSnapshot?: AnyRecord | null;
+  reprocessCampaignBlocks?: boolean;
 }) {
   const startedAt = Date.now();
   logContactVerificationTiming("scan_start", {
@@ -467,6 +484,12 @@ export async function verifyContactProfile(args: {
         sourceType: args.sourceType || "manual_verification",
       }),
     });
+    if (assessment.status === "verified_lead" && args.reprocessCampaignBlocks !== false) {
+      await reprocessCampaignBlocksForVerifiedContact({
+        locationId: args.locationId,
+        contactId: contact.id,
+      });
+    }
     logContactVerificationTiming("scan_complete", {
       locationId: args.locationId,
       contactId: contact.id,
@@ -597,6 +620,12 @@ export async function approveContactVerificationProposal(args: {
         data: { status: "superseded" },
       });
     });
+    if (assessment.status === "verified_lead") {
+      await reprocessCampaignBlocksForVerifiedContact({
+        locationId: args.locationId,
+        contactId: proposal.contactId,
+      });
+    }
     return { success: true as const, updated: false as const };
   }
 
@@ -648,6 +677,13 @@ export async function approveContactVerificationProposal(args: {
       data: { status: "superseded" },
     });
   });
+
+  if (assessment.status === "verified_lead") {
+    await reprocessCampaignBlocksForVerifiedContact({
+      locationId: args.locationId,
+      contactId: proposal.contactId,
+    });
+  }
 
   return { success: true as const, updated: true as const, contactId: proposal.contactId };
 }
@@ -710,6 +746,10 @@ export async function markContactVerified(args: {
       where: { contactId: contact.id, proposalType: "verification", status: "pending" },
       data: { status: "superseded" },
     });
+  });
+  await reprocessCampaignBlocksForVerifiedContact({
+    locationId: args.locationId,
+    contactId: contact.id,
   });
   return { success: true as const, contactId: contact.id };
 }

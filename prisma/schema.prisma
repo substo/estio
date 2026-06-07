@@ -624,6 +624,10 @@ model Contact {
   profileVerificationSource     String?
   profileVerificationConfidence Float?
   profileVerificationSummary    String?   @db.Text
+  profileVerificationDueAt      DateTime?
+  profileVerificationLastAttemptAt DateTime?
+  profileVerificationLastError  String?   @db.Text
+  profileVerificationAttemptCount Int      @default(0)
 
   insights                   Insight[]
   tasks                      ContactTask[]
@@ -649,6 +653,8 @@ model Contact {
   @@index([phone])
   @@index([lid])
   @@index([locationId, profileVerificationStatus])
+  @@index([locationId, profileVerificationDueAt])
+  @@index([locationId, profileVerifiedAt])
 }
 
 model WhatsAppIdentityMap {

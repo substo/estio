@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
 import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
+import { contactProfileVerificationConfigSchema } from "@/lib/ai/contact-profile-verification/config";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 
 const nullableTrimmedString = z.string().trim().nullish().transform((v) => v ?? null);
@@ -89,6 +90,7 @@ const aiSchema = z.object({
         qualifierPrompt: nullableTrimmedString,
     }).passthrough(),
     automationConfig: AiAutomationConfigSchema.default({}),
+    contactProfileVerification: contactProfileVerificationConfigSchema,
     whatsappTranscriptOnDemandEnabled: z.boolean().default(false),
     whatsappTranscriptRetentionDays: z.union([z.literal(30), z.literal(90), z.literal(365)]),
     whatsappTranscriptVisibility: z.union([z.literal("team"), z.literal("admin_only")]).default("team"),

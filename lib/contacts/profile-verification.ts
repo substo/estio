@@ -20,6 +20,8 @@ export function profileVerificationFields(args: {
     profileVerificationSource: args.source,
     profileVerificationConfidence: args.confidence ?? null,
     profileVerificationSummary: args.summary || null,
+    profileVerificationDueAt: null,
+    profileVerificationLastError: null,
   };
 }
 
@@ -30,6 +32,8 @@ export function clearProfileVerificationFields() {
     profileVerificationSource: null,
     profileVerificationConfidence: null,
     profileVerificationSummary: null,
+    profileVerificationDueAt: new Date(),
+    profileVerificationLastError: null,
   };
 }
 

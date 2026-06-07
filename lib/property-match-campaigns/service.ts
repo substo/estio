@@ -713,12 +713,14 @@ function profileVerificationBlockWhere() {
 async function reopenVerifiedProfileBlockedCandidates(args: {
   locationId: string;
   campaign: AnyRecord;
+  contactId?: string;
   limit?: number;
 }) {
   const rows = await db.propertyMatchCandidate.findMany({
     where: {
       campaignId: args.campaign.id,
       locationId: args.locationId,
+      ...(args.contactId ? { contactId: args.contactId } : {}),
       reviewerStatus: "pending",
       contact: { profileVerificationStatus: "verified_lead" },
       ...profileVerificationBlockWhere(),
@@ -815,6 +817,42 @@ async function reopenVerifiedProfileBlockedCandidates(args: {
   }
 
   return reopened;
+}
+
+export async function reprocessVerifiedContactProfileBlocks(args: {
+  locationId: string;
+  contactId: string;
+  limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(100, Number(args.limit || 50)));
+  const blockedRows = await db.propertyMatchCandidate.findMany({
+    where: {
+      locationId: args.locationId,
+      contactId: args.contactId,
+      reviewerStatus: "pending",
+      contact: { profileVerificationStatus: "verified_lead" },
+      ...profileVerificationBlockWhere(),
+    },
+    select: {
+      campaignId: true,
+      campaign: true,
+    },
+    distinct: ["campaignId"],
+    take: limit,
+  });
+
+  let reprocessed = 0;
+  for (const row of blockedRows) {
+    reprocessed += await reopenVerifiedProfileBlockedCandidates({
+      locationId: args.locationId,
+      campaign: row.campaign,
+      contactId: args.contactId,
+      limit,
+    });
+    await refreshCampaignCounts(row.campaignId);
+  }
+
+  return { success: true as const, reprocessed };
 }
 
 async function findPriorPropertyShareEvidenceByConversation(args: {

@@ -25,6 +25,17 @@ import {
 import { SettingsVersionConflictError } from "@/lib/settings/errors";
 import { runRequirementsIntelligenceCron } from "@/lib/ai/requirements-intelligence/service";
 import { normalizeAllowedPropertyDomains } from "@/lib/ai/property-evidence-resolver/domain-policy";
+import {
+    runContactProfileVerificationCron,
+    triggerGlobalContactProfileRecertification,
+} from "@/lib/ai/contact-profile-verification/cron";
+import {
+    normalizeContactProfileVerificationBatchSize,
+    normalizeContactProfileVerificationConfig,
+    normalizeContactProfileVerificationDelayHours,
+    normalizeContactProfileVerificationMode,
+    normalizeContactProfileVerificationRecertificationDays,
+} from "@/lib/ai/contact-profile-verification/config";
 
 interface AiSettingsState {
     message?: string;
@@ -151,6 +162,8 @@ export async function updateAiSettings(
             : "manual_only";
         const requirementsIntelligenceModel = normalizeOptionalModelOverride(formData.get("requirementsIntelligenceModel")) || transcriptionModel;
         const requirementsAllowedPropertyDomains = normalizeAllowedPropertyDomains(formData.get("requirementsAllowedPropertyDomains"));
+        const existingContactProfileVerification = normalizeContactProfileVerificationConfig((existingPayload as any)?.contactProfileVerification);
+        const contactProfileVerificationMode = normalizeContactProfileVerificationMode(formData.get("contactProfileVerificationMode"));
         const defaultReplyLanguage = normalizeReplyLanguage(formData.get("defaultReplyLanguage")) || DEFAULT_REPLY_LANGUAGE;
         const payload = {
             ...existingPayload,
@@ -176,6 +189,15 @@ export async function updateAiSettings(
                 mode: requirementsIntelligenceMode,
                 model: requirementsIntelligenceModel,
                 allowedPropertyDomains: requirementsAllowedPropertyDomains,
+            },
+            contactProfileVerification: {
+                ...existingContactProfileVerification,
+                mode: contactProfileVerificationMode,
+                newContactDelayHours: normalizeContactProfileVerificationDelayHours(formData.get("contactProfileVerificationNewContactDelayHours")),
+                recertificationDays: normalizeContactProfileVerificationRecertificationDays(formData.get("contactProfileVerificationRecertificationDays")),
+                recertifyOnNewActivity: formData.get("contactProfileVerificationRecertifyOnNewActivity") === "on",
+                batchSize: normalizeContactProfileVerificationBatchSize(formData.get("contactProfileVerificationBatchSize")),
+                autoReprocessCampaignBlocks: formData.get("contactProfileVerificationAutoReprocessCampaignBlocks") === "on",
             },
             brandVoice: formData.get("brandVoice") as string,
             outreachConfig: {
@@ -347,6 +369,44 @@ export async function runRequirementsIntelligenceNowAction(
     } catch (error: any) {
         console.error("[runRequirementsIntelligenceNowAction] Error:", error);
         return { success: false, error: error?.message || "Failed to run Requirements Intelligence scan." };
+    }
+}
+
+export async function runContactProfileVerificationNowAction(
+    locationId: string,
+    options?: { batchSize?: number }
+): Promise<RunAiAutomationNowResult> {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false, error: authorization.error };
+
+    try {
+        const stats = await runContactProfileVerificationCron({
+            locationId: authorization.locationId,
+            batchSize: normalizeContactProfileVerificationBatchSize(options?.batchSize),
+            source: "manual",
+            force: true,
+        });
+        revalidatePath("/admin/settings/ai");
+        return { success: true, stats };
+    } catch (error: any) {
+        console.error("[runContactProfileVerificationNowAction] Error:", error);
+        return { success: false, error: error?.message || "Failed to run Contact Profile Verification." };
+    }
+}
+
+export async function triggerGlobalContactProfileRecertificationAction(locationId: string) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false as const, error: authorization.error };
+
+    try {
+        const result = await triggerGlobalContactProfileRecertification({
+            locationId: authorization.locationId,
+        });
+        revalidatePath("/admin/settings/ai");
+        return result;
+    } catch (error: any) {
+        console.error("[triggerGlobalContactProfileRecertificationAction] Error:", error);
+        return { success: false as const, error: error?.message || "Failed to trigger global recertification." };
     }
 }
 

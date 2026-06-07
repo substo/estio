@@ -12,6 +12,7 @@ import {
 } from "@/lib/settings/constants";
 import { ensureDefaultSkillPolicies } from "@/lib/ai/runtime/engine";
 import { isPrecisionRemoveInfrastructureReady } from "@/lib/ai/property-image-precision-remove-config";
+import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
 
 const EMPTY_AI_RUNTIME_SUMMARY = {
     totalPolicies: 0,
@@ -21,6 +22,7 @@ const EMPTY_AI_RUNTIME_SUMMARY = {
     deadJobs: 0,
     pendingSuggestions: 0,
     pendingRequirementProposals: 0,
+    pendingVerificationProposals: 0,
     policies: [],
     recentDecisions: [],
     recentJobs: [],
@@ -37,6 +39,7 @@ async function loadAiRuntimeSummary(locationId: string) {
             deadRuntimeJobs,
             pendingSuggestions,
             pendingRequirementProposals,
+            pendingVerificationProposals,
             policies,
             recentDecisions,
             recentRuntimeJobs,
@@ -78,6 +81,14 @@ async function loadAiRuntimeSummary(locationId: string) {
                 where: {
                     locationId,
                     status: "pending",
+                    proposalType: "requirements",
+                },
+            }),
+            db.contactRequirementProposal.count({
+                where: {
+                    locationId,
+                    status: "pending",
+                    proposalType: "verification",
                 },
             }),
             db.aiSkillPolicy.findMany({
@@ -144,6 +155,7 @@ async function loadAiRuntimeSummary(locationId: string) {
             deadJobs: deadRuntimeJobs,
             pendingSuggestions,
             pendingRequirementProposals,
+            pendingVerificationProposals,
             policies: policies.map((item) => ({
                 id: item.id,
                 skillId: item.skillId,
@@ -194,6 +206,10 @@ function getDefaultRequirementsIntelligence(model?: string | null) {
     };
 }
 
+function getDefaultContactProfileVerification(value?: unknown) {
+    return normalizeContactProfileVerificationConfig(value);
+}
+
 function buildAiInitialData({
     aiDoc,
     siteConfig,
@@ -230,6 +246,7 @@ function buildAiInitialData({
             requirementsIntelligence: aiPayload?.requirementsIntelligence || getDefaultRequirementsIntelligence(
                 aiPayload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction
             ),
+            contactProfileVerification: getDefaultContactProfileVerification(aiPayload?.contactProfileVerification),
         };
     }
 
@@ -241,6 +258,7 @@ function buildAiInitialData({
         requirementsIntelligence: aiPayload?.requirementsIntelligence || getDefaultRequirementsIntelligence(
             siteConfig?.googleAiModelExtraction
         ),
+        contactProfileVerification: getDefaultContactProfileVerification(aiPayload?.contactProfileVerification),
     };
 }
 
@@ -286,6 +304,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             model: GEMINI_FLASH_STABLE_FALLBACK,
             lastRun: null,
         },
+        contactProfileVerification: initialData?.contactProfileVerification || getDefaultContactProfileVerification(),
     };
 
     return (

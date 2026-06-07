@@ -2,7 +2,12 @@
 
 import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
-import { runRequirementsIntelligenceNowAction, updateAiSettings } from "./actions";
+import {
+    runContactProfileVerificationNowAction,
+    runRequirementsIntelligenceNowAction,
+    triggerGlobalContactProfileRecertificationAction,
+    updateAiSettings,
+} from "./actions";
 import { Input } from "@/components/ui/input";
 import { DEFAULT_REPLY_LANGUAGE, REPLY_LANGUAGE_OPTIONS } from "@/lib/ai/reply-language-options";
 import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
@@ -49,6 +54,37 @@ type RequirementsIntelligenceSettings = {
     lastRun?: RequirementsLastRun | null;
 };
 
+type ContactProfileVerificationLastRunStats = {
+    checked?: number;
+    verified?: number;
+    proposals?: number;
+    skipped?: number;
+    failures?: number;
+    reprocessedCampaignBlocks?: number;
+};
+
+type ContactProfileVerificationLastRun = {
+    status?: string;
+    source?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    durationMs?: number;
+    mode?: string;
+    batchSize?: number;
+    stats?: ContactProfileVerificationLastRunStats;
+    error?: string | null;
+};
+
+type ContactProfileVerificationSettings = {
+    mode?: string;
+    newContactDelayHours?: number;
+    recertificationDays?: number;
+    recertifyOnNewActivity?: boolean;
+    batchSize?: number;
+    autoReprocessCampaignBlocks?: boolean;
+    lastRun?: ContactProfileVerificationLastRun | null;
+};
+
 type AiSettingsInitialData = {
     [key: string]: unknown;
     defaultReplyLanguage?: string;
@@ -77,6 +113,7 @@ type AiSettingsInitialData = {
         qualifierPrompt?: string;
     };
     requirementsIntelligence?: RequirementsIntelligenceSettings;
+    contactProfileVerification?: ContactProfileVerificationSettings;
 };
 
 type AiRuntimeSummary = {
@@ -87,7 +124,9 @@ type AiRuntimeSummary = {
     deadJobs: number;
     pendingSuggestions: number;
     pendingRequirementProposals?: number;
+    pendingVerificationProposals?: number;
     requirementsIntelligence?: RequirementsIntelligenceSettings;
+    contactProfileVerification?: ContactProfileVerificationSettings;
     policies: Array<{
         id: string;
         skillId: string;
@@ -498,6 +537,197 @@ function RequirementsIntelligenceSection({
     );
 }
 
+function ContactProfileVerificationSection({
+    initialData,
+    pendingVerificationProposals,
+    lastRun,
+    runningVerification,
+    runningRecertification,
+    onRunVerification,
+    onTriggerRecertification,
+}: {
+    initialData: AiSettingsInitialData;
+    pendingVerificationProposals: number;
+    lastRun: ContactProfileVerificationLastRun | null;
+    runningVerification: boolean;
+    runningRecertification: boolean;
+    onRunVerification: () => void;
+    onTriggerRecertification: () => void;
+}) {
+    const config = initialData?.contactProfileVerification || {};
+    const formatDateLabel = (value: string | null | undefined) => {
+        if (!value) return "Never";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString();
+    };
+
+    return (
+        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+            <div className="space-y-0.5">
+                <Label className="text-xs text-slate-500 uppercase tracking-wider">
+                    Contact Profile Verification
+                </Label>
+                <p className="text-[10px] text-muted-foreground">
+                    Controls global buyer/renter lead verification before campaign matching can draft or send.
+                </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid gap-2">
+                    <Label htmlFor="contactProfileVerificationMode" className="text-xs text-slate-500 uppercase tracking-wider">
+                        Mode
+                    </Label>
+                    <select
+                        id="contactProfileVerificationMode"
+                        name="contactProfileVerificationMode"
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                        defaultValue={String(config.mode || "daily_due_and_new_contacts")}
+                    >
+                        <option value="off">Off</option>
+                        <option value="manual_only">Manual only</option>
+                        <option value="new_contacts">New contacts after delay</option>
+                        <option value="daily_due_and_new_contacts">Daily due + new contacts</option>
+                    </select>
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="contactProfileVerificationBatchSize" className="text-xs text-slate-500 uppercase tracking-wider">
+                        Batch size
+                    </Label>
+                    <Input
+                        id="contactProfileVerificationBatchSize"
+                        name="contactProfileVerificationBatchSize"
+                        type="number"
+                        min={1}
+                        max={500}
+                        defaultValue={String(config.batchSize ?? 50)}
+                    />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="contactProfileVerificationNewContactDelayHours" className="text-xs text-slate-500 uppercase tracking-wider">
+                        New-contact delay hours
+                    </Label>
+                    <Input
+                        id="contactProfileVerificationNewContactDelayHours"
+                        name="contactProfileVerificationNewContactDelayHours"
+                        type="number"
+                        min={0}
+                        max={720}
+                        defaultValue={String(config.newContactDelayHours ?? 24)}
+                    />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="contactProfileVerificationRecertificationDays" className="text-xs text-slate-500 uppercase tracking-wider">
+                        Recertification days
+                    </Label>
+                    <Input
+                        id="contactProfileVerificationRecertificationDays"
+                        name="contactProfileVerificationRecertificationDays"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        defaultValue={String(config.recertificationDays ?? 90)}
+                    />
+                </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2">
+                    <input
+                        id="contactProfileVerificationRecertifyOnNewActivity"
+                        name="contactProfileVerificationRecertifyOnNewActivity"
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                        defaultChecked={config.recertifyOnNewActivity !== false}
+                    />
+                    <span className="space-y-0.5">
+                        <span className="block text-xs font-medium text-slate-700">Recertify on new activity</span>
+                        <span className="block text-[10px] text-muted-foreground">Inbound messages or history after verification make the contact due again.</span>
+                    </span>
+                </label>
+                <label className="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2">
+                    <input
+                        id="contactProfileVerificationAutoReprocessCampaignBlocks"
+                        name="contactProfileVerificationAutoReprocessCampaignBlocks"
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                        defaultChecked={config.autoReprocessCampaignBlocks !== false}
+                    />
+                    <span className="space-y-0.5">
+                        <span className="block text-xs font-medium text-slate-700">Reprocess campaign blockers</span>
+                        <span className="block text-[10px] text-muted-foreground">Verified leads automatically leave the campaign profile-check queue.</span>
+                    </span>
+                </label>
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+                Pending verification proposals: {pendingVerificationProposals}
+            </div>
+            <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <div className="text-xs font-medium text-slate-700">Verification Status</div>
+                        <div className="text-[10px] text-muted-foreground">
+                            Last run: {formatDateLabel(lastRun?.finishedAt)}
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs"
+                            disabled={runningVerification}
+                            onClick={onRunVerification}
+                        >
+                            {runningVerification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                            Run Profile Verification Now
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs"
+                            disabled={runningRecertification}
+                            onClick={onTriggerRecertification}
+                        >
+                            {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                            Trigger Global Recertification
+                        </Button>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
+                    <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p>
+                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.checked || 0)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Verified</p>
+                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.verified || 0)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Proposals</p>
+                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.proposals || 0)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Skipped</p>
+                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.skipped || 0)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Failures</p>
+                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.failures || 0)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Reopened</p>
+                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.reprocessedCampaignBlocks || 0)}</p>
+                    </div>
+                </div>
+                {lastRun?.error && (
+                    <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] text-red-700">
+                        {String(lastRun.error)}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function AudioTranscriptPolicySection({ initialData }: { initialData: AiSettingsInitialData }) {
     return (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -684,14 +914,20 @@ function ModelConfigurationSection({
     googleAiModelTranscription,
     googleAiModelTranslation,
     pendingRequirementProposals,
+    pendingVerificationProposals,
     requirementsLastRun,
+    contactProfileVerificationLastRun,
     runningRequirementsScan,
+    runningContactProfileVerification,
+    runningGlobalRecertification,
     onGeneralModelChange,
     onExtractionModelChange,
     onDesignModelChange,
     onTranscriptionModelChange,
     onTranslationModelChange,
     onRunRequirementsScan,
+    onRunContactProfileVerification,
+    onTriggerGlobalRecertification,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -701,14 +937,20 @@ function ModelConfigurationSection({
     googleAiModelTranscription: string;
     googleAiModelTranslation: string;
     pendingRequirementProposals: number;
+    pendingVerificationProposals: number;
     requirementsLastRun: RequirementsLastRun | null;
+    contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
     runningRequirementsScan: boolean;
+    runningContactProfileVerification: boolean;
+    runningGlobalRecertification: boolean;
     onGeneralModelChange: (value: string) => void;
     onExtractionModelChange: (value: string) => void;
     onDesignModelChange: (value: string) => void;
     onTranscriptionModelChange: (value: string) => void;
     onTranslationModelChange: (value: string) => void;
     onRunRequirementsScan: () => void;
+    onRunContactProfileVerification: () => void;
+    onTriggerGlobalRecertification: () => void;
 }) {
     return (
         <div className="space-y-4">
@@ -737,6 +979,16 @@ function ModelConfigurationSection({
                     requirementsLastRun={requirementsLastRun}
                     runningRequirementsScan={runningRequirementsScan}
                     onRunRequirementsScan={onRunRequirementsScan}
+                />
+
+                <ContactProfileVerificationSection
+                    initialData={initialData}
+                    pendingVerificationProposals={pendingVerificationProposals}
+                    lastRun={contactProfileVerificationLastRun}
+                    runningVerification={runningContactProfileVerification}
+                    runningRecertification={runningGlobalRecertification}
+                    onRunVerification={onRunContactProfileVerification}
+                    onTriggerRecertification={onTriggerGlobalRecertification}
                 />
 
                 <AudioTranscriptPolicySection initialData={initialData} />
@@ -1043,8 +1295,13 @@ export function AiSettingsForm({
 
     const [availableModels, setAvailableModels] = useState<AiModelOption[]>([]);
     const [runningRequirementsScan, setRunningRequirementsScan] = useState(false);
+    const [runningContactProfileVerification, setRunningContactProfileVerification] = useState(false);
+    const [runningGlobalRecertification, setRunningGlobalRecertification] = useState(false);
     const [requirementsLastRun, setRequirementsLastRun] = useState<RequirementsLastRun | null>(
         runtimeSummary?.requirementsIntelligence?.lastRun || initialData?.requirementsIntelligence?.lastRun || null
+    );
+    const [contactProfileVerificationLastRun, setContactProfileVerificationLastRun] = useState<ContactProfileVerificationLastRun | null>(
+        runtimeSummary?.contactProfileVerification?.lastRun || initialData?.contactProfileVerification?.lastRun || null
     );
     const [googleAiModel, setGoogleAiModel] = useState(
         getInitialModelValue(initialData, ["googleAiModel"], GEMINI_FLASH_LATEST_ALIAS)
@@ -1133,6 +1390,53 @@ export function AiSettingsForm({
         }
     };
 
+    const runContactProfileVerification = async () => {
+        setRunningContactProfileVerification(true);
+        try {
+            const batchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
+            const result = await runContactProfileVerificationNowAction(locationId, { batchSize });
+            if (!result?.success) {
+                toast.error(String(result?.error || "Profile verification failed."));
+                return;
+            }
+            const stats = result.stats || {};
+            setContactProfileVerificationLastRun({
+                status: Number(stats.failures || 0) > 0 ? "failed" : "completed",
+                source: "manual",
+                startedAt: new Date().toISOString(),
+                finishedAt: new Date().toISOString(),
+                durationMs: 0,
+                mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
+                batchSize,
+                stats,
+                error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
+            });
+            toast.success(
+                `Profile verification complete. Checked ${Number(stats.checked || 0)}, verified ${Number(stats.verified || 0)}, created ${Number(stats.proposals || 0)} proposal${Number(stats.proposals || 0) === 1 ? "" : "s"}.`
+            );
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Profile verification failed.");
+        } finally {
+            setRunningContactProfileVerification(false);
+        }
+    };
+
+    const triggerGlobalRecertification = async () => {
+        setRunningGlobalRecertification(true);
+        try {
+            const result = await triggerGlobalContactProfileRecertificationAction(locationId);
+            if (!result?.success) {
+                toast.error(String(result?.error || "Could not trigger global recertification."));
+                return;
+            }
+            toast.success(`Marked ${Number(result.due || 0)} contact${Number(result.due || 0) === 1 ? "" : "s"} due for profile verification.`);
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Could not trigger global recertification.");
+        } finally {
+            setRunningGlobalRecertification(false);
+        }
+    };
+
     return (
         <div className="space-y-8">
             <AiConfigurationHeader />
@@ -1154,8 +1458,12 @@ export function AiSettingsForm({
                     googleAiModelTranscription={googleAiModelTranscription}
                     googleAiModelTranslation={googleAiModelTranslation}
                     pendingRequirementProposals={Number(runtimeSummary?.pendingRequirementProposals || 0)}
+                    pendingVerificationProposals={Number(runtimeSummary?.pendingVerificationProposals || 0)}
                     requirementsLastRun={requirementsLastRun}
+                    contactProfileVerificationLastRun={contactProfileVerificationLastRun}
                     runningRequirementsScan={runningRequirementsScan}
+                    runningContactProfileVerification={runningContactProfileVerification}
+                    runningGlobalRecertification={runningGlobalRecertification}
                     onGeneralModelChange={(value) => {
                         hasUserSelectedGeneralModelRef.current = true;
                         setGoogleAiModel(value);
@@ -1177,6 +1485,8 @@ export function AiSettingsForm({
                         setGoogleAiModelTranslation(value);
                     }}
                     onRunRequirementsScan={runRequirementsScan}
+                    onRunContactProfileVerification={runContactProfileVerification}
+                    onTriggerGlobalRecertification={triggerGlobalRecertification}
                 />
 
                 <Separator />
