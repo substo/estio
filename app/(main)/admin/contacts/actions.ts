@@ -336,6 +336,7 @@ export type CreateContactState = {
     phone?: string | null;
     preferredLang?: string | null;
     message?: string | null;
+    contactType?: string | null;
   };
   duplicateContact?: { id: string; name: string | null; email?: string | null; phone?: string | null };
 };
@@ -956,6 +957,7 @@ async function updateContactCore(
         phone: updatedContact.phone || null,
         preferredLang: updatedContact.preferredLang || null,
         message: updatedContact.message || null,
+        contactType: updatedContact.contactType || null,
       };
       log('6_txUpdate');
 
@@ -1066,6 +1068,116 @@ export async function updateContactAction(contactId: string, data: Partial<Valid
   return res.success ? { success: true } : { success: false, error: res.message };
 }
 
+export async function updateContactTypeAction(contactId: string, contactType: ContactType) {
+  const normalizedContactId = String(contactId || '').trim();
+  if (!normalizedContactId) return { success: false as const, error: 'Missing contact ID' };
+  if (!CONTACT_TYPES.includes(contactType)) return { success: false as const, error: 'Invalid contact type' };
+
+  const { userId } = await auth();
+  if (!userId) return { success: false as const, error: 'Unauthorized' };
+
+  const dbUser = await db.user.findUnique({
+    where: { clerkId: userId },
+    select: { id: true },
+  });
+  const internalUserId = dbUser?.id || null;
+
+  const existing = await db.contact.findUnique({
+    where: { id: normalizedContactId },
+    select: {
+      id: true,
+      locationId: true,
+      contactType: true,
+      name: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      preferredLang: true,
+      message: true,
+    },
+  });
+
+  if (!existing) return { success: false as const, error: 'Contact not found' };
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, existing.locationId);
+  if (!hasAccess) return { success: false as const, error: 'Unauthorized' };
+
+  if (existing.contactType === contactType) {
+    return {
+      success: true as const,
+      contact: {
+        id: existing.id,
+        name: existing.name || '',
+        firstName: existing.firstName || null,
+        lastName: existing.lastName || null,
+        email: existing.email || null,
+        phone: existing.phone || null,
+        preferredLang: existing.preferredLang || null,
+        message: existing.message || null,
+        contactType: existing.contactType || null,
+      },
+    };
+  }
+
+  const updatedContact = await db.$transaction(async (tx) => {
+    const updated = await tx.contact.update({
+      where: { id: existing.id },
+      data: withProfileVerificationInvalidation({ contactType }),
+      select: {
+        id: true,
+        name: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        preferredLang: true,
+        message: true,
+        contactType: true,
+      },
+    });
+
+    await logContactHistory(tx, existing.id, internalUserId, 'UPDATED', [{
+      field: 'contactType',
+      old: normalizeForDiff(existing.contactType),
+      new: normalizeForDiff(contactType),
+    }]);
+
+    await enqueueContactSync(tx as Prisma.TransactionClient, {
+      contactId: existing.id,
+      locationId: existing.locationId,
+      operation: 'update',
+      payload: { preferredUserId: internalUserId, fields: ['contactType'] },
+    });
+
+    return updated;
+  });
+
+  enqueueProviderContactMirrorsAfterResponse({
+    locationId: existing.locationId,
+    contactId: existing.id,
+    userId: internalUserId,
+    reason: 'contact_type_update',
+  });
+
+  revalidatePath('/admin/contacts');
+
+  return {
+    success: true as const,
+    contact: {
+      id: updatedContact.id,
+      name: updatedContact.name || '',
+      firstName: updatedContact.firstName || null,
+      lastName: updatedContact.lastName || null,
+      email: updatedContact.email || null,
+      phone: updatedContact.phone || null,
+      preferredLang: updatedContact.preferredLang || null,
+      message: updatedContact.message || null,
+      contactType: updatedContact.contactType || null,
+    },
+  };
+}
+
 export async function updateContact(
   prevState: CreateContactState,
   formData: FormData
@@ -1173,7 +1285,9 @@ export async function updateContact(
       lastName: data.lastName ?? null,
       email: data.email || null,
       phone: data.phone || null,
-      message: data.message || null
+      preferredLang: data.preferredLang || null,
+      message: data.message || null,
+      contactType: data.contactType || null,
     }
   };
 }

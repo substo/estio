@@ -8,6 +8,7 @@ export type ConversationContactIdentityPatch = {
     email?: string;
     phone?: string;
     preferredLang?: string | null;
+    contactType?: string | null;
 };
 
 export type DealContactOption = {
@@ -36,6 +37,7 @@ export function normalizeConversationContactIdentityPatch(
         ...(patch.email !== undefined ? { email: String(patch.email || "").trim() || undefined } : {}),
         ...(patch.phone !== undefined ? { phone: String(patch.phone || "").trim() || undefined } : {}),
         ...(patch.preferredLang !== undefined ? { preferredLang: String(patch.preferredLang || "").trim() || null } : {}),
+        ...(patch.contactType !== undefined ? { contactType: String(patch.contactType || "").trim() || null } : {}),
     };
 }
 
@@ -60,6 +62,7 @@ export function applyConversationIdentityPatch<T extends Conversation>(
         ...(patch.email !== undefined ? { contactEmail: patch.email } : {}),
         ...(patch.phone !== undefined ? { contactPhone: patch.phone } : {}),
         ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang } : {}),
+        ...(patch.contactType !== undefined ? { contactType: patch.contactType } : {}),
     };
 }
 
@@ -77,6 +80,7 @@ export function applyRefreshedConversationIdentityPatch<T extends Conversation>(
         ...(patch.email !== undefined ? { contactEmail: patch.email } : {}),
         ...(patch.phone !== undefined ? { contactPhone: patch.phone } : {}),
         ...(patch.preferredLang !== undefined ? { contactPreferredLanguage: patch.preferredLang } : {}),
+        ...(patch.contactType !== undefined ? { contactType: patch.contactType } : {}),
     };
 }
 
@@ -127,6 +131,7 @@ export function applyWorkspaceContactContextIdentityPatch<T>(
             ...(patch.email !== undefined ? { email: patch.email || null } : {}),
             ...(patch.phone !== undefined ? { phone: patch.phone || null } : {}),
             ...(patch.preferredLang !== undefined ? { preferredLang: patch.preferredLang } : {}),
+            ...(patch.contactType !== undefined ? { contactType: patch.contactType } : {}),
         },
     };
 }
@@ -151,6 +156,7 @@ export function applyRefreshedWorkspaceContactContextIdentityPatch<T>(
             ...(patch.email !== undefined ? { email: patch.email || null } : {}),
             ...(patch.phone !== undefined ? { phone: patch.phone || null } : {}),
             ...(patch.preferredLang !== undefined ? { preferredLang: patch.preferredLang } : {}),
+            ...(patch.contactType !== undefined ? { contactType: patch.contactType } : {}),
         },
     };
 }

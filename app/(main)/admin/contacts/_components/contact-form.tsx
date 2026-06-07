@@ -2,6 +2,7 @@
 
 
 import { useRouter } from 'next/navigation';
+import type { FormEvent } from 'react';
 import { useState, useEffect, useActionState, useTransition, useRef, useCallback } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -26,7 +27,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { createContact, updateContact, deleteContactRole, verifyAndHealContact, openOrStartConversationForContact } from '../actions';
+import { createContact, updateContact, updateContactTypeAction, deleteContactRole, verifyAndHealContact, openOrStartConversationForContact } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
 import { GoogleSyncManager } from './google-sync-manager';
 import { OutlookSyncManager } from './outlook-sync-manager';
@@ -152,6 +153,7 @@ export type ContactIdentityPatch = {
     firstName?: string | null;
     lastName?: string | null;
     preferredLang?: string | null;
+    contactType?: string | null;
 };
 
 function getRequirementPriceValue(raw?: unknown) {
@@ -214,8 +216,9 @@ interface ContactFormProps {
     onShellReady?: () => void;
 }
 
-function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void }) {
+function SubmitButton({ isEditing, isCreating, toggler, saving }: { isEditing: boolean, isCreating: boolean, toggler: (e: React.MouseEvent) => void, saving?: boolean }) {
     const { pending } = useFormStatus();
+    const disabled = pending || !!saving;
 
     if (!isEditing) {
         return (
@@ -227,8 +230,8 @@ function SubmitButton({ isEditing, isCreating, toggler }: { isEditing: boolean, 
     }
 
     return (
-        <Button type="submit" disabled={pending}>
-            {pending ? (isCreating ? 'Creating...' : 'Saving...') : (isCreating ? 'Create Contact' : 'Save Changes')}
+        <Button type="submit" disabled={disabled}>
+            {disabled ? (isCreating ? 'Creating...' : 'Saving...') : (isCreating ? 'Create Contact' : 'Save Changes')}
         </Button>
     );
 }
@@ -249,6 +252,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
     const [outlookOpen, setOutlookOpen] = useState(false);
+    const [isSavingContactType, setIsSavingContactType] = useState(false);
     const [isOpeningConversation, startConversationTransition] = useTransition();
     const [conversationError, setConversationError] = useState<string | null>(null);
     const [contactPatch, setContactPatch] = useState<Partial<ContactData>>({});
@@ -508,6 +512,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     firstName: state.contact.firstName ?? null,
                     lastName: state.contact.lastName ?? null,
                     preferredLang: state.contact.preferredLang ?? null,
+                    contactType: state.contact.contactType ?? null,
                 } : null;
 
                 if (savedIdentityPatch) {
@@ -637,8 +642,103 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         6: 'grid-cols-6',
     };
 
+    const normalizeSubmittedScalar = (value: FormDataEntryValue | null | undefined) => String(value || '').trim();
+    const normalizeContactScalar = (value: unknown) => String(value || '').trim();
+    const normalizeReplyLanguageScalar = (value: unknown) => {
+        const normalized = String(value || '').trim();
+        return normalized === REPLY_LANGUAGE_AUTO_VALUE ? '' : normalized;
+    };
+
+    const formMatchesCurrentContactExceptType = (formData: FormData) => {
+        if (!contact || isCreating) return false;
+
+        const submittedType = normalizeSubmittedScalar(formData.get('contactType'));
+        if (!submittedType || submittedType === normalizeContactScalar(contact.contactType || DEFAULT_CONTACT_TYPE)) return false;
+        if (normalizeSubmittedScalar(formData.get('entityId')) || normalizeSubmittedScalar(formData.get('entityIds'))) return false;
+
+        const scalarFields: Array<keyof ContactData> = [
+            'name',
+            'email',
+            'phone',
+            'firstName',
+            'lastName',
+            'dateOfBirth',
+            'tags',
+            'message',
+            'address1',
+            'city',
+            'state',
+            'postalCode',
+            'country',
+        ];
+
+        const scalarFieldsMatch = scalarFields.every((field) => (
+            normalizeSubmittedScalar(formData.get(String(field))) === normalizeContactScalar(contact[field])
+        ));
+        if (!scalarFieldsMatch) return false;
+
+        return normalizeReplyLanguageScalar(formData.get('preferredLang')) === normalizeReplyLanguageScalar(contact.preferredLang);
+    };
+
+    const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+        if (!contact || isCreating || isSavingContactType) return;
+
+        const formData = new FormData(event.currentTarget);
+        if (!formMatchesCurrentContactExceptType(formData)) return;
+
+        event.preventDefault();
+        const nextContactType = normalizeSubmittedScalar(formData.get('contactType')) as ContactType;
+
+        startTransition(async () => {
+            setIsSavingContactType(true);
+            try {
+                const result = await updateContactTypeAction(contact.id, nextContactType);
+                if (!result.success) {
+                    toast({
+                        title: 'Error',
+                        description: result.error || 'Failed to update contact type.',
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+
+                const savedContact = result.contact;
+                const savedIdentityPatch: ContactIdentityPatch = {
+                    id: savedContact.id,
+                    name: savedContact.name ?? null,
+                    email: savedContact.email ?? null,
+                    phone: savedContact.phone ?? null,
+                    firstName: savedContact.firstName ?? null,
+                    lastName: savedContact.lastName ?? null,
+                    preferredLang: savedContact.preferredLang ?? null,
+                    contactType: savedContact.contactType ?? null,
+                };
+
+                setContactPatch((prev) => ({ ...prev, ...savedIdentityPatch }));
+                setFormRenderKey((prev) => prev + 1);
+                onContactSavedRef.current?.(savedIdentityPatch);
+                setIsEditing(false);
+                refreshRoute();
+                onSuccessRef.current?.();
+                toast({
+                    title: 'Success',
+                    description: 'Contact type updated successfully.',
+                });
+            } catch (error) {
+                console.error('[ContactForm] Failed to update contact type:', error);
+                toast({
+                    title: 'Error',
+                    description: 'Failed to update contact type.',
+                    variant: 'destructive',
+                });
+            } finally {
+                setIsSavingContactType(false);
+            }
+        });
+    };
+
     return (
-        <form action={formAction} className="flex flex-col flex-1 overflow-hidden">
+        <form action={formAction} onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
             <input type="hidden" name="locationId" value={locationId} />
             {contact && <input type="hidden" name="contactId" value={contact.id} />}
             <input type="hidden" name="contactType" value={contactType} />
@@ -1308,7 +1408,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         </div>
                     )}
                 </div>
-                <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} />
+                <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} saving={isSavingContactType} />
             </div>
 
             {contact && (

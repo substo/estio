@@ -44,6 +44,7 @@ test('normalizeConversationContactIdentityPatch trims ids and preserves empty-fi
         email: '   ',
         phone: ' +2000 ',
         preferredLang: '   ',
+        contactType: ' Agent ',
     });
 
     assert.deepEqual(patch, {
@@ -53,6 +54,7 @@ test('normalizeConversationContactIdentityPatch trims ids and preserves empty-fi
         email: undefined,
         phone: '+2000',
         preferredLang: null,
+        contactType: 'Agent',
     });
     assert.equal(normalizeConversationContactIdentityPatch('', { id: 'contact-1' }), null);
     assert.equal(normalizeConversationContactIdentityPatch('conv-1', { id: '   ' }), null);
@@ -65,6 +67,7 @@ test('applyConversationIdentityPatch patches by conversation id or contact id on
         email: 'new@example.com',
         phone: '+2000',
         preferredLang: 'el',
+        contactType: 'Agent',
     });
     assert.ok(patch);
 
@@ -73,6 +76,7 @@ test('applyConversationIdentityPatch patches by conversation id or contact id on
     assert.equal(byConversation.contactEmail, 'new@example.com');
     assert.equal(byConversation.contactPhone, '+2000');
     assert.equal(byConversation.contactPreferredLanguage, 'el');
+    assert.equal(byConversation.contactType, 'Agent');
 
     const byContact = applyConversationIdentityPatch({ ...baseConversation, id: 'other-conv' }, patch);
     assert.equal(byContact.contactName, 'New Name');
@@ -108,6 +112,7 @@ test('refreshed identity patch layers fresh conversation first and saved patch l
         email: 'saved@example.com',
         phone: '+3000',
         preferredLang: 'el',
+        contactType: 'Agent',
     });
     assert.ok(patch);
 
@@ -124,6 +129,7 @@ test('refreshed identity patch layers fresh conversation first and saved patch l
     assert.equal(conversation.contactEmail, 'saved@example.com');
     assert.equal(conversation.contactPhone, '+3000');
     assert.equal(conversation.contactPreferredLanguage, 'el');
+    assert.equal(conversation.contactType, 'Agent');
 
     const dealContact = applyRefreshedDealContactIdentityPatch(baseDealContact, fresh, patch);
     assert.equal(dealContact.contactName, 'Saved Name');
@@ -131,10 +137,11 @@ test('refreshed identity patch layers fresh conversation first and saved patch l
     assert.equal(dealContact.contactPhone, '+3000');
 
     const context = applyRefreshedWorkspaceContactContextIdentityPatch({
-        contact: { id: 'contact-1', name: 'Old Name', email: 'old@example.com', phone: '+1000', preferredLang: 'en' },
+        contact: { id: 'contact-1', name: 'Old Name', email: 'old@example.com', phone: '+1000', preferredLang: 'en', contactType: 'Lead' },
     }, fresh, patch);
     assert.equal(context.contact.name, 'Saved Name');
     assert.equal(context.contact.email, 'saved@example.com');
     assert.equal(context.contact.phone, '+3000');
     assert.equal(context.contact.preferredLang, 'el');
+    assert.equal(context.contact.contactType, 'Agent');
 });
