@@ -1,9 +1,6 @@
 "use server";
 
 import db from "@/lib/db";
-import { getLocationContext } from "@/lib/auth/location-context";
-import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import {
     ACTIVE_OUTBOX_STATUSES,
@@ -12,28 +9,10 @@ import {
     buildProviderSyncAlerts,
     sumStatusCounts,
 } from "@/lib/integrations/provider-sync-dashboard";
+import { resolveIntegrationAdminContext } from "../admin-context";
 
 const DASHBOARD_PATH = "/admin/settings/integrations/provider-sync";
 const STALE_LOCK_MS = 15 * 60 * 1000;
-
-async function resolveAdminContext() {
-    const { userId: clerkUserId } = await auth();
-    if (!clerkUserId) {
-        throw new Error("Unauthorized");
-    }
-
-    const location = await getLocationContext();
-    if (!location?.id) {
-        throw new Error("No location found");
-    }
-
-    const isAdmin = await verifyUserIsLocationAdmin(clerkUserId, location.id);
-    if (!isAdmin) {
-        throw new Error("Unauthorized");
-    }
-
-    return { clerkUserId, locationId: location.id };
-}
 
 function getRequiredFormId(formData: FormData) {
     const id = String(formData.get("id") || "").trim();
@@ -47,8 +26,69 @@ function toCountRows<T extends { status: string; _count: { _all: number } }>(row
     return rows.map((row) => ({ status: row.status, count: row._count._all }));
 }
 
+function buildRetryOutboxJobData() {
+    return {
+        status: "pending",
+        scheduledAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        processedAt: null,
+        lastError: null,
+    };
+}
+
+function buildDisableOutboxJobData() {
+    return {
+        status: "disabled",
+        lockedAt: null,
+        lockedBy: null,
+        processedAt: new Date(),
+        lastError: "Manually disabled from provider sync operations dashboard.",
+    };
+}
+
+async function updateProviderOutboxJob(formData: FormData, buildData: () => any) {
+    const { locationId } = await resolveIntegrationAdminContext();
+    const id = getRequiredFormId(formData);
+
+    const job = await db.providerOutbox.findFirst({
+        where: { id, locationId },
+        select: { id: true },
+    });
+    if (!job) {
+        throw new Error("Provider job not found");
+    }
+
+    await db.providerOutbox.update({
+        where: { id },
+        data: buildData(),
+    });
+
+    revalidatePath(DASHBOARD_PATH);
+}
+
+async function updateGmailSyncOutboxJob(formData: FormData, buildData: () => any) {
+    const { locationId } = await resolveIntegrationAdminContext();
+    const id = getRequiredFormId(formData);
+
+    const job = await db.gmailSyncOutbox.findFirst({
+        where: { id, user: { locations: { some: { id: locationId } } } },
+        select: { id: true },
+    });
+    if (!job) {
+        throw new Error("Gmail job not found");
+    }
+
+    await db.gmailSyncOutbox.update({
+        where: { id },
+        data: buildData(),
+    });
+
+    revalidatePath(DASHBOARD_PATH);
+}
+
 export async function getProviderSyncDashboard() {
-    const { locationId } = await resolveAdminContext();
+    const { locationId } = await resolveIntegrationAdminContext();
     const staleLockBefore = new Date(Date.now() - STALE_LOCK_MS);
 
     const users = await db.user.findMany({
@@ -225,107 +265,17 @@ export async function getProviderSyncDashboard() {
 }
 
 export async function retryProviderOutboxJob(formData: FormData) {
-    const { locationId } = await resolveAdminContext();
-    const id = getRequiredFormId(formData);
-
-    const job = await db.providerOutbox.findFirst({
-        where: { id, locationId },
-        select: { id: true },
-    });
-    if (!job) {
-        throw new Error("Provider job not found");
-    }
-
-    await db.providerOutbox.update({
-        where: { id },
-        data: {
-            status: "pending",
-            scheduledAt: new Date(),
-            lockedAt: null,
-            lockedBy: null,
-            processedAt: null,
-            lastError: null,
-        },
-    });
-
-    revalidatePath(DASHBOARD_PATH);
+    await updateProviderOutboxJob(formData, buildRetryOutboxJobData);
 }
 
 export async function disableProviderOutboxJob(formData: FormData) {
-    const { locationId } = await resolveAdminContext();
-    const id = getRequiredFormId(formData);
-
-    const job = await db.providerOutbox.findFirst({
-        where: { id, locationId },
-        select: { id: true },
-    });
-    if (!job) {
-        throw new Error("Provider job not found");
-    }
-
-    await db.providerOutbox.update({
-        where: { id },
-        data: {
-            status: "disabled",
-            lockedAt: null,
-            lockedBy: null,
-            processedAt: new Date(),
-            lastError: "Manually disabled from provider sync operations dashboard.",
-        },
-    });
-
-    revalidatePath(DASHBOARD_PATH);
+    await updateProviderOutboxJob(formData, buildDisableOutboxJobData);
 }
 
 export async function retryGmailSyncOutboxJob(formData: FormData) {
-    const { locationId } = await resolveAdminContext();
-    const id = getRequiredFormId(formData);
-
-    const job = await db.gmailSyncOutbox.findFirst({
-        where: { id, user: { locations: { some: { id: locationId } } } },
-        select: { id: true },
-    });
-    if (!job) {
-        throw new Error("Gmail job not found");
-    }
-
-    await db.gmailSyncOutbox.update({
-        where: { id },
-        data: {
-            status: "pending",
-            scheduledAt: new Date(),
-            lockedAt: null,
-            lockedBy: null,
-            processedAt: null,
-            lastError: null,
-        },
-    });
-
-    revalidatePath(DASHBOARD_PATH);
+    await updateGmailSyncOutboxJob(formData, buildRetryOutboxJobData);
 }
 
 export async function disableGmailSyncOutboxJob(formData: FormData) {
-    const { locationId } = await resolveAdminContext();
-    const id = getRequiredFormId(formData);
-
-    const job = await db.gmailSyncOutbox.findFirst({
-        where: { id, user: { locations: { some: { id: locationId } } } },
-        select: { id: true },
-    });
-    if (!job) {
-        throw new Error("Gmail job not found");
-    }
-
-    await db.gmailSyncOutbox.update({
-        where: { id },
-        data: {
-            status: "disabled",
-            lockedAt: null,
-            lockedBy: null,
-            processedAt: new Date(),
-            lastError: "Manually disabled from provider sync operations dashboard.",
-        },
-    });
-
-    revalidatePath(DASHBOARD_PATH);
+    await updateGmailSyncOutboxJob(formData, buildDisableOutboxJobData);
 }

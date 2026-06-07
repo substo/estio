@@ -1,18 +1,11 @@
-import db from '@/lib/db';
-import { auth } from '@clerk/nextjs/server';
 import { TaskForm } from '../../_components/task-form';
+import { ProspectingUnauthorized } from '../../_components/prospecting-unauthorized';
 import { getScrapingConnections } from '../../actions';
+import { getProspectingLocationId } from '../../location';
 
 export default async function NewScrapingTaskPage() {
-    const { userId } = await auth();
-    
-    const user = await db.user.findUnique({
-        where: { clerkId: userId || '' },
-        include: { locations: { take: 1 } }
-    });
-
-    const locationId = user?.locations?.[0]?.id;
-    if (!locationId) return <div>Unauthorized</div>;
+    const locationId = await getProspectingLocationId();
+    if (!locationId) return <ProspectingUnauthorized />;
 
     const connections = await getScrapingConnections(locationId);
 

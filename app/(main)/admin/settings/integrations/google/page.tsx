@@ -1,4 +1,3 @@
-
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,74 @@ import {
     getGoogleIntegrationSettingsForRead,
     googleIntegrationSettingsSelect,
 } from "@/lib/google/settings";
+
+type GoogleTasklistOption = {
+    id: string;
+    title: string;
+    isDefault: boolean;
+};
+
+type GoogleCalendarOption = {
+    id: string;
+    title: string;
+    isPrimary: boolean;
+};
+
+const GOOGLE_ERROR_MESSAGE_BY_CODE: Record<string, string> = {
+    invalid_state: "Connection check failed (invalid OAuth state). Please try connecting again.",
+    oauth_denied: "Google authorization was denied or canceled. Please try again and approve permissions.",
+    missing_code: "Google did not return an authorization code. Please retry the connection flow.",
+    internal_error: "We could not complete Google connection due to a server-side issue. Please retry shortly.",
+};
+
+async function loadGoogleTasklistOptions(userId: string, googleSettings: any) {
+    try {
+        const tasklists = await listGoogleTasklists({ userId });
+        return {
+            tasklists: tasklists.map((tasklist): GoogleTasklistOption => ({
+                id: tasklist.id,
+                title: tasklist.title,
+                isDefault: tasklist.isDefault,
+            })),
+            error: null,
+        };
+    } catch (error: any) {
+        const fallbackTasklistId = googleSettings.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID;
+        return {
+            tasklists: [{
+                id: fallbackTasklistId,
+                title: googleSettings.googleTasklistTitle || "Default",
+                isDefault: fallbackTasklistId === DEFAULT_GOOGLE_TASKLIST_ID,
+            }],
+            error: error?.message || "Could not load Google tasklists. Reconnect Google to refresh permissions.",
+        };
+    }
+}
+
+async function loadGoogleCalendarOptions(userId: string, googleSettings: any) {
+    try {
+        const calendars = await listGoogleCalendars(userId);
+        return {
+            calendars: calendars.map((calendar): GoogleCalendarOption => ({
+                id: calendar.id,
+                title: calendar.title,
+                isPrimary: calendar.isPrimary,
+            })),
+            error: null,
+        };
+    } catch (error: any) {
+        return {
+            calendars: googleSettings.googleCalendarId
+                ? [{
+                    id: googleSettings.googleCalendarId,
+                    title: googleSettings.googleCalendarTitle || "Default Calendar",
+                    isPrimary: false,
+                }]
+                : [],
+            error: error?.message || "Could not load Google calendars. Reconnect Google to refresh calendar permissions.",
+        };
+    }
+}
 
 export default async function GoogleIntegrationPage({
     searchParams,
@@ -50,55 +117,24 @@ export default async function GoogleIntegrationPage({
     const googleErrorId = typeof resolvedParams?.google_error_id === "string"
         ? resolvedParams.google_error_id
         : null;
-    const googleErrorMessageByCode: Record<string, string> = {
-        invalid_state: "Connection check failed (invalid OAuth state). Please try connecting again.",
-        oauth_denied: "Google authorization was denied or canceled. Please try again and approve permissions.",
-        missing_code: "Google did not return an authorization code. Please retry the connection flow.",
-        internal_error: "We could not complete Google connection due to a server-side issue. Please retry shortly.",
-    };
     const googleErrorMessage = googleErrorCode
-        ? (googleErrorMessageByCode[googleErrorCode] || "Google connection failed. Please reconnect.")
+        ? (GOOGLE_ERROR_MESSAGE_BY_CODE[googleErrorCode] || "Google connection failed. Please reconnect.")
         : null;
     let tasklistLoadError: string | null = null;
-    let googleTasklists: Array<{ id: string; title: string; isDefault: boolean }> = [];
+    let googleTasklists: GoogleTasklistOption[] = [];
 
     let calendarLoadError: string | null = null;
-    let googleCalendars: Array<{ id: string; title: string; isPrimary: boolean }> = [];
+    let googleCalendars: GoogleCalendarOption[] = [];
 
     if (isConnected) {
-        try {
-            const loadedTasklists = await listGoogleTasklists({ userId: user.id });
-            googleTasklists = loadedTasklists.map((tasklist) => ({
-                id: tasklist.id,
-                title: tasklist.title,
-                isDefault: tasklist.isDefault,
-            }));
-        } catch (error: any) {
-            tasklistLoadError = error?.message || "Could not load Google tasklists. Reconnect Google to refresh permissions.";
-            googleTasklists = [{
-                id: googleSettings.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID,
-                title: googleSettings.googleTasklistTitle || "Default",
-                isDefault: (googleSettings.googleTasklistId || DEFAULT_GOOGLE_TASKLIST_ID) === DEFAULT_GOOGLE_TASKLIST_ID,
-            }];
-        }
-
-        try {
-            const loadedCalendars = await listGoogleCalendars(user.id);
-            googleCalendars = loadedCalendars.map((calendar) => ({
-                id: calendar.id,
-                title: calendar.title,
-                isPrimary: calendar.isPrimary,
-            }));
-        } catch (error: any) {
-            calendarLoadError = error?.message || "Could not load Google calendars. Reconnect Google to refresh calendar permissions.";
-            if (googleSettings.googleCalendarId) {
-                googleCalendars = [{
-                    id: googleSettings.googleCalendarId,
-                    title: googleSettings.googleCalendarTitle || "Default Calendar",
-                    isPrimary: false,
-                }];
-            }
-        }
+        const [tasklistResult, calendarResult] = await Promise.all([
+            loadGoogleTasklistOptions(user.id, googleSettings),
+            loadGoogleCalendarOptions(user.id, googleSettings),
+        ]);
+        googleTasklists = tasklistResult.tasklists;
+        tasklistLoadError = tasklistResult.error;
+        googleCalendars = calendarResult.calendars;
+        calendarLoadError = calendarResult.error;
     }
 
     return (

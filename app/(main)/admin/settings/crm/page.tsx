@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,9 +9,76 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { saveCrmCredentials, getCrmSettings, analyzeLeadSchema, saveLeadSchema, saveLegacyCrmLeadEmailSettings } from "./actions";
 import { analyzeCrmSchema, saveCrmSchema } from "../../properties/import/actions";
-import { useEffect } from "react";
 import { LeadSourceManager } from "./_components/lead-source-manager";
 
+type CrmSettingsFormValues = {
+    locationId: string;
+    settingsVersion: number;
+    crmUrl: string;
+    crmUsername: string;
+    crmPassword: string;
+    hasCrmPassword: boolean;
+    crmEditUrlPattern: string;
+    crmLeadUrlPattern: string;
+    legacyCrmLeadEmailEnabled: boolean;
+    legacyCrmLeadEmailSenders: string;
+    legacyCrmLeadEmailSenderDomains: string;
+    legacyCrmLeadEmailSubjectPatterns: string;
+    legacyCrmLeadEmailPinConversation: boolean;
+    legacyCrmLeadEmailAutoProcess: boolean;
+    legacyCrmLeadEmailAutoDraftFirstContact: boolean;
+};
+
+const DEFAULT_CRM_SETTINGS: CrmSettingsFormValues = {
+    locationId: "",
+    settingsVersion: 0,
+    crmUrl: "https://www.downtowncyprus.com/admin",
+    crmUsername: "",
+    crmPassword: "",
+    hasCrmPassword: false,
+    crmEditUrlPattern: "",
+    crmLeadUrlPattern: "",
+    legacyCrmLeadEmailEnabled: false,
+    legacyCrmLeadEmailSenders: "info@downtowncyprus.com",
+    legacyCrmLeadEmailSenderDomains: "mg.downtowncyprus.com",
+    legacyCrmLeadEmailSubjectPatterns: "You have been assigned a new lead!\nYou need to follow up on a lead!",
+    legacyCrmLeadEmailPinConversation: true,
+    legacyCrmLeadEmailAutoProcess: false,
+    legacyCrmLeadEmailAutoDraftFirstContact: false,
+};
+
+function listToTextareaValue(value: unknown, fallback: string) {
+    return Array.isArray(value) ? value.join("\n") || fallback : fallback;
+}
+
+function normalizeCrmSettings(settings: any): CrmSettingsFormValues {
+    return {
+        locationId: settings.locationId || DEFAULT_CRM_SETTINGS.locationId,
+        settingsVersion: Number(settings.settingsVersion || DEFAULT_CRM_SETTINGS.settingsVersion),
+        crmUrl: settings.crmUrl || DEFAULT_CRM_SETTINGS.crmUrl,
+        crmUsername: settings.crmUsername || DEFAULT_CRM_SETTINGS.crmUsername,
+        crmPassword: "",
+        hasCrmPassword: Boolean(settings.hasCrmPassword),
+        crmEditUrlPattern: settings.crmEditUrlPattern || DEFAULT_CRM_SETTINGS.crmEditUrlPattern,
+        crmLeadUrlPattern: settings.crmLeadUrlPattern || DEFAULT_CRM_SETTINGS.crmLeadUrlPattern,
+        legacyCrmLeadEmailEnabled: !!settings.legacyCrmLeadEmailEnabled,
+        legacyCrmLeadEmailSenders: listToTextareaValue(
+            settings.legacyCrmLeadEmailSenders,
+            DEFAULT_CRM_SETTINGS.legacyCrmLeadEmailSenders
+        ),
+        legacyCrmLeadEmailSenderDomains: listToTextareaValue(
+            settings.legacyCrmLeadEmailSenderDomains,
+            DEFAULT_CRM_SETTINGS.legacyCrmLeadEmailSenderDomains
+        ),
+        legacyCrmLeadEmailSubjectPatterns: listToTextareaValue(
+            settings.legacyCrmLeadEmailSubjectPatterns,
+            DEFAULT_CRM_SETTINGS.legacyCrmLeadEmailSubjectPatterns
+        ),
+        legacyCrmLeadEmailPinConversation: settings.legacyCrmLeadEmailPinConversation ?? DEFAULT_CRM_SETTINGS.legacyCrmLeadEmailPinConversation,
+        legacyCrmLeadEmailAutoProcess: !!settings.legacyCrmLeadEmailAutoProcess,
+        legacyCrmLeadEmailAutoDraftFirstContact: !!settings.legacyCrmLeadEmailAutoDraftFirstContact,
+    };
+}
 
 export default function CrmSettingsPage() {
     const [isSaving, setIsSaving] = useState(false);
@@ -19,48 +86,32 @@ export default function CrmSettingsPage() {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isLeadAnalyzing, setIsLeadAnalyzing] = useState(false);
     const [schema, setSchema] = useState<any>(null);
-    const [defaultValues, setDefaultValues] = useState({
-        locationId: "",
-        settingsVersion: 0,
-        crmUrl: "https://www.downtowncyprus.com/admin",
-        crmUsername: "",
-        crmPassword: "",
-        hasCrmPassword: false,
-        crmEditUrlPattern: "",
-        crmLeadUrlPattern: "",
-        legacyCrmLeadEmailEnabled: false,
-        legacyCrmLeadEmailSenders: "info@downtowncyprus.com",
-        legacyCrmLeadEmailSenderDomains: "mg.downtowncyprus.com",
-        legacyCrmLeadEmailSubjectPatterns: "You have been assigned a new lead!\nYou need to follow up on a lead!",
-        legacyCrmLeadEmailPinConversation: true,
-        legacyCrmLeadEmailAutoProcess: false,
-        legacyCrmLeadEmailAutoDraftFirstContact: false,
-    });
+    const [defaultValues, setDefaultValues] = useState(DEFAULT_CRM_SETTINGS);
     const [leadAnalysisUrl, setLeadAnalysisUrl] = useState("https://www.downtowncyprus.com/admin/leads/create");
     const [leadAnalysisResult, setLeadAnalysisResult] = useState<any>(null);
+
+    async function refreshSavedSettings(options: { updatePasswordState?: boolean } = {}) {
+        const settings: any = await getCrmSettings(defaultValues.locationId || null);
+        if (!settings) return;
+
+        setDefaultValues((prev) => ({
+            ...prev,
+            settingsVersion: Number(settings.settingsVersion || prev.settingsVersion || 0),
+            ...(options.updatePasswordState
+                ? {
+                    hasCrmPassword: Boolean(settings.hasCrmPassword),
+                    crmPassword: "",
+                }
+                : {}),
+        }));
+    }
 
     useEffect(() => {
         async function fetchSettings() {
             try {
                 const settings: any = await getCrmSettings();
                 if (settings) {
-                    setDefaultValues({
-                        locationId: settings.locationId || "",
-                        settingsVersion: Number(settings.settingsVersion || 0),
-                        crmUrl: settings.crmUrl || "https://www.downtowncyprus.com/admin",
-                        crmUsername: settings.crmUsername || "",
-                        crmPassword: "",
-                        hasCrmPassword: Boolean(settings.hasCrmPassword),
-                        crmEditUrlPattern: settings.crmEditUrlPattern || "",
-                        crmLeadUrlPattern: settings.crmLeadUrlPattern || "",
-                        legacyCrmLeadEmailEnabled: !!settings.legacyCrmLeadEmailEnabled,
-                        legacyCrmLeadEmailSenders: (settings.legacyCrmLeadEmailSenders || []).join("\n") || "info@downtowncyprus.com",
-                        legacyCrmLeadEmailSenderDomains: (settings.legacyCrmLeadEmailSenderDomains || []).join("\n") || "mg.downtowncyprus.com",
-                        legacyCrmLeadEmailSubjectPatterns: (settings.legacyCrmLeadEmailSubjectPatterns || []).join("\n") || "You have been assigned a new lead!\nYou need to follow up on a lead!",
-                        legacyCrmLeadEmailPinConversation: settings.legacyCrmLeadEmailPinConversation ?? true,
-                        legacyCrmLeadEmailAutoProcess: !!settings.legacyCrmLeadEmailAutoProcess,
-                        legacyCrmLeadEmailAutoDraftFirstContact: !!settings.legacyCrmLeadEmailAutoDraftFirstContact,
-                    });
+                    setDefaultValues(normalizeCrmSettings(settings));
                     if (settings.crmSchema) {
                         setSchema(settings.crmSchema);
                     }
@@ -103,13 +154,7 @@ export default function CrmSettingsPage() {
             const result = await saveLegacyCrmLeadEmailSettings(data);
             if (result?.success) {
                 toast.success("Legacy CRM lead email settings saved");
-                const settings: any = await getCrmSettings(defaultValues.locationId || null);
-                if (settings) {
-                    setDefaultValues((prev) => ({
-                        ...prev,
-                        settingsVersion: Number(settings.settingsVersion || prev.settingsVersion || 0),
-                    }));
-                }
+                await refreshSavedSettings();
             } else {
                 toast.error(result?.error || "Failed to save settings");
             }
@@ -121,17 +166,13 @@ export default function CrmSettingsPage() {
     }
 
     async function onAnalyzeLead() {
-        console.log("Analyze Lead button clicked");
         if (!leadAnalysisUrl) {
-            console.log("No URL provided");
             toast.error("Please enter a URL");
             return;
         }
         setIsLeadAnalyzing(true);
         try {
-            console.log("Calling server action analyzeLeadSchema with:", leadAnalysisUrl);
             const result = await analyzeLeadSchema(leadAnalysisUrl, defaultValues.locationId || null);
-            console.log("Server action result:", result);
             if (result.success) {
                 setLeadAnalysisResult(result.analysis);
                 toast.success("Lead page analyzed successfully");
@@ -160,15 +201,7 @@ export default function CrmSettingsPage() {
                 return;
             }
             toast.success("Credentials saved successfully");
-            const settings: any = await getCrmSettings(defaultValues.locationId || null);
-            if (settings) {
-                setDefaultValues((prev) => ({
-                    ...prev,
-                    settingsVersion: Number(settings.settingsVersion || prev.settingsVersion || 0),
-                    hasCrmPassword: Boolean(settings.hasCrmPassword),
-                    crmPassword: "",
-                }));
-            }
+            await refreshSavedSettings({ updatePasswordState: true });
         } catch (error) {
             toast.error("Failed to save credentials");
             console.error(error);
@@ -513,25 +546,6 @@ export default function CrmSettingsPage() {
 
             {/* Lead Sources Manager */}
             <div className="mt-6">
-                {/* 
-                   Ideally we fetch this data server-side. Since this is a client component, we have a few options:
-                   1. Convert this page to Server Component (it has 'use client' at top).
-                   2. Fetch inside useEffect.
-                   3. Create a wrapper Server Component.
-                   
-                   Current page is 'use client'. To minimize refactor, I will fetch inside useEffect or component wrapper?
-                   Actually, let's keep it simple. I can add a small server component wrapper inside the layout or just fetch here via action.
-                   BUT to be clean, let's make a separate wrapper or just fetch via action in useEffect for now since page is client.
-                   Wait, I can't put server code (db.findMany) directly here if it's 'use client'. 
-                   
-                   Better approach: Create a Server Component wrapper that fetches data and passes it to the Client Component.
-                   OR: Use a server action to fetch string list.
-
-                   Let's use a server action `getLeadSources` in `./actions.ts`.
-                 */}
-                {/* Re-evaluating: convert page to server component? It has a lot of state. 
-                    Let's just fetch via action for now to avoid big refactor.
-                 */}
                 <LeadSourceManagerWrapper locationId={defaultValues.locationId} />
             </div>
         </div >

@@ -43,6 +43,35 @@ type RunAiAutomationNowResult = {
 
 type UpdateAiAutomationConfigResult = Awaited<ReturnType<typeof updateAiAutomationConfig>>;
 
+type AiSettingsAuthorization =
+    | { ok: true; userId: string; locationId: string }
+    | { ok: false; error: string };
+
+async function authorizeAiSettingsLocation(
+    locationId: unknown,
+    options: {
+        missingLocationError?: string;
+        adminError?: string;
+        trimLocationId?: boolean;
+    } = {}
+): Promise<AiSettingsAuthorization> {
+    const { userId } = await auth();
+    if (!userId) return { ok: false, error: "Unauthorized" };
+
+    const rawLocationId = String(locationId || "");
+    const targetLocationId = options.trimLocationId === false ? rawLocationId : rawLocationId.trim();
+    if (!targetLocationId) {
+        return { ok: false, error: options.missingLocationError || "Missing location ID." };
+    }
+
+    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
+    if (!isAdmin) {
+        return { ok: false, error: options.adminError || "Unauthorized: Admin access is required." };
+    }
+
+    return { ok: true, userId, locationId: targetLocationId };
+}
+
 function normalizeTranscriptionModel(value: unknown): string {
     const normalized = String(value || "").trim();
     if (!normalized) return GEMINI_FLASH_STABLE_FALLBACK;
@@ -77,18 +106,14 @@ export async function updateAiSettings(
     prevState: AiSettingsState,
     formData: FormData
 ): Promise<AiSettingsState> {
-    const { userId } = await auth();
-    if (!userId) return { message: "Unauthorized" };
+    const authorization = await authorizeAiSettingsLocation(formData.get("locationId"), {
+        missingLocationError: "Location ID is missing",
+        adminError: "Unauthorized: Admin access is required to update settings.",
+        trimLocationId: false,
+    });
+    if (!authorization.ok) return { message: authorization.error };
 
-    const locationId = formData.get("locationId") as string;
-    if (!locationId) {
-        return { message: "Location ID is missing" };
-    }
-
-    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
-    if (!isAdmin) {
-        return { message: "Unauthorized: Admin access is required to update settings." };
-    }
+    const { userId, locationId } = authorization;
 
     try {
         const localUser = await db.user.findUnique({
@@ -276,17 +301,11 @@ export async function runAiAutomationNowAction(
     locationId: string,
     options?: { plannerOnly?: boolean; batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Unauthorized" };
-
-    const targetLocationId = String(locationId || "").trim();
-    if (!targetLocationId) return { success: false, error: "Missing location ID." };
-
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return { success: false, error: "Unauthorized: Admin access is required." };
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false, error: authorization.error };
 
     try {
-        const runtime = await runAiRuntimeNow(targetLocationId, {
+        const runtime = await runAiRuntimeNow(authorization.locationId, {
             plannerOnly: !!options?.plannerOnly,
             batchSize: Math.max(1, Math.min(300, Number(options?.batchSize || 80))),
             source: "automation",
@@ -314,18 +333,12 @@ export async function runRequirementsIntelligenceNowAction(
     locationId: string,
     options?: { batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Unauthorized" };
-
-    const targetLocationId = String(locationId || "").trim();
-    if (!targetLocationId) return { success: false, error: "Missing location ID." };
-
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return { success: false, error: "Unauthorized: Admin access is required." };
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false, error: authorization.error };
 
     try {
         const stats = await runRequirementsIntelligenceCron({
-            locationId: targetLocationId,
+            locationId: authorization.locationId,
             batchSize: Math.max(1, Math.min(100, Number(options?.batchSize || 40))),
             source: "manual",
         });
@@ -345,23 +358,15 @@ export async function updateAiAutomationConfigFromSettingsAction(
 }
 
 export async function listSkillPoliciesFromSettingsAction(locationId: string) {
-    const { userId } = await auth();
-    if (!userId) return [];
-    const targetLocationId = String(locationId || "").trim();
-    if (!targetLocationId) return [];
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return [];
-    return listSkillPolicies(targetLocationId);
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return [];
+    return listSkillPolicies(authorization.locationId);
 }
 
 export async function upsertSkillPolicyFromSettingsAction(locationId: string, skillId: string, policy: unknown) {
-    const { userId } = await auth();
-    if (!userId) return { success: false as const, error: "Unauthorized" };
-    const targetLocationId = String(locationId || "").trim();
-    if (!targetLocationId) return { success: false as const, error: "Missing location ID." };
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return { success: false as const, error: "Unauthorized: Admin access is required." };
-    return upsertSkillPolicy(targetLocationId, skillId, policy);
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false as const, error: authorization.error };
+    return upsertSkillPolicy(authorization.locationId, skillId, policy);
 }
 
 export async function listAiRuntimeDecisionsFromSettingsAction(locationId: string, input?: {
@@ -370,15 +375,11 @@ export async function listAiRuntimeDecisionsFromSettingsAction(locationId: strin
     since?: string | null;
     limit?: number;
 }) {
-    const { userId } = await auth();
-    if (!userId) return [];
-    const targetLocationId = String(locationId || "").trim();
-    if (!targetLocationId) return [];
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return [];
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return [];
     return listAiDecisions({
         ...input,
-        locationId: targetLocationId,
+        locationId: authorization.locationId,
         limit: Math.max(1, Math.min(120, Number(input?.limit || 40))),
     });
 }
@@ -388,15 +389,11 @@ export async function listAiRuntimeJobsFromSettingsAction(locationId: string, in
     since?: string | null;
     limit?: number;
 }) {
-    const { userId } = await auth();
-    if (!userId) return [];
-    const targetLocationId = String(locationId || "").trim();
-    if (!targetLocationId) return [];
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return [];
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return [];
     return listAiRuntimeJobs({
         ...input,
-        locationId: targetLocationId,
+        locationId: authorization.locationId,
         limit: Math.max(1, Math.min(120, Number(input?.limit || 40))),
     });
 }
@@ -407,11 +404,7 @@ export async function simulateSkillDecisionFromSettingsAction(input: {
     dealId?: string | null;
     contactId?: string | null;
 }) {
-    const { userId } = await auth();
-    if (!userId) return { success: false as const, error: "Unauthorized" };
-    const targetLocationId = String(input.locationId || "").trim();
-    if (!targetLocationId) return { success: false as const, error: "Missing location ID." };
-    const isAdmin = await verifyUserIsLocationAdmin(userId, targetLocationId);
-    if (!isAdmin) return { success: false as const, error: "Unauthorized: Admin access is required." };
+    const authorization = await authorizeAiSettingsLocation(input.locationId);
+    if (!authorization.ok) return { success: false as const, error: authorization.error };
     return simulateSkillDecision(input);
 }

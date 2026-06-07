@@ -74,6 +74,41 @@ async function resolveAdminContext(locationIdInput?: string | null) {
     return { clerkUserId: userId, localUserId: user.id, locationId, user };
 }
 
+async function resolveLeadSourceAdminAccess(id: string) {
+    const { userId } = await auth();
+    if (!userId) {
+        return { success: false as const, message: 'Unauthorized' };
+    }
+
+    const source = await db.leadSource.findUnique({ where: { id } });
+    if (!source) {
+        return { success: false as const, message: 'Source not found' };
+    }
+
+    const isAdmin = await verifyUserIsLocationAdmin(userId, source.locationId);
+    if (!isAdmin) {
+        return { success: false as const, message: 'Unauthorized' };
+    }
+
+    return { success: true as const, source };
+}
+
+function getLocationCrmDocument(locationId: string) {
+    return settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: locationId,
+        domain: SETTINGS_DOMAINS.LOCATION_CRM,
+    });
+}
+
+function getUserCrmDocument(localUserId: string) {
+    return settingsService.getDocument<any>({
+        scopeType: "USER",
+        scopeId: localUserId,
+        domain: SETTINGS_DOMAINS.USER_CRM,
+    });
+}
+
 export async function pullLead(crmLeadId: string) {
     console.log("[Action] pullLead called for ID:", crmLeadId);
     try {
@@ -127,14 +162,8 @@ export async function addLeadSource(name: string, locationId?: string | null) {
 
 export async function toggleLeadSource(id: string, isActive: boolean) {
     try {
-        const { userId } = await auth();
-        if (!userId) return { success: false, message: 'Unauthorized' };
-
-        const source = await db.leadSource.findUnique({ where: { id } });
-        if (!source) return { success: false, message: 'Source not found' };
-
-        const isAdmin = await verifyUserIsLocationAdmin(userId, source.locationId);
-        if (!isAdmin) return { success: false, message: 'Unauthorized' };
+        const access = await resolveLeadSourceAdminAccess(id);
+        if (!access.success) return access;
 
         await db.leadSource.update({
             where: { id },
@@ -177,11 +206,7 @@ export async function saveLegacyCrmLeadEmailSettings(data: any) {
         );
         const subjectPatterns = parseStringList(data.legacyCrmLeadEmailSubjectPatterns, { lower: true });
 
-        const existingDoc = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: context.locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CRM,
-        });
+        const existingDoc = await getLocationCrmDocument(context.locationId);
         const existingPayload = existingDoc?.payload || {};
         const payload = {
             ...existingPayload,
@@ -258,11 +283,7 @@ export async function saveCrmCredentials(data: any) {
             throw new Error("Missing username");
         }
 
-        const existingLocationDoc = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: context.locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CRM,
-        });
+        const existingLocationDoc = await getLocationCrmDocument(context.locationId);
         const existingLocationPayload = existingLocationDoc?.payload || {};
         const locationPayload = {
             ...existingLocationPayload,
@@ -388,16 +409,8 @@ export async function getCrmSettings(locationId?: string | null) {
                     legacyCrmLeadEmailAutoDraftFirstContact: true,
                 } as any
             }),
-            settingsService.getDocument<any>({
-                scopeType: "LOCATION",
-                scopeId: context.locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CRM,
-            }),
-            settingsService.getDocument<any>({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-            }),
+            getLocationCrmDocument(context.locationId),
+            getUserCrmDocument(context.localUserId),
             settingsService.hasSecret({
                 scopeType: "USER",
                 scopeId: context.localUserId,
@@ -439,11 +452,7 @@ export async function getCrmSettings(locationId?: string | null) {
 export async function saveLeadSchema(schema: any, locationId?: string | null) {
     try {
         const context = await resolveAdminContext(locationId || null);
-        const existing = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: context.locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CRM,
-        });
+        const existing = await getLocationCrmDocument(context.locationId);
         const payload = {
             ...(existing?.payload || {}),
             crmLeadSchema: schema,
@@ -484,16 +493,8 @@ export async function analyzeLeadSchema(testUrl: string, locationId?: string | n
 
         const context = await resolveAdminContext(locationId || null);
         const [locationDoc, userDoc, crmPasswordSecret, location] = await Promise.all([
-            settingsService.getDocument<any>({
-                scopeType: "LOCATION",
-                scopeId: context.locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CRM,
-            }),
-            settingsService.getDocument<any>({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-            }),
+            getLocationCrmDocument(context.locationId),
+            getUserCrmDocument(context.localUserId),
             settingsService.getSecret({
                 scopeType: "USER",
                 scopeId: context.localUserId,

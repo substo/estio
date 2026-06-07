@@ -1,31 +1,21 @@
-import db from '@/lib/db';
-import { auth } from '@clerk/nextjs/server';
 import { CredentialForm } from '../../../../_components/credential-form';
+import { ProspectingUnauthorized } from '../../../../_components/prospecting-unauthorized';
 import { notFound } from 'next/navigation';
+import {
+    getProspectingConnection,
+    getProspectingCredential,
+    getProspectingLocationId,
+} from '../../../../location';
 
 export default async function EditScrapingCredentialPage({ params }: { params: Promise<{ id: string, credId: string }> }) {
     const { id: connectionId, credId } = await params;
-    const { userId } = await auth();
-    
-    const user = await db.user.findUnique({
-        where: { clerkId: userId || '' },
-        include: { locations: { take: 1 } }
-    });
+    const locationId = await getProspectingLocationId();
+    if (!locationId) return <ProspectingUnauthorized />;
 
-    const locationId = user?.locations?.[0]?.id;
-    if (!locationId) return <div>Unauthorized</div>;
-
-    // Verify parent
-    const connection = await db.scrapingConnection.findUnique({
-        where: { id: connectionId, locationId }
-    });
-
+    const connection = await getProspectingConnection(connectionId, locationId);
     if (!connection) return notFound();
 
-    const credential = await db.scrapingCredential.findUnique({
-        where: { id: credId, connectionId }
-    });
-
+    const credential = await getProspectingCredential(credId, connectionId);
     if (!credential) return notFound();
 
     return (

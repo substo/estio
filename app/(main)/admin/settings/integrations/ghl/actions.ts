@@ -1,33 +1,12 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import db from "@/lib/db";
-import { getLocationContext } from "@/lib/auth/location-context";
-import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { buildGhlDisconnectData } from "@/lib/ghl/disconnect";
-
-async function resolveGhlAdminContext() {
-    const { userId } = await auth();
-    if (!userId) {
-        throw new Error("Unauthorized");
-    }
-
-    const location = await getLocationContext();
-    if (!location?.id) {
-        throw new Error("No location found");
-    }
-
-    const isAdmin = await verifyUserIsLocationAdmin(userId, location.id);
-    if (!isAdmin) {
-        throw new Error("Unauthorized");
-    }
-
-    return { userId, locationId: location.id };
-}
+import { resolveIntegrationAdminContext } from "../admin-context";
 
 export async function disconnectGhlIntegration(formData: FormData) {
-    const { locationId } = await resolveGhlAdminContext();
+    const { locationId } = await resolveIntegrationAdminContext();
     const mode = String(formData.get("mode") || "").trim();
 
     await db.location.update({

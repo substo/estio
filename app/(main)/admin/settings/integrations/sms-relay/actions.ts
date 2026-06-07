@@ -39,15 +39,22 @@ export type DeviceActivityStats = {
     lastMessageAt: string | null;
 };
 
+async function getSmsRelayLocation({ required = false }: { required?: boolean } = {}) {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+
+    const location = await getLocationContext();
+    if (!location && required) throw new Error("No location found");
+
+    return location;
+}
+
 // ---------------------------------------------------------------------------
 // List all devices for the current location
 // ---------------------------------------------------------------------------
 
 export async function getSmsRelayDevices(): Promise<SmsRelayDevice[]> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
+    const location = await getSmsRelayLocation();
     if (!location) return [];
 
     const devices = await (db as any).smsRelayDevice.findMany({
@@ -79,11 +86,7 @@ export async function getSmsRelayDevices(): Promise<SmsRelayDevice[]> {
 export async function initiatePairing(
     label: string
 ): Promise<{ pairCode: string; qrPayload: string; deviceId: string; expiresInSeconds: number }> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
-    if (!location) throw new Error("No location found");
+    const location = await getSmsRelayLocation({ required: true });
 
     // Import auth helpers directly (no HTTP round-trip needed in server action)
     const { generatePairCode } = await import("@/lib/sms-relay/auth");
@@ -123,11 +126,7 @@ export async function updateDevice(
     deviceId: string,
     data: { label?: string; phoneNumber?: string }
 ): Promise<void> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
-    if (!location) throw new Error("No location found");
+    const location = await getSmsRelayLocation({ required: true });
 
     await (db as any).smsRelayDevice.updateMany({
         where: { id: deviceId, locationId: location.id },
@@ -145,11 +144,7 @@ export async function updateDevice(
 // ---------------------------------------------------------------------------
 
 export async function unlinkDevice(deviceId: string): Promise<void> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
-    if (!location) throw new Error("No location found");
+    const location = await getSmsRelayLocation({ required: true });
 
     const device = await (db as any).smsRelayDevice.findFirst({
         where: { id: deviceId, locationId: location.id },
@@ -174,10 +169,7 @@ export async function unlinkDevice(deviceId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function getSmsRelayStats(): Promise<SmsRelayStats> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
+    const location = await getSmsRelayLocation();
     if (!location) return { sent7d: 0, received7d: 0, failed7d: 0, pending: 0 };
 
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -217,10 +209,7 @@ export async function getSmsRelayStats(): Promise<SmsRelayStats> {
 // ---------------------------------------------------------------------------
 
 export async function getSmsRelayToggle(): Promise<boolean> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
+    const location = await getSmsRelayLocation();
     if (!location) return false;
 
     const loc = await db.location.findUnique({
@@ -232,11 +221,7 @@ export async function getSmsRelayToggle(): Promise<boolean> {
 }
 
 export async function toggleSmsRelay(enabled: boolean): Promise<boolean> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
-    if (!location) throw new Error("No location found");
+    const location = await getSmsRelayLocation({ required: true });
 
     const updated = await db.location.update({
         where: { id: location.id },
@@ -252,10 +237,7 @@ export async function toggleSmsRelay(enabled: boolean): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export async function getDeviceActivityStats(deviceId: string): Promise<DeviceActivityStats> {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const location = await getLocationContext();
+    const location = await getSmsRelayLocation();
     if (!location) return { sentToday: 0, failedToday: 0, queuedNow: 0, lastMessageAt: null };
 
     const startOfDay = new Date();

@@ -8,10 +8,13 @@ import {
     googleIntegrationSettingsSelect,
     updateGoogleIntegrationSettings,
     type GoogleAutoSyncMode,
+    type GoogleIntegrationSettings,
     type GoogleIntegrationLegacyUser,
 } from "@/lib/google/settings";
 
 export type { GoogleAutoSyncMode } from "@/lib/google/settings";
+
+const GOOGLE_SETTINGS_PATH = "/admin/settings/integrations/google";
 
 async function resolveGoogleContext() {
     const { userId: clerkUserId } = await auth();
@@ -34,6 +37,22 @@ async function resolveGoogleContext() {
     return { user: user as GoogleIntegrationLegacyUser };
 }
 
+async function saveGoogleSettings({
+    user,
+    patch,
+}: {
+    user: GoogleIntegrationLegacyUser;
+    patch: Partial<GoogleIntegrationSettings>;
+}) {
+    await updateGoogleIntegrationSettings({
+        user,
+        patch,
+        legacyData: patch,
+    });
+
+    revalidatePath(GOOGLE_SETTINGS_PATH);
+}
+
 export async function updateGoogleSyncDirection(direction: string) {
     const { user } = await resolveGoogleContext();
 
@@ -42,13 +61,10 @@ export async function updateGoogleSyncDirection(direction: string) {
         throw new Error("Invalid sync direction");
     }
 
-    await updateGoogleIntegrationSettings({
+    await saveGoogleSettings({
         user,
         patch: { googleSyncDirection: direction },
-        legacyData: { googleSyncDirection: direction },
     });
-
-    revalidatePath("/admin/settings/integrations/google");
     return { success: true };
 }
 
@@ -77,13 +93,11 @@ export async function updateGoogleAutomationSettings(input: GoogleAutomationSett
         googleAutoSyncMode: input.mode,
     };
 
-    await updateGoogleIntegrationSettings({
+    await saveGoogleSettings({
         user,
         patch,
-        legacyData: patch,
     });
 
-    revalidatePath("/admin/settings/integrations/google");
     return { success: true };
 }
 
@@ -102,9 +116,8 @@ export async function updateGoogleTasklistSettings(input: z.input<typeof updateG
         googleTasklistTitle: parsed.tasklistTitle || null,
     };
 
-    await updateGoogleIntegrationSettings({ user, patch, legacyData: patch });
+    await saveGoogleSettings({ user, patch });
 
-    revalidatePath("/admin/settings/integrations/google");
     return { success: true };
 }
 
@@ -123,8 +136,7 @@ export async function updateGoogleCalendarSettings(input: z.input<typeof updateG
         googleCalendarTitle: parsed.calendarTitle || null,
     };
 
-    await updateGoogleIntegrationSettings({ user, patch, legacyData: patch });
+    await saveGoogleSettings({ user, patch });
 
-    revalidatePath("/admin/settings/integrations/google");
     return { success: true };
 }

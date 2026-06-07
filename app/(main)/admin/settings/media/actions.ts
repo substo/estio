@@ -9,15 +9,19 @@ import {
   MEDIA_ASSET_RETENTION_DAYS,
 } from "@/lib/media/media-assets";
 
-/**
- * Lists all soft-deleted (trashed) media assets for the admin UI.
- */
-export async function listTrashedMediaAction(locationId: string) {
+async function ensureMediaLocationAccess(locationId: string) {
   const user = await currentUser();
   if (!user) throw new Error("Unauthorized");
 
   const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
   if (!hasAccess) throw new Error("Unauthorized: Access Denied");
+}
+
+/**
+ * Lists all soft-deleted (trashed) media assets for the admin UI.
+ */
+export async function listTrashedMediaAction(locationId: string) {
+  await ensureMediaLocationAccess(locationId);
 
   const { assets, total } = await listSoftDeletedAssets({ take: 100 });
 
@@ -45,11 +49,7 @@ export async function listTrashedMediaAction(locationId: string) {
  * Calls Cloudflare API to delete the physical file, then removes DB record.
  */
 export async function purgeExpiredMediaAction(locationId: string) {
-  const user = await currentUser();
-  if (!user) throw new Error("Unauthorized");
-
-  const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-  if (!hasAccess) throw new Error("Unauthorized: Access Denied");
+  await ensureMediaLocationAccess(locationId);
 
   const result = await purgeExpiredMediaAssets();
 
@@ -66,11 +66,7 @@ export async function restoreMediaAssetAction(
   locationId: string,
   cloudflareImageId: string
 ) {
-  const user = await currentUser();
-  if (!user) throw new Error("Unauthorized");
-
-  const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-  if (!hasAccess) throw new Error("Unauthorized: Access Denied");
+  await ensureMediaLocationAccess(locationId);
 
   await restoreMediaAsset(cloudflareImageId);
 

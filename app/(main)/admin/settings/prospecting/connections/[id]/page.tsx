@@ -1,28 +1,18 @@
-import db from '@/lib/db';
-import { auth } from '@clerk/nextjs/server';
 import { ConnectionForm } from '../../_components/connection-form';
 import { getScrapingCredentials } from '../../actions';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Plus, Pencil, Trash } from 'lucide-react';
+import { Plus, Pencil } from 'lucide-react';
+import { ProspectingUnauthorized } from '../../_components/prospecting-unauthorized';
+import { getProspectingConnection, getProspectingLocationId } from '../../location';
 
 export default async function EditScrapingConnectionPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
-    const { userId } = await auth();
-    
-    const user = await db.user.findUnique({
-        where: { clerkId: userId || '' },
-        include: { locations: { take: 1 } }
-    });
+    const locationId = await getProspectingLocationId();
+    if (!locationId) return <ProspectingUnauthorized />;
 
-    const locationId = user?.locations?.[0]?.id;
-    if (!locationId) return <div>Unauthorized</div>;
-
-    const connection = await db.scrapingConnection.findUnique({
-        where: { id, locationId }
-    });
-
+    const connection = await getProspectingConnection(id, locationId);
     if (!connection) return notFound();
 
     const credentials = await getScrapingCredentials(connection.id);

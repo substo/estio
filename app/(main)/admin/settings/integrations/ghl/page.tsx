@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import {
@@ -19,17 +20,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { getGhlConnectionHealth, type GhlConnectionHealth } from "@/lib/ghl/connection-health";
 import { disconnectGhlIntegration } from "./actions";
-
-function formatDate(value: string | Date | null | undefined) {
-    if (!value) return "-";
-    return new Intl.DateTimeFormat("en", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-    }).format(new Date(value));
-}
+import { formatIntegrationDate } from "../date-format";
 
 function getStatusCopy(health: GhlConnectionHealth) {
     switch (health.status) {
@@ -70,6 +61,37 @@ function getStatusCopy(health: GhlConnectionHealth) {
     }
 }
 
+function GhlSettingsShell({
+    children,
+}: {
+    children: ReactNode;
+}) {
+    return (
+        <div className="max-w-4xl space-y-6">
+            <h1 className="text-2xl font-bold tracking-tight">GoHighLevel Configuration</h1>
+            {children}
+        </div>
+    );
+}
+
+function GhlAccessError({
+    title,
+    description,
+}: {
+    title: string;
+    description: string;
+}) {
+    return (
+        <GhlSettingsShell>
+            <Alert variant="destructive">
+                <AlertCircle className="h-5 w-5" />
+                <AlertTitle>{title}</AlertTitle>
+                <AlertDescription>{description}</AlertDescription>
+            </Alert>
+        </GhlSettingsShell>
+    );
+}
+
 export default async function GHLSettingsPage() {
     const { userId } = await auth();
     if (!userId) redirect("/sign-in");
@@ -77,28 +99,20 @@ export default async function GHLSettingsPage() {
     const location = await getLocationContext();
     if (!location?.id) {
         return (
-            <div className="max-w-4xl space-y-6">
-                <h1 className="text-2xl font-bold tracking-tight">GoHighLevel Configuration</h1>
-                <Alert variant="destructive">
-                    <AlertCircle className="h-5 w-5" />
-                    <AlertTitle>No location found</AlertTitle>
-                    <AlertDescription>Choose or create a location before configuring GoHighLevel.</AlertDescription>
-                </Alert>
-            </div>
+            <GhlAccessError
+                title="No location found"
+                description="Choose or create a location before configuring GoHighLevel."
+            />
         );
     }
 
     const isAdmin = await verifyUserIsLocationAdmin(userId, location.id);
     if (!isAdmin) {
         return (
-            <div className="max-w-4xl space-y-6">
-                <h1 className="text-2xl font-bold tracking-tight">GoHighLevel Configuration</h1>
-                <Alert variant="destructive">
-                    <AlertCircle className="h-5 w-5" />
-                    <AlertTitle>Admin access required</AlertTitle>
-                    <AlertDescription>Only location admins can manage this GoHighLevel connection.</AlertDescription>
-                </Alert>
-            </div>
+            <GhlAccessError
+                title="Admin access required"
+                description="Only location admins can manage this GoHighLevel connection."
+            />
         );
     }
 
@@ -152,11 +166,11 @@ export default async function GHLSettingsPage() {
                         </div>
                         <div>
                             <p className="text-muted-foreground">Token expires</p>
-                            <p>{formatDate(health.expiresAt)}</p>
+                            <p>{formatIntegrationDate(health.expiresAt, { year: true })}</p>
                         </div>
                         <div>
                             <p className="text-muted-foreground">Last checked</p>
-                            <p>{formatDate(health.checkedAt)}</p>
+                            <p>{formatIntegrationDate(health.checkedAt, { year: true })}</p>
                         </div>
                     </div>
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Activity, Ban, RefreshCw, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,16 +20,7 @@ import {
     retryGmailSyncOutboxJob,
     retryProviderOutboxJob,
 } from "./actions";
-
-function formatDate(value: Date | string | null | undefined) {
-    if (!value) return "-";
-    return new Intl.DateTimeFormat("en", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-    }).format(new Date(value));
-}
+import { formatIntegrationDate } from "../date-format";
 
 function statusBadge(status: string) {
     const variant = status === "dead" || status === "failed"
@@ -107,23 +99,75 @@ function GroupedCountTable({
     );
 }
 
-function ProviderJobsTable({
-    jobs,
+type JobAction = (formData: FormData) => void | Promise<void>;
+
+function JobActions({
+    id,
+    retryAction,
+    disableAction,
 }: {
-    jobs: Awaited<ReturnType<typeof getProviderSyncDashboard>>["recentProviderJobs"];
+    id: string;
+    retryAction: JobAction;
+    disableAction: JobAction;
+}) {
+    return (
+        <div className="flex justify-end gap-2">
+            <form action={retryAction}>
+                <input type="hidden" name="id" value={id} />
+                <Button type="submit" size="sm" variant="outline" title="Retry job">
+                    <RefreshCw className="h-4 w-4" />
+                </Button>
+            </form>
+            <form action={disableAction}>
+                <input type="hidden" name="id" value={id} />
+                <Button type="submit" size="sm" variant="outline" title="Disable job">
+                    <Ban className="h-4 w-4" />
+                </Button>
+            </form>
+        </div>
+    );
+}
+
+function ActiveJobsTable<TJob extends {
+    id: string;
+    operation: string;
+    status: string;
+    attemptCount: number;
+    updatedAt: Date | string;
+    lastError: string | null;
+}>({
+    title,
+    description,
+    jobs,
+    emptyMessage,
+    firstColumnTitle,
+    renderFirstCell,
+    renderOperationCell,
+    retryAction,
+    disableAction,
+}: {
+    title: string;
+    description: string;
+    jobs: TJob[];
+    emptyMessage: string;
+    firstColumnTitle: string;
+    renderFirstCell: (job: TJob) => ReactNode;
+    renderOperationCell: (job: TJob) => ReactNode;
+    retryAction: JobAction;
+    disableAction: JobAction;
 }) {
     return (
         <Card>
             <CardHeader>
-                <CardTitle className="text-base">Provider Outbox Jobs</CardTitle>
-                <CardDescription>Recent pending, failed, dead, disabled, or processing mirror jobs.</CardDescription>
+                <CardTitle className="text-base">{title}</CardTitle>
+                <CardDescription>{description}</CardDescription>
             </CardHeader>
             <CardContent>
                 {jobs.length ? (
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Provider</TableHead>
+                                <TableHead>{firstColumnTitle}</TableHead>
                                 <TableHead>Operation</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead>Attempts</TableHead>
@@ -135,47 +179,62 @@ function ProviderJobsTable({
                         <TableBody>
                             {jobs.map((job) => (
                                 <TableRow key={job.id}>
-                                    <TableCell className="font-medium">
-                                        <div>{job.provider}</div>
-                                        <div className="text-xs text-muted-foreground">{job.providerAccountId}</div>
-                                    </TableCell>
-                                    <TableCell>
-                                        <div>{job.operation}</div>
-                                        <div className="text-xs text-muted-foreground">
-                                            {[job.conversationId, job.messageId, job.contactId].filter(Boolean).join(" / ") || "-"}
-                                        </div>
-                                    </TableCell>
+                                    <TableCell className="font-medium">{renderFirstCell(job)}</TableCell>
+                                    <TableCell>{renderOperationCell(job)}</TableCell>
                                     <TableCell>{statusBadge(job.status)}</TableCell>
                                     <TableCell className="tabular-nums">{job.attemptCount}</TableCell>
-                                    <TableCell>{formatDate(job.updatedAt)}</TableCell>
+                                    <TableCell>{formatIntegrationDate(job.updatedAt)}</TableCell>
                                     <TableCell className="max-w-[280px] text-xs text-muted-foreground">
                                         {truncateError(job.lastError) || "-"}
                                     </TableCell>
                                     <TableCell>
-                                        <div className="flex justify-end gap-2">
-                                            <form action={retryProviderOutboxJob}>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <Button type="submit" size="sm" variant="outline" title="Retry job">
-                                                    <RefreshCw className="h-4 w-4" />
-                                                </Button>
-                                            </form>
-                                            <form action={disableProviderOutboxJob}>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <Button type="submit" size="sm" variant="outline" title="Disable job">
-                                                    <Ban className="h-4 w-4" />
-                                                </Button>
-                                            </form>
-                                        </div>
+                                        <JobActions
+                                            id={job.id}
+                                            retryAction={retryAction}
+                                            disableAction={disableAction}
+                                        />
                                     </TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
                     </Table>
                 ) : (
-                    <p className="text-sm text-muted-foreground">No active provider outbox jobs.</p>
+                    <p className="text-sm text-muted-foreground">{emptyMessage}</p>
                 )}
             </CardContent>
         </Card>
+    );
+}
+
+function ProviderJobsTable({
+    jobs,
+}: {
+    jobs: Awaited<ReturnType<typeof getProviderSyncDashboard>>["recentProviderJobs"];
+}) {
+    return (
+        <ActiveJobsTable
+            title="Provider Outbox Jobs"
+            description="Recent pending, failed, dead, disabled, or processing mirror jobs."
+            jobs={jobs}
+            emptyMessage="No active provider outbox jobs."
+            firstColumnTitle="Provider"
+            retryAction={retryProviderOutboxJob}
+            disableAction={disableProviderOutboxJob}
+            renderFirstCell={(job) => (
+                <>
+                    <div>{job.provider}</div>
+                    <div className="text-xs text-muted-foreground">{job.providerAccountId}</div>
+                </>
+            )}
+            renderOperationCell={(job) => (
+                <>
+                    <div>{job.operation}</div>
+                    <div className="text-xs text-muted-foreground">
+                        {[job.conversationId, job.messageId, job.contactId].filter(Boolean).join(" / ") || "-"}
+                    </div>
+                </>
+            )}
+        />
     );
 }
 
@@ -185,61 +244,17 @@ function GmailJobsTable({
     jobs: Awaited<ReturnType<typeof getProviderSyncDashboard>>["recentGmailJobs"];
 }) {
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle className="text-base">Gmail Sync Jobs</CardTitle>
-                <CardDescription>Native Gmail ingestion jobs scoped to users in this location.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                {jobs.length ? (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>User</TableHead>
-                                <TableHead>Operation</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Attempts</TableHead>
-                                <TableHead>Updated</TableHead>
-                                <TableHead>Error</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {jobs.map((job) => (
-                                <TableRow key={job.id}>
-                                    <TableCell className="font-medium">{job.user.email}</TableCell>
-                                    <TableCell>{job.operation}</TableCell>
-                                    <TableCell>{statusBadge(job.status)}</TableCell>
-                                    <TableCell className="tabular-nums">{job.attemptCount}</TableCell>
-                                    <TableCell>{formatDate(job.updatedAt)}</TableCell>
-                                    <TableCell className="max-w-[280px] text-xs text-muted-foreground">
-                                        {truncateError(job.lastError) || "-"}
-                                    </TableCell>
-                                    <TableCell>
-                                        <div className="flex justify-end gap-2">
-                                            <form action={retryGmailSyncOutboxJob}>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <Button type="submit" size="sm" variant="outline" title="Retry job">
-                                                    <RefreshCw className="h-4 w-4" />
-                                                </Button>
-                                            </form>
-                                            <form action={disableGmailSyncOutboxJob}>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <Button type="submit" size="sm" variant="outline" title="Disable job">
-                                                    <Ban className="h-4 w-4" />
-                                                </Button>
-                                            </form>
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                ) : (
-                    <p className="text-sm text-muted-foreground">No active Gmail sync jobs.</p>
-                )}
-            </CardContent>
-        </Card>
+        <ActiveJobsTable
+            title="Gmail Sync Jobs"
+            description="Native Gmail ingestion jobs scoped to users in this location."
+            jobs={jobs}
+            emptyMessage="No active Gmail sync jobs."
+            firstColumnTitle="User"
+            retryAction={retryGmailSyncOutboxJob}
+            disableAction={disableGmailSyncOutboxJob}
+            renderFirstCell={(job) => job.user.email}
+            renderOperationCell={(job) => job.operation}
+        />
     );
 }
 
@@ -368,7 +383,7 @@ export default async function ProviderSyncPage() {
             <GmailJobsTable jobs={dashboard.recentGmailJobs} />
 
             <p className="text-xs text-muted-foreground">
-                Generated {formatDate(dashboard.generatedAt)} for location {dashboard.locationId}.
+                Generated {formatIntegrationDate(dashboard.generatedAt)} for location {dashboard.locationId}.
             </p>
         </div>
     );

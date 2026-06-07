@@ -90,50 +90,66 @@ export default function MicrosoftIntegrationPage() {
         }
     }, [searchParams]);
 
-    const handleSyncNow = async () => {
+    const runMicrosoftAction = async ({
+        endpoint,
+        fallbackSuccess,
+        httpErrorPrefix,
+        fallbackError,
+        onAccepted,
+    }: {
+        endpoint: string;
+        fallbackSuccess: string;
+        httpErrorPrefix: string;
+        fallbackError: string;
+        onAccepted?: (data: any, res: Response) => Promise<boolean>;
+    }) => {
         setSyncing(true);
         setError(null);
         setSuccess(null);
+
         try {
-            const res = await fetch('/api/microsoft/sync', { method: 'POST' });
+            const res = await fetch(endpoint, { method: 'POST' });
             const data = await parseApiResponse<any>(res);
 
             if (res.ok && data.success) {
-                setSuccess(data.message || 'Sync completed successfully!');
-                await checkStatus(); // Refresh stats
-            } else {
-                setError(data.error || `Failed to sync (HTTP ${res.status})`);
-            }
-        } catch (err: any) {
-            setError(err.message || 'Error occurred during sync');
-        } finally {
-            setSyncing(false);
-        }
-    };
-
-    const handleRenewSession = async () => {
-        setSyncing(true);
-        setError(null);
-        setSuccess(null);
-        try {
-            const res = await fetch('/api/microsoft/renew-session', { method: 'POST' });
-            const data = await parseApiResponse<any>(res);
-
-            if (res.ok && data.success) {
-                setSuccess(data.message || 'Outlook session renewed successfully!');
+                setSuccess(data.message || fallbackSuccess);
                 await checkStatus();
-            } else if (res.status === 202 && data.renewing) {
-                setSuccess(data.message || 'Outlook session renewal is already in progress...');
-                await checkStatus({ showLoading: false });
-            } else {
-                setError(data.error || `Failed to renew session (HTTP ${res.status})`);
+                return;
             }
+
+            if (onAccepted && await onAccepted(data, res)) {
+                await checkStatus({ showLoading: false });
+                return;
+            }
+
+            setError(data.error || `${httpErrorPrefix} (HTTP ${res.status})`);
         } catch (err: any) {
-            setError(err.message || 'Failed to renew Outlook session');
+            setError(err.message || fallbackError);
         } finally {
             setSyncing(false);
         }
     };
+
+    const handleSyncNow = () => runMicrosoftAction({
+        endpoint: '/api/microsoft/sync',
+        fallbackSuccess: 'Sync completed successfully!',
+        httpErrorPrefix: 'Failed to sync',
+        fallbackError: 'Error occurred during sync',
+    });
+
+    const handleRenewSession = () => runMicrosoftAction({
+        endpoint: '/api/microsoft/renew-session',
+        fallbackSuccess: 'Outlook session renewed successfully!',
+        httpErrorPrefix: 'Failed to renew session',
+        fallbackError: 'Failed to renew Outlook session',
+        onAccepted: async (data, res) => {
+            if (res.status === 202 && data.renewing) {
+                setSuccess(data.message || 'Outlook session renewal is already in progress...');
+                return true;
+            }
+            return false;
+        },
+    });
 
     const checkStatus = async (options?: { showLoading?: boolean }) => {
         try {

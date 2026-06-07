@@ -14,6 +14,7 @@ import {
     type AutomationTemplateKey,
 } from "@/lib/ai/automation/config";
 import { runAiAutomationNowAction, updateAiAutomationConfigFromSettingsAction } from "./actions";
+import { formatAiSettingsDateLabel } from "./date-format";
 
 const CADENCE_OPTIONS: Array<{ value: AiAutomationConfig["followUpCadence"]; label: string }> = [
     { value: "daily", label: "Daily" },
@@ -96,10 +97,7 @@ function toBoundedInt(value: string, min: number, max: number, fallback: number)
 }
 
 function formatDateLabel(value: string | null | undefined): string {
-    if (!value) return "Not scheduled yet";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "Not scheduled yet";
-    return d.toLocaleString();
+    return formatAiSettingsDateLabel(value, "Not scheduled yet");
 }
 
 function parseIdListInput(value: string): string[] {

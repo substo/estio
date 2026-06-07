@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getScrapingRuns } from '../actions';
 import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { formatRunDuration, formatRunTime } from './run-format';
 
 interface ScrapingRun {
     id: string;
@@ -67,23 +68,6 @@ function readNestedText(meta: Record<string, unknown>, parentKey: string, childK
 function readNumber(meta: Record<string, unknown>, key: string): number | null {
     const value = meta[key];
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function formatTime(date: Date | string | null) {
-    if (!date) return '—';
-    const d = new Date(date);
-    return d.toLocaleString('en-GB', {
-        month: 'short', day: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-}
-
-function formatDuration(start: Date | string, end: Date | string | null) {
-    if (!end) return '—';
-    const ms = new Date(end).getTime() - new Date(start).getTime();
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
 function toPrettySource(value: string | null): string {
@@ -162,10 +146,10 @@ export function RunHistoryPanel({
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-3">
                                         <StatusBadge status={run.status} />
-                                        <span className="text-muted-foreground">{formatTime(run.createdAt)}</span>
+                                        <span className="text-muted-foreground">{formatRunTime(run.createdAt)}</span>
                                         {run.completedAt && (
                                             <span className="text-muted-foreground">
-                                                ({formatDuration(run.createdAt, run.completedAt)})
+                                                ({formatRunDuration(run.createdAt, run.completedAt)})
                                             </span>
                                         )}
                                     </div>

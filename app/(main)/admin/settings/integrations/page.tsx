@@ -1,5 +1,96 @@
 import Link from "next/link";
-import { Activity, MessageSquare } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+    Activity,
+    Blocks,
+    Mail,
+    MessageSquare,
+    Smartphone,
+    Users,
+} from "lucide-react";
+
+type IntegrationSection = {
+    title: string;
+    description: string;
+    href: string;
+    cta: string;
+    icon: LucideIcon;
+    iconClassName: string;
+};
+
+const INTEGRATION_SECTIONS: IntegrationSection[] = [
+    {
+        title: "WhatsApp Business",
+        description: "Connect your WhatsApp Business Account to send and receive messages directly from the dashboard.",
+        href: "/admin/settings/integrations/whatsapp",
+        cta: "Configure Integration",
+        icon: MessageSquare,
+        iconClassName: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400",
+    },
+    {
+        title: "GoHighLevel",
+        description: "Manage the connection to your GoHighLevel location, specific tokens, and syncing preferences.",
+        href: "/admin/settings/integrations/ghl",
+        cta: "Configure Integration",
+        icon: Blocks,
+        iconClassName: "bg-purple-100 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400",
+    },
+    {
+        title: "SIM Relay",
+        description: "Connect physical Android phones as native SMS gateways using the Estio Companion app.",
+        href: "/admin/settings/integrations/sms-relay",
+        cta: "Configure Integration",
+        icon: Smartphone,
+        iconClassName: "bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400",
+    },
+    {
+        title: "Google Workspace",
+        description: "Sync Contacts and Gmail (Two-Way) to manage leads and communication.",
+        href: "/admin/settings/integrations/google",
+        cta: "Configure Integration",
+        icon: Users,
+        iconClassName: "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
+    },
+    {
+        title: "Microsoft Outlook",
+        description: "Sync Emails and Contacts with Outlook (Personal or Office 365).",
+        href: "/admin/settings/integrations/microsoft",
+        cta: "Configure Integration",
+        icon: Mail,
+        iconClassName: "bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400",
+    },
+    {
+        title: "Provider Sync Operations",
+        description: "Monitor async provider queues, retry failed mirror jobs, and inspect sync alias health.",
+        href: "/admin/settings/integrations/provider-sync",
+        cta: "Open Operations",
+        icon: Activity,
+        iconClassName: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400",
+    },
+];
+
+function IntegrationCard({ section }: { section: IntegrationSection }) {
+    const Icon = section.icon;
+
+    return (
+        <Link href={section.href} prefetch={false} className="group block h-full">
+            <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
+                <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${section.iconClassName}`}>
+                            <Icon className="h-6 w-6" />
+                        </div>
+                        <h3 className="font-semibold text-lg">{section.title}</h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{section.description}</p>
+                </div>
+                <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
+                    {section.cta} &rarr;
+                </div>
+            </div>
+        </Link>
+    );
+}
 
 export default function IntegrationsPage() {
     return (
@@ -10,132 +101,9 @@ export default function IntegrationsPage() {
             </div>
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {/* WhatsApp Integration Card */}
-                <Link href="/admin/settings/integrations/whatsapp" prefetch={false} className="group block h-full">
-                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400">
-                                    <MessageSquare className="h-6 w-6" />
-                                </div>
-                                <h3 className="font-semibold text-lg">WhatsApp Business</h3>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Connect your WhatsApp Business Account to send and receive messages directly from the dashboard.
-                            </p>
-                        </div>
-                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
-                            Configure Integration &rarr;
-                        </div>
-                    </div>
-                </Link>
-
-                {/* GoHighLevel Integration Card */}
-                <Link href="/admin/settings/integrations/ghl" prefetch={false} className="group block h-full">
-                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400">
-                                    <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current">
-                                        <path d="M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" />
-                                    </svg>
-                                </div>
-                                <h3 className="font-semibold text-lg">GoHighLevel</h3>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Manage the connection to your GoHighLevel location, specific tokens, and syncing preferences.
-                            </p>
-                        </div>
-                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
-                            Configure Integration &rarr;
-                        </div>
-                    </div>
-                </Link>
-
-                {/* SIM Relay Integration Card */}
-                <Link href="/admin/settings/integrations/sms-relay" prefetch={false} className="group block h-full">
-                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-smartphone"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-                                </div>
-                                <h3 className="font-semibold text-lg">SIM Relay</h3>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Connect physical Android phones as native SMS gateways using the Estio Companion app.
-                            </p>
-                        </div>
-                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
-                            Configure Integration &rarr;
-                        </div>
-                    </div>
-                </Link>
-
-                {/* Google Contacts Integration Card */}
-                <Link href="/admin/settings/integrations/google" prefetch={false} className="group block h-full">
-
-                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-                                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
-                                    </svg>
-                                </div>
-                                <h3 className="font-semibold text-lg">Google Workspace</h3>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Sync Contacts and Gmail (Two-Way) to manage leads and communication.
-                            </p>
-                        </div>
-                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
-                            Configure Integration &rarr;
-                        </div>
-                    </div>
-                </Link>
-
-                {/* Microsoft / Outlook Integration Card */}
-                <Link href="/admin/settings/integrations/microsoft" prefetch={false} className="group block h-full">
-                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-                                        <path d="M2 4v16h10V4H2zm9 14H3V6h8v12zm2-14v16h9V4h-9zm8 14h-7V6h7v12z" />
-                                    </svg>
-                                </div>
-                                <h3 className="font-semibold text-lg">Microsoft Outlook</h3>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Sync Emails and Contacts with Outlook (Personal or Office 365).
-                            </p>
-                        </div>
-                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
-                            Configure Integration &rarr;
-                        </div>
-                    </div>
-                </Link>
-
-                {/* Provider Sync Operations Card */}
-                <Link href="/admin/settings/integrations/provider-sync" prefetch={false} className="group block h-full">
-                    <div className="flex h-full flex-col justify-between rounded-lg border p-6 transition-colors hover:border-primary hover:bg-muted/50">
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400">
-                                    <Activity className="h-6 w-6" />
-                                </div>
-                                <h3 className="font-semibold text-lg">Provider Sync Operations</h3>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Monitor async provider queues, retry failed mirror jobs, and inspect sync alias health.
-                            </p>
-                        </div>
-                        <div className="mt-6 flex items-center text-sm font-medium text-primary group-hover:underline">
-                            Open Operations &rarr;
-                        </div>
-                    </div>
-                </Link>
+                {INTEGRATION_SECTIONS.map((section) => (
+                    <IntegrationCard key={section.href} section={section} />
+                ))}
             </div>
         </div>
     );

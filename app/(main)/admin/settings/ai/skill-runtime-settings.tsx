@@ -14,6 +14,7 @@ import {
     simulateSkillDecisionFromSettingsAction,
     upsertSkillPolicyFromSettingsAction,
 } from "./actions";
+import { formatAiSettingsDateLabel } from "./date-format";
 
 type RuntimeSummary = {
     totalPolicies: number;
@@ -47,10 +48,7 @@ const AGGRESSIVENESS_OPTIONS = [
 ];
 
 function formatDateLabel(value: string | null | undefined): string {
-    if (!value) return "Not scheduled";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "Not scheduled";
-    return d.toLocaleString();
+    return formatAiSettingsDateLabel(value, "Not scheduled");
 }
 
 function toBoundedNumber(value: string, min: number, max: number, fallback: number) {

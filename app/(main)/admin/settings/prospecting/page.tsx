@@ -7,25 +7,66 @@ import {
     getDeepScrapeQueueDiagnostics,
     getDeepScrapeRunOverview,
 } from './actions';
-import db from '@/lib/db';
-import { auth } from '@clerk/nextjs/server';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { RunScraperButton } from './_components/run-scraper-button';
 import { RunHistoryPanel } from './_components/run-history-panel';
 import { RunDeepScraperButton } from './_components/run-deep-scraper-button';
 import { DeepRunsPanel } from './_components/deep-runs-panel';
+import { ProspectingUnauthorized } from './_components/prospecting-unauthorized';
+import { getProspectingLocationId } from './location';
+
+function OverviewMetricCard({
+    label,
+    value,
+    detail,
+}: {
+    label: string;
+    value: string | number;
+    detail?: string;
+}) {
+    return (
+        <div className="rounded-lg border bg-card p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+            <p className="text-xl font-semibold mt-1">{value}</p>
+            {detail && <p className="text-[11px] text-muted-foreground mt-1">{detail}</p>}
+        </div>
+    );
+}
+
+function SettingsSectionHeader({
+    title,
+    actionHref,
+    actionLabel,
+    actionVariant = "default",
+}: {
+    title: string;
+    actionHref: string;
+    actionLabel: string;
+    actionVariant?: "default" | "outline";
+}) {
+    return (
+        <div className="mt-8 mb-4 flex justify-between items-center border-b pb-2">
+            <h2 className="text-xl font-semibold">{title}</h2>
+            <Link href={actionHref}>
+                <Button variant={actionVariant} size="sm">{actionLabel}</Button>
+            </Link>
+        </div>
+    );
+}
+
+function EmptySettingsState({ children }: { children: ReactNode }) {
+    return (
+        <div className="text-center p-8 border rounded-lg bg-card text-muted-foreground text-sm">
+            {children}
+        </div>
+    );
+}
 
 export default async function ProspectingSettingsPage() {
-    const { userId } = await auth();
-    
-    const user = await db.user.findUnique({
-        where: { clerkId: userId || '' },
-        include: { locations: { take: 1 } }
-    });
-
-    const locationId = user?.locations?.[0]?.id;
-    if (!locationId) return <div>Unauthorized</div>;
+    const locationId = await getProspectingLocationId();
+    if (!locationId) return <ProspectingUnauthorized />;
 
     const [connections, tasks, runOverview, deepRunOverview, deepRuns, deepQueueDiagnostics] = await Promise.all([
         getScrapingConnections(locationId),
@@ -43,6 +84,31 @@ export default async function ProspectingSettingsPage() {
             runsByTask[task.id] = await getScrapingRuns(task.id, locationId, 15);
         })
     );
+    const overviewMetrics = [
+        {
+            label: "Runs (24h)",
+            value: runOverview.totalRuns,
+        },
+        {
+            label: "Success Rate",
+            value: `${runOverview.successRate}%`,
+            detail: `${runOverview.completedRuns} completed`,
+        },
+        {
+            label: "Failed / Partial",
+            value: runOverview.failedRuns + runOverview.partialRuns,
+            detail: `${runOverview.failedRuns} failed · ${runOverview.partialRuns} partial`,
+        },
+        {
+            label: "Running",
+            value: runOverview.runningRuns,
+        },
+        {
+            label: "Avg / P95 Duration",
+            value: runOverview.avgDurationSeconds !== null ? `${runOverview.avgDurationSeconds}s` : '—',
+            detail: `P95: ${runOverview.p95DurationSeconds !== null ? `${runOverview.p95DurationSeconds}s` : '—'}`,
+        },
+    ];
 
     return (
         <div className="p-6">
@@ -63,33 +129,14 @@ export default async function ProspectingSettingsPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-6">
-                <div className="rounded-lg border bg-card p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Runs (24h)</p>
-                    <p className="text-xl font-semibold mt-1">{runOverview.totalRuns}</p>
-                </div>
-                <div className="rounded-lg border bg-card p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Success Rate</p>
-                    <p className="text-xl font-semibold mt-1">{runOverview.successRate}%</p>
-                    <p className="text-[11px] text-muted-foreground mt-1">{runOverview.completedRuns} completed</p>
-                </div>
-                <div className="rounded-lg border bg-card p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Failed / Partial</p>
-                    <p className="text-xl font-semibold mt-1">{runOverview.failedRuns + runOverview.partialRuns}</p>
-                    <p className="text-[11px] text-muted-foreground mt-1">{runOverview.failedRuns} failed · {runOverview.partialRuns} partial</p>
-                </div>
-                <div className="rounded-lg border bg-card p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Running</p>
-                    <p className="text-xl font-semibold mt-1">{runOverview.runningRuns}</p>
-                </div>
-                <div className="rounded-lg border bg-card p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Avg / P95 Duration</p>
-                    <p className="text-xl font-semibold mt-1">
-                        {runOverview.avgDurationSeconds !== null ? `${runOverview.avgDurationSeconds}s` : '—'}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                        P95: {runOverview.p95DurationSeconds !== null ? `${runOverview.p95DurationSeconds}s` : '—'}
-                    </p>
-                </div>
+                {overviewMetrics.map((metric) => (
+                    <OverviewMetricCard
+                        key={metric.label}
+                        label={metric.label}
+                        value={metric.value}
+                        detail={metric.detail}
+                    />
+                ))}
             </div>
 
             <DeepRunsPanel
@@ -112,19 +159,18 @@ export default async function ProspectingSettingsPage() {
                 </div>
             )}
 
-            {/* Platform Connections Section */}
-            <div className="mt-8 mb-4 flex justify-between items-center border-b pb-2">
-                <h2 className="text-xl font-semibold">1. Platform Connections</h2>
-                <Link href="/admin/settings/prospecting/connections/new">
-                    <Button variant="outline" size="sm">Add Connection</Button>
-                </Link>
-            </div>
+            <SettingsSectionHeader
+                title="1. Platform Connections"
+                actionHref="/admin/settings/prospecting/connections/new"
+                actionLabel="Add Connection"
+                actionVariant="outline"
+            />
             
             <div className="grid gap-4 mb-8">
                 {connections.length === 0 ? (
-                    <div className="text-center p-8 border rounded-lg bg-card text-muted-foreground text-sm">
+                    <EmptySettingsState>
                         No platform connections configured. Create one to begin scraping.
-                    </div>
+                    </EmptySettingsState>
                 ) : (
                     connections.map((conn: any) => (
                         <div key={conn.id} className="p-4 border rounded-lg bg-card flex justify-between items-center">
@@ -153,19 +199,17 @@ export default async function ProspectingSettingsPage() {
                 )}
             </div>
 
-            {/* Scheduled Tasks Section */}
-            <div className="mt-8 mb-4 flex justify-between items-center border-b pb-2">
-                <h2 className="text-xl font-semibold">2. Scheduled Tasks</h2>
-                <Link href="/admin/settings/prospecting/tasks/new">
-                    <Button size="sm">Add Task</Button>
-                </Link>
-            </div>
+            <SettingsSectionHeader
+                title="2. Scheduled Tasks"
+                actionHref="/admin/settings/prospecting/tasks/new"
+                actionLabel="Add Task"
+            />
 
             <div className="grid gap-4">
                 {tasks.length === 0 ? (
-                    <div className="text-center p-8 border rounded-lg bg-card text-muted-foreground text-sm">
+                    <EmptySettingsState>
                         No target tasks scheduled.
-                    </div>
+                    </EmptySettingsState>
                 ) : (
                     tasks.map((task: any) => (
                         <div key={task.id} className="p-4 border rounded-lg bg-card">

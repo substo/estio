@@ -31,6 +31,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { formatRunDuration, formatRunTime } from './run-format';
 
 interface DeepScrapeRunStage {
     id: string;
@@ -73,32 +74,6 @@ interface DeepScrapeRun {
 
 function isInFlightStatus(status: string) {
     return status === 'queued' || status === 'running';
-}
-
-function formatTime(value: Date | string | null | undefined) {
-    if (!value) return '—';
-    const d = new Date(value);
-    if (!Number.isFinite(d.getTime())) return '—';
-    return d.toLocaleString('en-GB', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-    });
-}
-
-function formatDuration(start: Date | string, end: Date | string | null) {
-    const startMs = new Date(start).getTime();
-    if (!Number.isFinite(startMs)) return '—';
-
-    const endMs = end ? new Date(end).getTime() : Date.now();
-    if (!Number.isFinite(endMs)) return '—';
-
-    const ms = Math.max(0, endMs - startMs);
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
 function toPrettySource(value: string | null) {
@@ -531,8 +506,10 @@ export function DeepRunsPanel({
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <StatusBadge status={displayStatus} />
-                                        <span className="text-muted-foreground">{formatTime(run.createdAt)}</span>
-                                        <span className="text-muted-foreground">({formatDuration(run.createdAt, run.completedAt)})</span>
+                                        <span className="text-muted-foreground">{formatRunTime(run.createdAt)}</span>
+                                        <span className="text-muted-foreground">
+                                            ({formatRunDuration(run.createdAt, run.completedAt, { useNowWhenMissingEnd: true })})
+                                        </span>
                                         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                                             {toPrettySource(run.triggeredBy)}
                                         </span>
@@ -617,7 +594,7 @@ export function DeepRunsPanel({
                                                         <div className="flex items-center justify-between gap-2">
                                                             <div className="flex items-center gap-2 flex-wrap">
                                                                 <span className="font-medium">{stage.stage}</span>
-                                                                <span className="text-muted-foreground">{formatTime(stage.createdAt)}</span>
+                                                                <span className="text-muted-foreground">{formatRunTime(stage.createdAt)}</span>
                                                                 <span className="rounded bg-background px-1 py-0.5 text-[10px] text-muted-foreground">{stage.status}</span>
                                                                 {stage.taskId && (
                                                                     <span className="rounded bg-background px-1 py-0.5 text-[10px] text-muted-foreground">

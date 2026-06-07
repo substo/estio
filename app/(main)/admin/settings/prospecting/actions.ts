@@ -181,6 +181,15 @@ function serializeDeepRunForClient(runPayload: any): ManualDeepScrapeTriggerResu
     };
 }
 
+async function requireProspectingLocationAdmin(locationId: string, errorMessage = 'Unauthorized') {
+    const { auth } = await import('@clerk/nextjs/server');
+    const { userId } = await auth();
+    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
+    if (!isAdmin) throw new Error(errorMessage);
+
+    return userId;
+}
+
 // --- CONNECTIONS ---
 
 export async function getScrapingConnections(locationId: string) {
@@ -192,10 +201,7 @@ export async function getScrapingConnections(locationId: string) {
 }
 
 export async function createScrapingConnection(locationId: string, data: any) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized to create scraping connections");
+    await requireProspectingLocationAdmin(locationId, "Unauthorized to create scraping connections");
 
     const connection = await db.scrapingConnection.create({
         data: {
@@ -212,10 +218,7 @@ export async function createScrapingConnection(locationId: string, data: any) {
 }
 
 export async function updateScrapingConnection(id: string, locationId: string, data: any) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const updateData: any = {
         name: data.name,
@@ -233,10 +236,7 @@ export async function updateScrapingConnection(id: string, locationId: string, d
 }
 
 export async function deleteScrapingConnection(id: string, locationId: string) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     await db.scrapingConnection.delete({
         where: { id, locationId }
@@ -257,10 +257,7 @@ export async function getScrapingCredentials(connectionId: string) {
 }
 
 export async function createScrapingCredential(connectionId: string, locationId: string, data: any) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     let encryptedPassword = null;
     if (data.authPassword) {
@@ -281,10 +278,7 @@ export async function createScrapingCredential(connectionId: string, locationId:
 }
 
 export async function updateScrapingCredential(id: string, locationId: string, data: any) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const updateData: any = {
         authUsername: data.authUsername,
@@ -305,10 +299,7 @@ export async function updateScrapingCredential(id: string, locationId: string, d
 }
 
 export async function deleteScrapingCredential(id: string, locationId: string) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     await db.scrapingCredential.delete({
         where: { id }
@@ -330,10 +321,7 @@ export async function getScrapingTasks(locationId: string) {
 }
 
 export async function createScrapingTask(locationId: string, data: any) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized to create scraping tasks");
+    await requireProspectingLocationAdmin(locationId, "Unauthorized to create scraping tasks");
 
     const connection = await db.scrapingConnection.findFirst({
         where: { id: data.connectionId, locationId },
@@ -370,10 +358,7 @@ export async function createScrapingTask(locationId: string, data: any) {
 }
 
 export async function updateScrapingTask(id: string, locationId: string, data: any) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const existingTask = await db.scrapingTask.findFirst({
         where: { id, locationId },
@@ -425,10 +410,7 @@ export async function updateScrapingTask(id: string, locationId: string, data: a
 }
 
 export async function deleteScrapingTask(id: string, locationId: string) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     await db.scrapingTask.delete({
         where: { id, locationId }
@@ -439,10 +421,7 @@ export async function deleteScrapingTask(id: string, locationId: string) {
 }
 
 export async function manualTriggerScrape(id: string, locationId: string, pageLimit?: number) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    const userId = await requireProspectingLocationAdmin(locationId);
 
     const task = await db.scrapingTask.findUnique({
         where: { id, locationId }
@@ -466,10 +445,7 @@ export async function manualTriggerDeepScrape(
     locationId: string,
     limit?: number,
 ): Promise<ManualDeepScrapeTriggerResult> {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    const userId = await requireProspectingLocationAdmin(locationId);
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit as number))) : 50;
     const queuedAt = new Date();
@@ -666,10 +642,7 @@ export async function manualTriggerDeepScrape(
 }
 
 export async function getDeepScrapeRuns(locationId: string, limit = 15) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 15;
     return db.deepScrapeRun.findMany({
@@ -686,10 +659,7 @@ export async function getDeepScrapeRuns(locationId: string, limit = 15) {
 }
 
 export async function getDeepScrapeRunDetails(locationId: string, runId: string, stageLimit = 200) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const safeStageLimit = Number.isFinite(stageLimit)
         ? Math.max(1, Math.min(1000, Math.floor(stageLimit)))
@@ -713,10 +683,7 @@ export async function getDeepScrapeRunDetails(locationId: string, runId: string,
 }
 
 export async function cancelDeepScrapeRun(locationId: string, runId: string): Promise<CancelDeepScrapeRunResult> {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    const userId = await requireProspectingLocationAdmin(locationId);
 
     const safeRunId = String(runId || '').trim();
     if (!safeRunId) throw new Error('Deep scrape run id is required');
@@ -832,19 +799,13 @@ export async function cancelDeepScrapeRun(locationId: string, runId: string): Pr
 }
 
 export async function getDeepScrapeQueueDiagnostics(locationId: string): Promise<DeepScrapeQueueDiagnostics> {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     return getScrapingQueueDiagnostics();
 }
 
 export async function getDeepScrapeRunOverview(locationId: string, windowHours = 24): Promise<DeepScrapeRunOverview> {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const safeWindowHours = Number.isFinite(windowHours) ? Math.max(1, Math.min(24 * 30, Math.floor(windowHours))) : 24;
     const since = new Date(Date.now() - safeWindowHours * 60 * 60 * 1000);
@@ -948,10 +909,7 @@ export async function getDeepScrapeRunOverview(locationId: string, windowHours =
 }
 
 export async function getScrapingRuns(taskId: string, locationId: string, limit = 15) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     if (!taskId) return [];
     return await db.scrapingRun.findMany({
@@ -965,10 +923,7 @@ export async function getScrapingRuns(taskId: string, locationId: string, limit 
 }
 
 export async function getScrapingRunOverview(locationId: string, windowHours = 24): Promise<ScrapingRunOverview> {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    const isAdmin = await verifyUserIsLocationAdmin(userId || '', locationId);
-    if (!isAdmin) throw new Error("Unauthorized");
+    await requireProspectingLocationAdmin(locationId);
 
     const safeWindowHours = Number.isFinite(windowHours) ? Math.max(1, Math.min(24 * 30, Math.floor(windowHours))) : 24;
     const since = new Date(Date.now() - safeWindowHours * 60 * 60 * 1000);
