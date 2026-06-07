@@ -203,6 +203,8 @@ function getDefaultRequirementsIntelligence(model?: string | null) {
         mode: "manual_only",
         model: model || GEMINI_FLASH_STABLE_FALLBACK,
         allowedPropertyDomains: [],
+        activityDebounceMinutes: 60,
+        autoReprocessCampaignCandidates: true,
     };
 }
 

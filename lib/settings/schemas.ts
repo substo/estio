@@ -19,6 +19,15 @@ const defaultReplyLanguageSchema = z.string().trim().nullish().transform((value,
     return normalized || DEFAULT_REPLY_LANGUAGE;
 });
 
+const requirementsIntelligenceSchema = z.object({
+    mode: z.enum(["off", "manual_only", "new_activity", "daily_and_new_activity"]).default("manual_only"),
+    model: z.string().trim().min(1),
+    allowedPropertyDomains: z.array(z.string().trim().min(1)).default([]),
+    activityDebounceMinutes: z.number().int().min(0).max(24 * 60).default(60),
+    autoReprocessCampaignCandidates: z.boolean().default(true),
+    lastRun: z.unknown().nullable().optional(),
+}).passthrough();
+
 const navLinkSchema: z.ZodType<any> = z.lazy(() => z.object({
     id: z.string().optional(),
     label: z.string().trim().min(1),
@@ -90,6 +99,7 @@ const aiSchema = z.object({
         qualifierPrompt: nullableTrimmedString,
     }).passthrough(),
     automationConfig: AiAutomationConfigSchema.default({}),
+    requirementsIntelligence: requirementsIntelligenceSchema,
     contactProfileVerification: contactProfileVerificationConfigSchema,
     whatsappTranscriptOnDemandEnabled: z.boolean().default(false),
     whatsappTranscriptRetentionDays: z.union([z.literal(30), z.literal(90), z.literal(365)]),

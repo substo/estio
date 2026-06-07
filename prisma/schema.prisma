@@ -574,6 +574,9 @@ model Contact {
   requirementPropertyLocations String[] @default([])
   requirementOtherDetails      String?
   requirementSummary           String?  @db.Text
+  requirementsLastAssessedAt   DateTime?
+  requirementsAssessmentDueAt  DateTime?
+  requirementsLastError        String?  @db.Text
 
   // Property Matching
   matchingPropertiesToMatch      String    @default("Updated and New")
@@ -655,6 +658,8 @@ model Contact {
   @@index([locationId, profileVerificationStatus])
   @@index([locationId, profileVerificationDueAt])
   @@index([locationId, profileVerifiedAt])
+  @@index([locationId, requirementsAssessmentDueAt])
+  @@index([locationId, requirementsLastAssessedAt])
 }
 
 model WhatsAppIdentityMap {

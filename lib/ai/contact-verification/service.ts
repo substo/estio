@@ -351,6 +351,24 @@ async function reprocessCampaignBlocksForVerifiedContact(args: {
   }
 }
 
+async function queueRequirementsForVerifiedContact(args: {
+  locationId: string;
+  contactId: string;
+  conversationId?: string | null;
+}) {
+  try {
+    const { queueRequirementProposalForNewActivity } = await import("@/lib/ai/requirements-intelligence/service");
+    queueRequirementProposalForNewActivity({
+      locationId: args.locationId,
+      contactId: args.contactId,
+      conversationId: args.conversationId || null,
+      sourceType: "verification",
+    });
+  } catch (error) {
+    console.warn("[contact-verification] Failed to queue requirements intelligence:", error);
+  }
+}
+
 async function collectRecentMessages(args: {
   locationId: string;
   contactId: string;
@@ -490,6 +508,13 @@ export async function verifyContactProfile(args: {
         contactId: contact.id,
       });
     }
+    if (assessment.status === "verified_lead") {
+      await queueRequirementsForVerifiedContact({
+        locationId: args.locationId,
+        contactId: contact.id,
+        conversationId: args.conversationId || null,
+      });
+    }
     logContactVerificationTiming("scan_complete", {
       locationId: args.locationId,
       contactId: contact.id,
@@ -625,6 +650,10 @@ export async function approveContactVerificationProposal(args: {
         locationId: args.locationId,
         contactId: proposal.contactId,
       });
+      await queueRequirementsForVerifiedContact({
+        locationId: args.locationId,
+        contactId: proposal.contactId,
+      });
     }
     return { success: true as const, updated: false as const };
   }
@@ -680,6 +709,10 @@ export async function approveContactVerificationProposal(args: {
 
   if (assessment.status === "verified_lead") {
     await reprocessCampaignBlocksForVerifiedContact({
+      locationId: args.locationId,
+      contactId: proposal.contactId,
+    });
+    await queueRequirementsForVerifiedContact({
       locationId: args.locationId,
       contactId: proposal.contactId,
     });
@@ -748,6 +781,10 @@ export async function markContactVerified(args: {
     });
   });
   await reprocessCampaignBlocksForVerifiedContact({
+    locationId: args.locationId,
+    contactId: contact.id,
+  });
+  await queueRequirementsForVerifiedContact({
     locationId: args.locationId,
     contactId: contact.id,
   });

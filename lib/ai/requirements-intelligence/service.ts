@@ -21,6 +21,9 @@ export const REQUIREMENTS_INTELLIGENCE_MODES = [
 
 export type RequirementsIntelligenceMode = typeof REQUIREMENTS_INTELLIGENCE_MODES[number];
 
+const DEFAULT_REQUIREMENTS_ACTIVITY_DEBOUNCE_MINUTES = 60;
+const MAX_REQUIREMENTS_ACTIVITY_LOOKBACK_DAYS = 30;
+
 type RequirementPatch = {
   requirementStatus?: string | null;
   requirementDistrict?: string | null;
@@ -73,9 +76,17 @@ function normalizeMode(value: unknown): RequirementsIntelligenceMode {
     : "manual_only";
 }
 
+function normalizeActivityDebounceMinutes(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_REQUIREMENTS_ACTIVITY_DEBOUNCE_MINUTES;
+  return Math.max(0, Math.min(24 * 60, Math.trunc(numeric)));
+}
+
 export async function getRequirementsIntelligenceSettings(locationId: string): Promise<{
   mode: RequirementsIntelligenceMode;
   model: string;
+  activityDebounceMinutes: number;
+  autoReprocessCampaignCandidates: boolean;
 }> {
   const doc = await settingsService.getDocument<any>({
     scopeType: "LOCATION",
@@ -86,6 +97,8 @@ export async function getRequirementsIntelligenceSettings(locationId: string): P
   return {
     mode: normalizeMode(config.mode),
     model: String(config.model || doc?.payload?.googleAiModelExtraction || GEMINI_FLASH_STABLE_FALLBACK).trim() || GEMINI_FLASH_STABLE_FALLBACK,
+    activityDebounceMinutes: normalizeActivityDebounceMinutes(config.activityDebounceMinutes),
+    autoReprocessCampaignCandidates: config.autoReprocessCampaignCandidates !== false,
   };
 }
 
@@ -144,6 +157,56 @@ function getRequirementSnapshot(contact: any): RequirementPatch {
     requirementOtherDetails: contact.requirementOtherDetails || null,
     requirementSummary: contact.requirementSummary || null,
   };
+}
+
+function latestDate(values: Array<Date | string | null | undefined>): Date | null {
+  const dates = values
+    .map((value) => value ? new Date(value) : null)
+    .filter((value): value is Date => Boolean(value && !Number.isNaN(value.getTime())));
+  if (dates.length === 0) return null;
+  return dates.reduce((latest, value) => value > latest ? value : latest, dates[0]);
+}
+
+export function shouldAssessRequirementsForActivity(args: {
+  latestActivityAt?: Date | string | null;
+  lastAssessedAt?: Date | string | null;
+  dueAt?: Date | string | null;
+  now: Date;
+  debounceMinutes: number;
+}) {
+  const dueAt = args.dueAt ? new Date(args.dueAt) : null;
+  if (dueAt && !Number.isNaN(dueAt.getTime()) && dueAt <= args.now) return true;
+
+  const latestActivityAt = args.latestActivityAt ? new Date(args.latestActivityAt) : null;
+  if (!latestActivityAt || Number.isNaN(latestActivityAt.getTime())) return false;
+
+  const debounceMs = Math.max(0, args.debounceMinutes) * 60 * 1000;
+  if (latestActivityAt.getTime() + debounceMs > args.now.getTime()) return false;
+
+  const lastAssessedAt = args.lastAssessedAt ? new Date(args.lastAssessedAt) : null;
+  if (!lastAssessedAt || Number.isNaN(lastAssessedAt.getTime())) return true;
+  return latestActivityAt > lastAssessedAt;
+}
+
+async function recordRequirementsAssessmentSuccess(contactId: string, assessedAt = new Date()) {
+  await db.contact.update({
+    where: { id: contactId },
+    data: {
+      requirementsLastAssessedAt: assessedAt,
+      requirementsAssessmentDueAt: null,
+      requirementsLastError: null,
+    } as any,
+  });
+}
+
+async function recordRequirementsAssessmentFailure(contactId: string, error: string, retryAt?: Date | null) {
+  await db.contact.update({
+    where: { id: contactId },
+    data: {
+      requirementsLastError: error.slice(0, 4000),
+      ...(retryAt ? { requirementsAssessmentDueAt: retryAt } : {}),
+    } as any,
+  });
 }
 
 function normalizeAssessmentList(value: unknown, maxItems = 8): string[] {
@@ -352,11 +415,15 @@ export async function generateRequirementProposal(args: {
   sourceType?: string;
   sourceIds?: string[];
   actorUserId?: string | null;
+  allowUnverified?: boolean;
 }) {
   const contact = await db.contact.findFirst({
     where: { id: args.contactId, locationId: args.locationId },
   });
   if (!contact) return { success: false as const, error: "Contact not found." };
+  if (!args.allowUnverified && contact.profileVerificationStatus !== "verified_lead") {
+    return { success: true as const, created: false as const, skippedUnverified: true as const, reason: "Contact is not a verified lead." };
+  }
 
   const pendingProposal = await db.contactRequirementProposal.findFirst({
     where: {
@@ -383,12 +450,16 @@ export async function generateRequirementProposal(args: {
     source: args.sourceType || "manual",
   });
   if (!classifyRequirementSignal(evidenceText) && propertyEvidence.items.length === 0) {
+    await recordRequirementsAssessmentSuccess(contact.id);
     return { success: true as const, created: false as const, reason: "No requirement changes detected." };
   }
 
   const settings = await getRequirementsIntelligenceSettings(args.locationId);
   const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
-  if (!apiKey) return { success: false as const, error: "No AI API key configured." };
+  if (!apiKey) {
+    await recordRequirementsAssessmentFailure(contact.id, "No AI API key configured.");
+    return { success: false as const, error: "No AI API key configured." };
+  }
 
   const snapshot = getRequirementSnapshot(contact);
   const prompt = `You maintain client property requirements for a real-estate CRM.
@@ -476,6 +547,7 @@ ${propertyEvidence.text || "None"}`;
   const hasMaterialChanges = Boolean(parsed.hasChanges && hasPatchChanges(snapshot, proposedPatch));
 
   if (!hasMaterialChanges) {
+    await recordRequirementsAssessmentSuccess(contact.id);
     await recordRequirementsIntelligenceUsage({
       locationId: args.locationId,
       contactId: contact.id,
@@ -543,6 +615,7 @@ ${propertyEvidence.text || "None"}`;
       estimatedCostUsd,
     },
   });
+  await recordRequirementsAssessmentSuccess(contact.id);
 
   await recordRequirementsIntelligenceUsage({
     locationId: args.locationId,
@@ -679,6 +752,20 @@ export async function approveRequirementProposal(args: {
     });
   });
 
+  const settings = await getRequirementsIntelligenceSettings(args.locationId);
+  if (settings.autoReprocessCampaignCandidates) {
+    try {
+      const { reprocessPendingCampaignCandidatesForContactRequirements } = await import("@/lib/property-match-campaigns/service");
+      await reprocessPendingCampaignCandidatesForContactRequirements({
+        locationId: args.locationId,
+        contactId: proposal.contactId,
+        limit: 100,
+      });
+    } catch (error) {
+      console.warn("[requirements-intelligence] Failed to reprocess campaign candidates after requirement approval:", error);
+    }
+  }
+
   return { success: true as const, updated: true as const, contactId: proposal.contactId };
 }
 
@@ -723,6 +810,8 @@ type RequirementsIntelligenceRunStatus = {
     contactsWithoutNewActivity: number;
     contactsChecked: number;
     skippedPending: number;
+    skippedUnverified: number;
+    skippedDebounce: number;
     proposalsCreated: number;
     noChanges: number;
     failures: number;
@@ -762,9 +851,10 @@ export async function runRequirementsIntelligenceCron(args?: {
   batchSize?: number;
   now?: Date;
   source?: "cron" | "manual";
+  force?: boolean;
 }) {
   const now = args?.now || new Date();
-  const since = new Date(now.getTime() - 36 * 60 * 60 * 1000);
+  const since = new Date(now.getTime() - MAX_REQUIREMENTS_ACTIVITY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const batchSize = Math.max(1, Math.min(100, Number(args?.batchSize || 40)));
   const source = args?.source || "cron";
   const locations = await db.location.findMany({
@@ -780,6 +870,8 @@ export async function runRequirementsIntelligenceCron(args?: {
     contactsWithoutNewActivity: 0,
     contactsChecked: 0,
     skippedPending: 0,
+    skippedUnverified: 0,
+    skippedDebounce: 0,
     proposalsCreated: 0,
     noChanges: 0,
     failures: 0,
@@ -795,12 +887,14 @@ export async function runRequirementsIntelligenceCron(args?: {
       contactsWithoutNewActivity: 0,
       contactsChecked: 0,
       skippedPending: 0,
+      skippedUnverified: 0,
+      skippedDebounce: 0,
       proposalsCreated: 0,
       noChanges: 0,
       failures: 0,
     };
 
-    if (settings.mode !== "daily_and_new_activity") {
+    if (!args?.force && settings.mode !== "daily_and_new_activity") {
       await persistRequirementsIntelligenceRunStatus({
         locationId: location.id,
         status: {
@@ -823,7 +917,9 @@ export async function runRequirementsIntelligenceCron(args?: {
     const recentActivityWhere = {
       locationId: location.id,
       contactType: { in: ["Lead", "Contact"] },
+      profileVerificationStatus: "verified_lead",
       OR: [
+        { requirementsAssessmentDueAt: { lte: now } },
         { conversations: { some: { lastMessageAt: { gte: since } } } },
         { history: { some: { createdAt: { gte: since } } } },
       ],
@@ -834,6 +930,7 @@ export async function runRequirementsIntelligenceCron(args?: {
         where: {
           locationId: location.id,
           contactType: { in: ["Lead", "Contact"] },
+          profileVerificationStatus: "verified_lead",
         },
       }),
       db.contact.count({
@@ -852,13 +949,20 @@ export async function runRequirementsIntelligenceCron(args?: {
       where: recentActivityWhere,
       select: {
         id: true,
+        requirementsLastAssessedAt: true,
+        requirementsAssessmentDueAt: true,
         conversations: {
           orderBy: { lastMessageAt: "desc" },
           take: 1,
-          select: { id: true },
+          select: { id: true, lastMessageAt: true },
+        },
+        history: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { createdAt: true },
         },
         requirementProposals: {
-          where: { status: "pending" },
+          where: { proposalType: "requirements", status: "pending" },
           take: 1,
           select: { id: true },
         },
@@ -874,6 +978,21 @@ export async function runRequirementsIntelligenceCron(args?: {
         locationStats.skippedPending += 1;
         continue;
       }
+      const latestActivityAt = latestDate([
+        contact.conversations[0]?.lastMessageAt,
+        contact.history[0]?.createdAt,
+      ]);
+      if (!args?.force && !shouldAssessRequirementsForActivity({
+        latestActivityAt,
+        lastAssessedAt: contact.requirementsLastAssessedAt,
+        dueAt: contact.requirementsAssessmentDueAt,
+        now,
+        debounceMinutes: settings.activityDebounceMinutes,
+      })) {
+        stats.skippedDebounce += 1;
+        locationStats.skippedDebounce += 1;
+        continue;
+      }
       try {
         const result = await generateRequirementProposal({
           locationId: location.id,
@@ -881,15 +1000,22 @@ export async function runRequirementsIntelligenceCron(args?: {
           conversationId: contact.conversations[0]?.id || null,
           sourceType: "cron",
         });
-        if (result.success && result.created) stats.proposalsCreated += 1;
+        if (result.success && "skippedUnverified" in result && result.skippedUnverified) stats.skippedUnverified += 1;
+        else if (result.success && result.created) stats.proposalsCreated += 1;
         else if (result.success) stats.noChanges += 1;
         else stats.failures += 1;
-        if (result.success && result.created) locationStats.proposalsCreated += 1;
+        if (result.success && "skippedUnverified" in result && result.skippedUnverified) locationStats.skippedUnverified += 1;
+        else if (result.success && result.created) locationStats.proposalsCreated += 1;
         else if (result.success) locationStats.noChanges += 1;
         else locationStats.failures += 1;
       } catch (error) {
         stats.failures += 1;
         locationStats.failures += 1;
+        await recordRequirementsAssessmentFailure(
+          contact.id,
+          error instanceof Error ? error.message : "Requirements intelligence failed.",
+          new Date(now.getTime() + 60 * 60 * 1000),
+        ).catch(() => null);
         console.error("[requirements-intelligence:cron] Contact failed:", contact.id, error);
       }
     }
@@ -917,13 +1043,29 @@ export function queueRequirementProposalForNewActivity(args: {
   locationId: string;
   contactId: string;
   conversationId?: string | null;
-  sourceType: "message" | "activity_note" | "transcript";
+  sourceType: "message" | "activity_note" | "transcript" | "verification";
   sourceIds?: string[];
   actorUserId?: string | null;
 }) {
   void (async () => {
     const settings = await getRequirementsIntelligenceSettings(args.locationId);
     if (settings.mode !== "new_activity" && settings.mode !== "daily_and_new_activity") return;
+    const contact = await db.contact.findFirst({
+      where: { id: args.contactId, locationId: args.locationId },
+      select: { id: true, profileVerificationStatus: true },
+    });
+    if (!contact || contact.profileVerificationStatus !== "verified_lead") return;
+    const debounceMs = Math.max(0, settings.activityDebounceMinutes) * 60 * 1000;
+    if (debounceMs > 0) {
+      await db.contact.update({
+        where: { id: contact.id },
+        data: {
+          requirementsAssessmentDueAt: new Date(Date.now() + debounceMs),
+          requirementsLastError: null,
+        } as any,
+      });
+      return;
+    }
     await generateRequirementProposal({
       locationId: args.locationId,
       contactId: args.contactId,

@@ -710,6 +710,29 @@ function profileVerificationBlockWhere() {
   };
 }
 
+function alreadySharedCandidateData(candidate: AnyRecord, evidence: AnyRecord) {
+  return {
+    ...candidate,
+    aiVerdict: "no",
+    aiReviewStatus: "done",
+    score: Math.min(Number(candidate.score || 0), -2),
+    confidence: 0.95,
+    evidence: {
+      ...((candidate.evidence as AnyRecord) || {}),
+      priorShare: evidence,
+      structured: {
+        ...((candidate.evidence as AnyRecord)?.structured || {}),
+        needsAi: false,
+      },
+    },
+    reasoning: [
+      "This property appears to have already been shared with the contact.",
+      evidence.matchedBy?.length ? `Matched by ${evidence.matchedBy.join(" and ")}.` : null,
+    ].filter(Boolean).join(" "),
+    matchSummary: "Already shared with this contact.",
+  };
+}
+
 async function reopenVerifiedProfileBlockedCandidates(args: {
   locationId: string;
   campaign: AnyRecord;
@@ -789,26 +812,7 @@ async function reopenVerifiedProfileBlockedCandidates(args: {
   let reopened = 0;
   for (const item of rebuilt) {
     const evidence = priorShareEvidence.get(item.candidate.conversationId);
-    const candidate = evidence ? {
-      ...item.candidate,
-      aiVerdict: "no",
-      aiReviewStatus: "done",
-      score: Math.min(Number(item.candidate.score || 0), -2),
-      confidence: 0.95,
-      evidence: {
-        ...((item.candidate.evidence as AnyRecord) || {}),
-        priorShare: evidence,
-        structured: {
-          ...((item.candidate.evidence as AnyRecord)?.structured || {}),
-          needsAi: false,
-        },
-      },
-      reasoning: [
-        "This property appears to have already been shared with the contact.",
-        evidence.matchedBy?.length ? `Matched by ${evidence.matchedBy.join(" and ")}.` : null,
-      ].filter(Boolean).join(" "),
-      matchSummary: "Already shared with this contact.",
-    } : item.candidate;
+    const candidate = evidence ? alreadySharedCandidateData(item.candidate, evidence) : item.candidate;
     await db.propertyMatchCandidate.update({
       where: { id: item.row.id },
       data: candidate,
@@ -850,6 +854,123 @@ export async function reprocessVerifiedContactProfileBlocks(args: {
       limit,
     });
     await refreshCampaignCounts(row.campaignId);
+  }
+
+  return { success: true as const, reprocessed };
+}
+
+function alreadySharedCandidateWhere() {
+  return {
+    OR: [
+      { matchSummary: { contains: "Already shared", mode: "insensitive" as const } },
+      { reasoning: { contains: "already been shared", mode: "insensitive" as const } },
+    ],
+  };
+}
+
+export async function reprocessPendingCampaignCandidatesForContactRequirements(args: {
+  locationId: string;
+  contactId: string;
+  limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(200, Number(args.limit || 100)));
+  const rows = await db.propertyMatchCandidate.findMany({
+    where: {
+      locationId: args.locationId,
+      contactId: args.contactId,
+      reviewerStatus: "pending",
+      contact: { profileVerificationStatus: "verified_lead" },
+      NOT: alreadySharedCandidateWhere(),
+    },
+    include: {
+      campaign: true,
+      contact: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          contactType: true,
+          leadGoal: true,
+          profileVerificationStatus: true,
+          profileVerifiedAt: true,
+          profileVerificationSource: true,
+          profileVerificationConfidence: true,
+          profileVerificationSummary: true,
+          requirementStatus: true,
+          requirementDistrict: true,
+          requirementBedrooms: true,
+          requirementMinPrice: true,
+          requirementMaxPrice: true,
+          requirementCondition: true,
+          requirementPropertyTypes: true,
+          requirementPropertyLocations: true,
+          requirementOtherDetails: true,
+          requirementSummary: true,
+          conversations: {
+            where: { locationId: args.locationId, deletedAt: null },
+            orderBy: { lastMessageAt: "desc" },
+            take: 1,
+            select: {
+              id: true,
+              lastMessageType: true,
+              messages: {
+                orderBy: { createdAt: "desc" },
+                take: 8,
+                select: { body: true },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { updatedAt: "asc" },
+    take: limit,
+  });
+
+  const rebuilt = rows.flatMap((row: AnyRecord) => {
+    const candidate = structuredCandidateData({
+      locationId: args.locationId,
+      campaignId: row.campaignId,
+      contact: row.contact,
+      propertyInput: propertyMatchInput(row.campaign.propertySnapshot || {}),
+    });
+    return candidate ? [{ row, candidate }] : [];
+  });
+  const priorShareEvidenceByCandidate = new Map<string, ReturnType<typeof findPriorPropertyShareEvidence>>();
+  const rebuiltByCampaign = new Map<string, typeof rebuilt>();
+  for (const item of rebuilt) {
+    const items = rebuiltByCampaign.get(item.row.campaignId) || [];
+    items.push(item);
+    rebuiltByCampaign.set(item.row.campaignId, items);
+  }
+  for (const items of rebuiltByCampaign.values()) {
+    const campaign = items[0]?.row.campaign;
+    if (!campaign) continue;
+    const priorShareEvidence = await findPriorPropertyShareEvidenceByConversation({
+      snapshot: campaign.propertySnapshot || {},
+      conversationIds: items.map((item) => item.candidate.conversationId),
+    });
+    for (const item of items) {
+      const evidence = priorShareEvidence.get(item.candidate.conversationId);
+      if (evidence) priorShareEvidenceByCandidate.set(item.row.id, evidence);
+    }
+  }
+
+  let reprocessed = 0;
+  const campaignIds = new Set<string>();
+  for (const item of rebuilt) {
+    const evidence = priorShareEvidenceByCandidate.get(item.row.id);
+    const candidate = evidence ? alreadySharedCandidateData(item.candidate, evidence) : item.candidate;
+    await db.propertyMatchCandidate.update({
+      where: { id: item.row.id },
+      data: candidate,
+    });
+    campaignIds.add(item.row.campaignId);
+    reprocessed += 1;
+  }
+  for (const campaignId of campaignIds) {
+    await refreshCampaignCounts(campaignId);
   }
 
   return { success: true as const, reprocessed };

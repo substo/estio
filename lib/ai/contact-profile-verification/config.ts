@@ -31,7 +31,7 @@ export const contactProfileVerificationLastRunSchema = z.object({
 
 export const contactProfileVerificationConfigSchema = z.object({
   mode: z.enum(CONTACT_PROFILE_VERIFICATION_MODES).default("daily_due_and_new_contacts"),
-  newContactDelayHours: z.number().int().min(0).max(24 * 30).default(24),
+  newContactDelayHours: z.number().int().min(0).max(24 * 30).default(0),
   recertificationDays: z.number().int().min(1).max(3650).default(90),
   recertifyOnNewActivity: z.boolean().default(true),
   batchSize: z.number().int().min(1).max(500).default(50),
@@ -60,7 +60,7 @@ export function normalizeContactProfileVerificationBatchSize(value: unknown, fal
   return clampInt(value, fallback, 1, 500);
 }
 
-export function normalizeContactProfileVerificationDelayHours(value: unknown, fallback = 24): number {
+export function normalizeContactProfileVerificationDelayHours(value: unknown, fallback = 0): number {
   return clampInt(value, fallback, 0, 24 * 30);
 }
 

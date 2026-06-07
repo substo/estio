@@ -31,6 +31,8 @@ type RequirementsLastRunStats = {
     contactsChecked?: number;
     contactsWithoutNewActivity?: number;
     skippedPending?: number;
+    skippedUnverified?: number;
+    skippedDebounce?: number;
     proposalsCreated?: number;
     failures?: number;
 };
@@ -51,6 +53,8 @@ type RequirementsIntelligenceSettings = {
     mode?: string;
     model?: string;
     allowedPropertyDomains?: string[];
+    activityDebounceMinutes?: number;
+    autoReprocessCampaignCandidates?: boolean;
     lastRun?: RequirementsLastRun | null;
 };
 
@@ -399,65 +403,87 @@ function ModelSelectionSection({
     );
 }
 
-function RequirementsIntelligenceSection({
+function LeadIntelligenceSection({
     initialData,
     modelOptions,
     fallbackModel,
     pendingRequirementProposals,
+    pendingVerificationProposals,
     requirementsLastRun,
+    contactProfileVerificationLastRun,
     runningRequirementsScan,
-    onRunRequirementsScan,
+    runningVerification,
+    runningRecertification,
+    onRunLeadIntelligence,
+    onRunVerification,
+    onTriggerRecertification,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
     fallbackModel: string;
     pendingRequirementProposals: number;
+    pendingVerificationProposals: number;
     requirementsLastRun: RequirementsLastRun | null;
+    contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
     runningRequirementsScan: boolean;
-    onRunRequirementsScan: () => void;
+    runningVerification: boolean;
+    runningRecertification: boolean;
+    onRunLeadIntelligence: () => void;
+    onRunVerification: () => void;
+    onTriggerRecertification: () => void;
 }) {
+    const requirements = initialData?.requirementsIntelligence || {};
+    const verification = initialData?.contactProfileVerification || {};
     const formatDateLabel = (value: string | null | undefined) => {
         if (!value) return "Never";
         const date = new Date(value);
         return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString();
     };
+    const leadMode = requirements.mode === "off" && verification.mode === "off"
+        ? "off"
+        : requirements.mode === "manual_only" && verification.mode === "manual_only"
+            ? "manual_only"
+            : "automatic";
+    const reprocessEnabled = requirements.autoReprocessCampaignCandidates !== false
+        && verification.autoReprocessCampaignBlocks !== false;
+    const runningLeadIntelligence = runningRequirementsScan || runningVerification;
 
     return (
         <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
             <div className="space-y-0.5">
                 <Label className="text-xs text-slate-500 uppercase tracking-wider">
-                    AI Requirement Intelligence
+                    Lead Intelligence
                 </Label>
                 <p className="text-[10px] text-muted-foreground">
-                    Maintains evolving client search criteria as human-approved contact updates.
+                    Verifies buyer/renter leads before requirement analysis, then keeps approved requirements current from new activity.
                 </p>
             </div>
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                    <Label htmlFor="requirementsIntelligenceMode" className="text-xs text-slate-500 uppercase tracking-wider">
+                    <Label htmlFor="leadIntelligenceMode" className="text-xs text-slate-500 uppercase tracking-wider">
                         Mode
                     </Label>
                     <select
-                        id="requirementsIntelligenceMode"
-                        name="requirementsIntelligenceMode"
+                        id="leadIntelligenceMode"
+                        name="leadIntelligenceMode"
                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                        defaultValue={String(initialData?.requirementsIntelligence?.mode || "manual_only")}
+                        defaultValue={leadMode}
                     >
                         <option value="off">Off</option>
                         <option value="manual_only">Manual only</option>
-                        <option value="new_activity">Suggest from new activity</option>
-                        <option value="daily_and_new_activity">Daily scan + new activity</option>
+                        <option value="automatic">Automatic</option>
                     </select>
                 </div>
                 <div className="grid gap-2">
                     <Label htmlFor="requirementsIntelligenceModel" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Model
+                        Requirements model
                     </Label>
                     <select
                         id="requirementsIntelligenceModel"
                         name="requirementsIntelligenceModel"
                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                        defaultValue={String(initialData?.requirementsIntelligence?.model || fallbackModel)}
+                        defaultValue={String(requirements.model || fallbackModel)}
                     >
                         {modelOptions.map((model) => (
                             <option key={model.value} value={model.value}>
@@ -467,262 +493,109 @@ function RequirementsIntelligenceSection({
                     </select>
                 </div>
             </div>
-            <div className="grid gap-2">
-                <Label htmlFor="requirementsAllowedPropertyDomains" className="text-xs text-slate-500 uppercase tracking-wider">
-                    Allowed property page domains
-                </Label>
-                <textarea
-                    id="requirementsAllowedPropertyDomains"
-                    name="requirementsAllowedPropertyDomains"
-                    className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    placeholder={"downtowncyprus.com\nexample-agency.com"}
-                    defaultValue={(initialData?.requirementsIntelligence?.allowedPropertyDomains || []).join("\n")}
-                />
-                <p className="text-[10px] text-muted-foreground">
-                    One domain per line. Requirement Intelligence may crawl one public listing page from these domains to extract property evidence. Internal/private URLs are still blocked.
-                </p>
-            </div>
-            <div className="text-[10px] text-muted-foreground">
-                Pending proposals: {pendingRequirementProposals}
-            </div>
-            <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50/70 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                        <div className="text-xs font-medium text-slate-700">Requirements Scan Status</div>
-                        <div className="text-[10px] text-muted-foreground">
-                            Last run: {formatDateLabel(requirementsLastRun?.finishedAt)}
-                        </div>
-                    </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        disabled={runningRequirementsScan}
-                        onClick={onRunRequirementsScan}
-                    >
-                        {runningRequirementsScan ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                        Run Requirements Scan Now
-                    </Button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p>
-                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.contactsChecked || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">No New Activity</p>
-                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.contactsWithoutNewActivity || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Pending Skip</p>
-                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.skippedPending || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Created</p>
-                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.proposalsCreated || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Failures</p>
-                        <p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.failures || 0)}</p>
-                    </div>
-                </div>
-                {requirementsLastRun?.error && (
-                    <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] text-red-700">
-                        {String(requirementsLastRun.error)}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
 
-function ContactProfileVerificationSection({
-    initialData,
-    pendingVerificationProposals,
-    lastRun,
-    runningVerification,
-    runningRecertification,
-    onRunVerification,
-    onTriggerRecertification,
-}: {
-    initialData: AiSettingsInitialData;
-    pendingVerificationProposals: number;
-    lastRun: ContactProfileVerificationLastRun | null;
-    runningVerification: boolean;
-    runningRecertification: boolean;
-    onRunVerification: () => void;
-    onTriggerRecertification: () => void;
-}) {
-    const config = initialData?.contactProfileVerification || {};
-    const formatDateLabel = (value: string | null | undefined) => {
-        if (!value) return "Never";
-        const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString();
-    };
+            <details className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                <summary className="cursor-pointer text-xs font-medium text-slate-700">Advanced controls</summary>
+                <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="grid gap-2">
+                        <Label htmlFor="requirementsActivityDebounceMinutes" className="text-xs text-slate-500 uppercase tracking-wider">
+                            Requirement activity debounce minutes
+                        </Label>
+                        <Input
+                            id="requirementsActivityDebounceMinutes"
+                            name="requirementsActivityDebounceMinutes"
+                            type="number"
+                            min={0}
+                            max={1440}
+                            defaultValue={String(requirements.activityDebounceMinutes ?? 60)}
+                        />
+                    </div>
+                    <div className="grid gap-2">
+                        <Label htmlFor="leadIntelligenceBatchSize" className="text-xs text-slate-500 uppercase tracking-wider">
+                            Batch size
+                        </Label>
+                        <Input
+                            id="leadIntelligenceBatchSize"
+                            name="leadIntelligenceBatchSize"
+                            type="number"
+                            min={1}
+                            max={500}
+                            defaultValue={String(verification.batchSize ?? 50)}
+                        />
+                    </div>
+                    <input type="hidden" name="contactProfileVerificationNewContactDelayHours" value="0" />
+                    <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 md:col-span-2">
+                        <input
+                            id="leadIntelligenceAutoReprocessCampaignCandidates"
+                            name="leadIntelligenceAutoReprocessCampaignCandidates"
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                            defaultChecked={reprocessEnabled}
+                        />
+                        <span className="space-y-0.5">
+                            <span className="block text-xs font-medium text-slate-700">Reprocess active campaign candidates</span>
+                            <span className="block text-[10px] text-muted-foreground">Applies after profile verification and approved requirement changes. Sent, skipped, rejected, and approved candidates stay untouched.</span>
+                        </span>
+                    </label>
+                    <div className="grid gap-2 md:col-span-2">
+                        <Label htmlFor="requirementsAllowedPropertyDomains" className="text-xs text-slate-500 uppercase tracking-wider">
+                            Allowed property page domains
+                        </Label>
+                        <textarea
+                            id="requirementsAllowedPropertyDomains"
+                            name="requirementsAllowedPropertyDomains"
+                            className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            placeholder={"downtowncyprus.com\nexample-agency.com"}
+                            defaultValue={(requirements.allowedPropertyDomains || []).join("\n")}
+                        />
+                    </div>
+                </div>
+            </details>
 
-    return (
-        <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
-            <div className="space-y-0.5">
-                <Label className="text-xs text-slate-500 uppercase tracking-wider">
-                    Contact Profile Verification
-                </Label>
-                <p className="text-[10px] text-muted-foreground">
-                    Controls global buyer/renter lead verification before campaign matching can draft or send.
-                </p>
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="grid gap-2">
-                    <Label htmlFor="contactProfileVerificationMode" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Mode
-                    </Label>
-                    <select
-                        id="contactProfileVerificationMode"
-                        name="contactProfileVerificationMode"
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                        defaultValue={String(config.mode || "daily_due_and_new_contacts")}
-                    >
-                        <option value="off">Off</option>
-                        <option value="manual_only">Manual only</option>
-                        <option value="new_contacts">New contacts after delay</option>
-                        <option value="daily_due_and_new_contacts">Daily due + new contacts</option>
-                    </select>
-                </div>
-                <div className="grid gap-2">
-                    <Label htmlFor="contactProfileVerificationBatchSize" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Batch size
-                    </Label>
-                    <Input
-                        id="contactProfileVerificationBatchSize"
-                        name="contactProfileVerificationBatchSize"
-                        type="number"
-                        min={1}
-                        max={500}
-                        defaultValue={String(config.batchSize ?? 50)}
-                    />
-                </div>
-                <div className="grid gap-2">
-                    <Label htmlFor="contactProfileVerificationNewContactDelayHours" className="text-xs text-slate-500 uppercase tracking-wider">
-                        New-contact delay hours
-                    </Label>
-                    <Input
-                        id="contactProfileVerificationNewContactDelayHours"
-                        name="contactProfileVerificationNewContactDelayHours"
-                        type="number"
-                        min={0}
-                        max={720}
-                        defaultValue={String(config.newContactDelayHours ?? 24)}
-                    />
-                </div>
-                <div className="grid gap-2">
-                    <Label htmlFor="contactProfileVerificationRecertificationDays" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Recertification days
-                    </Label>
-                    <Input
-                        id="contactProfileVerificationRecertificationDays"
-                        name="contactProfileVerificationRecertificationDays"
-                        type="number"
-                        min={1}
-                        max={3650}
-                        defaultValue={String(config.recertificationDays ?? 90)}
-                    />
-                </div>
-            </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2">
-                    <input
-                        id="contactProfileVerificationRecertifyOnNewActivity"
-                        name="contactProfileVerificationRecertifyOnNewActivity"
-                        type="checkbox"
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                        defaultChecked={config.recertifyOnNewActivity !== false}
-                    />
-                    <span className="space-y-0.5">
-                        <span className="block text-xs font-medium text-slate-700">Recertify on new activity</span>
-                        <span className="block text-[10px] text-muted-foreground">Inbound messages or history after verification make the contact due again.</span>
-                    </span>
-                </label>
-                <label className="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2">
-                    <input
-                        id="contactProfileVerificationAutoReprocessCampaignBlocks"
-                        name="contactProfileVerificationAutoReprocessCampaignBlocks"
-                        type="checkbox"
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                        defaultChecked={config.autoReprocessCampaignBlocks !== false}
-                    />
-                    <span className="space-y-0.5">
-                        <span className="block text-xs font-medium text-slate-700">Reprocess campaign blockers</span>
-                        <span className="block text-[10px] text-muted-foreground">Verified leads automatically leave the campaign profile-check queue.</span>
-                    </span>
-                </label>
-            </div>
-            <div className="text-[10px] text-muted-foreground">
-                Pending verification proposals: {pendingVerificationProposals}
-            </div>
-            <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50/70 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                        <div className="text-xs font-medium text-slate-700">Verification Status</div>
-                        <div className="text-[10px] text-muted-foreground">
-                            Last run: {formatDateLabel(lastRun?.finishedAt)}
+                <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="text-xs font-medium text-slate-700">Requirements</div>
+                            <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(requirementsLastRun?.finishedAt)}</div>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningLeadIntelligence} onClick={onRunLeadIntelligence}>
+                            {runningLeadIntelligence ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                            Run Lead Intelligence Now
+                        </Button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.contactsChecked || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Created</p><p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.proposalsCreated || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Unverified</p><p className="text-sm font-semibold">{Number(requirementsLastRun?.stats?.skippedUnverified || 0)}</p></div>
+                    </div>
+                    <div className="mt-2 text-[10px] text-muted-foreground">Pending requirement proposals: {pendingRequirementProposals}</div>
+                </div>
+
+                <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="text-xs font-medium text-slate-700">Profile Verification</div>
+                            <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningVerification} onClick={onRunVerification}>
+                                {runningVerification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                                Recheck Profiles
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningRecertification} onClick={onTriggerRecertification}>
+                                {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                                Queue All
+                            </Button>
                         </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-xs"
-                            disabled={runningVerification}
-                            onClick={onRunVerification}
-                        >
-                            {runningVerification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                            Run Profile Verification Now
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-xs"
-                            disabled={runningRecertification}
-                            onClick={onTriggerRecertification}
-                        >
-                            {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                            Trigger Global Recertification
-                        </Button>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.checked || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Verified</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Proposals</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.proposals || 0)}</p></div>
                     </div>
+                    <div className="mt-2 text-[10px] text-muted-foreground">Pending verification proposals: {pendingVerificationProposals}</div>
                 </div>
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p>
-                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.checked || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Verified</p>
-                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.verified || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Proposals</p>
-                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.proposals || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Skipped</p>
-                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.skipped || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Failures</p>
-                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.failures || 0)}</p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">Reopened</p>
-                        <p className="text-sm font-semibold">{Number(lastRun?.stats?.reprocessedCampaignBlocks || 0)}</p>
-                    </div>
-                </div>
-                {lastRun?.error && (
-                    <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] text-red-700">
-                        {String(lastRun.error)}
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -925,6 +798,7 @@ function ModelConfigurationSection({
     onDesignModelChange,
     onTranscriptionModelChange,
     onTranslationModelChange,
+    onRunLeadIntelligence,
     onRunRequirementsScan,
     onRunContactProfileVerification,
     onTriggerGlobalRecertification,
@@ -948,6 +822,7 @@ function ModelConfigurationSection({
     onDesignModelChange: (value: string) => void;
     onTranscriptionModelChange: (value: string) => void;
     onTranslationModelChange: (value: string) => void;
+    onRunLeadIntelligence: () => void;
     onRunRequirementsScan: () => void;
     onRunContactProfileVerification: () => void;
     onTriggerGlobalRecertification: () => void;
@@ -971,22 +846,18 @@ function ModelConfigurationSection({
                     onTranslationModelChange={onTranslationModelChange}
                 />
 
-                <RequirementsIntelligenceSection
+                <LeadIntelligenceSection
                     initialData={initialData}
                     modelOptions={modelOptions}
                     fallbackModel={googleAiModelExtraction}
                     pendingRequirementProposals={pendingRequirementProposals}
-                    requirementsLastRun={requirementsLastRun}
-                    runningRequirementsScan={runningRequirementsScan}
-                    onRunRequirementsScan={onRunRequirementsScan}
-                />
-
-                <ContactProfileVerificationSection
-                    initialData={initialData}
                     pendingVerificationProposals={pendingVerificationProposals}
-                    lastRun={contactProfileVerificationLastRun}
+                    requirementsLastRun={requirementsLastRun}
+                    contactProfileVerificationLastRun={contactProfileVerificationLastRun}
+                    runningRequirementsScan={runningRequirementsScan}
                     runningVerification={runningContactProfileVerification}
                     runningRecertification={runningGlobalRecertification}
+                    onRunLeadIntelligence={onRunLeadIntelligence}
                     onRunVerification={onRunContactProfileVerification}
                     onTriggerRecertification={onTriggerGlobalRecertification}
                 />
@@ -1437,6 +1308,11 @@ export function AiSettingsForm({
         }
     };
 
+    const runLeadIntelligence = async () => {
+        await runContactProfileVerification();
+        await runRequirementsScan();
+    };
+
     return (
         <div className="space-y-8">
             <AiConfigurationHeader />
@@ -1484,6 +1360,7 @@ export function AiSettingsForm({
                         hasUserSelectedTranslationModelRef.current = true;
                         setGoogleAiModelTranslation(value);
                     }}
+                    onRunLeadIntelligence={runLeadIntelligence}
                     onRunRequirementsScan={runRequirementsScan}
                     onRunContactProfileVerification={runContactProfileVerification}
                     onTriggerGlobalRecertification={triggerGlobalRecertification}

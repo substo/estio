@@ -1,6 +1,5 @@
 import db from "@/lib/db";
 import { verifyContactProfile } from "@/lib/ai/contact-verification/service";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
@@ -61,38 +60,17 @@ function addHours(date: Date, hours: number) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
 
-function addDays(date: Date, days: number) {
-  return addHours(date, days * 24);
-}
-
-function hasActivityAfterVerification(contact: any) {
-  const verifiedAt = contact.profileVerifiedAt ? new Date(contact.profileVerifiedAt) : null;
-  if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) return false;
-  const latestConversationAt = contact.conversations?.[0]?.lastMessageAt
-    ? new Date(contact.conversations[0].lastMessageAt)
-    : null;
-  const latestHistoryAt = contact.history?.[0]?.createdAt
-    ? new Date(contact.history[0].createdAt)
-    : null;
-  return Boolean(
-    (latestConversationAt && latestConversationAt > verifiedAt)
-    || (latestHistoryAt && latestHistoryAt > verifiedAt)
-  );
-}
-
 function shouldVerifyContact(args: {
   contact: any;
   now: Date;
   newContactCutoff: Date;
-  staleCutoff: Date;
   settings: ContactProfileVerificationConfig;
 }) {
-  const { contact, now, newContactCutoff, staleCutoff, settings } = args;
+  const { contact, now, newContactCutoff } = args;
   if (contact.requirementProposals?.length > 0) return false;
   if (contact.profileVerificationDueAt && new Date(contact.profileVerificationDueAt) <= now) return true;
   if (!contact.profileVerifiedAt && new Date(contact.createdAt) <= newContactCutoff) return true;
-  if (contact.profileVerifiedAt && new Date(contact.profileVerifiedAt) <= staleCutoff) return true;
-  return settings.recertifyOnNewActivity && hasActivityAfterVerification(contact);
+  return false;
 }
 
 async function getLocationSettings(locationId: string): Promise<{
@@ -139,8 +117,6 @@ async function findVerificationCandidates(args: {
   batchSize: number;
 }) {
   const newContactCutoff = addHours(args.now, -args.settings.newContactDelayHours);
-  const staleCutoff = addDays(args.now, -args.settings.recertificationDays);
-  const activityCutoff = addDays(args.now, -Math.max(1, args.settings.recertificationDays));
 
   const rows = await db.contact.findMany({
     where: {
@@ -149,16 +125,6 @@ async function findVerificationCandidates(args: {
       OR: [
         { profileVerificationDueAt: { lte: args.now } },
         { profileVerifiedAt: null, createdAt: { lte: newContactCutoff } },
-        ...(args.settings.mode === "daily_due_and_new_contacts" ? [
-          { profileVerifiedAt: { lte: staleCutoff } },
-          ...(args.settings.recertifyOnNewActivity ? [{
-            profileVerifiedAt: { not: null },
-            OR: [
-              { conversations: { some: { lastMessageAt: { gte: activityCutoff } } } },
-              { history: { some: { createdAt: { gte: activityCutoff } } } },
-            ],
-          }] : []),
-        ] : []),
       ],
     },
     select: {
@@ -198,7 +164,6 @@ async function findVerificationCandidates(args: {
       contact,
       now: args.now,
       newContactCutoff,
-      staleCutoff,
       settings: args.settings,
     }))
     .slice(0, args.batchSize);
@@ -215,7 +180,7 @@ async function recordSuccess(args: {
       profileVerificationLastAttemptAt: args.now,
       profileVerificationLastError: null,
       profileVerificationAttemptCount: { increment: 1 },
-      profileVerificationDueAt: addDays(args.now, args.settings.recertificationDays),
+      profileVerificationDueAt: null,
     } as any,
   });
 }
@@ -261,24 +226,6 @@ async function runForLocation(args: {
       batchSize,
       stats,
       error: "Contact Profile Verification mode is not enabled for automated runs.",
-    };
-    await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
-    return stats;
-  }
-
-  const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
-  if (!apiKey) {
-    stats.skipped += 1;
-    const status: ContactProfileVerificationRunStatus = {
-      status: "skipped",
-      source: args.source,
-      startedAt: startedAt.toISOString(),
-      finishedAt: new Date().toISOString(),
-      durationMs: Date.now() - startedAt.getTime(),
-      mode: settings.mode,
-      batchSize,
-      stats,
-      error: "Google AI API key is not configured.",
     };
     await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
     return stats;

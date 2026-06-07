@@ -156,14 +156,31 @@ export async function updateAiSettings(
         const viewingSessionTranslationModel = normalizeOptionalModelOverride(formData.get("viewingSessionTranslationModel"));
         const viewingSessionInsightsModel = normalizeOptionalModelOverride(formData.get("viewingSessionInsightsModel"));
         const viewingSessionSummaryModel = normalizeOptionalModelOverride(formData.get("viewingSessionSummaryModel"));
-        const requirementsIntelligenceModeRaw = String(formData.get("requirementsIntelligenceMode") || "").trim();
+        const leadIntelligenceModeRaw = String(formData.get("leadIntelligenceMode") || "").trim();
+        const legacyRequirementsModeRaw = String(formData.get("requirementsIntelligenceMode") || "").trim();
+        const requirementsIntelligenceModeRaw = leadIntelligenceModeRaw === "automatic"
+            ? "daily_and_new_activity"
+            : leadIntelligenceModeRaw === "off" || leadIntelligenceModeRaw === "manual_only"
+                ? leadIntelligenceModeRaw
+                : legacyRequirementsModeRaw;
         const requirementsIntelligenceMode = ["off", "manual_only", "new_activity", "daily_and_new_activity"].includes(requirementsIntelligenceModeRaw)
             ? requirementsIntelligenceModeRaw
             : "manual_only";
         const requirementsIntelligenceModel = normalizeOptionalModelOverride(formData.get("requirementsIntelligenceModel")) || transcriptionModel;
         const requirementsAllowedPropertyDomains = normalizeAllowedPropertyDomains(formData.get("requirementsAllowedPropertyDomains"));
+        const requirementsActivityDebounceRaw = Number(formData.get("requirementsActivityDebounceMinutes"));
+        const requirementsActivityDebounceMinutes = Number.isFinite(requirementsActivityDebounceRaw)
+            ? Math.max(0, Math.min(24 * 60, Math.trunc(requirementsActivityDebounceRaw)))
+            : 60;
+        const autoReprocessCampaignCandidates = formData.get("leadIntelligenceAutoReprocessCampaignCandidates") === "on"
+            || formData.get("contactProfileVerificationAutoReprocessCampaignBlocks") === "on";
         const existingContactProfileVerification = normalizeContactProfileVerificationConfig((existingPayload as any)?.contactProfileVerification);
-        const contactProfileVerificationMode = normalizeContactProfileVerificationMode(formData.get("contactProfileVerificationMode"));
+        const mappedContactProfileVerificationMode = leadIntelligenceModeRaw === "automatic"
+            ? "daily_due_and_new_contacts"
+            : leadIntelligenceModeRaw === "off" || leadIntelligenceModeRaw === "manual_only"
+                ? leadIntelligenceModeRaw
+                : formData.get("contactProfileVerificationMode");
+        const contactProfileVerificationMode = normalizeContactProfileVerificationMode(mappedContactProfileVerificationMode);
         const defaultReplyLanguage = normalizeReplyLanguage(formData.get("defaultReplyLanguage")) || DEFAULT_REPLY_LANGUAGE;
         const payload = {
             ...existingPayload,
@@ -189,15 +206,17 @@ export async function updateAiSettings(
                 mode: requirementsIntelligenceMode,
                 model: requirementsIntelligenceModel,
                 allowedPropertyDomains: requirementsAllowedPropertyDomains,
+                activityDebounceMinutes: requirementsActivityDebounceMinutes,
+                autoReprocessCampaignCandidates,
             },
             contactProfileVerification: {
                 ...existingContactProfileVerification,
                 mode: contactProfileVerificationMode,
-                newContactDelayHours: normalizeContactProfileVerificationDelayHours(formData.get("contactProfileVerificationNewContactDelayHours")),
-                recertificationDays: normalizeContactProfileVerificationRecertificationDays(formData.get("contactProfileVerificationRecertificationDays")),
-                recertifyOnNewActivity: formData.get("contactProfileVerificationRecertifyOnNewActivity") === "on",
-                batchSize: normalizeContactProfileVerificationBatchSize(formData.get("contactProfileVerificationBatchSize")),
-                autoReprocessCampaignBlocks: formData.get("contactProfileVerificationAutoReprocessCampaignBlocks") === "on",
+                newContactDelayHours: normalizeContactProfileVerificationDelayHours(formData.get("contactProfileVerificationNewContactDelayHours"), existingContactProfileVerification.newContactDelayHours ?? 0),
+                recertificationDays: normalizeContactProfileVerificationRecertificationDays(formData.get("contactProfileVerificationRecertificationDays"), existingContactProfileVerification.recertificationDays ?? 90),
+                recertifyOnNewActivity: false,
+                batchSize: normalizeContactProfileVerificationBatchSize(formData.get("leadIntelligenceBatchSize"), existingContactProfileVerification.batchSize ?? 50),
+                autoReprocessCampaignBlocks: autoReprocessCampaignCandidates,
             },
             brandVoice: formData.get("brandVoice") as string,
             outreachConfig: {
@@ -363,6 +382,7 @@ export async function runRequirementsIntelligenceNowAction(
             locationId: authorization.locationId,
             batchSize: Math.max(1, Math.min(100, Number(options?.batchSize || 40))),
             source: "manual",
+            force: true,
         });
         revalidatePath("/admin/settings/ai");
         return { success: true, stats };
