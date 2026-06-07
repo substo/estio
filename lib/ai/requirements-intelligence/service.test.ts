@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildRecentRequirementsActivityWhere,
   getRequirementPatchChanges,
   shouldAssessRequirementsForActivity,
 } from "./service";
@@ -64,4 +65,31 @@ test("shouldAssessRequirementsForActivity gates by freshness and debounce", () =
     now,
     debounceMinutes: 60,
   }), true);
+});
+
+test("buildRecentRequirementsActivityWhere selects due contacts or inbound contact messages", () => {
+  const since = new Date("2026-06-06T12:00:00.000Z");
+  const now = new Date("2026-06-07T12:00:00.000Z");
+  const where = buildRecentRequirementsActivityWhere({ locationId: "loc_1", since, now });
+
+  assert.deepEqual(where, {
+    locationId: "loc_1",
+    contactType: { in: ["Lead", "Contact"] },
+    profileVerificationStatus: "verified_lead",
+    OR: [
+      { requirementsAssessmentDueAt: { lte: now } },
+      {
+        conversations: {
+          some: {
+            messages: {
+              some: {
+                direction: "inbound",
+                createdAt: { gte: since },
+              },
+            },
+          },
+        },
+      },
+    ],
+  });
 });

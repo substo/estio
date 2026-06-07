@@ -168,10 +168,13 @@ export async function updateAiSettings(
             : "manual_only";
         const requirementsIntelligenceModel = normalizeOptionalModelOverride(formData.get("requirementsIntelligenceModel")) || transcriptionModel;
         const requirementsAllowedPropertyDomains = normalizeAllowedPropertyDomains(formData.get("requirementsAllowedPropertyDomains"));
+        const requirementsActivityWaitHoursRaw = Number(formData.get("requirementsActivityWaitHours"));
         const requirementsActivityDebounceRaw = Number(formData.get("requirementsActivityDebounceMinutes"));
-        const requirementsActivityDebounceMinutes = Number.isFinite(requirementsActivityDebounceRaw)
-            ? Math.max(0, Math.min(24 * 60, Math.trunc(requirementsActivityDebounceRaw)))
-            : 60;
+        const requirementsActivityDebounceMinutes = Number.isFinite(requirementsActivityWaitHoursRaw)
+            ? Math.max(0, Math.min(24, Math.trunc(requirementsActivityWaitHoursRaw))) * 60
+            : Number.isFinite(requirementsActivityDebounceRaw)
+                ? Math.max(0, Math.min(24 * 60, Math.trunc(requirementsActivityDebounceRaw)))
+                : 24 * 60;
         const autoReprocessCampaignCandidates = formData.get("leadIntelligenceAutoReprocessCampaignCandidates") === "on"
             || formData.get("contactProfileVerificationAutoReprocessCampaignBlocks") === "on";
         const existingContactProfileVerification = normalizeContactProfileVerificationConfig((existingPayload as any)?.contactProfileVerification);
@@ -410,7 +413,7 @@ export async function runContactProfileVerificationNowAction(
         return { success: true, stats };
     } catch (error: any) {
         console.error("[runContactProfileVerificationNowAction] Error:", error);
-        return { success: false, error: error?.message || "Failed to run Contact Profile Verification." };
+        return { success: false, error: error?.message || "Failed to run Contact Classification." };
     }
 }
 

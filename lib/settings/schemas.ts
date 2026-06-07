@@ -23,7 +23,7 @@ const requirementsIntelligenceSchema = z.object({
     mode: z.enum(["off", "manual_only", "new_activity", "daily_and_new_activity"]).default("manual_only"),
     model: z.string().trim().min(1),
     allowedPropertyDomains: z.array(z.string().trim().min(1)).default([]),
-    activityDebounceMinutes: z.number().int().min(0).max(24 * 60).default(60),
+    activityDebounceMinutes: z.number().int().min(0).max(24 * 60).default(24 * 60),
     autoReprocessCampaignCandidates: z.boolean().default(true),
     lastRun: z.unknown().nullable().optional(),
 }).passthrough();

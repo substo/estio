@@ -21,7 +21,7 @@ export const REQUIREMENTS_INTELLIGENCE_MODES = [
 
 export type RequirementsIntelligenceMode = typeof REQUIREMENTS_INTELLIGENCE_MODES[number];
 
-const DEFAULT_REQUIREMENTS_ACTIVITY_DEBOUNCE_MINUTES = 60;
+const DEFAULT_REQUIREMENTS_ACTIVITY_DEBOUNCE_MINUTES = 24 * 60;
 const MAX_REQUIREMENTS_ACTIVITY_LOOKBACK_DAYS = 30;
 
 type RequirementPatch = {
@@ -186,6 +186,33 @@ export function shouldAssessRequirementsForActivity(args: {
   const lastAssessedAt = args.lastAssessedAt ? new Date(args.lastAssessedAt) : null;
   if (!lastAssessedAt || Number.isNaN(lastAssessedAt.getTime())) return true;
   return latestActivityAt > lastAssessedAt;
+}
+
+export function buildRecentRequirementsActivityWhere(args: {
+  locationId: string;
+  since: Date;
+  now: Date;
+}) {
+  return {
+    locationId: args.locationId,
+    contactType: { in: ["Lead", "Contact"] },
+    profileVerificationStatus: "verified_lead",
+    OR: [
+      { requirementsAssessmentDueAt: { lte: args.now } },
+      {
+        conversations: {
+          some: {
+            messages: {
+              some: {
+                direction: "inbound",
+                createdAt: { gte: args.since },
+              },
+            },
+          },
+        },
+      },
+    ],
+  } as const;
 }
 
 async function recordRequirementsAssessmentSuccess(contactId: string, assessedAt = new Date()) {
@@ -914,16 +941,11 @@ export async function runRequirementsIntelligenceCron(args?: {
     stats.locationsChecked += 1;
     locationStats.locationsChecked += 1;
 
-    const recentActivityWhere = {
+    const recentActivityWhere = buildRecentRequirementsActivityWhere({
       locationId: location.id,
-      contactType: { in: ["Lead", "Contact"] },
-      profileVerificationStatus: "verified_lead",
-      OR: [
-        { requirementsAssessmentDueAt: { lte: now } },
-        { conversations: { some: { lastMessageAt: { gte: since } } } },
-        { history: { some: { createdAt: { gte: since } } } },
-      ],
-    } as const;
+      since,
+      now,
+    });
 
     const [totalContacts, contactsWithRecentActivity] = await Promise.all([
       db.contact.count({
@@ -952,14 +974,28 @@ export async function runRequirementsIntelligenceCron(args?: {
         requirementsLastAssessedAt: true,
         requirementsAssessmentDueAt: true,
         conversations: {
+          where: {
+            messages: {
+              some: {
+                direction: "inbound",
+                createdAt: { gte: since },
+              },
+            },
+          },
           orderBy: { lastMessageAt: "desc" },
           take: 1,
-          select: { id: true, lastMessageAt: true },
-        },
-        history: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-          select: { createdAt: true },
+          select: {
+            id: true,
+            messages: {
+              where: {
+                direction: "inbound",
+                createdAt: { gte: since },
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: { createdAt: true },
+            },
+          },
         },
         requirementProposals: {
           where: { proposalType: "requirements", status: "pending" },
@@ -979,8 +1015,7 @@ export async function runRequirementsIntelligenceCron(args?: {
         continue;
       }
       const latestActivityAt = latestDate([
-        contact.conversations[0]?.lastMessageAt,
-        contact.history[0]?.createdAt,
+        contact.conversations[0]?.messages[0]?.createdAt,
       ]);
       if (!args?.force && !shouldAssessRequirementsForActivity({
         latestActivityAt,
