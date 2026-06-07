@@ -14,6 +14,38 @@ interface ConversationListRowProps {
     onHoverConversation?: (id: string) => void;
 }
 
+const CONTACT_TYPE_TONES: Record<string, string> = {
+    lead: "border-blue-200 bg-blue-50 text-blue-700",
+    contact: "border-zinc-200 bg-zinc-50 text-zinc-700",
+    agent: "border-amber-200 bg-amber-50 text-amber-800",
+    owner: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    tenant: "border-violet-200 bg-violet-50 text-violet-700",
+    partner: "border-cyan-200 bg-cyan-50 text-cyan-700",
+    associate: "border-slate-200 bg-slate-50 text-slate-700",
+    maintenance: "border-rose-200 bg-rose-50 text-rose-700",
+    whatsappgroup: "border-indigo-200 bg-indigo-50 text-indigo-700",
+    "ref-groupmember": "border-indigo-200 bg-indigo-50 text-indigo-700",
+};
+
+function formatContactTypeLabel(contactType?: string | null) {
+    const trimmed = String(contactType || "").trim();
+    if (!trimmed) return "Contact";
+    if (trimmed === "WhatsAppGroup") return "Group";
+    if (trimmed === "Ref-GroupMember") return "Group ref";
+
+    return trimmed
+        .replace(/[_-]+/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getContactTypeTone(contactType?: string | null) {
+    const key = String(contactType || "Contact").trim().toLowerCase().replace(/\s+/g, "");
+    return CONTACT_TYPE_TONES[key] || "border-slate-200 bg-white text-slate-700";
+}
+
 export function ConversationListRow({
     conversation,
     selectedId,
@@ -24,6 +56,8 @@ export function ConversationListRow({
     onHoverConversation,
 }: ConversationListRowProps) {
     const channel = getConversationChannelInfo(conversation);
+    const contactTypeLabel = formatContactTypeLabel(conversation.contactType);
+    const contactTypeTone = getContactTypeTone(conversation.contactType);
 
     return (
         <div
@@ -79,9 +113,21 @@ export function ConversationListRow({
                     </div>
                 </div>
                 {/* Channel icon */}
-                <div className="flex items-center gap-1 mt-1">
-                    {channel.icon}
-                    <span className="text-[10px] text-gray-500">{channel.name}</span>
+                <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                    <div className="flex min-w-0 items-center gap-1 text-gray-500">
+                        {channel.icon}
+                        <span className="truncate text-[10px]">{channel.name}</span>
+                    </div>
+                    <span
+                        aria-label={`Contact type: ${contactTypeLabel}`}
+                        title={`Contact type: ${contactTypeLabel}`}
+                        className={cn(
+                            "inline-flex h-4 max-w-[92px] shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold leading-none",
+                            contactTypeTone
+                        )}
+                    >
+                        <span className="truncate">{contactTypeLabel}</span>
+                    </span>
                 </div>
             </div>
         </div>
