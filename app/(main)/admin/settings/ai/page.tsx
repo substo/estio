@@ -13,6 +13,7 @@ import {
 import { ensureDefaultSkillPolicies } from "@/lib/ai/runtime/engine";
 import { isPrecisionRemoveInfrastructureReady } from "@/lib/ai/property-image-precision-remove-config";
 import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
+import { getContactProfileVerificationQueueStatus } from "@/lib/ai/contact-profile-verification/cron";
 
 const EMPTY_AI_RUNTIME_SUMMARY = {
     totalPolicies: 0,
@@ -23,6 +24,7 @@ const EMPTY_AI_RUNTIME_SUMMARY = {
     pendingSuggestions: 0,
     pendingRequirementProposals: 0,
     pendingVerificationProposals: 0,
+    contactClassificationQueue: null,
     policies: [],
     recentDecisions: [],
     recentJobs: [],
@@ -40,6 +42,7 @@ async function loadAiRuntimeSummary(locationId: string) {
             pendingSuggestions,
             pendingRequirementProposals,
             pendingVerificationProposals,
+            contactClassificationQueue,
             policies,
             recentDecisions,
             recentRuntimeJobs,
@@ -91,6 +94,7 @@ async function loadAiRuntimeSummary(locationId: string) {
                     proposalType: "verification",
                 },
             }),
+            getContactProfileVerificationQueueStatus({ locationId }),
             db.aiSkillPolicy.findMany({
                 where: { locationId },
                 orderBy: [{ enabled: "desc" }, { objective: "asc" }, { skillId: "asc" }],
@@ -156,6 +160,7 @@ async function loadAiRuntimeSummary(locationId: string) {
             pendingSuggestions,
             pendingRequirementProposals,
             pendingVerificationProposals,
+            contactClassificationQueue,
             policies: policies.map((item) => ({
                 id: item.id,
                 skillId: item.skillId,

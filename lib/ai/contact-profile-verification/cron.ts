@@ -355,3 +355,61 @@ export async function triggerGlobalContactProfileRecertification(args: {
   } as any);
   return { success: true as const, due: result.count };
 }
+
+export async function getContactProfileVerificationQueueStatus(args: {
+  locationId: string;
+  now?: Date;
+}) {
+  const now = args.now || new Date();
+  const eligibleWhere = {
+    locationId: args.locationId,
+    contactType: { in: ["Lead", "Contact"] },
+    requirementProposals: {
+      none: { proposalType: "verification", status: "pending" },
+    },
+  } as const;
+  const [
+    eligible,
+    queued,
+    pendingReview,
+    failed,
+    latestQueued,
+  ] = await Promise.all([
+    db.contact.count({ where: eligibleWhere }),
+    db.contact.count({
+      where: {
+        ...eligibleWhere,
+        profileVerificationDueAt: { lte: now },
+      },
+    } as any),
+    db.contactRequirementProposal.count({
+      where: {
+        locationId: args.locationId,
+        proposalType: "verification",
+        status: "pending",
+      },
+    }),
+    db.contact.count({
+      where: {
+        ...eligibleWhere,
+        profileVerificationLastError: { not: null },
+      },
+    } as any),
+    db.contact.findFirst({
+      where: {
+        ...eligibleWhere,
+        profileVerificationDueAt: { not: null },
+      } as any,
+      orderBy: { profileVerificationDueAt: "desc" },
+      select: { profileVerificationDueAt: true },
+    }),
+  ]);
+
+  return {
+    eligible,
+    queued,
+    pendingReview,
+    failed,
+    latestQueuedAt: latestQueued?.profileVerificationDueAt?.toISOString() || null,
+  };
+}

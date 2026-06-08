@@ -88,6 +88,14 @@ type ContactProfileVerificationSettings = {
     lastRun?: ContactProfileVerificationLastRun | null;
 };
 
+type ContactClassificationQueueStatus = {
+    eligible?: number;
+    queued?: number;
+    pendingReview?: number;
+    failed?: number;
+    latestQueuedAt?: string | null;
+};
+
 type AiSettingsInitialData = {
     [key: string]: unknown;
     defaultReplyLanguage?: string;
@@ -128,6 +136,7 @@ type AiRuntimeSummary = {
     pendingSuggestions: number;
     pendingRequirementProposals?: number;
     pendingVerificationProposals?: number;
+    contactClassificationQueue?: ContactClassificationQueueStatus | null;
     requirementsIntelligence?: RequirementsIntelligenceSettings;
     contactProfileVerification?: ContactProfileVerificationSettings;
     policies: Array<{
@@ -408,6 +417,8 @@ function LeadIntelligenceSection({
     fallbackModel,
     pendingRequirementProposals,
     pendingVerificationProposals,
+    contactClassificationQueue,
+    contactClassificationQueueUpdatedAt,
     requirementsLastRun,
     contactProfileVerificationLastRun,
     runningRequirementsScan,
@@ -422,6 +433,8 @@ function LeadIntelligenceSection({
     fallbackModel: string;
     pendingRequirementProposals: number;
     pendingVerificationProposals: number;
+    contactClassificationQueue: ContactClassificationQueueStatus | null;
+    contactClassificationQueueUpdatedAt: string | null;
     requirementsLastRun: RequirementsLastRun | null;
     contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
     runningRequirementsScan: boolean;
@@ -447,6 +460,9 @@ function LeadIntelligenceSection({
         && verification.autoReprocessCampaignBlocks !== false;
     const runningLeadIntelligence = runningRequirementsScan || runningVerification;
     const requirementWaitHours = Math.max(0, Math.min(24, Math.round(Number(requirements.activityDebounceMinutes ?? 24 * 60) / 60)));
+    const queuedCount = Number(contactClassificationQueue?.queued || 0);
+    const eligibleCount = Number(contactClassificationQueue?.eligible || 0);
+    const processedCount = Number(contactProfileVerificationLastRun?.stats?.checked || 0);
 
     return (
         <div className="space-y-3">
@@ -505,24 +521,31 @@ function LeadIntelligenceSection({
                             <div className="text-xs font-medium text-slate-700">Contact Classification</div>
                             <div className="text-[10px] text-muted-foreground">Classifies buyer/renter lead, owner, agent, not a lead, or needs review.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
+                            <div className="text-[10px] text-muted-foreground">Last queued: {formatDateLabel(contactClassificationQueue?.latestQueuedAt)}</div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningVerification} onClick={onRunVerification}>
                                 {runningVerification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                                Recheck Classifications
+                                Run Classification Now
                             </Button>
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningRecertification} onClick={onTriggerRecertification}>
                                 {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                                Queue All Contacts
+                                Queue Contacts
                             </Button>
                         </div>
                     </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.checked || 0)}</p></div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-5">
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Queued</p><p className="text-sm font-semibold">{queuedCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{eligibleCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{processedCount}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Needs Review</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.proposals || 0)}</p></div>
                     </div>
-                    <div className="mt-2 text-[10px] text-muted-foreground">Pending classification proposals: {pendingVerificationProposals}</div>
+                    <div className="mt-2 text-[10px] text-muted-foreground">
+                        Queue marks contacts to be checked. Run Classification Now processes the next batch.
+                        Pending classification proposals: {pendingVerificationProposals}. Failed: {Number(contactClassificationQueue?.failed || 0)}.
+                        {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
+                    </div>
                 </div>
 
                 <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
@@ -796,6 +819,8 @@ function ModelConfigurationSection({
     googleAiModelTranslation,
     pendingRequirementProposals,
     pendingVerificationProposals,
+    contactClassificationQueue,
+    contactClassificationQueueUpdatedAt,
     requirementsLastRun,
     contactProfileVerificationLastRun,
     runningRequirementsScan,
@@ -819,6 +844,8 @@ function ModelConfigurationSection({
     googleAiModelTranslation: string;
     pendingRequirementProposals: number;
     pendingVerificationProposals: number;
+    contactClassificationQueue: ContactClassificationQueueStatus | null;
+    contactClassificationQueueUpdatedAt: string | null;
     requirementsLastRun: RequirementsLastRun | null;
     contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
     runningRequirementsScan: boolean;
@@ -858,6 +885,8 @@ function ModelConfigurationSection({
                     fallbackModel={googleAiModelExtraction}
                     pendingRequirementProposals={pendingRequirementProposals}
                     pendingVerificationProposals={pendingVerificationProposals}
+                    contactClassificationQueue={contactClassificationQueue}
+                    contactClassificationQueueUpdatedAt={contactClassificationQueueUpdatedAt}
                     requirementsLastRun={requirementsLastRun}
                     contactProfileVerificationLastRun={contactProfileVerificationLastRun}
                     runningRequirementsScan={runningRequirementsScan}
@@ -1180,6 +1209,12 @@ export function AiSettingsForm({
     const [contactProfileVerificationLastRun, setContactProfileVerificationLastRun] = useState<ContactProfileVerificationLastRun | null>(
         runtimeSummary?.contactProfileVerification?.lastRun || initialData?.contactProfileVerification?.lastRun || null
     );
+    const [contactClassificationQueue, setContactClassificationQueue] = useState<ContactClassificationQueueStatus | null>(
+        runtimeSummary?.contactClassificationQueue || null
+    );
+    const [contactClassificationQueueUpdatedAt, setContactClassificationQueueUpdatedAt] = useState<string | null>(
+        runtimeSummary?.contactClassificationQueue ? new Date().toISOString() : null
+    );
     const [googleAiModel, setGoogleAiModel] = useState(
         getInitialModelValue(initialData, ["googleAiModel"], GEMINI_FLASH_LATEST_ALIAS)
     );
@@ -1207,6 +1242,18 @@ export function AiSettingsForm({
     const hasConfiguredTranscriptionModel = hasInitialModelValue(initialData, "googleAiModelTranscription");
     const hasConfiguredTranslationModel = hasInitialModelValue(initialData, "googleAiModelTranslation");
     const modelOptions = availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS;
+
+    async function refreshContactClassificationQueue() {
+        const params = new URLSearchParams({ locationId });
+        const response = await fetch(`/api/admin/settings/ai/contact-classification/queue-all?${params.toString()}`);
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success) {
+            throw new Error(String(result?.error || `Could not load contact classification status (${response.status}).`));
+        }
+        setContactClassificationQueue(result.status || null);
+        setContactClassificationQueueUpdatedAt(new Date().toISOString());
+        return result.status as ContactClassificationQueueStatus | null;
+    }
 
     useEffect(() => {
         let mounted = true;
@@ -1236,6 +1283,18 @@ export function AiSettingsForm({
         });
         return () => { mounted = false; };
     }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel, hasConfiguredTranslationModel]);
+
+    useEffect(() => {
+        const shouldPoll = Number(contactClassificationQueue?.queued || 0) > 0
+            || runningContactProfileVerification
+            || runningGlobalRecertification;
+        if (!shouldPoll) return;
+
+        const interval = window.setInterval(() => {
+            refreshContactClassificationQueue().catch(() => null);
+        }, 10000);
+        return () => window.clearInterval(interval);
+    }, [contactClassificationQueue?.queued, locationId, runningContactProfileVerification, runningGlobalRecertification]);
 
     const runRequirementsScan = async () => {
         setRunningRequirementsScan(true);
@@ -1291,6 +1350,7 @@ export function AiSettingsForm({
             toast.success(
                 `Contact classification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, created ${Number(stats.proposals || 0)} proposal${Number(stats.proposals || 0) === 1 ? "" : "s"}.`
             );
+            await refreshContactClassificationQueue();
         } catch (error: unknown) {
             toast.error(error instanceof Error ? error.message : "Contact classification failed.");
         } finally {
@@ -1311,7 +1371,9 @@ export function AiSettingsForm({
                 toast.error(String(result?.error || `Could not queue contacts for classification (${response.status}).`));
                 return;
             }
-            toast.success(`Marked ${Number(result.due || 0)} contact${Number(result.due || 0) === 1 ? "" : "s"} due for contact classification.`);
+            setContactClassificationQueue(result.status || null);
+            setContactClassificationQueueUpdatedAt(new Date().toISOString());
+            toast.success(`Queued ${Number(result.due || 0)} contact${Number(result.due || 0) === 1 ? "" : "s"} for classification.`);
         } catch (error: unknown) {
             toast.error(error instanceof Error ? error.message : "Could not queue contacts for classification.");
         } finally {
@@ -1341,6 +1403,8 @@ export function AiSettingsForm({
                     googleAiModelTranslation={googleAiModelTranslation}
                     pendingRequirementProposals={Number(runtimeSummary?.pendingRequirementProposals || 0)}
                     pendingVerificationProposals={Number(runtimeSummary?.pendingVerificationProposals || 0)}
+                    contactClassificationQueue={contactClassificationQueue}
+                    contactClassificationQueueUpdatedAt={contactClassificationQueueUpdatedAt}
                     requirementsLastRun={requirementsLastRun}
                     contactProfileVerificationLastRun={contactProfileVerificationLastRun}
                     runningRequirementsScan={runningRequirementsScan}
