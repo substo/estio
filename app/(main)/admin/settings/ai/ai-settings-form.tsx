@@ -1569,6 +1569,23 @@ export function AiSettingsForm({
         }>(response, "Could not apply confident contact classifications");
     }
 
+    async function verifyContactsNowRequest(batchSize: number) {
+        const response = await fetch("/api/admin/settings/ai/contact-classification/verify-now", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ locationId, batchSize }),
+        });
+        return readJsonResponse<{
+            success: true;
+            batchSize?: number;
+            queued?: { success: true; due?: number };
+            stats?: ContactProfileVerificationLastRunStats;
+            firstAutoApply?: { applied?: number; failures?: number };
+            secondAutoApply?: { applied?: number; failures?: number };
+            status?: ContactClassificationQueueStatus | null;
+        }>(response, "Could not verify contacts");
+    }
+
     const triggerGlobalRecertification = async () => {
         setRunningGlobalRecertification(true);
         try {
@@ -1605,11 +1622,8 @@ export function AiSettingsForm({
         setRunningVerifyContactsNow(true);
         try {
             const batchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
-            const firstAutoApply = await applyConfidentContactClassifications(200);
-            const queued = await queueContactClassification();
-            const runResult = await runContactProfileVerificationBatch(batchSize);
-            const secondAutoApply = await applyConfidentContactClassifications(200);
-            const stats = runResult.stats || {};
+            const result = await verifyContactsNowRequest(batchSize);
+            const stats = result.stats || {};
             setContactProfileVerificationLastRun({
                 status: Number(stats.failures || 0) > 0 ? "failed" : "completed",
                 source: "manual",
@@ -1621,8 +1635,8 @@ export function AiSettingsForm({
                 stats,
                 error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
             });
-            updateContactClassificationQueue(secondAutoApply.status || runResult.status || queued.status);
-            const applied = Number(firstAutoApply.applied || 0) + Number(secondAutoApply.applied || 0);
+            updateContactClassificationQueue(result.status);
+            const applied = Number(result.firstAutoApply?.applied || 0) + Number(result.secondAutoApply?.applied || 0);
             toast.success(
                 `Verification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, applied ${applied} confident decision${applied === 1 ? "" : "s"}.`
             );
