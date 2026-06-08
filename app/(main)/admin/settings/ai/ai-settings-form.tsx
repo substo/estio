@@ -472,10 +472,12 @@ function LeadIntelligenceSection({
     runningVerification,
     runningRecertification,
     runningAutoApplyConfident,
+    runningVerifyContactsNow,
     onRunRequirementsScan,
     onRunVerification,
     onTriggerRecertification,
     onAutoApplyConfidentClassifications,
+    onVerifyContactsNow,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -490,10 +492,12 @@ function LeadIntelligenceSection({
     runningVerification: boolean;
     runningRecertification: boolean;
     runningAutoApplyConfident: boolean;
+    runningVerifyContactsNow: boolean;
     onRunRequirementsScan: () => void;
     onRunVerification: () => void;
     onTriggerRecertification: () => void;
     onAutoApplyConfidentClassifications: () => void;
+    onVerifyContactsNow: () => void;
 }) {
     const requirements = initialData?.requirementsIntelligence || {};
     const verification = initialData?.contactProfileVerification || {};
@@ -509,7 +513,8 @@ function LeadIntelligenceSection({
             : "automatic";
     const reprocessEnabled = requirements.autoReprocessCampaignCandidates !== false
         && verification.autoReprocessCampaignBlocks !== false;
-    const runningLeadIntelligence = runningRequirementsScan || runningVerification;
+    const runningLeadIntelligence = runningRequirementsScan || runningVerification || runningVerifyContactsNow;
+    const runningAnyContactClassification = runningVerification || runningRecertification || runningAutoApplyConfident || runningVerifyContactsNow;
     const requirementWaitHours = Math.max(0, Math.min(24, Math.round(Number(requirements.activityDebounceMinutes ?? 24 * 60) / 60)));
     const processedCount = Number(contactProfileVerificationLastRun?.stats?.checked || 0);
     const classificationProgress = deriveContactClassificationProgress({
@@ -530,7 +535,7 @@ function LeadIntelligenceSection({
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 rounded-md border border-slate-200 bg-white p-3">
                 <div className="grid gap-2">
                     <Label htmlFor="leadIntelligenceMode" className="text-xs text-slate-500 uppercase tracking-wider">
                         Mode
@@ -549,56 +554,91 @@ function LeadIntelligenceSection({
                         Automatic classifies new contacts and updates requirements after new contact messages.
                     </p>
                 </div>
-                <div className="grid gap-2">
-                    <Label htmlFor="contactProfileVerificationModel" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Contact Classification model
-                    </Label>
-                    <select
-                        id="contactProfileVerificationModel"
-                        name="contactProfileVerificationModel"
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                        defaultValue={String(verification.model || fallbackModel)}
-                    >
-                        {modelOptions.map((model) => (
-                            <option key={model.value} value={model.value}>
-                                {model.label}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="grid gap-2">
-                    <Label htmlFor="requirementsIntelligenceModel" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Requirements model
-                    </Label>
-                    <select
-                        id="requirementsIntelligenceModel"
-                        name="requirementsIntelligenceModel"
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                        defaultValue={String(requirements.model || fallbackModel)}
-                    >
-                        {modelOptions.map((model) => (
-                            <option key={model.value} value={model.value}>
-                                {model.label}
-                            </option>
-                        ))}
-                    </select>
-                </div>
+                <details className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                    <summary className="cursor-pointer text-xs font-medium text-slate-700">Advanced model settings</summary>
+                    <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="grid gap-2">
+                            <Label htmlFor="contactProfileVerificationModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                                Contact Classification model
+                            </Label>
+                            <select
+                                id="contactProfileVerificationModel"
+                                name="contactProfileVerificationModel"
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                defaultValue={String(verification.model || fallbackModel)}
+                            >
+                                {modelOptions.map((model) => (
+                                    <option key={model.value} value={model.value}>
+                                        {model.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="requirementsIntelligenceModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                                Requirements model
+                            </Label>
+                            <select
+                                id="requirementsIntelligenceModel"
+                                name="requirementsIntelligenceModel"
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                defaultValue={String(requirements.model || fallbackModel)}
+                            >
+                                {modelOptions.map((model) => (
+                                    <option key={model.value} value={model.value}>
+                                        {model.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </details>
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <div className="text-xs font-medium text-slate-700">Contact Classification</div>
-                            <div className="text-[10px] text-muted-foreground">Classifies contacts as buyer/renter lead, owner, agent, not a lead, or needs review.</div>
+                            <div className="text-xs font-medium text-slate-700">Verify Contacts</div>
+                            <div className="text-[10px] text-muted-foreground">AI classifies contacts as buyer/renter leads, owners, agents, or not leads. Confident results are applied automatically.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
-                            <div className="text-[10px] text-muted-foreground">Last queued: {formatDateLabel(contactClassificationQueue?.latestQueuedAt)}</div>
                             <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationProgress.statusLabel}</div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" className="h-9 text-xs" disabled={runningAnyContactClassification} onClick={onVerifyContactsNow}>
+                            {runningAnyContactClassification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                            Verify Contacts Now
+                        </Button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-5">
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Waiting</p><p className="text-sm font-semibold">{classificationProgress.queuedCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{classificationProgress.eligibleCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{processedCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Needs Review</p><p className="text-sm font-semibold">{pendingVerificationProposals}</p></div>
+                    </div>
+                    <div className="mt-3">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                                className="h-full rounded-full bg-emerald-500 transition-all"
+                                style={{ width: `${classificationProgress.progressPercent}%` }}
+                            />
+                        </div>
+                        <div className="mt-1 flex flex-wrap justify-between gap-2 text-[10px] text-muted-foreground">
+                            <span>{classificationProgress.queuedCount > 0 ? `${classificationProgress.queuedCount} contact${classificationProgress.queuedCount === 1 ? "" : "s"} waiting` : "No contacts waiting"}</span>
+                            <span>{classificationProgress.progressPercent}% clear</span>
+                        </div>
+                    </div>
+                    <div className="mt-2 text-[10px] text-muted-foreground">
+                        Click Verify Contacts Now. AI will classify eligible contacts, apply confident decisions, and leave only uncertain contacts for human review.
+                        Failed: {classificationProgress.failedCount}.
+                        {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
+                    </div>
+                    <details className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-slate-700">Advanced classification actions</summary>
+                        <div className="mt-3 flex flex-wrap gap-2">
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningVerification} onClick={onRunVerification}>
                                 {runningVerification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                                Process Queued Batch
+                                Process Waiting Batch
                             </Button>
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningRecertification} onClick={onTriggerRecertification}>
                                 {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
@@ -616,31 +656,7 @@ function LeadIntelligenceSection({
                                 Apply Confident Decisions
                             </Button>
                         </div>
-                    </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-5">
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Queued</p><p className="text-sm font-semibold">{classificationProgress.queuedCount}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{classificationProgress.eligibleCount}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{processedCount}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Pending Review</p><p className="text-sm font-semibold">{pendingVerificationProposals}</p></div>
-                    </div>
-                    <div className="mt-3">
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                            <div
-                                className="h-full rounded-full bg-emerald-500 transition-all"
-                                style={{ width: `${classificationProgress.progressPercent}%` }}
-                            />
-                        </div>
-                        <div className="mt-1 flex flex-wrap justify-between gap-2 text-[10px] text-muted-foreground">
-                            <span>{classificationProgress.queuedCount > 0 ? `${classificationProgress.queuedCount} contact${classificationProgress.queuedCount === 1 ? "" : "s"} waiting` : "No contacts waiting"}</span>
-                            <span>{classificationProgress.progressPercent}% clear</span>
-                        </div>
-                    </div>
-                    <div className="mt-2 text-[10px] text-muted-foreground">
-                        Queue Eligible Contacts marks only contacts without pending review as waiting. Process Queued Batch runs AI on up to the configured batch size. Apply Confident Decisions clears pending AI decisions that are not marked needs review.
-                        Failed: {classificationProgress.failedCount}.
-                        {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
-                    </div>
+                    </details>
                 </div>
 
                 <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3">
@@ -922,6 +938,7 @@ function ModelConfigurationSection({
     runningContactProfileVerification,
     runningGlobalRecertification,
     runningAutoApplyConfident,
+    runningVerifyContactsNow,
     onGeneralModelChange,
     onExtractionModelChange,
     onDesignModelChange,
@@ -931,6 +948,7 @@ function ModelConfigurationSection({
     onRunContactProfileVerification,
     onTriggerGlobalRecertification,
     onAutoApplyConfidentClassifications,
+    onVerifyContactsNow,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -949,6 +967,7 @@ function ModelConfigurationSection({
     runningContactProfileVerification: boolean;
     runningGlobalRecertification: boolean;
     runningAutoApplyConfident: boolean;
+    runningVerifyContactsNow: boolean;
     onGeneralModelChange: (value: string) => void;
     onExtractionModelChange: (value: string) => void;
     onDesignModelChange: (value: string) => void;
@@ -958,6 +977,7 @@ function ModelConfigurationSection({
     onRunContactProfileVerification: () => void;
     onTriggerGlobalRecertification: () => void;
     onAutoApplyConfidentClassifications: () => void;
+    onVerifyContactsNow: () => void;
 }) {
     return (
         <div className="space-y-4">
@@ -992,10 +1012,12 @@ function ModelConfigurationSection({
                     runningVerification={runningContactProfileVerification}
                     runningRecertification={runningGlobalRecertification}
                     runningAutoApplyConfident={runningAutoApplyConfident}
+                    runningVerifyContactsNow={runningVerifyContactsNow}
                     onRunRequirementsScan={onRunRequirementsScan}
                     onRunVerification={onRunContactProfileVerification}
                     onTriggerRecertification={onTriggerGlobalRecertification}
                     onAutoApplyConfidentClassifications={onAutoApplyConfidentClassifications}
+                    onVerifyContactsNow={onVerifyContactsNow}
                 />
 
                 <AudioTranscriptPolicySection initialData={initialData} />
@@ -1305,6 +1327,7 @@ export function AiSettingsForm({
     const [runningContactProfileVerification, setRunningContactProfileVerification] = useState(false);
     const [runningGlobalRecertification, setRunningGlobalRecertification] = useState(false);
     const [runningAutoApplyConfident, setRunningAutoApplyConfident] = useState(false);
+    const [runningVerifyContactsNow, setRunningVerifyContactsNow] = useState(false);
     const [runtimeSummaryState, setRuntimeSummaryState] = useState<AiRuntimeSummary | null>(runtimeSummary || null);
     const [requirementsLastRun, setRequirementsLastRun] = useState<RequirementsLastRun | null>(
         runtimeSummary?.requirementsIntelligence?.lastRun || initialData?.requirementsIntelligence?.lastRun || null
@@ -1422,14 +1445,16 @@ export function AiSettingsForm({
     useEffect(() => {
         const shouldPoll = Number(contactClassificationQueue?.queued || 0) > 0
             || runningContactProfileVerification
-            || runningGlobalRecertification;
+            || runningGlobalRecertification
+            || runningAutoApplyConfident
+            || runningVerifyContactsNow;
         if (!shouldPoll) return;
 
         const interval = window.setInterval(() => {
             refreshContactClassificationQueue().catch(() => null);
         }, 10000);
         return () => window.clearInterval(interval);
-    }, [contactClassificationQueue?.queued, locationId, runningContactProfileVerification, runningGlobalRecertification]);
+    }, [contactClassificationQueue?.queued, locationId, runningAutoApplyConfident, runningContactProfileVerification, runningGlobalRecertification, runningVerifyContactsNow]);
 
     const runRequirementsScan = async () => {
         setRunningRequirementsScan(true);
@@ -1501,19 +1526,53 @@ export function AiSettingsForm({
         }
     };
 
+    async function runContactProfileVerificationBatch(batchSize: number) {
+        const response = await fetch("/api/admin/settings/ai/contact-classification/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ locationId, batchSize }),
+        });
+        return readJsonResponse<{
+            success: true;
+            stats?: ContactProfileVerificationLastRunStats;
+            status?: ContactClassificationQueueStatus | null;
+        }>(response, "Contact classification failed");
+    }
+
+    async function queueContactClassification() {
+        const response = await fetch("/api/admin/settings/ai/contact-classification/queue-all", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ locationId }),
+        });
+        return readJsonResponse<{
+            success: true;
+            due?: number;
+            status?: ContactClassificationQueueStatus | null;
+        }>(response, "Could not queue contacts for classification");
+    }
+
+    async function applyConfidentContactClassifications(limit = 200) {
+        const response = await fetch("/api/admin/settings/ai/contact-classification/auto-apply-confident", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ locationId, limit }),
+        });
+        return readJsonResponse<{
+            success: true;
+            checked?: number;
+            applied?: number;
+            skipped?: number;
+            failures?: number;
+            remainingBatchAvailable?: boolean;
+            status?: ContactClassificationQueueStatus | null;
+        }>(response, "Could not apply confident contact classifications");
+    }
+
     const triggerGlobalRecertification = async () => {
         setRunningGlobalRecertification(true);
         try {
-            const response = await fetch("/api/admin/settings/ai/contact-classification/queue-all", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ locationId }),
-            });
-            const result = await readJsonResponse<{
-                success: true;
-                due?: number;
-                status?: ContactClassificationQueueStatus | null;
-            }>(response, "Could not queue contacts for classification");
+            const result = await queueContactClassification();
             updateContactClassificationQueue(result.status);
             toast.success(`Queued ${Number(result.due || 0)} contact${Number(result.due || 0) === 1 ? "" : "s"} for classification.`);
         } catch (error: unknown) {
@@ -1526,20 +1585,7 @@ export function AiSettingsForm({
     const autoApplyConfidentClassifications = async () => {
         setRunningAutoApplyConfident(true);
         try {
-            const response = await fetch("/api/admin/settings/ai/contact-classification/auto-apply-confident", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ locationId, limit: 100 }),
-            });
-            const result = await readJsonResponse<{
-                success: true;
-                checked?: number;
-                applied?: number;
-                skipped?: number;
-                failures?: number;
-                remainingBatchAvailable?: boolean;
-                status?: ContactClassificationQueueStatus | null;
-            }>(response, "Could not apply confident contact classifications");
+            const result = await applyConfidentContactClassifications(200);
             updateContactClassificationQueue(result.status);
             const applied = Number(result.applied || 0);
             const failures = Number(result.failures || 0);
@@ -1552,6 +1598,38 @@ export function AiSettingsForm({
             toast.error(error instanceof Error ? error.message : "Could not apply confident contact classifications.");
         } finally {
             setRunningAutoApplyConfident(false);
+        }
+    };
+
+    const verifyContactsNow = async () => {
+        setRunningVerifyContactsNow(true);
+        try {
+            const batchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
+            const firstAutoApply = await applyConfidentContactClassifications(200);
+            const queued = await queueContactClassification();
+            const runResult = await runContactProfileVerificationBatch(batchSize);
+            const secondAutoApply = await applyConfidentContactClassifications(200);
+            const stats = runResult.stats || {};
+            setContactProfileVerificationLastRun({
+                status: Number(stats.failures || 0) > 0 ? "failed" : "completed",
+                source: "manual",
+                startedAt: new Date().toISOString(),
+                finishedAt: new Date().toISOString(),
+                durationMs: 0,
+                mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
+                batchSize,
+                stats,
+                error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
+            });
+            updateContactClassificationQueue(secondAutoApply.status || runResult.status || queued.status);
+            const applied = Number(firstAutoApply.applied || 0) + Number(secondAutoApply.applied || 0);
+            toast.success(
+                `Verification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, applied ${applied} confident decision${applied === 1 ? "" : "s"}.`
+            );
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Could not verify contacts.");
+        } finally {
+            setRunningVerifyContactsNow(false);
         }
     };
 
@@ -1585,6 +1663,7 @@ export function AiSettingsForm({
                     runningContactProfileVerification={runningContactProfileVerification}
                     runningGlobalRecertification={runningGlobalRecertification}
                     runningAutoApplyConfident={runningAutoApplyConfident}
+                    runningVerifyContactsNow={runningVerifyContactsNow}
                     onGeneralModelChange={(value) => {
                         hasUserSelectedGeneralModelRef.current = true;
                         setGoogleAiModel(value);
@@ -1609,6 +1688,7 @@ export function AiSettingsForm({
                     onRunContactProfileVerification={runContactProfileVerification}
                     onTriggerGlobalRecertification={triggerGlobalRecertification}
                     onAutoApplyConfidentClassifications={autoApplyConfidentClassifications}
+                    onVerifyContactsNow={verifyContactsNow}
                 />
 
                 <Separator />
