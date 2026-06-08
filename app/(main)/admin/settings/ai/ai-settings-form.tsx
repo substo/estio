@@ -69,11 +69,12 @@ type ContactProfileVerificationLastRun = {
     status?: string;
     source?: string;
     startedAt?: string;
-    finishedAt?: string;
+    finishedAt?: string | null;
     durationMs?: number;
     mode?: string;
     batchSize?: number;
     stats?: ContactProfileVerificationLastRunStats;
+    currentContactId?: string | null;
     error?: string | null;
 };
 
@@ -587,6 +588,11 @@ function LeadIntelligenceSection({
                             <div className="text-[10px] text-muted-foreground">Classifies contacts as buyer/renter leads, owners, agents, not leads, or needs review. Confident decisions are applied automatically.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
                             <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationProgress.statusLabel}</div>
+                            {runningVerifyContactsNow ? (
+                                <div className="text-[10px] text-muted-foreground">
+                                    Processing in small batches. You can watch the numbers update as each batch finishes.
+                                </div>
+                            ) : null}
                         </div>
                         <Button type="button" size="sm" className="h-9 text-xs" disabled={runningAnyContactClassification} onClick={onVerifyContactsNow}>
                             {runningAnyContactClassification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
@@ -613,7 +619,7 @@ function LeadIntelligenceSection({
                         </div>
                     </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
-                        Verify Contacts Now checks eligible contacts, updates safe decisions automatically, and leaves only uncertain contacts for review.
+                        Verify Contacts Now queues eligible contacts, checks them in batches, applies safe decisions automatically, and leaves only uncertain contacts for review.
                         Failed: {classificationProgress.failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
@@ -1435,36 +1441,117 @@ export function AiSettingsForm({
             success: true;
             batchSize?: number;
             queued?: { success: true; due?: number };
-            stats?: ContactProfileVerificationLastRunStats;
             firstAutoApply?: { applied?: number; failures?: number };
-            secondAutoApply?: { applied?: number; failures?: number };
             status?: ContactClassificationQueueStatus | null;
         }>(response, "Could not verify contacts");
     }
 
+    async function runContactClassificationBatchRequest(batchSize: number) {
+        const response = await fetch("/api/admin/settings/ai/contact-classification/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ locationId, batchSize, autoApplyLimit: 200 }),
+        });
+        return readJsonResponse<{
+            success: true;
+            stats?: ContactProfileVerificationLastRunStats;
+            autoApply?: { applied?: number; failures?: number };
+            status?: ContactClassificationQueueStatus | null;
+        }>(response, "Could not process contact classification batch");
+    }
+
+    function addContactClassificationStats(
+        target: ContactProfileVerificationLastRunStats,
+        source: ContactProfileVerificationLastRunStats | undefined,
+    ): ContactProfileVerificationLastRunStats {
+        return {
+            checked: Number(target.checked || 0) + Number(source?.checked || 0),
+            verified: Number(target.verified || 0) + Number(source?.verified || 0),
+            proposals: Number(target.proposals || 0) + Number(source?.proposals || 0),
+            skipped: Number(target.skipped || 0) + Number(source?.skipped || 0),
+            failures: Number(target.failures || 0) + Number(source?.failures || 0),
+            reprocessedCampaignBlocks: Number(target.reprocessedCampaignBlocks || 0) + Number(source?.reprocessedCampaignBlocks || 0),
+        };
+    }
+
     const verifyContactsNow = async () => {
         setRunningVerifyContactsNow(true);
+        const startedAt = new Date();
+        let latestStats: ContactProfileVerificationLastRunStats = {};
+        let batchSize = 5;
         try {
-            const batchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
-            const result = await verifyContactsNowRequest(batchSize);
-            const stats = result.stats || {};
+            const configuredBatchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
+            batchSize = Number.isFinite(configuredBatchSize)
+                ? Math.max(1, Math.min(configuredBatchSize, 5))
+                : 5;
+            const startResult = await verifyContactsNowRequest(batchSize);
+            updateContactClassificationQueue(startResult.status);
+
+            let stats: ContactProfileVerificationLastRunStats = {};
+            let applied = Number(startResult.firstAutoApply?.applied || 0);
+            let latestStatus = startResult.status || null;
+            let remainingQueued = Number(latestStatus?.queued || 0);
+            let batches = 0;
+
             setContactProfileVerificationLastRun({
-                status: Number(stats.failures || 0) > 0 ? "failed" : "completed",
+                status: "running",
                 source: "manual",
-                startedAt: new Date().toISOString(),
-                finishedAt: new Date().toISOString(),
-                durationMs: 0,
+                startedAt: startedAt.toISOString(),
+                finishedAt: null,
+                durationMs: Date.now() - startedAt.getTime(),
                 mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
                 batchSize,
                 stats,
-                error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
+                error: null,
             });
-            updateContactClassificationQueue(result.status);
-            const applied = Number(result.firstAutoApply?.applied || 0) + Number(result.secondAutoApply?.applied || 0);
+
+            while (remainingQueued > 0 && batches < 250) {
+                batches += 1;
+                const batchResult = await runContactClassificationBatchRequest(batchSize);
+                stats = addContactClassificationStats(stats, batchResult.stats);
+                latestStats = stats;
+                applied += Number(batchResult.autoApply?.applied || 0);
+                latestStatus = batchResult.status || latestStatus;
+                updateContactClassificationQueue(latestStatus);
+                remainingQueued = Number(latestStatus?.queued || 0);
+
+                setContactProfileVerificationLastRun({
+                    status: remainingQueued > 0 ? "running" : Number(stats.failures || 0) > 0 ? "failed" : "completed",
+                    source: "manual",
+                    startedAt: startedAt.toISOString(),
+                    finishedAt: remainingQueued > 0 ? null : new Date().toISOString(),
+                    durationMs: Date.now() - startedAt.getTime(),
+                    mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
+                    batchSize,
+                    stats,
+                    error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
+                });
+
+                if (Number(batchResult.stats?.checked || 0) === 0 && remainingQueued > 0) {
+                    throw new Error("Contact verification stopped because no contacts were processed in the latest batch.");
+                }
+            }
+
+            if (remainingQueued > 0) {
+                toast.info(`Verification paused after ${batches} batches. ${remainingQueued} contact${remainingQueued === 1 ? "" : "s"} still waiting.`);
+                return;
+            }
+
             toast.success(
                 `Verification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, applied ${applied} confident decision${applied === 1 ? "" : "s"}.`
             );
         } catch (error: unknown) {
+            setContactProfileVerificationLastRun({
+                status: "failed",
+                source: "manual",
+                startedAt: startedAt.toISOString(),
+                finishedAt: new Date().toISOString(),
+                durationMs: Date.now() - startedAt.getTime(),
+                mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
+                batchSize,
+                stats: latestStats,
+                error: error instanceof Error ? error.message : "Could not verify contacts.",
+            });
             toast.error(error instanceof Error ? error.message : "Could not verify contacts.");
         } finally {
             setRunningVerifyContactsNow(false);

@@ -21,14 +21,15 @@ type ContactProfileVerificationRunStats = {
 };
 
 type ContactProfileVerificationRunStatus = {
-  status: "completed" | "failed" | "skipped";
+  status: "running" | "completed" | "failed" | "skipped";
   source: "cron" | "manual";
   startedAt: string;
-  finishedAt: string;
+  finishedAt?: string | null;
   durationMs: number;
   mode: ContactProfileVerificationMode;
   batchSize: number;
   stats: ContactProfileVerificationRunStats;
+  currentContactId?: string | null;
   error?: string | null;
 };
 
@@ -232,21 +233,64 @@ async function runForLocation(args: {
   }
 
   stats.locationsChecked += 1;
+  const persistRunningStatus = async (currentContactId?: string | null) => {
+    if (args.source !== "manual") return;
+    const status: ContactProfileVerificationRunStatus = {
+      status: "running",
+      source: args.source,
+      startedAt: startedAt.toISOString(),
+      finishedAt: null,
+      durationMs: Date.now() - startedAt.getTime(),
+      mode: settings.mode,
+      batchSize,
+      stats: { ...stats },
+      currentContactId: currentContactId || null,
+      error: null,
+    };
+    await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
+  };
+
   const candidates = await findVerificationCandidates({
     locationId: args.locationId,
     now: args.now,
     settings,
     batchSize,
   });
+  if (args.source === "manual") {
+    console.info("[contact-profile-verification:manual] Batch started", {
+      locationId: args.locationId,
+      candidates: candidates.length,
+      batchSize,
+    });
+    await persistRunningStatus(null);
+  }
 
   for (const contact of candidates) {
     if (contact.requirementProposals?.length > 0) {
       stats.skipped += 1;
+      if (args.source === "manual") {
+        console.info("[contact-profile-verification:manual] Contact skipped", {
+          locationId: args.locationId,
+          contactId: contact.id,
+          reason: "pending_verification_proposal",
+          stats,
+        });
+        await persistRunningStatus(contact.id);
+      }
       continue;
     }
 
     stats.checked += 1;
     try {
+      if (args.source === "manual") {
+        console.info("[contact-profile-verification:manual] Contact started", {
+          locationId: args.locationId,
+          contactId: contact.id,
+          checked: stats.checked,
+          batchSize,
+        });
+        await persistRunningStatus(contact.id);
+      }
       const result = await verifyContactProfile({
         locationId: args.locationId,
         contactId: contact.id,
@@ -258,10 +302,28 @@ async function runForLocation(args: {
       if (!result.success) {
         stats.failures += 1;
         await recordFailure({ contact, now: args.now, error: result.error || "Verification failed." });
+        if (args.source === "manual") {
+          console.info("[contact-profile-verification:manual] Contact failed", {
+            locationId: args.locationId,
+            contactId: contact.id,
+            error: result.error || "Verification failed.",
+            stats,
+          });
+          await persistRunningStatus(contact.id);
+        }
         continue;
       }
       if (!result.assessment && /pending contact verification proposal/i.test(String(result.reason || ""))) {
         stats.skipped += 1;
+        if (args.source === "manual") {
+          console.info("[contact-profile-verification:manual] Contact skipped", {
+            locationId: args.locationId,
+            contactId: contact.id,
+            reason: "pending_verification_proposal",
+            stats,
+          });
+          await persistRunningStatus(contact.id);
+        }
         continue;
       }
 
@@ -279,6 +341,16 @@ async function runForLocation(args: {
           stats.reprocessedCampaignBlocks += reprocessed.reprocessed;
         }
       }
+      if (args.source === "manual") {
+        console.info("[contact-profile-verification:manual] Contact completed", {
+          locationId: args.locationId,
+          contactId: contact.id,
+          status: result.assessment?.status || (result.created ? "proposal_created" : "unchanged"),
+          createdProposal: Boolean(result.created),
+          stats,
+        });
+        await persistRunningStatus(contact.id);
+      }
     } catch (error: any) {
       stats.failures += 1;
       await recordFailure({
@@ -287,6 +359,15 @@ async function runForLocation(args: {
         error: error?.message || "Verification failed.",
       });
       console.error("[contact-profile-verification:cron] Contact failed:", contact.id, error);
+      if (args.source === "manual") {
+        console.info("[contact-profile-verification:manual] Contact failed", {
+          locationId: args.locationId,
+          contactId: contact.id,
+          error: error?.message || "Verification failed.",
+          stats,
+        });
+        await persistRunningStatus(contact.id);
+      }
     }
   }
 
@@ -299,9 +380,17 @@ async function runForLocation(args: {
     mode: settings.mode,
     batchSize,
     stats,
+    currentContactId: null,
     error: stats.failures > 0 ? `${stats.failures} contact(s) failed.` : null,
   };
   await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
+  if (args.source === "manual") {
+    console.info("[contact-profile-verification:manual] Batch finished", {
+      locationId: args.locationId,
+      status: status.status,
+      stats,
+    });
+  }
   return stats;
 }
 

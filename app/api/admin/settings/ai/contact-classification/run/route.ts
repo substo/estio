@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { autoApplyConfidentContactVerificationProposals } from "@/lib/ai/contact-verification/service";
 import {
     getContactProfileVerificationQueueStatus,
     runContactProfileVerificationCron,
@@ -22,6 +23,11 @@ export async function POST(request: NextRequest) {
             source: "manual",
             force: true,
         });
+        const autoApply = await autoApplyConfidentContactVerificationProposals({
+            locationId: authorization.locationId,
+            actorUserId: null,
+            limit: Number(body?.autoApplyLimit || 200),
+        });
         const status = await getContactProfileVerificationQueueStatus({ locationId: authorization.locationId });
         console.info("[contact-classification:run] Processed batch", {
             locationId: authorization.locationId,
@@ -29,9 +35,11 @@ export async function POST(request: NextRequest) {
             verified: stats.verified,
             proposals: stats.proposals,
             failures: stats.failures,
+            applied: autoApply.applied,
+            autoApplyFailures: autoApply.failures,
             queued: status.queued,
         });
-        return NextResponse.json({ success: true, stats, status });
+        return NextResponse.json({ success: true, stats, autoApply, status });
     } catch (error: unknown) {
         console.error("[contact-classification:run] Error:", error);
         return NextResponse.json(

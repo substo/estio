@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { autoApplyConfidentContactVerificationProposals } from "@/lib/ai/contact-verification/service";
 import {
     getContactProfileVerificationQueueStatus,
-    runContactProfileVerificationCron,
     triggerGlobalContactProfileRecertification,
 } from "@/lib/ai/contact-profile-verification/cron";
 import { normalizeContactProfileVerificationBatchSize } from "@/lib/ai/contact-profile-verification/config";
@@ -26,27 +25,12 @@ export async function POST(request: NextRequest) {
             limit: 200,
         });
         const queued = await triggerGlobalContactProfileRecertification({ locationId: authorization.locationId });
-        const stats = await runContactProfileVerificationCron({
-            locationId: authorization.locationId,
-            batchSize,
-            source: "manual",
-            force: true,
-        });
-        const secondAutoApply = await autoApplyConfidentContactVerificationProposals({
-            locationId: authorization.locationId,
-            actorUserId: null,
-            limit: 200,
-        });
         const status = await getContactProfileVerificationQueueStatus({ locationId: authorization.locationId });
 
-        console.info("[contact-classification:verify-now] Verified contacts", {
+        console.info("[contact-classification:verify-now] Started contact verification", {
             locationId: authorization.locationId,
             queued: queued.due,
-            checked: stats.checked,
-            verified: stats.verified,
-            proposals: stats.proposals,
-            failures: stats.failures,
-            applied: Number(firstAutoApply.applied || 0) + Number(secondAutoApply.applied || 0),
+            applied: Number(firstAutoApply.applied || 0),
             remainingQueued: status.queued,
             pendingReview: status.pendingReview,
         });
@@ -55,9 +39,7 @@ export async function POST(request: NextRequest) {
             success: true,
             batchSize,
             queued,
-            stats,
             firstAutoApply,
-            secondAutoApply,
             status,
         });
     } catch (error: unknown) {
