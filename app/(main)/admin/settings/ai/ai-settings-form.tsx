@@ -79,6 +79,7 @@ type ContactProfileVerificationLastRun = {
 
 type ContactProfileVerificationSettings = {
     mode?: string;
+    model?: string;
     newContactDelayHours?: number;
     recertificationDays?: number;
     recertifyOnNewActivity?: boolean;
@@ -543,6 +544,23 @@ function LeadIntelligenceSection({
                     <p className="text-[10px] text-muted-foreground">
                         Automatic classifies new contacts and updates requirements after new contact messages.
                     </p>
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="contactProfileVerificationModel" className="text-xs text-slate-500 uppercase tracking-wider">
+                        Contact Classification model
+                    </Label>
+                    <select
+                        id="contactProfileVerificationModel"
+                        name="contactProfileVerificationModel"
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                        defaultValue={String(verification.model || fallbackModel)}
+                    >
+                        {modelOptions.map((model) => (
+                            <option key={model.value} value={model.value}>
+                                {model.label}
+                            </option>
+                        ))}
+                    </select>
                 </div>
                 <div className="grid gap-2">
                     <Label htmlFor="requirementsIntelligenceModel" className="text-xs text-slate-500 uppercase tracking-wider">

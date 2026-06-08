@@ -184,7 +184,10 @@ export async function updateAiSettings(
                 ? leadIntelligenceModeRaw
                 : formData.get("contactProfileVerificationMode");
         const contactProfileVerificationMode = normalizeContactProfileVerificationMode(mappedContactProfileVerificationMode);
-        const defaultReplyLanguage = normalizeReplyLanguage(formData.get("defaultReplyLanguage")) || DEFAULT_REPLY_LANGUAGE;
+        const contactProfileVerificationModel = normalizeOptionalModelOverride(formData.get("contactProfileVerificationModel"))
+            || requirementsIntelligenceModel
+            || transcriptionModel;
+        const defaultReplyLanguage = normalizeReplyLanguage(String(formData.get("defaultReplyLanguage") || "")) || DEFAULT_REPLY_LANGUAGE;
         const payload = {
             ...existingPayload,
             googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
@@ -215,6 +218,7 @@ export async function updateAiSettings(
             contactProfileVerification: {
                 ...existingContactProfileVerification,
                 mode: contactProfileVerificationMode,
+                model: contactProfileVerificationModel,
                 newContactDelayHours: normalizeContactProfileVerificationDelayHours(formData.get("contactProfileVerificationNewContactDelayHours"), existingContactProfileVerification.newContactDelayHours ?? 0),
                 recertificationDays: normalizeContactProfileVerificationRecertificationDays(formData.get("contactProfileVerificationRecertificationDays"), existingContactProfileVerification.recertificationDays ?? 90),
                 recertifyOnNewActivity: false,

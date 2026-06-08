@@ -24,8 +24,13 @@ function getDefaultRequirementsIntelligence(model?: string | null) {
     };
 }
 
-function getDefaultContactProfileVerification(value?: unknown) {
-    return normalizeContactProfileVerificationConfig(value);
+function getDefaultContactProfileVerification(value?: unknown, model?: string | null) {
+    const normalized = normalizeContactProfileVerificationConfig(value);
+    const configuredModel = String((value as any)?.model || "").trim();
+    return {
+        ...normalized,
+        model: configuredModel || model || normalized.model,
+    };
 }
 
 function buildAiInitialData({
@@ -64,7 +69,10 @@ function buildAiInitialData({
             requirementsIntelligence: aiPayload?.requirementsIntelligence || getDefaultRequirementsIntelligence(
                 aiPayload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction
             ),
-            contactProfileVerification: getDefaultContactProfileVerification(aiPayload?.contactProfileVerification),
+            contactProfileVerification: getDefaultContactProfileVerification(
+                aiPayload?.contactProfileVerification,
+                aiPayload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction || aiPayload?.googleAiModel || siteConfig?.googleAiModel
+            ),
         };
     }
 
@@ -76,7 +84,10 @@ function buildAiInitialData({
         requirementsIntelligence: aiPayload?.requirementsIntelligence || getDefaultRequirementsIntelligence(
             siteConfig?.googleAiModelExtraction
         ),
-        contactProfileVerification: getDefaultContactProfileVerification(aiPayload?.contactProfileVerification),
+        contactProfileVerification: getDefaultContactProfileVerification(
+            aiPayload?.contactProfileVerification,
+            siteConfig?.googleAiModelExtraction || siteConfig?.googleAiModel
+        ),
     };
 }
 
@@ -121,7 +132,10 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             model: GEMINI_FLASH_STABLE_FALLBACK,
             lastRun: null,
         },
-        contactProfileVerification: initialData?.contactProfileVerification || getDefaultContactProfileVerification(),
+        contactProfileVerification: initialData?.contactProfileVerification || getDefaultContactProfileVerification(
+            null,
+            initialData?.googleAiModelExtraction || initialData?.googleAiModel
+        ),
     };
 
     return (

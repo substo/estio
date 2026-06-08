@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 
 export const CONTACT_PROFILE_VERIFICATION_MODES = [
   "off",
@@ -31,6 +32,7 @@ export const contactProfileVerificationLastRunSchema = z.object({
 
 export const contactProfileVerificationConfigSchema = z.object({
   mode: z.enum(CONTACT_PROFILE_VERIFICATION_MODES).default("daily_due_and_new_contacts"),
+  model: z.string().trim().min(1).default(GEMINI_FLASH_STABLE_FALLBACK),
   newContactDelayHours: z.number().int().min(0).max(24 * 30).default(0),
   recertificationDays: z.number().int().min(1).max(3650).default(90),
   recertifyOnNewActivity: z.boolean().default(true),
@@ -73,6 +75,7 @@ export function normalizeContactProfileVerificationConfig(value: unknown): Conta
   return contactProfileVerificationConfigSchema.parse({
     ...source,
     mode: normalizeContactProfileVerificationMode(source.mode),
+    model: String(source.model || "").trim() || GEMINI_FLASH_STABLE_FALLBACK,
     newContactDelayHours: normalizeContactProfileVerificationDelayHours(source.newContactDelayHours),
     recertificationDays: normalizeContactProfileVerificationRecertificationDays(source.recertificationDays),
     batchSize: normalizeContactProfileVerificationBatchSize(source.batchSize),

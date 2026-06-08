@@ -1,5 +1,11 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
+import { calculateRunCost } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
 import {
   buildCanonicalContactName,
   extractPropertyRefsFromLeadText,
@@ -7,6 +13,7 @@ import {
   inferLeadContactRoleFromSignals,
   normalizeWhitespace,
   parseContactPersonNameFromDisplayName,
+  type InferredLeadContactRole,
 } from "@/lib/contacts/name-builder";
 import {
   profileVerificationFields,
@@ -17,6 +24,7 @@ type AnyRecord = Record<string, any>;
 
 const CONTACT_VERIFICATION_MODEL = "contact-profile-name-agent-v1";
 const CONTACT_VERIFICATION_PROVIDER = "deterministic";
+const CONTACT_VERIFICATION_AI_PROVIDER = "google_gemini";
 
 const CONTACT_TYPES = new Set([
   "Lead",
@@ -51,9 +59,33 @@ export type ContactVerificationStatus =
 
 export type ContactVerificationPatch = Partial<Record<typeof VERIFICATION_FIELDS[number], string | null>>;
 
+type ContactVerificationAssessment = ReturnType<typeof buildContactVerificationAssessment>;
+
+type ContactVerificationRunMetadata = {
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  fallbackReason?: string | null;
+};
+
 function normalizeText(value: unknown, max = 4000): string | null {
   const normalized = String(value || "").trim();
   return normalized ? normalized.slice(0, max) : null;
+}
+
+function extractJsonObject(text: string): any {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("Empty AI response.");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("AI response did not contain JSON.");
+    return JSON.parse(match[0]);
+  }
 }
 
 function logContactVerificationTiming(event: string, fields: Record<string, unknown> = {}) {
@@ -138,6 +170,40 @@ function verificationStatusForPatch(patch: ContactVerificationPatch, inferredRol
     return "verified_lead";
   }
   return "needs_review";
+}
+
+function normalizeContactVerificationStatus(value: unknown): ContactVerificationStatus | null {
+  const status = String(value || "").trim();
+  return [
+    "verified_lead",
+    "needs_review",
+    "likely_agent",
+    "likely_owner",
+    "not_a_lead",
+  ].includes(status) ? status as ContactVerificationStatus : null;
+}
+
+function normalizeInferredLeadContactRole(value: unknown): InferredLeadContactRole | null {
+  const role = String(value || "").trim();
+  return role === "Lead" || role === "Owner" || role === "Agent"
+    ? role
+    : null;
+}
+
+function normalizeEvidenceItems(value: unknown): AnyRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 12).flatMap((item, index) => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as AnyRecord;
+    const quote = normalizeText(source.quote, 800);
+    const field = normalizeText(source.field, 120);
+    if (!quote || !field) return [];
+    return [{
+      sourceId: normalizeText(source.sourceId, 120) || `ai_evidence_${index + 1}`,
+      field,
+      quote,
+    }];
+  });
 }
 
 function leadGoalProfileLabel(goal: unknown): string {
@@ -323,6 +389,223 @@ export function buildContactVerificationAssessment(args: {
   };
 }
 
+async function getContactProfileVerificationModel(locationId: string): Promise<string> {
+  const doc = await settingsService.getDocument<any>({
+    scopeType: "LOCATION",
+    scopeId: locationId,
+    domain: SETTINGS_DOMAINS.LOCATION_AI,
+  }).catch(() => null);
+  const rawConfig = doc?.payload?.contactProfileVerification;
+  const config = normalizeContactProfileVerificationConfig(rawConfig);
+  const configured = String(rawConfig?.model || "").trim();
+  if (configured) return configured;
+  return String(doc?.payload?.googleAiModelExtraction || doc?.payload?.googleAiModel || "").trim() || config.model;
+}
+
+function buildContactVerificationPrompt(args: {
+  contact: AnyRecord;
+  recentMessages: Array<{ body?: string | null; direction?: string | null; createdAt?: Date | string | null }>;
+  deterministicAssessment: ContactVerificationAssessment;
+}) {
+  const snapshot = getContactVerificationSnapshot(args.contact);
+  const messages = args.recentMessages.map((message) => ({
+    direction: message.direction || null,
+    createdAt: message.createdAt
+      ? new Date(message.createdAt).toISOString()
+      : null,
+    body: normalizeText(message.body, 2000),
+  })).filter((message) => message.body);
+
+  return `You classify real-estate CRM contacts before buyer/renter requirement automation runs.
+
+Return JSON only:
+{
+  "status": "verified_lead"|"needs_review"|"likely_agent"|"likely_owner"|"not_a_lead",
+  "inferredRole": "Lead"|"Agent"|"Owner"|"Partner"|"Associate"|"Maintenance"|"Contact"|"Tenant"|"WhatsAppGroup",
+  "proposedPatch": {
+    "contactType": string|null,
+    "leadGoal": "To Buy"|"To Rent"|"To List"|"Other"|null,
+    "name": string|null,
+    "firstName": string|null,
+    "lastName": string|null,
+    "qualificationStage": string|null,
+    "requirementSummary": string|null
+  },
+  "evidence": [{"sourceId": string, "field": string, "quote": string}],
+  "confidence": number,
+  "reasoning": string
+}
+
+Rules:
+- Classify buyer/renter leads as verified_lead only when the contact is a real buyer or renter lead.
+- Classify agents, owners, partners, associates, maintenance contacts, tenants, groups, and unrelated contacts as non-leads.
+- Use likely_agent or likely_owner when the strongest correction is agent or owner.
+- Use not_a_lead for other non-lead contacts.
+- Use needs_review when buy/rent intent or role is ambiguous.
+- Propose only fields that should change. Use null only to clear allowed nullable fields.
+- Do not invent personal names, budgets, or requirements.
+- If changing contactType away from Lead, clear leadGoal and set qualificationStage to not_a_lead.
+- Keep evidence quotes short and grounded in the input.
+
+Current contact snapshot:
+${JSON.stringify(snapshot, null, 2)}
+
+Additional contact context:
+${JSON.stringify({
+    rawName: args.contact.name || null,
+    message: normalizeText(args.contact.message, 2000),
+    notes: normalizeText(args.contact.notes, 2000),
+    requirementStatus: args.contact.requirementStatus || null,
+    requirementSummary: normalizeText(args.contact.requirementSummary, 2000),
+    requirementOtherDetails: normalizeText(args.contact.requirementOtherDetails, 2000),
+  }, null, 2)}
+
+Recent messages:
+${JSON.stringify(messages, null, 2)}
+
+Deterministic baseline for comparison:
+${JSON.stringify({
+    status: args.deterministicAssessment.status,
+    inferredRole: args.deterministicAssessment.inferredRole,
+    proposedPatch: args.deterministicAssessment.proposedPatch,
+    reasoning: args.deterministicAssessment.reasoning,
+  }, null, 2)}`;
+}
+
+function normalizeAiContactVerificationAssessment(args: {
+  raw: any;
+  contact: AnyRecord;
+  deterministicAssessment: ContactVerificationAssessment;
+}): ContactVerificationAssessment {
+  const proposedPatch = normalizeContactVerificationPatch(args.raw?.proposedPatch || {});
+  const inferredRole = normalizeInferredLeadContactRole(args.raw?.inferredRole)
+    || normalizeInferredLeadContactRole(proposedPatch.contactType)
+    || args.deterministicAssessment.inferredRole;
+  const status = normalizeContactVerificationStatus(args.raw?.status)
+    || verificationStatusForPatch(proposedPatch, inferredRole, args.contact);
+  const confidence = Number(args.raw?.confidence);
+  const reasoning = normalizeText(args.raw?.reasoning, 4000)
+    || args.deterministicAssessment.reasoning;
+  const evidence = normalizeEvidenceItems(args.raw?.evidence);
+  const snapshot = getContactVerificationSnapshot(args.contact);
+  const hasChanges = getContactVerificationPatchChanges(snapshot, proposedPatch).length > 0;
+
+  if (!normalizeContactVerificationStatus(status)) {
+    throw new Error("AI response did not include a valid contact classification status.");
+  }
+  if (!hasChanges && status === "needs_review" && evidence.length === 0) {
+    throw new Error("AI response did not include usable classification evidence.");
+  }
+
+  return {
+    status,
+    inferredRole,
+    snapshot,
+    proposedPatch,
+    evidence: evidence.length > 0 ? evidence : args.deterministicAssessment.evidence,
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : args.deterministicAssessment.confidence,
+    reasoning,
+    hasChanges,
+  };
+}
+
+async function buildModelBackedContactVerificationAssessment(args: {
+  locationId: string;
+  contact: AnyRecord;
+  recentMessages: Array<{ body?: string | null; direction?: string | null; createdAt?: Date | string | null }>;
+  deterministicAssessment: ContactVerificationAssessment;
+}): Promise<{
+  assessment: ContactVerificationAssessment;
+  metadata: ContactVerificationRunMetadata;
+}> {
+  const modelName = await getContactProfileVerificationModel(args.locationId);
+  const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
+  if (!apiKey) {
+    throw new Error("No AI API key configured.");
+  }
+
+  const prompt = buildContactVerificationPrompt({
+    contact: args.contact,
+    recentMessages: args.recentMessages,
+    deterministicAssessment: args.deterministicAssessment,
+  });
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 0.1,
+    },
+  });
+  const result = await model.generateContent(prompt);
+  const parsed = extractJsonObject(result.response.text());
+  const assessment = normalizeAiContactVerificationAssessment({
+    raw: parsed,
+    contact: args.contact,
+    deterministicAssessment: args.deterministicAssessment,
+  });
+  const usage = (result.response.usageMetadata || {}) as Record<string, unknown>;
+  const promptTokens = Number(usage.promptTokenCount || 0);
+  const completionTokens = Number(usage.candidatesTokenCount || 0);
+  const totalTokens = Number(usage.totalTokenCount || promptTokens + completionTokens);
+  const estimatedCostUsd = calculateRunCost(modelName, promptTokens, completionTokens);
+
+  return {
+    assessment,
+    metadata: {
+      provider: CONTACT_VERIFICATION_AI_PROVIDER,
+      model: modelName,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      estimatedCostUsd,
+      fallbackReason: null,
+    },
+  };
+}
+
+async function resolveContactVerificationAssessment(args: {
+  locationId: string;
+  contact: AnyRecord;
+  recentMessages: Array<{ body?: string | null; direction?: string | null; createdAt?: Date | string | null }>;
+}): Promise<{
+  assessment: ContactVerificationAssessment;
+  metadata: ContactVerificationRunMetadata;
+}> {
+  const deterministicAssessment = buildContactVerificationAssessment({
+    contact: args.contact,
+    recentMessages: args.recentMessages,
+  });
+
+  try {
+    return await buildModelBackedContactVerificationAssessment({
+      locationId: args.locationId,
+      contact: args.contact,
+      recentMessages: args.recentMessages,
+      deterministicAssessment,
+    });
+  } catch (error: any) {
+    const fallbackReason = error?.message || "Gemini contact classification failed.";
+    console.warn("[contact-verification] Falling back to deterministic classification:", {
+      locationId: args.locationId,
+      contactId: args.contact.id,
+      reason: fallbackReason,
+    });
+    return {
+      assessment: deterministicAssessment,
+      metadata: {
+        provider: CONTACT_VERIFICATION_PROVIDER,
+        model: CONTACT_VERIFICATION_MODEL,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        estimatedCostUsd: 0,
+        fallbackReason,
+      },
+    };
+  }
+}
+
 function profileVerificationDataForAssessment(args: {
   assessment: ReturnType<typeof buildContactVerificationAssessment>;
   sourceType?: string;
@@ -465,7 +748,11 @@ export async function verifyContactProfile(args: {
   }
 
   const assessmentStartedAt = Date.now();
-  const assessment = buildContactVerificationAssessment({ contact, recentMessages });
+  const { assessment, metadata } = await resolveContactVerificationAssessment({
+    locationId: args.locationId,
+    contact,
+    recentMessages,
+  });
   const assessmentMs = Date.now() - assessmentStartedAt;
 
   void securelyRecordAiUsage({
@@ -475,10 +762,10 @@ export async function verifyContactProfile(args: {
     resourceId: contact.id,
     featureArea: "contact_verification",
     action: "profile_scan",
-    provider: CONTACT_VERIFICATION_PROVIDER,
-    model: CONTACT_VERIFICATION_MODEL,
-    inputTokens: 0,
-    outputTokens: 0,
+    provider: metadata.provider,
+    model: metadata.model,
+    inputTokens: metadata.promptTokens,
+    outputTokens: metadata.completionTokens,
     metadata: {
       conversationId: args.conversationId || null,
       sourceType: args.sourceType || "manual_verification",
@@ -486,6 +773,9 @@ export async function verifyContactProfile(args: {
       inferredRole: assessment.inferredRole,
       hasChanges: assessment.hasChanges,
       recentMessageCount: recentMessages.length,
+      totalTokens: metadata.totalTokens,
+      estimatedCostUsd: metadata.estimatedCostUsd,
+      fallbackReason: metadata.fallbackReason || null,
       durationMs: Date.now() - startedAt,
       contactLookupMs,
       pendingMs,
@@ -529,11 +819,12 @@ export async function verifyContactProfile(args: {
       inferredRole: assessment.inferredRole,
       hasChanges: false,
       proposalCreated: false,
-      model: CONTACT_VERIFICATION_MODEL,
-      provider: CONTACT_VERIFICATION_PROVIDER,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
+      model: metadata.model,
+      provider: metadata.provider,
+      promptTokens: metadata.promptTokens,
+      completionTokens: metadata.completionTokens,
+      totalTokens: metadata.totalTokens,
+      fallbackReason: metadata.fallbackReason || null,
     });
     return { success: true as const, created: false as const, reason: assessment.reasoning, assessment };
   }
@@ -553,11 +844,11 @@ export async function verifyContactProfile(args: {
       evidence: assessment.evidence,
       confidence: assessment.confidence,
       reasoning: assessment.reasoning,
-      model: CONTACT_VERIFICATION_MODEL,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      estimatedCostUsd: 0,
+      model: metadata.model,
+      promptTokens: metadata.promptTokens,
+      completionTokens: metadata.completionTokens,
+      totalTokens: metadata.totalTokens,
+      estimatedCostUsd: metadata.estimatedCostUsd,
     },
   });
 
@@ -576,11 +867,12 @@ export async function verifyContactProfile(args: {
     hasChanges: true,
     proposalCreated: true,
     proposalId: proposal.id,
-    model: CONTACT_VERIFICATION_MODEL,
-    provider: CONTACT_VERIFICATION_PROVIDER,
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
+    model: metadata.model,
+    provider: metadata.provider,
+    promptTokens: metadata.promptTokens,
+    completionTokens: metadata.completionTokens,
+    totalTokens: metadata.totalTokens,
+    fallbackReason: metadata.fallbackReason || null,
   });
 
   return { success: true as const, created: true as const, proposal, assessment };
