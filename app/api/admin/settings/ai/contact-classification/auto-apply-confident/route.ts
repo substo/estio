@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     try {
         const result = await autoApplyConfidentContactVerificationProposals({
             locationId: authorization.locationId,
-            actorUserId: authorization.userId,
+            actorUserId: null,
             limit: Number(body?.limit || 100),
         });
         const status = await getContactProfileVerificationQueueStatus({ locationId: authorization.locationId });
