@@ -61,10 +61,16 @@ test("buildPropertyMessageInstruction gives new listings a chat line shape", () 
         purpose: "new_listing",
     });
 
-    assert.match(instruction, /quick personal hook, 2-3 key facts, one light benefit/i);
+    assert.match(instruction, /thread-aware hook, 2-3 key facts, one light benefit/i);
     assert.match(instruction, /clear CTA and the URL on its own line/i);
+    assert.match(instruction, /compare against the recent outbound messages/i);
+    assert.match(instruction, /Do not reuse the same opener, CTA, or phrase pattern/i);
+    assert.match(instruction, /another similar listing after no client reply/i);
     assert.match(instruction, /facts first and benefits lightly/i);
     assert.match(instruction, /Avoid brochure language, over-explaining investment logic, or salesy claims/i);
+    assert.match(instruction, /simple, clear English/i);
+    assert.match(instruction, /Avoid idioms or vague phrases such as fancy a look/i);
+    assert.match(instruction, /Would you like to view it/i);
     assert.match(instruction, /Use at most one simple emoji/i);
     assert.match(instruction, /Never return one bulky paragraph/);
     assert.match(instruction, /Do not put more than 1-2 short sentences on the same line or paragraph/);

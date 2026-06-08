@@ -816,7 +816,10 @@ export async function generateDraft(context: CoordinationContext) {
             channel: channelName,
         });
 
-        const hasPriorOutbound = messages.some(m => m.direction === "outbound" && m.body.trim().length > 0);
+        const meaningfulMessages = messages.filter(m => (m.body || "").trim().length > 0);
+        const hasPriorOutbound = meaningfulMessages.some(m => m.direction === "outbound");
+        const latestMeaningfulMessage = meaningfulMessages[meaningfulMessages.length - 1] || null;
+        const isContinuingAfterAgentMessage = latestMeaningfulMessage?.direction === "outbound";
         const isFirstOutreach = !hasPriorOutbound;
 
         const messagesWithTimestamps = messages.filter((m): m is DraftMessage & { createdAt: Date } => !!m.createdAt);
@@ -833,9 +836,11 @@ export async function generateDraft(context: CoordinationContext) {
         const isNewConversationDay = !!(latestTimestamp && previousTimestamp && latestTimestamp.toDateString() !== previousTimestamp.toDateString());
         const hasLongBreak = hoursBetweenLastTwoMessages !== null && hoursBetweenLastTwoMessages >= NAME_GREETING_LONG_BREAK_HOURS;
 
-        const allowNameGreeting = !!contactFirstName && (isFirstOutreach || isNewConversationDay || hasLongBreak);
+        const allowNameGreeting = !!contactFirstName && !isContinuingAfterAgentMessage && (isFirstOutreach || isNewConversationDay || hasLongBreak);
         const greetingDecisionReason = !contactFirstName
             ? "No contact first name is available."
+            : isContinuingAfterAgentMessage
+                ? "The agent is continuing after a recent outbound message with no client reply; repeating a name greeting would sound scripted."
             : isFirstOutreach
                 ? "This is first outreach (no prior outbound message in history)."
                 : isNewConversationDay

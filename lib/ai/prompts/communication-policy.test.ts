@@ -141,6 +141,9 @@ test("conversational messaging contract constrains chat drafts to short readable
     assert.match(contract, /one idea, question, or fact per short line/i);
     assert.match(contract, /Ask at most one clear question/i);
     assert.match(contract, /facts first and benefits lightly/i);
+    assert.match(contract, /Avoid repeating the same opener, CTA, or phrase pattern/i);
+    assert.match(contract, /simple, clear English over idioms/i);
+    assert.match(contract, /fancy a look/i);
     assert.match(contract, /Use emojis sparingly/i);
     assert.match(contract, /URLs on their own line after a blank line/i);
     assert.match(contract, /Hope you are well/i);
