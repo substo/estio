@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
 import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
 import { contactProfileVerificationConfigSchema } from "@/lib/ai/contact-profile-verification/config";
+import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 
 const nullableTrimmedString = z.string().trim().nullish().transform((v) => v ?? null);
@@ -21,12 +22,12 @@ const defaultReplyLanguageSchema = z.string().trim().nullish().transform((value,
 
 const requirementsIntelligenceSchema = z.object({
     mode: z.enum(["off", "manual_only", "new_activity", "daily_and_new_activity"]).default("manual_only"),
-    model: z.string().trim().min(1),
+    model: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     allowedPropertyDomains: z.array(z.string().trim().min(1)).default([]),
     activityDebounceMinutes: z.number().int().min(0).max(24 * 60).default(24 * 60),
     autoReprocessCampaignCandidates: z.boolean().default(true),
     lastRun: z.unknown().nullable().optional(),
-}).passthrough();
+}).passthrough().default({});
 
 const navLinkSchema: z.ZodType<any> = z.lazy(() => z.object({
     id: z.string().optional(),
@@ -84,11 +85,11 @@ const publicSiteSchema = z.object({
 }).passthrough();
 
 const aiSchema = z.object({
-    googleAiModel: z.string().trim().min(1),
-    googleAiModelExtraction: z.string().trim().min(1),
-    googleAiModelDesign: z.string().trim().min(1),
-    googleAiModelTranscription: z.string().trim().min(1),
-    googleAiModelTranslation: z.string().trim().min(1),
+    googleAiModel: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
+    googleAiModelExtraction: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
+    googleAiModelDesign: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
+    googleAiModelTranscription: z.string().trim().min(1).default(GEMINI_FLASH_STABLE_FALLBACK),
+    googleAiModelTranslation: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     defaultReplyLanguage: defaultReplyLanguageSchema,
     precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,
@@ -97,7 +98,7 @@ const aiSchema = z.object({
         visionIdPrompt: nullableTrimmedString,
         icebreakerPrompt: nullableTrimmedString,
         qualifierPrompt: nullableTrimmedString,
-    }).passthrough(),
+    }).passthrough().default({}),
     automationConfig: AiAutomationConfigSchema.default({}),
     requirementsIntelligence: requirementsIntelligenceSchema,
     contactProfileVerification: contactProfileVerificationConfigSchema,
