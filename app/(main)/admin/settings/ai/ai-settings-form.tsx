@@ -95,6 +95,14 @@ type ContactClassificationQueueStatus = {
     latestQueuedAt?: string | null;
 };
 
+type ContactClassificationProgress = {
+    queuedCount: number;
+    eligibleCount: number;
+    failedCount: number;
+    progressPercent: number;
+    statusLabel: string;
+};
+
 type AiSettingsInitialData = {
     [key: string]: unknown;
     defaultReplyLanguage?: string;
@@ -286,6 +294,45 @@ function hasInitialModelValue(initialData: AiSettingsInitialData, key: string): 
     return Boolean(getInitialStringValue(initialData, key));
 }
 
+function deriveContactClassificationProgress(args: {
+    queue: ContactClassificationQueueStatus | null | undefined;
+    runningVerification: boolean;
+    runningRecertification: boolean;
+}): ContactClassificationProgress {
+    const queuedCount = Number(args.queue?.queued || 0);
+    const eligibleCount = Number(args.queue?.eligible || 0);
+    const failedCount = Number(args.queue?.failed || 0);
+    const progressPercent = eligibleCount > 0
+        ? Math.max(0, Math.min(100, Math.round(((eligibleCount - queuedCount) / eligibleCount) * 100)))
+        : 100;
+    const statusLabel = args.runningVerification
+        ? "Processing the next batch"
+        : args.runningRecertification
+            ? "Queueing contacts"
+            : queuedCount > 0
+                ? "Queued for classification"
+                : failedCount > 0
+                    ? "Needs attention"
+                    : "Up to date";
+
+    return {
+        queuedCount,
+        eligibleCount,
+        failedCount,
+        progressPercent,
+        statusLabel,
+    };
+}
+
+async function readJsonResponse<T>(response: Response, fallbackError: string): Promise<T> {
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success) {
+        throw new Error(String(result?.error || `${fallbackError} (${response.status}).`));
+    }
+
+    return result as T;
+}
+
 function ModelSelectionSection({
     initialData,
     modelOptions,
@@ -459,20 +506,12 @@ function LeadIntelligenceSection({
         && verification.autoReprocessCampaignBlocks !== false;
     const runningLeadIntelligence = runningRequirementsScan || runningVerification;
     const requirementWaitHours = Math.max(0, Math.min(24, Math.round(Number(requirements.activityDebounceMinutes ?? 24 * 60) / 60)));
-    const queuedCount = Number(contactClassificationQueue?.queued || 0);
-    const eligibleCount = Number(contactClassificationQueue?.eligible || 0);
     const processedCount = Number(contactProfileVerificationLastRun?.stats?.checked || 0);
-    const failedCount = Number(contactClassificationQueue?.failed || 0);
-    const progressPercent = eligibleCount > 0 ? Math.max(0, Math.min(100, Math.round(((eligibleCount - queuedCount) / eligibleCount) * 100))) : 100;
-    const classificationStatus = runningVerification
-        ? "Processing the next batch"
-        : runningRecertification
-            ? "Queueing contacts"
-            : queuedCount > 0
-                ? "Queued for classification"
-                : failedCount > 0
-                    ? "Needs attention"
-                    : "Up to date";
+    const classificationProgress = deriveContactClassificationProgress({
+        queue: contactClassificationQueue,
+        runningVerification,
+        runningRecertification,
+    });
 
     return (
         <div className="space-y-3">
@@ -532,7 +571,7 @@ function LeadIntelligenceSection({
                             <div className="text-[10px] text-muted-foreground">Classifies buyer/renter lead, owner, agent, not a lead, or needs review.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
                             <div className="text-[10px] text-muted-foreground">Last queued: {formatDateLabel(contactClassificationQueue?.latestQueuedAt)}</div>
-                            <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationStatus}</div>
+                            <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationProgress.statusLabel}</div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningVerification} onClick={onRunVerification}>
@@ -546,8 +585,8 @@ function LeadIntelligenceSection({
                         </div>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-5">
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Queued</p><p className="text-sm font-semibold">{queuedCount}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{eligibleCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Queued</p><p className="text-sm font-semibold">{classificationProgress.queuedCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{classificationProgress.eligibleCount}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{processedCount}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Needs Review</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.proposals || 0)}</p></div>
@@ -556,17 +595,17 @@ function LeadIntelligenceSection({
                         <div className="h-2 overflow-hidden rounded-full bg-slate-200">
                             <div
                                 className="h-full rounded-full bg-emerald-500 transition-all"
-                                style={{ width: `${progressPercent}%` }}
+                                style={{ width: `${classificationProgress.progressPercent}%` }}
                             />
                         </div>
                         <div className="mt-1 flex flex-wrap justify-between gap-2 text-[10px] text-muted-foreground">
-                            <span>{queuedCount > 0 ? `${queuedCount} contact${queuedCount === 1 ? "" : "s"} waiting` : "No contacts waiting"}</span>
-                            <span>{progressPercent}% clear</span>
+                            <span>{classificationProgress.queuedCount > 0 ? `${classificationProgress.queuedCount} contact${classificationProgress.queuedCount === 1 ? "" : "s"} waiting` : "No contacts waiting"}</span>
+                            <span>{classificationProgress.progressPercent}% clear</span>
                         </div>
                     </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
                         Queue Contacts marks eligible contacts to be checked. Run Classification Now processes up to the configured batch size.
-                        Pending classification proposals: {pendingVerificationProposals}. Failed: {failedCount}.
+                        Pending classification proposals: {pendingVerificationProposals}. Failed: {classificationProgress.failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
                 </div>
@@ -1266,15 +1305,19 @@ export function AiSettingsForm({
     const hasConfiguredTranslationModel = hasInitialModelValue(initialData, "googleAiModelTranslation");
     const modelOptions = availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS;
 
+    function updateContactClassificationQueue(status: ContactClassificationQueueStatus | null | undefined) {
+        setContactClassificationQueue(status || null);
+        setContactClassificationQueueUpdatedAt(new Date().toISOString());
+    }
+
     async function refreshContactClassificationQueue() {
         const params = new URLSearchParams({ locationId });
         const response = await fetch(`/api/admin/settings/ai/contact-classification/queue-all?${params.toString()}`);
-        const result = await response.json().catch(() => null);
-        if (!response.ok || !result?.success) {
-            throw new Error(String(result?.error || `Could not load contact classification status (${response.status}).`));
-        }
-        setContactClassificationQueue(result.status || null);
-        setContactClassificationQueueUpdatedAt(new Date().toISOString());
+        const result = await readJsonResponse<{ success: true; status?: ContactClassificationQueueStatus | null }>(
+            response,
+            "Could not load contact classification status",
+        );
+        updateContactClassificationQueue(result.status);
         return result.status as ContactClassificationQueueStatus | null;
     }
 
@@ -1358,11 +1401,11 @@ export function AiSettingsForm({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ locationId, batchSize }),
             });
-            const result = await response.json().catch(() => null);
-            if (!result?.success) {
-                toast.error(String(result?.error || `Contact classification failed (${response.status}).`));
-                return;
-            }
+            const result = await readJsonResponse<{
+                success: true;
+                stats?: ContactProfileVerificationLastRunStats;
+                status?: ContactClassificationQueueStatus | null;
+            }>(response, "Contact classification failed");
             const stats = result.stats || {};
             setContactProfileVerificationLastRun({
                 status: Number(stats.failures || 0) > 0 ? "failed" : "completed",
@@ -1376,8 +1419,7 @@ export function AiSettingsForm({
                 error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
             });
             if (result.status) {
-                setContactClassificationQueue(result.status);
-                setContactClassificationQueueUpdatedAt(new Date().toISOString());
+                updateContactClassificationQueue(result.status);
             }
             toast.success(
                 `Contact classification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, created ${Number(stats.proposals || 0)} proposal${Number(stats.proposals || 0) === 1 ? "" : "s"}.`
@@ -1398,13 +1440,12 @@ export function AiSettingsForm({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ locationId }),
             });
-            const result = await response.json().catch(() => null);
-            if (!result?.success) {
-                toast.error(String(result?.error || `Could not queue contacts for classification (${response.status}).`));
-                return;
-            }
-            setContactClassificationQueue(result.status || null);
-            setContactClassificationQueueUpdatedAt(new Date().toISOString());
+            const result = await readJsonResponse<{
+                success: true;
+                due?: number;
+                status?: ContactClassificationQueueStatus | null;
+            }>(response, "Could not queue contacts for classification");
+            updateContactClassificationQueue(result.status);
             toast.success(`Queued ${Number(result.due || 0)} contact${Number(result.due || 0) === 1 ? "" : "s"} for classification.`);
         } catch (error: unknown) {
             toast.error(error instanceof Error ? error.message : "Could not queue contacts for classification.");
