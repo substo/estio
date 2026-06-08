@@ -11,10 +11,10 @@ export const CONTACT_PROFILE_VERIFICATION_MODES = [
 export type ContactProfileVerificationMode = typeof CONTACT_PROFILE_VERIFICATION_MODES[number];
 
 export const contactProfileVerificationLastRunSchema = z.object({
-  status: z.enum(["completed", "failed", "skipped"]).default("completed"),
+  status: z.enum(["running", "completed", "failed", "skipped"]).default("completed"),
   source: z.enum(["cron", "manual"]).default("cron"),
   startedAt: z.string().optional(),
-  finishedAt: z.string().optional(),
+  finishedAt: z.string().nullable().optional(),
   durationMs: z.number().int().nonnegative().default(0),
   mode: z.enum(CONTACT_PROFILE_VERIFICATION_MODES).default("daily_due_and_new_contacts"),
   batchSize: z.number().int().min(1).max(500).default(50),
@@ -27,6 +27,7 @@ export const contactProfileVerificationLastRunSchema = z.object({
     failures: z.number().int().nonnegative().default(0),
     reprocessedCampaignBlocks: z.number().int().nonnegative().default(0),
   }).default({}),
+  currentContactId: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
 }).passthrough();
 

@@ -33,3 +33,55 @@ test("location AI settings schema fills defaults for legacy payloads", () => {
     assert.equal(payload.requirementsIntelligence.model, GEMINI_FLASH_LATEST_ALIAS);
     assert.deepEqual(payload.requirementsIntelligence.allowedPropertyDomains, []);
 });
+
+test("location AI settings schema accepts running contact classification progress", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_AI, {
+        googleAiModel: GEMINI_FLASH_LATEST_ALIAS,
+        googleAiModelExtraction: GEMINI_FLASH_LATEST_ALIAS,
+        googleAiModelDesign: GEMINI_FLASH_LATEST_ALIAS,
+        googleAiModelTranscription: GEMINI_FLASH_STABLE_FALLBACK,
+        googleAiModelTranslation: GEMINI_FLASH_LATEST_ALIAS,
+        defaultReplyLanguage: "en",
+        precisionRemoveEnabled: false,
+        brandVoice: null,
+        outreachConfig: {},
+        automationConfig: {},
+        requirementsIntelligence: {},
+        contactProfileVerification: {
+            lastRun: {
+                status: "running",
+                source: "manual",
+                startedAt: "2026-06-08T19:00:00.000Z",
+                finishedAt: null,
+                durationMs: 1200,
+                mode: "manual_only",
+                batchSize: 5,
+                currentContactId: "contact_123",
+                stats: {
+                    locationsChecked: 1,
+                    checked: 1,
+                    verified: 0,
+                    proposals: 0,
+                    skipped: 0,
+                    failures: 0,
+                    reprocessedCampaignBlocks: 0,
+                },
+            },
+        },
+        whatsappTranscriptOnDemandEnabled: false,
+        whatsappTranscriptRetentionDays: 90,
+        whatsappTranscriptVisibility: "team",
+        viewingSessionRetentionDays: 90,
+        viewingSessionTranscriptVisibility: "team",
+        viewingSessionAiDisclosureRequired: true,
+        viewingSessionAiDisclosureVersion: "v1",
+        viewingSessionRawAudioStorageEnabled: false,
+        viewingSessionTranslationModel: null,
+        viewingSessionInsightsModel: null,
+        viewingSessionSummaryModel: null,
+    }) as any;
+
+    assert.equal(payload.contactProfileVerification.lastRun.status, "running");
+    assert.equal(payload.contactProfileVerification.lastRun.finishedAt, null);
+    assert.equal(payload.contactProfileVerification.lastRun.currentContactId, "contact_123");
+});
