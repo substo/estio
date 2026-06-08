@@ -4,6 +4,7 @@ import {
   buildContactVerificationAssessment,
   getContactVerificationPatchChanges,
   normalizeContactVerificationPatch,
+  shouldAutoApplyContactVerificationAssessment,
 } from "./service";
 
 test("verification proposes agent correction for lead with agent context", () => {
@@ -86,6 +87,7 @@ test("verification proposes buy lead goal from strong buying text", () => {
   assert.equal(result.status, "verified_lead");
   assert.equal(result.proposedPatch.leadGoal, "To Buy");
   assert.equal(result.hasChanges, true);
+  assert.equal(shouldAutoApplyContactVerificationAssessment(result), true);
 });
 
 test("verification proposes rent lead goal from strong rental text", () => {
@@ -123,6 +125,7 @@ test("verification keeps mixed buy and rent intent in review without a resolver"
   assert.equal(result.status, "needs_review");
   assert.equal(result.proposedPatch.leadGoal, undefined);
   assert.equal(result.hasChanges, false);
+  assert.equal(shouldAutoApplyContactVerificationAssessment(result), false);
 });
 
 test("verification resolves mixed buy and rent intent from requirement status", () => {
@@ -247,4 +250,15 @@ test("verification patch changes ignore unchanged normalized values", () => {
   assert.deepEqual(changes, [
     { field: "contactType", old: "Lead", new: "Agent" },
   ]);
+});
+
+test("verification auto-apply policy keeps low confidence decisions for review", () => {
+  assert.equal(shouldAutoApplyContactVerificationAssessment({
+    status: "verified_lead",
+    confidence: 0.7,
+  }), false);
+  assert.equal(shouldAutoApplyContactVerificationAssessment({
+    status: "likely_agent",
+    confidence: 0.9,
+  }), true);
 });

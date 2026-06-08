@@ -17,5 +17,5 @@ export async function authorizeContactClassificationRequest(locationId: string) 
         return { ok: false as const, response: NextResponse.json({ success: false, error: "Unauthorized: Admin access is required." }, { status: 403 }) };
     }
 
-    return { ok: true as const, locationId };
+    return { ok: true as const, locationId, userId };
 }

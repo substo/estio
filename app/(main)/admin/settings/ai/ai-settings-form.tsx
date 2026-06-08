@@ -471,9 +471,11 @@ function LeadIntelligenceSection({
     runningRequirementsScan,
     runningVerification,
     runningRecertification,
+    runningAutoApplyConfident,
     onRunRequirementsScan,
     onRunVerification,
     onTriggerRecertification,
+    onAutoApplyConfidentClassifications,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -487,9 +489,11 @@ function LeadIntelligenceSection({
     runningRequirementsScan: boolean;
     runningVerification: boolean;
     runningRecertification: boolean;
+    runningAutoApplyConfident: boolean;
     onRunRequirementsScan: () => void;
     onRunVerification: () => void;
     onTriggerRecertification: () => void;
+    onAutoApplyConfidentClassifications: () => void;
 }) {
     const requirements = initialData?.requirementsIntelligence || {};
     const verification = initialData?.contactProfileVerification || {};
@@ -600,6 +604,17 @@ function LeadIntelligenceSection({
                                 {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
                                 Queue Eligible Contacts
                             </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs"
+                                disabled={runningAutoApplyConfident || pendingVerificationProposals <= 0}
+                                onClick={onAutoApplyConfidentClassifications}
+                            >
+                                {runningAutoApplyConfident ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                                Apply Confident Decisions
+                            </Button>
                         </div>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-5">
@@ -622,7 +637,7 @@ function LeadIntelligenceSection({
                         </div>
                     </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
-                        Queue Eligible Contacts marks only contacts without pending review as waiting. Process Queued Batch runs AI on up to the configured batch size. Contacts already in Pending Review stay there until approved or rejected.
+                        Queue Eligible Contacts marks only contacts without pending review as waiting. Process Queued Batch runs AI on up to the configured batch size. Apply Confident Decisions clears pending AI decisions that are not marked needs review.
                         Failed: {classificationProgress.failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
@@ -906,6 +921,7 @@ function ModelConfigurationSection({
     runningRequirementsScan,
     runningContactProfileVerification,
     runningGlobalRecertification,
+    runningAutoApplyConfident,
     onGeneralModelChange,
     onExtractionModelChange,
     onDesignModelChange,
@@ -914,6 +930,7 @@ function ModelConfigurationSection({
     onRunRequirementsScan,
     onRunContactProfileVerification,
     onTriggerGlobalRecertification,
+    onAutoApplyConfidentClassifications,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -931,6 +948,7 @@ function ModelConfigurationSection({
     runningRequirementsScan: boolean;
     runningContactProfileVerification: boolean;
     runningGlobalRecertification: boolean;
+    runningAutoApplyConfident: boolean;
     onGeneralModelChange: (value: string) => void;
     onExtractionModelChange: (value: string) => void;
     onDesignModelChange: (value: string) => void;
@@ -939,6 +957,7 @@ function ModelConfigurationSection({
     onRunRequirementsScan: () => void;
     onRunContactProfileVerification: () => void;
     onTriggerGlobalRecertification: () => void;
+    onAutoApplyConfidentClassifications: () => void;
 }) {
     return (
         <div className="space-y-4">
@@ -972,9 +991,11 @@ function ModelConfigurationSection({
                     runningRequirementsScan={runningRequirementsScan}
                     runningVerification={runningContactProfileVerification}
                     runningRecertification={runningGlobalRecertification}
+                    runningAutoApplyConfident={runningAutoApplyConfident}
                     onRunRequirementsScan={onRunRequirementsScan}
                     onRunVerification={onRunContactProfileVerification}
                     onTriggerRecertification={onTriggerGlobalRecertification}
+                    onAutoApplyConfidentClassifications={onAutoApplyConfidentClassifications}
                 />
 
                 <AudioTranscriptPolicySection initialData={initialData} />
@@ -1283,6 +1304,7 @@ export function AiSettingsForm({
     const [runningRequirementsScan, setRunningRequirementsScan] = useState(false);
     const [runningContactProfileVerification, setRunningContactProfileVerification] = useState(false);
     const [runningGlobalRecertification, setRunningGlobalRecertification] = useState(false);
+    const [runningAutoApplyConfident, setRunningAutoApplyConfident] = useState(false);
     const [runtimeSummaryState, setRuntimeSummaryState] = useState<AiRuntimeSummary | null>(runtimeSummary || null);
     const [requirementsLastRun, setRequirementsLastRun] = useState<RequirementsLastRun | null>(
         runtimeSummary?.requirementsIntelligence?.lastRun || initialData?.requirementsIntelligence?.lastRun || null
@@ -1327,6 +1349,11 @@ export function AiSettingsForm({
     function updateContactClassificationQueue(status: ContactClassificationQueueStatus | null | undefined) {
         setContactClassificationQueue(status || null);
         setContactClassificationQueueUpdatedAt(new Date().toISOString());
+        if (status) {
+            setRuntimeSummaryState((current) => current
+                ? { ...current, pendingVerificationProposals: Number(status.pendingReview || 0) }
+                : current);
+        }
     }
 
     async function refreshContactClassificationQueue() {
@@ -1496,6 +1523,38 @@ export function AiSettingsForm({
         }
     };
 
+    const autoApplyConfidentClassifications = async () => {
+        setRunningAutoApplyConfident(true);
+        try {
+            const response = await fetch("/api/admin/settings/ai/contact-classification/auto-apply-confident", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ locationId, limit: 100 }),
+            });
+            const result = await readJsonResponse<{
+                success: true;
+                checked?: number;
+                applied?: number;
+                skipped?: number;
+                failures?: number;
+                remainingBatchAvailable?: boolean;
+                status?: ContactClassificationQueueStatus | null;
+            }>(response, "Could not apply confident contact classifications");
+            updateContactClassificationQueue(result.status);
+            const applied = Number(result.applied || 0);
+            const failures = Number(result.failures || 0);
+            if (failures > 0) {
+                toast.error(`Applied ${applied} confident decision${applied === 1 ? "" : "s"}, ${failures} failed.`);
+            } else {
+                toast.success(`Applied ${applied} confident decision${applied === 1 ? "" : "s"}.`);
+            }
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Could not apply confident contact classifications.");
+        } finally {
+            setRunningAutoApplyConfident(false);
+        }
+    };
+
     return (
         <div className="space-y-8">
             <AiConfigurationHeader />
@@ -1525,6 +1584,7 @@ export function AiSettingsForm({
                     runningRequirementsScan={runningRequirementsScan}
                     runningContactProfileVerification={runningContactProfileVerification}
                     runningGlobalRecertification={runningGlobalRecertification}
+                    runningAutoApplyConfident={runningAutoApplyConfident}
                     onGeneralModelChange={(value) => {
                         hasUserSelectedGeneralModelRef.current = true;
                         setGoogleAiModel(value);
@@ -1548,6 +1608,7 @@ export function AiSettingsForm({
                     onRunRequirementsScan={runRequirementsScan}
                     onRunContactProfileVerification={runContactProfileVerification}
                     onTriggerGlobalRecertification={triggerGlobalRecertification}
+                    onAutoApplyConfidentClassifications={autoApplyConfidentClassifications}
                 />
 
                 <Separator />

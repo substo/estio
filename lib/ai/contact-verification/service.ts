@@ -49,6 +49,7 @@ const VERIFICATION_FIELDS = [
   "requirementSummary",
 ] as const;
 const NULLABLE_FIELDS = new Set(["leadGoal", "name", "firstName", "lastName", "qualificationStage", "requirementSummary"]);
+const AUTO_APPLY_CONFIDENCE_THRESHOLD = 0.75;
 
 export type ContactVerificationStatus =
   | "verified_lead"
@@ -618,6 +619,92 @@ function profileVerificationDataForAssessment(args: {
   });
 }
 
+export function shouldAutoApplyContactVerificationAssessment(assessment: {
+  status?: string | null;
+  confidence?: number | null;
+}) {
+  const status = normalizeContactVerificationStatus(assessment.status);
+  return Boolean(status)
+    && status !== "needs_review"
+    && Number(assessment.confidence || 0) >= AUTO_APPLY_CONFIDENCE_THRESHOLD;
+}
+
+async function applyContactVerificationAssessment(args: {
+  locationId: string;
+  contact: AnyRecord;
+  assessment: ContactVerificationAssessment;
+  sourceType: string;
+  actorUserId?: string | null;
+  proposalId?: string | null;
+  reprocessCampaignBlocks?: boolean;
+}) {
+  const changes = getContactVerificationPatchChanges(args.assessment.snapshot, args.assessment.proposedPatch);
+  const changedPatch = changes.reduce((data, change) => {
+    (data as AnyRecord)[change.field] = change.new;
+    return data;
+  }, {} as ContactVerificationPatch);
+
+  await db.$transaction(async (tx) => {
+    await tx.contact.update({
+      where: { id: args.contact.id },
+      data: {
+        ...withProfileVerificationInvalidation(changedPatch as any),
+        ...profileVerificationDataForAssessment({
+          assessment: args.assessment,
+          sourceType: args.sourceType,
+        }),
+      },
+    });
+    if (changes.length > 0) {
+      await tx.contactHistory.create({
+        data: {
+          contactId: args.contact.id,
+          userId: args.actorUserId || null,
+          action: "AI_CONTACT_VERIFICATION_AUTO_APPLIED",
+          changes: {
+            proposalId: args.proposalId || null,
+            status: args.assessment.status,
+            confidence: args.assessment.confidence,
+            changes,
+          } as any,
+        },
+      });
+    }
+    if (args.proposalId) {
+      await tx.contactRequirementProposal.update({
+        where: { id: args.proposalId },
+        data: {
+          status: "approved",
+          approvedAt: new Date(),
+          approvedByUserId: args.actorUserId || null,
+        },
+      });
+    }
+    await tx.contactRequirementProposal.updateMany({
+      where: {
+        contactId: args.contact.id,
+        proposalType: "verification",
+        status: "pending",
+        ...(args.proposalId ? { id: { not: args.proposalId } } : {}),
+      },
+      data: { status: "superseded" },
+    });
+  });
+
+  if (args.assessment.status === "verified_lead") {
+    if (args.reprocessCampaignBlocks !== false) {
+      await reprocessCampaignBlocksForVerifiedContact({
+        locationId: args.locationId,
+        contactId: args.contact.id,
+      });
+    }
+    await queueRequirementsForVerifiedContact({
+      locationId: args.locationId,
+      contactId: args.contact.id,
+    });
+  }
+}
+
 async function reprocessCampaignBlocksForVerifiedContact(args: {
   locationId: string;
   contactId: string;
@@ -829,6 +916,40 @@ export async function verifyContactProfile(args: {
     return { success: true as const, created: false as const, reason: assessment.reasoning, assessment };
   }
 
+  if (shouldAutoApplyContactVerificationAssessment(assessment)) {
+    await applyContactVerificationAssessment({
+      locationId: args.locationId,
+      contact,
+      assessment,
+      sourceType: args.sourceType || "manual_verification",
+      actorUserId: args.actorUserId || null,
+      reprocessCampaignBlocks: args.reprocessCampaignBlocks,
+    });
+    logContactVerificationTiming("scan_complete", {
+      locationId: args.locationId,
+      contactId: contact.id,
+      conversationId: args.conversationId || null,
+      elapsedMs: Date.now() - startedAt,
+      contactLookupMs,
+      pendingMs,
+      messagesMs,
+      assessmentMs,
+      recentMessageCount: recentMessages.length,
+      status: assessment.status,
+      inferredRole: assessment.inferredRole,
+      hasChanges: true,
+      autoApplied: true,
+      proposalCreated: false,
+      model: metadata.model,
+      provider: metadata.provider,
+      promptTokens: metadata.promptTokens,
+      completionTokens: metadata.completionTokens,
+      totalTokens: metadata.totalTokens,
+      fallbackReason: metadata.fallbackReason || null,
+    });
+    return { success: true as const, created: false as const, autoApplied: true as const, reason: assessment.reasoning, assessment };
+  }
+
   const proposal = await db.contactRequirementProposal.create({
     data: {
       locationId: args.locationId,
@@ -876,6 +997,77 @@ export async function verifyContactProfile(args: {
   });
 
   return { success: true as const, created: true as const, proposal, assessment };
+}
+
+export async function autoApplyConfidentContactVerificationProposals(args: {
+  locationId: string;
+  actorUserId?: string | null;
+  limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(200, Number(args.limit || 100)));
+  const rows = await db.contactRequirementProposal.findMany({
+    where: {
+      locationId: args.locationId,
+      proposalType: "verification",
+      status: "pending",
+      proposedSummary: { not: "needs_review" },
+      confidence: { gte: AUTO_APPLY_CONFIDENCE_THRESHOLD },
+    },
+    include: { contact: true },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
+
+  let applied = 0;
+  let skipped = 0;
+  let failures = 0;
+
+  for (const proposal of rows) {
+    const proposedPatch = normalizeContactVerificationPatch(proposal.proposedPatch);
+    const status = normalizeContactVerificationStatus(proposal.proposedSummary);
+    if (!status || status === "needs_review") {
+      skipped += 1;
+      continue;
+    }
+    const assessment = {
+      status,
+      inferredRole: normalizeInferredLeadContactRole(proposedPatch.contactType) || "Lead",
+      snapshot: getContactVerificationSnapshot(proposal.contact),
+      proposedPatch,
+      evidence: Array.isArray(proposal.evidence) ? proposal.evidence as AnyRecord[] : [],
+      confidence: Number(proposal.confidence || 0),
+      reasoning: normalizeText(proposal.reasoning, 4000) || "Confident contact classification auto-applied.",
+      hasChanges: getContactVerificationPatchChanges(getContactVerificationSnapshot(proposal.contact), proposedPatch).length > 0,
+    } satisfies ContactVerificationAssessment;
+    if (!shouldAutoApplyContactVerificationAssessment(assessment)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await applyContactVerificationAssessment({
+        locationId: args.locationId,
+        contact: proposal.contact,
+        assessment,
+        sourceType: String(proposal.sourceType || "manual_verification"),
+        actorUserId: args.actorUserId || null,
+        proposalId: proposal.id,
+      });
+      applied += 1;
+    } catch (error) {
+      failures += 1;
+      console.error("[contact-verification] Failed to auto-apply pending proposal:", proposal.id, error);
+    }
+  }
+
+  return {
+    success: true as const,
+    checked: rows.length,
+    applied,
+    skipped,
+    failures,
+    remainingBatchAvailable: rows.length === limit,
+  };
 }
 
 export async function listPendingContactVerificationProposals(args: {
