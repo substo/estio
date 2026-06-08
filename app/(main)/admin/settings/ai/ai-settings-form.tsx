@@ -1265,6 +1265,7 @@ export function AiSettingsForm({
     const [runningRequirementsScan, setRunningRequirementsScan] = useState(false);
     const [runningContactProfileVerification, setRunningContactProfileVerification] = useState(false);
     const [runningGlobalRecertification, setRunningGlobalRecertification] = useState(false);
+    const [runtimeSummaryState, setRuntimeSummaryState] = useState<AiRuntimeSummary | null>(runtimeSummary || null);
     const [requirementsLastRun, setRequirementsLastRun] = useState<RequirementsLastRun | null>(
         runtimeSummary?.requirementsIntelligence?.lastRun || initialData?.requirementsIntelligence?.lastRun || null
     );
@@ -1320,6 +1321,29 @@ export function AiSettingsForm({
         updateContactClassificationQueue(result.status);
         return result.status as ContactClassificationQueueStatus | null;
     }
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadRuntimeSummary() {
+            const params = new URLSearchParams({ locationId });
+            const response = await fetch(`/api/admin/settings/ai/runtime-summary?${params.toString()}`);
+            const result = await readJsonResponse<{ success: true; summary?: AiRuntimeSummary | null }>(
+                response,
+                "Could not load AI runtime summary",
+            );
+            if (cancelled) return;
+
+            const summary = result.summary || null;
+            setRuntimeSummaryState(summary);
+            if (summary?.contactClassificationQueue) {
+                updateContactClassificationQueue(summary.contactClassificationQueue);
+            }
+        }
+
+        loadRuntimeSummary().catch(() => null);
+        return () => { cancelled = true; };
+    }, [locationId]);
 
     useEffect(() => {
         let mounted = true;
@@ -1474,8 +1498,8 @@ export function AiSettingsForm({
                     googleAiModelDesign={googleAiModelDesign}
                     googleAiModelTranscription={googleAiModelTranscription}
                     googleAiModelTranslation={googleAiModelTranslation}
-                    pendingRequirementProposals={Number(runtimeSummary?.pendingRequirementProposals || 0)}
-                    pendingVerificationProposals={Number(runtimeSummary?.pendingVerificationProposals || 0)}
+                    pendingRequirementProposals={Number(runtimeSummaryState?.pendingRequirementProposals || 0)}
+                    pendingVerificationProposals={Number(runtimeSummaryState?.pendingVerificationProposals || 0)}
                     contactClassificationQueue={contactClassificationQueue}
                     contactClassificationQueueUpdatedAt={contactClassificationQueueUpdatedAt}
                     requirementsLastRun={requirementsLastRun}
@@ -1519,7 +1543,7 @@ export function AiSettingsForm({
 
                 <SkillRuntimeSettings
                     locationId={locationId}
-                    summary={runtimeSummary || null}
+                    summary={runtimeSummaryState || null}
                 />
 
                 <Separator />

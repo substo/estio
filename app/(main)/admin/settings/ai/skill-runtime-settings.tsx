@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, PlayCircle, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -128,6 +128,12 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
         contactId: "",
     });
     const [simulationResult, setSimulationResult] = useState<any>(null);
+
+    useEffect(() => {
+        setPolicies(initialPolicies);
+        setDecisions(summary?.recentDecisions || []);
+        setJobs(summary?.recentJobs || []);
+    }, [initialPolicies, summary?.recentDecisions, summary?.recentJobs]);
 
     const derivedEnabledPolicies = policies.length > 0
         ? policies.filter((policy) => policy.enabled).length
