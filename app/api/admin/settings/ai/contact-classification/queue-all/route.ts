@@ -1,32 +1,13 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import {
     getContactProfileVerificationQueueStatus,
     triggerGlobalContactProfileRecertification,
 } from "@/lib/ai/contact-profile-verification/cron";
-
-async function authorizeRequest(locationId: string) {
-    const { userId } = await auth();
-    if (!userId) {
-        return { ok: false as const, response: NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }) };
-    }
-
-    if (!locationId) {
-        return { ok: false as const, response: NextResponse.json({ success: false, error: "Missing location ID." }, { status: 400 }) };
-    }
-
-    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
-    if (!isAdmin) {
-        return { ok: false as const, response: NextResponse.json({ success: false, error: "Unauthorized: Admin access is required." }, { status: 403 }) };
-    }
-
-    return { ok: true as const, locationId };
-}
+import { authorizeContactClassificationRequest } from "../_shared";
 
 export async function GET(request: NextRequest) {
     const locationId = String(request.nextUrl.searchParams.get("locationId") || "").trim();
-    const authorization = await authorizeRequest(locationId);
+    const authorization = await authorizeContactClassificationRequest(locationId);
     if (!authorization.ok) return authorization.response;
 
     try {
@@ -44,7 +25,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const locationId = String(body?.locationId || "").trim();
-    const authorization = await authorizeRequest(locationId);
+    const authorization = await authorizeContactClassificationRequest(locationId);
     if (!authorization.ok) return authorization.response;
 
     try {

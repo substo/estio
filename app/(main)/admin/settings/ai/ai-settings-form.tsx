@@ -3,7 +3,6 @@
 import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import {
-    runContactProfileVerificationNowAction,
     runRequirementsIntelligenceNowAction,
     updateAiSettings,
 } from "./actions";
@@ -463,6 +462,17 @@ function LeadIntelligenceSection({
     const queuedCount = Number(contactClassificationQueue?.queued || 0);
     const eligibleCount = Number(contactClassificationQueue?.eligible || 0);
     const processedCount = Number(contactProfileVerificationLastRun?.stats?.checked || 0);
+    const failedCount = Number(contactClassificationQueue?.failed || 0);
+    const progressPercent = eligibleCount > 0 ? Math.max(0, Math.min(100, Math.round(((eligibleCount - queuedCount) / eligibleCount) * 100))) : 100;
+    const classificationStatus = runningVerification
+        ? "Processing the next batch"
+        : runningRecertification
+            ? "Queueing contacts"
+            : queuedCount > 0
+                ? "Queued for classification"
+                : failedCount > 0
+                    ? "Needs attention"
+                    : "Up to date";
 
     return (
         <div className="space-y-3">
@@ -522,6 +532,7 @@ function LeadIntelligenceSection({
                             <div className="text-[10px] text-muted-foreground">Classifies buyer/renter lead, owner, agent, not a lead, or needs review.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
                             <div className="text-[10px] text-muted-foreground">Last queued: {formatDateLabel(contactClassificationQueue?.latestQueuedAt)}</div>
+                            <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationStatus}</div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningVerification} onClick={onRunVerification}>
@@ -541,9 +552,21 @@ function LeadIntelligenceSection({
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Needs Review</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.proposals || 0)}</p></div>
                     </div>
+                    <div className="mt-3">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                                className="h-full rounded-full bg-emerald-500 transition-all"
+                                style={{ width: `${progressPercent}%` }}
+                            />
+                        </div>
+                        <div className="mt-1 flex flex-wrap justify-between gap-2 text-[10px] text-muted-foreground">
+                            <span>{queuedCount > 0 ? `${queuedCount} contact${queuedCount === 1 ? "" : "s"} waiting` : "No contacts waiting"}</span>
+                            <span>{progressPercent}% clear</span>
+                        </div>
+                    </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
-                        Queue marks contacts to be checked. Run Classification Now processes the next batch.
-                        Pending classification proposals: {pendingVerificationProposals}. Failed: {Number(contactClassificationQueue?.failed || 0)}.
+                        Queue Contacts marks eligible contacts to be checked. Run Classification Now processes up to the configured batch size.
+                        Pending classification proposals: {pendingVerificationProposals}. Failed: {failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
                 </div>
@@ -1330,9 +1353,14 @@ export function AiSettingsForm({
         setRunningContactProfileVerification(true);
         try {
             const batchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
-            const result = await runContactProfileVerificationNowAction(locationId, { batchSize });
+            const response = await fetch("/api/admin/settings/ai/contact-classification/run", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ locationId, batchSize }),
+            });
+            const result = await response.json().catch(() => null);
             if (!result?.success) {
-                toast.error(String(result?.error || "Contact classification failed."));
+                toast.error(String(result?.error || `Contact classification failed (${response.status}).`));
                 return;
             }
             const stats = result.stats || {};
@@ -1347,10 +1375,14 @@ export function AiSettingsForm({
                 stats,
                 error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
             });
+            if (result.status) {
+                setContactClassificationQueue(result.status);
+                setContactClassificationQueueUpdatedAt(new Date().toISOString());
+            }
             toast.success(
                 `Contact classification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, created ${Number(stats.proposals || 0)} proposal${Number(stats.proposals || 0) === 1 ? "" : "s"}.`
             );
-            await refreshContactClassificationQueue();
+            if (!result.status) await refreshContactClassificationQueue();
         } catch (error: unknown) {
             toast.error(error instanceof Error ? error.message : "Contact classification failed.");
         } finally {
