@@ -586,7 +586,7 @@ function LeadIntelligenceSection({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
                             <div className="text-xs font-medium text-slate-700">Contact Classification</div>
-                            <div className="text-[10px] text-muted-foreground">Classifies buyer/renter lead, owner, agent, not a lead, or needs review.</div>
+                            <div className="text-[10px] text-muted-foreground">Classifies contacts as buyer/renter lead, owner, agent, not a lead, or needs review.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
                             <div className="text-[10px] text-muted-foreground">Last queued: {formatDateLabel(contactClassificationQueue?.latestQueuedAt)}</div>
                             <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationProgress.statusLabel}</div>
@@ -594,11 +594,11 @@ function LeadIntelligenceSection({
                         <div className="flex flex-wrap gap-2">
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningVerification} onClick={onRunVerification}>
                                 {runningVerification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                                Run Classification Now
+                                Process Queued Batch
                             </Button>
                             <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningRecertification} onClick={onTriggerRecertification}>
                                 {runningRecertification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                                Queue Contacts
+                                Queue Eligible Contacts
                             </Button>
                         </div>
                     </div>
@@ -607,7 +607,7 @@ function LeadIntelligenceSection({
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{classificationProgress.eligibleCount}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{processedCount}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Needs Review</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.proposals || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Pending Review</p><p className="text-sm font-semibold">{pendingVerificationProposals}</p></div>
                     </div>
                     <div className="mt-3">
                         <div className="h-2 overflow-hidden rounded-full bg-slate-200">
@@ -622,8 +622,8 @@ function LeadIntelligenceSection({
                         </div>
                     </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
-                        Queue Contacts marks eligible contacts to be checked. Run Classification Now processes up to the configured batch size.
-                        Pending classification proposals: {pendingVerificationProposals}. Failed: {classificationProgress.failedCount}.
+                        Queue Eligible Contacts marks only contacts without pending review as waiting. Process Queued Batch runs AI on up to the configured batch size. Contacts already in Pending Review stay there until approved or rejected.
+                        Failed: {classificationProgress.failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
                 </div>
