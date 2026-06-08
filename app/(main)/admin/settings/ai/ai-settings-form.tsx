@@ -5,7 +5,6 @@ import { useFormStatus } from "react-dom";
 import {
     runContactProfileVerificationNowAction,
     runRequirementsIntelligenceNowAction,
-    triggerGlobalContactProfileRecertificationAction,
     updateAiSettings,
 } from "./actions";
 import { Input } from "@/components/ui/input";
@@ -1302,9 +1301,14 @@ export function AiSettingsForm({
     const triggerGlobalRecertification = async () => {
         setRunningGlobalRecertification(true);
         try {
-            const result = await triggerGlobalContactProfileRecertificationAction(locationId);
+            const response = await fetch("/api/admin/settings/ai/contact-classification/queue-all", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ locationId }),
+            });
+            const result = await response.json().catch(() => null);
             if (!result?.success) {
-                toast.error(String(result?.error || "Could not queue contacts for classification."));
+                toast.error(String(result?.error || `Could not queue contacts for classification (${response.status}).`));
                 return;
             }
             toast.success(`Marked ${Number(result.due || 0)} contact${Number(result.due || 0) === 1 ? "" : "s"} due for contact classification.`);
