@@ -210,6 +210,7 @@ async function runForLocation(args: {
   source: "cron" | "manual";
   force?: boolean;
   batchSize?: number;
+  modelOverride?: string | null;
 }) {
   const startedAt = new Date();
   const stats = cloneStats();
@@ -297,6 +298,7 @@ async function runForLocation(args: {
         conversationId: contact.conversations?.[0]?.id || null,
         sourceType: args.source === "manual" ? "manual_verification" : "cron",
         reprocessCampaignBlocks: false,
+        modelOverride: args.modelOverride,
       });
 
       if (!result.success) {
@@ -400,6 +402,7 @@ export async function runContactProfileVerificationCron(args?: {
   now?: Date;
   source?: "cron" | "manual";
   force?: boolean;
+  modelOverride?: string | null;
 }) {
   const now = args?.now || new Date();
   const source = args?.source || "cron";
@@ -417,6 +420,7 @@ export async function runContactProfileVerificationCron(args?: {
       source,
       force: args?.force,
       batchSize: args?.batchSize,
+      modelOverride: args?.modelOverride,
     });
     addStats(stats, locationStats);
   }

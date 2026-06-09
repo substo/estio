@@ -460,6 +460,7 @@ function LeadIntelligenceSection({
     initialData,
     modelOptions,
     fallbackModel,
+    contactProfileVerificationModel,
     pendingRequirementProposals,
     pendingVerificationProposals,
     contactClassificationQueue,
@@ -468,12 +469,14 @@ function LeadIntelligenceSection({
     contactProfileVerificationLastRun,
     runningRequirementsScan,
     runningVerifyContactsNow,
+    onContactProfileVerificationModelChange,
     onRunRequirementsScan,
     onVerifyContactsNow,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
     fallbackModel: string;
+    contactProfileVerificationModel: string;
     pendingRequirementProposals: number;
     pendingVerificationProposals: number;
     contactClassificationQueue: ContactClassificationQueueStatus | null;
@@ -482,6 +485,7 @@ function LeadIntelligenceSection({
     contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
     runningRequirementsScan: boolean;
     runningVerifyContactsNow: boolean;
+    onContactProfileVerificationModelChange: (value: string) => void;
     onRunRequirementsScan: () => void;
     onVerifyContactsNow: () => void;
 }) {
@@ -550,7 +554,8 @@ function LeadIntelligenceSection({
                                 id="contactProfileVerificationModel"
                                 name="contactProfileVerificationModel"
                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                                defaultValue={String(verification.model || fallbackModel)}
+                                value={contactProfileVerificationModel}
+                                onChange={(event) => onContactProfileVerificationModelChange(event.target.value)}
                             >
                                 {modelOptions.map((model) => (
                                     <option key={model.value} value={model.value}>
@@ -590,7 +595,7 @@ function LeadIntelligenceSection({
                             <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationProgress.statusLabel}</div>
                             {runningVerifyContactsNow ? (
                                 <div className="text-[10px] text-muted-foreground">
-                                    Processing in small batches. You can watch the numbers update as each batch finishes.
+                                    Checking one contact at a time so the numbers update after each contact.
                                 </div>
                             ) : null}
                         </div>
@@ -619,7 +624,7 @@ function LeadIntelligenceSection({
                         </div>
                     </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
-                        Verify Contacts Now queues eligible contacts, checks them in batches, applies safe decisions automatically, and leaves only uncertain contacts for review.
+                        Verify Contacts Now queues eligible contacts, checks them one by one, applies safe decisions automatically, and leaves only uncertain contacts for review.
                         Failed: {classificationProgress.failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
@@ -910,6 +915,7 @@ function ModelConfigurationSection({
     onDesignModelChange,
     onTranscriptionModelChange,
     onTranslationModelChange,
+    onContactProfileVerificationModelChange,
     onRunRequirementsScan,
     onVerifyContactsNow,
 }: {
@@ -920,6 +926,7 @@ function ModelConfigurationSection({
     googleAiModelDesign: string;
     googleAiModelTranscription: string;
     googleAiModelTranslation: string;
+    contactProfileVerificationModel: string;
     pendingRequirementProposals: number;
     pendingVerificationProposals: number;
     contactClassificationQueue: ContactClassificationQueueStatus | null;
@@ -933,6 +940,7 @@ function ModelConfigurationSection({
     onDesignModelChange: (value: string) => void;
     onTranscriptionModelChange: (value: string) => void;
     onTranslationModelChange: (value: string) => void;
+    onContactProfileVerificationModelChange: (value: string) => void;
     onRunRequirementsScan: () => void;
     onVerifyContactsNow: () => void;
 }) {
@@ -959,6 +967,7 @@ function ModelConfigurationSection({
                     initialData={initialData}
                     modelOptions={modelOptions}
                     fallbackModel={googleAiModelExtraction}
+                    contactProfileVerificationModel={contactProfileVerificationModel}
                     pendingRequirementProposals={pendingRequirementProposals}
                     pendingVerificationProposals={pendingVerificationProposals}
                     contactClassificationQueue={contactClassificationQueue}
@@ -967,6 +976,7 @@ function ModelConfigurationSection({
                     contactProfileVerificationLastRun={contactProfileVerificationLastRun}
                     runningRequirementsScan={runningRequirementsScan}
                     runningVerifyContactsNow={runningVerifyContactsNow}
+                    onContactProfileVerificationModelChange={onContactProfileVerificationModelChange}
                     onRunRequirementsScan={onRunRequirementsScan}
                     onVerifyContactsNow={onVerifyContactsNow}
                 />
@@ -1304,6 +1314,9 @@ export function AiSettingsForm({
     const [googleAiModelTranslation, setGoogleAiModelTranslation] = useState(
         getInitialModelValue(initialData, ["googleAiModelTranslation"], GEMINI_FLASH_LATEST_ALIAS)
     );
+    const [contactProfileVerificationModel, setContactProfileVerificationModel] = useState(
+        String(initialData?.contactProfileVerification?.model || initialData?.googleAiModelExtraction || initialData?.googleAiModel || GEMINI_FLASH_LATEST_ALIAS)
+    );
     const hasUserSelectedGeneralModelRef = useRef(false);
     const hasUserSelectedExtractionModelRef = useRef(false);
     const hasUserSelectedDesignModelRef = useRef(false);
@@ -1435,7 +1448,7 @@ export function AiSettingsForm({
         const response = await fetch("/api/admin/settings/ai/contact-classification/verify-now", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ locationId, batchSize }),
+            body: JSON.stringify({ locationId, batchSize, model: contactProfileVerificationModel }),
         });
         return readJsonResponse<{
             success: true;
@@ -1450,7 +1463,7 @@ export function AiSettingsForm({
         const response = await fetch("/api/admin/settings/ai/contact-classification/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ locationId, batchSize, autoApplyLimit: 200 }),
+            body: JSON.stringify({ locationId, batchSize, autoApplyLimit: 200, model: contactProfileVerificationModel }),
         });
         return readJsonResponse<{
             success: true;
@@ -1480,10 +1493,7 @@ export function AiSettingsForm({
         let latestStats: ContactProfileVerificationLastRunStats = {};
         let batchSize = 5;
         try {
-            const configuredBatchSize = Number(initialData?.contactProfileVerification?.batchSize || 50);
-            batchSize = Number.isFinite(configuredBatchSize)
-                ? Math.max(1, Math.min(configuredBatchSize, 5))
-                : 5;
+            batchSize = 1;
             const startResult = await verifyContactsNowRequest(batchSize);
             updateContactClassificationQueue(startResult.status);
 
@@ -1505,7 +1515,7 @@ export function AiSettingsForm({
                 error: null,
             });
 
-            while (remainingQueued > 0 && batches < 250) {
+            while (remainingQueued > 0 && batches < 1000) {
                 batches += 1;
                 const batchResult = await runContactClassificationBatchRequest(batchSize);
                 stats = addContactClassificationStats(stats, batchResult.stats);
@@ -1528,12 +1538,12 @@ export function AiSettingsForm({
                 });
 
                 if (Number(batchResult.stats?.checked || 0) === 0 && remainingQueued > 0) {
-                    throw new Error("Contact verification stopped because no contacts were processed in the latest batch.");
+                    throw new Error("Contact verification stopped because no contact was processed in the latest request.");
                 }
             }
 
             if (remainingQueued > 0) {
-                toast.info(`Verification paused after ${batches} batches. ${remainingQueued} contact${remainingQueued === 1 ? "" : "s"} still waiting.`);
+                toast.info(`Verification paused after ${batches} contact${batches === 1 ? "" : "s"}. ${remainingQueued} contact${remainingQueued === 1 ? "" : "s"} still waiting.`);
                 return;
             }
 
@@ -1578,6 +1588,7 @@ export function AiSettingsForm({
                     googleAiModelDesign={googleAiModelDesign}
                     googleAiModelTranscription={googleAiModelTranscription}
                     googleAiModelTranslation={googleAiModelTranslation}
+                    contactProfileVerificationModel={contactProfileVerificationModel}
                     pendingRequirementProposals={Number(runtimeSummaryState?.pendingRequirementProposals || 0)}
                     pendingVerificationProposals={Number(runtimeSummaryState?.pendingVerificationProposals || 0)}
                     contactClassificationQueue={contactClassificationQueue}
@@ -1606,6 +1617,7 @@ export function AiSettingsForm({
                         hasUserSelectedTranslationModelRef.current = true;
                         setGoogleAiModelTranslation(value);
                     }}
+                    onContactProfileVerificationModelChange={setContactProfileVerificationModel}
                     onRunRequirementsScan={runRequirementsScan}
                     onVerifyContactsNow={verifyContactsNow}
                 />

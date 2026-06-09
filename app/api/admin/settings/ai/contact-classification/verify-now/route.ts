@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
     if (!authorization.ok) return authorization.response;
 
     const batchSize = normalizeContactProfileVerificationBatchSize(body?.batchSize);
+    const modelOverride = String(body?.model || "").trim() || null;
 
     try {
         const firstAutoApply = await autoApplyConfidentContactVerificationProposals({
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
             applied: Number(firstAutoApply.applied || 0),
             remainingQueued: status.queued,
             pendingReview: status.pendingReview,
+            model: modelOverride || "saved_setting",
         });
 
         return NextResponse.json({
@@ -41,6 +43,7 @@ export async function POST(request: NextRequest) {
             queued,
             firstAutoApply,
             status,
+            model: modelOverride,
         });
     } catch (error: unknown) {
         console.error("[contact-classification:verify-now] Error:", error);

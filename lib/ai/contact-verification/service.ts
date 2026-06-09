@@ -390,7 +390,9 @@ export function buildContactVerificationAssessment(args: {
   };
 }
 
-async function getContactProfileVerificationModel(locationId: string): Promise<string> {
+async function getContactProfileVerificationModel(locationId: string, modelOverride?: string | null): Promise<string> {
+  const override = String(modelOverride || "").trim();
+  if (override) return override;
   const doc = await settingsService.getDocument<any>({
     scopeType: "LOCATION",
     scopeId: locationId,
@@ -515,11 +517,12 @@ async function buildModelBackedContactVerificationAssessment(args: {
   contact: AnyRecord;
   recentMessages: Array<{ body?: string | null; direction?: string | null; createdAt?: Date | string | null }>;
   deterministicAssessment: ContactVerificationAssessment;
+  modelOverride?: string | null;
 }): Promise<{
   assessment: ContactVerificationAssessment;
   metadata: ContactVerificationRunMetadata;
 }> {
-  const modelName = await getContactProfileVerificationModel(args.locationId);
+  const modelName = await getContactProfileVerificationModel(args.locationId, args.modelOverride);
   const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
   if (!apiKey) {
     throw new Error("No AI API key configured.");
@@ -569,6 +572,7 @@ async function resolveContactVerificationAssessment(args: {
   locationId: string;
   contact: AnyRecord;
   recentMessages: Array<{ body?: string | null; direction?: string | null; createdAt?: Date | string | null }>;
+  modelOverride?: string | null;
 }): Promise<{
   assessment: ContactVerificationAssessment;
   metadata: ContactVerificationRunMetadata;
@@ -584,6 +588,7 @@ async function resolveContactVerificationAssessment(args: {
       contact: args.contact,
       recentMessages: args.recentMessages,
       deterministicAssessment,
+      modelOverride: args.modelOverride,
     });
   } catch (error: any) {
     const fallbackReason = error?.message || "Gemini contact classification failed.";
@@ -770,6 +775,7 @@ export async function verifyContactProfile(args: {
   actorUserId?: string | null;
   contactSnapshot?: AnyRecord | null;
   reprocessCampaignBlocks?: boolean;
+  modelOverride?: string | null;
 }) {
   const startedAt = Date.now();
   logContactVerificationTiming("scan_start", {
@@ -839,6 +845,7 @@ export async function verifyContactProfile(args: {
     locationId: args.locationId,
     contact,
     recentMessages,
+    modelOverride: args.modelOverride,
   });
   const assessmentMs = Date.now() - assessmentStartedAt;
 

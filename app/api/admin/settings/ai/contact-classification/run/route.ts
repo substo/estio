@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     const locationId = String(body?.locationId || "").trim();
     const authorization = await authorizeContactClassificationRequest(locationId);
     if (!authorization.ok) return authorization.response;
+    const modelOverride = String(body?.model || "").trim() || null;
 
     try {
         const stats = await runContactProfileVerificationCron({
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
             batchSize: normalizeContactProfileVerificationBatchSize(body?.batchSize),
             source: "manual",
             force: true,
+            modelOverride,
         });
         const autoApply = await autoApplyConfidentContactVerificationProposals({
             locationId: authorization.locationId,
@@ -38,6 +40,7 @@ export async function POST(request: NextRequest) {
             applied: autoApply.applied,
             autoApplyFailures: autoApply.failures,
             queued: status.queued,
+            model: modelOverride || "saved_setting",
         });
         return NextResponse.json({ success: true, stats, autoApply, status });
     } catch (error: unknown) {
