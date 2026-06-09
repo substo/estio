@@ -902,6 +902,7 @@ function ModelConfigurationSection({
     googleAiModelDesign,
     googleAiModelTranscription,
     googleAiModelTranslation,
+    contactProfileVerificationModel,
     pendingRequirementProposals,
     pendingVerificationProposals,
     contactClassificationQueue,
