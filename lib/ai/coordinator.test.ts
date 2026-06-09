@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildContactRequirementGuide, enforceMapSharingInstruction, stripUngroundedMapUrls } from "./coordinator";
+import {
+    buildContactRequirementGuide,
+    enforceMapSharingInstruction,
+    looksLikeSendReadyDraftInstruction,
+    stripUngroundedMapUrls,
+} from "./coordinator";
 
 test("buildContactRequirementGuide includes non-empty requirement guidance", () => {
     const guide = buildContactRequirementGuide({
@@ -88,4 +93,18 @@ test("enforceMapSharingInstruction removes map links when procedure gates sharin
 
     assert.doesNotMatch(cleaned, /maps\.app\.goo\.gl/);
     assert.match(cleaned, /viewing is arranged/);
+});
+
+test("looksLikeSendReadyDraftInstruction distinguishes operator drafts from commands", () => {
+    assert.equal(
+        looksLikeSendReadyDraftInstruction(
+            "Hi Myrto. Sorry for the late reply.\n\nThe tender deadline is 10:00 AM every Tuesday. Please let me know if you are still searching."
+        ),
+        true
+    );
+
+    assert.equal(
+        looksLikeSendReadyDraftInstruction("Make it shorter and friendlier, but keep the details."),
+        false
+    );
 });

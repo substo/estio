@@ -267,6 +267,37 @@ function stripLeadingNameGreeting(text: string, firstName: string | null, allowN
     return text.replace(salutationRegex, "").trimStart();
 }
 
+function hasExplicitOpeningGreeting(value: string): boolean {
+    return /^(?:hi|hello|hey|dear)\b/i.test(value.trim());
+}
+
+export function looksLikeSendReadyDraftInstruction(value: string): boolean {
+    const text = value.trim();
+    if (text.length < 60) return false;
+
+    const lower = text.toLowerCase();
+    if (/^(?:make|write|draft|generate|create|reply|respond|say|tell|ask|include|mention|explain|add|remove|change|rewrite|improve|shorten|translate|summari[sz]e)\b/.test(lower)) {
+        return false;
+    }
+
+    const sentenceCount = (text.match(/[.!?](?:\s|$)/g) || []).length;
+    const hasMessageOpening = hasExplicitOpeningGreeting(text);
+    const hasMessageBodySignal = /\b(?:i|we|you|your|please|let me know|regarding|thank you|thanks|sorry)\b/i.test(text);
+
+    return hasMessageBodySignal && (hasMessageOpening || sentenceCount >= 2 || text.includes("\n"));
+}
+
+function summarizeDraftInstructionForLog(value: string) {
+    let hash = 0;
+    for (let idx = 0; idx < value.length; idx += 1) {
+        hash = ((hash << 5) - hash + value.charCodeAt(idx)) | 0;
+    }
+    return {
+        chars: value.length,
+        hash: Math.abs(hash).toString(36),
+    };
+}
+
 function stripManualSignatureBlock(text: string): string {
     const trimmed = text.trim();
     if (!trimmed) return text;
@@ -821,6 +852,10 @@ export async function generateDraft(context: CoordinationContext) {
         const latestMeaningfulMessage = meaningfulMessages[meaningfulMessages.length - 1] || null;
         const isContinuingAfterAgentMessage = latestMeaningfulMessage?.direction === "outbound";
         const isFirstOutreach = !hasPriorOutbound;
+        const normalizedInstruction = String(context.instruction || "").trim();
+        const normalizedBaseDraft = String(context.baseDraft || "").trim();
+        const instructionLooksSendReady = !!normalizedInstruction && looksLikeSendReadyDraftInstruction(normalizedInstruction);
+        const hasOperatorGreeting = hasExplicitOpeningGreeting(normalizedBaseDraft) || hasExplicitOpeningGreeting(normalizedInstruction);
 
         const messagesWithTimestamps = messages.filter((m): m is DraftMessage & { createdAt: Date } => !!m.createdAt);
         const latestTimestamp = messagesWithTimestamps.length > 0
@@ -836,9 +871,11 @@ export async function generateDraft(context: CoordinationContext) {
         const isNewConversationDay = !!(latestTimestamp && previousTimestamp && latestTimestamp.toDateString() !== previousTimestamp.toDateString());
         const hasLongBreak = hoursBetweenLastTwoMessages !== null && hoursBetweenLastTwoMessages >= NAME_GREETING_LONG_BREAK_HOURS;
 
-        const allowNameGreeting = !!contactFirstName && !isContinuingAfterAgentMessage && (isFirstOutreach || isNewConversationDay || hasLongBreak);
-        const greetingDecisionReason = !contactFirstName
-            ? "No contact first name is available."
+        const allowNameGreeting = hasOperatorGreeting || (!!contactFirstName && !isContinuingAfterAgentMessage && (isFirstOutreach || isNewConversationDay || hasLongBreak));
+        const greetingDecisionReason = hasOperatorGreeting
+            ? "The operator supplied an explicit opening greeting in the current draft/instruction; preserve it."
+            : !contactFirstName
+                ? "No contact first name is available."
             : isContinuingAfterAgentMessage
                 ? "The agent is continuing after a recent outbound message with no client reply; repeating a name greeting would sound scripted."
             : isFirstOutreach
@@ -849,8 +886,6 @@ export async function generateDraft(context: CoordinationContext) {
                         ? `The conversation resumed after a ${hoursBetweenLastTwoMessages?.toFixed(1)} hour break.`
                         : "Recent messages are close together in the same active thread.";
 
-        const normalizedInstruction = String(context.instruction || "").trim();
-        const normalizedBaseDraft = String(context.baseDraft || "").trim();
         const isComplexDraft =
             !isFastDraft
             && (
@@ -991,10 +1026,14 @@ export async function generateDraft(context: CoordinationContext) {
         // Add current composer draft and specific user instruction if provided.
         let finalPrompt = fullPrompt;
         if (normalizedBaseDraft) {
-            finalPrompt += `\n\nCURRENT COMPOSER DRAFT TO REVISE:\n${normalizedBaseDraft}\n\nRevision rules:\n1. Revise this draft; do not write a separate unrelated reply.\n2. Preserve factual meaning, commitments, property details, dates, times, and links unless the user instruction explicitly changes them.\n3. Return only the revised send-ready message body.`;
+            finalPrompt += `\n\nCURRENT COMPOSER DRAFT TO REVISE:\n${normalizedBaseDraft}\n\nRevision rules:\n1. Revise this draft; do not write a separate unrelated reply.\n2. Preserve the opening/intro, paragraph structure, factual meaning, commitments, property details, dates, times, and links unless the user instruction explicitly changes them.\n3. Do not summarize, shorten, or remove details merely because the general task says to be concise.\n4. Return only the revised send-ready message body.`;
         }
         if (normalizedInstruction) {
-            finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user provided: "${normalizedInstruction}"\n\nYour draft MUST:\n1. Follow this instruction precisely.\n2. Treat this instruction as the primary scope for what to include.\n3. Produce a send-ready channel-appropriate message using only the wording needed.\n4. If the instruction is already close to send-ready, keep its structure and only refine clarity/grammar.\n5. Do not add new scenarios, commitments, pressure, or side notes unless explicitly requested.\n6. Do not repeat the instruction; write the actual message the agent should send.`;
+            if (!normalizedBaseDraft && instructionLooksSendReady) {
+                finalPrompt += `\n\nOPERATOR SEND-READY DRAFT TO PRESERVE:\n${normalizedInstruction}\n\nPreservation rules:\n1. Treat the operator text above as the draft message, not as loose topic guidance.\n2. Preserve the opening/intro, paragraph structure, factual details, dates, times, property references, qualification questions, and links unless they are unsupported by context or unsafe.\n3. Do not summarize, shorten, or remove details merely because the general task says to be concise.\n4. Only make minimal grammar, clarity, and channel-fit edits.\n5. Return only the final send-ready message body.`;
+            } else {
+                finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nThe user provided: "${normalizedInstruction}"\n\nYour draft MUST:\n1. Follow this instruction precisely.\n2. Treat this instruction as the primary scope for what to include.\n3. Produce a send-ready channel-appropriate message using only the wording needed.\n4. If the instruction is already close to send-ready, keep its opening, structure, and all factual details; only refine clarity/grammar.\n5. Do not add new scenarios, commitments, pressure, or side notes unless explicitly requested.\n6. Do not repeat the instruction; write the actual message the agent should send.`;
+            }
         } else if (normalizedBaseDraft) {
             finalPrompt += `\n\nSPECIFIC USER INSTRUCTION:\nImprove the current composer draft for clarity, concision, and channel-appropriate tone without changing its factual meaning.`;
         }
@@ -1020,6 +1059,20 @@ export async function generateDraft(context: CoordinationContext) {
             latencyMode: isFastDraft ? "fast" : "full",
             maxOutputTokens,
             thinkingBudget,
+            instruction: normalizedInstruction
+                ? {
+                    ...summarizeDraftInstructionForLog(normalizedInstruction),
+                    sendReady: instructionLooksSendReady,
+                    hasExplicitOpeningGreeting: hasExplicitOpeningGreeting(normalizedInstruction),
+                }
+                : null,
+            baseDraft: normalizedBaseDraft
+                ? {
+                    ...summarizeDraftInstructionForLog(normalizedBaseDraft),
+                    hasExplicitOpeningGreeting: hasExplicitOpeningGreeting(normalizedBaseDraft),
+                }
+                : null,
+            operatorGreetingOverride: hasOperatorGreeting,
         }));
 
         const cachedStaticContext = `${DRAFT_STATIC_CONTEXT_PROMPT}
