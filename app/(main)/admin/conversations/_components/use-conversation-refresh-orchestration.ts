@@ -380,7 +380,7 @@ export function useConversationRefreshOrchestration({
 
                 if (selectedConversationId && Array.isArray(delta?.deltas)) {
                     const activeDelta = delta.deltas.find((item: any) => item?.id === selectedConversationId);
-                    if (activeDelta && Number(activeDelta.unreadCount || 0) > 0) {
+                    if (activeDelta && Number(activeDelta?.conversation?.unreadCount ?? activeDelta?.unreadCount ?? 0) > 0) {
                         void markConversationReadInUi(selectedConversationId);
                     }
                 }

@@ -46,6 +46,7 @@ import {
     applyConversationDeltaPayload as applyConversationDeltaListPayload,
     deriveConversationListPageInfo,
     replaceConversationListFromResponse as replaceConversationListStateFromResponse,
+    type ConversationReadResetGuard,
 } from '@/lib/conversations/list-state';
 import {
     getWorkspaceCoreCacheEntry,
@@ -223,6 +224,7 @@ const WORKSPACE_CORE_CACHE_TTL_MS = 15 * 60 * 1000;
 const WORKSPACE_SIDEBAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_ACTIVITY_LIMIT = 180;
 const ACTIVE_POLL_GRACE_MS = 2500;
+const READ_RESET_GUARD_LIMIT = 500;
 
 async function sendReplyViaApi(
     conversationId: string,
@@ -377,6 +379,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     );
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readResetInFlightRef = useRef<Set<string>>(new Set());
+    const readResetGuardRef = useRef<Map<string, number>>(new Map());
     const pendingOutboundByConversationRef = useRef<Map<string, Map<string, Message>>>(new Map());
     const selectedConversationCacheRef = useRef<Map<string, Conversation>>(
         new Map(initialConversations.filter((conversation) => !!conversation?.id).map((conversation) => [conversation.id, conversation]))
@@ -965,7 +968,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const hasHydratedListRef = useRef(false);
 
     const replaceConversationListFromResponse = useCallback((data: any) => {
-        const listState = replaceConversationListStateFromResponse<Conversation>(data, readResetInFlightRef.current);
+        const listState = replaceConversationListStateFromResponse<Conversation>(data, readResetGuardRef.current as ConversationReadResetGuard);
         setConversations(listState.conversations);
         setConversationListHasMore(listState.pageInfo.hasMore);
         setConversationListNextCursor(listState.pageInfo.nextCursor);
@@ -978,7 +981,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const appendConversationPageFromResponse = useCallback((data: any) => {
         const pageInfo = deriveConversationListPageInfo(data);
         setConversations(prev => {
-            const listState = appendConversationPageStateFromResponse<Conversation>(prev, data, readResetInFlightRef.current);
+            const listState = appendConversationPageStateFromResponse<Conversation>(prev, data, readResetGuardRef.current as ConversationReadResetGuard);
             return listState.conversations;
         });
         setConversationListHasMore(pageInfo.hasMore);
@@ -994,7 +997,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         // If a user clicks an archived conversation from the search results while on the 'active' tab,
         // it will naturally not match the filter, but we should not kick them out of the chat window.
         setConversations((prev) => {
-            const listState = applyConversationDeltaListPayload<Conversation>(prev, deltaPayload, readResetInFlightRef.current);
+            const listState = applyConversationDeltaListPayload<Conversation>(prev, deltaPayload, readResetGuardRef.current as ConversationReadResetGuard);
             return listState.conversations;
         });
 
@@ -1094,12 +1097,24 @@ export function ConversationInterface({ locationId, initialConversations, initia
         messageSignatureRef.current = getMessageSignature(messages);
     }, [messages, activeId]);
 
+    const rememberReadReset = useCallback((conversationId: string, lastMessageDate: number) => {
+        const guard = readResetGuardRef.current;
+        guard.delete(conversationId);
+        guard.set(conversationId, lastMessageDate);
+        while (guard.size > READ_RESET_GUARD_LIMIT) {
+            const oldestConversationId = guard.keys().next().value;
+            if (!oldestConversationId) break;
+            guard.delete(oldestConversationId);
+        }
+    }, []);
+
     const markConversationReadInUi = useCallback((conversationId: string) => {
         const currentConversation = conversationsRef.current.find((c) => c.id === conversationId);
         if (!currentConversation) return;
 
         const currentUnreadCount = Number(currentConversation.unreadCount || 0);
         if (currentUnreadCount <= 0 && !readResetInFlightRef.current.has(conversationId)) return;
+        rememberReadReset(conversationId, Number(currentConversation.lastMessageDate || 0));
 
         if (currentUnreadCount > 0) {
             setConversations(prev =>
@@ -1118,15 +1133,17 @@ export function ConversationInterface({ locationId, initialConversations, initia
             .then((res) => {
                 if (!res?.success) {
                     console.warn("markConversationAsRead returned unsuccessful response:", res);
+                    readResetGuardRef.current.delete(conversationId);
                 }
             })
             .catch((err) => {
                 console.error("Failed to mark conversation as read:", err);
+                readResetGuardRef.current.delete(conversationId);
             })
             .finally(() => {
                 readResetInFlightRef.current.delete(conversationId);
             });
-    }, []);
+    }, [rememberReadReset]);
 
     const handleBindClick = (ids: string[]) => {
         if (ids.length === 0) return;

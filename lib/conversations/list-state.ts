@@ -1,7 +1,10 @@
 type ConversationListItem = {
     id?: string | null;
+    lastMessageDate?: number | null;
     unreadCount?: number | null;
 };
+
+export type ConversationReadResetGuard = ReadonlySet<string> | ReadonlyMap<string, number>;
 
 export type ConversationListPageInfo = {
     hasMore: boolean;
@@ -55,10 +58,10 @@ export function mergeConversationListsWithIncomingFirst<T extends ConversationLi
 
 export function normalizeFetchedConversations<T extends ConversationListItem>(
     conversations: unknown,
-    readResetInFlightIds: ReadonlySet<string>
+    readResetGuard: ConversationReadResetGuard
 ): T[] {
     if (!Array.isArray(conversations)) return [];
-    return conversations.map((conversation: T) => preserveOptimisticUnreadReset(conversation, readResetInFlightIds));
+    return conversations.map((conversation: T) => preserveOptimisticUnreadReset(conversation, readResetGuard));
 }
 
 export function deriveConversationListPageInfo(data: ConversationListResponseLike): ConversationListPageInfo {
@@ -76,10 +79,10 @@ export function deriveConversationListPageInfo(data: ConversationListResponseLik
 
 export function replaceConversationListFromResponse<T extends ConversationListItem>(
     data: ConversationListResponseLike,
-    readResetInFlightIds: ReadonlySet<string>
+    readResetGuard: ConversationReadResetGuard
 ): ConversationListResponseState<T> {
     return {
-        conversations: normalizeFetchedConversations<T>(data?.conversations, readResetInFlightIds),
+        conversations: normalizeFetchedConversations<T>(data?.conversations, readResetGuard),
         pageInfo: deriveConversationListPageInfo(data),
     };
 }
@@ -87,12 +90,12 @@ export function replaceConversationListFromResponse<T extends ConversationListIt
 export function appendConversationPageFromResponse<T extends ConversationListItem>(
     existing: T[],
     data: ConversationListResponseLike,
-    readResetInFlightIds: ReadonlySet<string>
+    readResetGuard: ConversationReadResetGuard
 ): ConversationListResponseState<T> {
     return {
         conversations: mergeConversationLists(
             existing,
-            normalizeFetchedConversations<T>(data?.conversations, readResetInFlightIds)
+            normalizeFetchedConversations<T>(data?.conversations, readResetGuard)
         ),
         pageInfo: deriveConversationListPageInfo(data),
     };
@@ -101,7 +104,7 @@ export function appendConversationPageFromResponse<T extends ConversationListIte
 export function applyConversationDeltaPayload<T extends ConversationListItem>(
     existing: T[],
     deltaPayload: ConversationDeltaPayloadLike,
-    readResetInFlightIds: ReadonlySet<string>
+    readResetGuard: ConversationReadResetGuard
 ): ConversationDeltaListState<T> {
     const deltas = Array.isArray(deltaPayload?.deltas) ? deltaPayload.deltas : [];
     const cursor = deriveConversationDeltaCursor(deltaPayload);
@@ -115,7 +118,7 @@ export function applyConversationDeltaPayload<T extends ConversationListItem>(
 
     const incoming = deltas
         .filter((item: any) => !!item?.matchesFilter && !!item?.conversation)
-        .map((item: any) => preserveOptimisticUnreadReset({ ...item.conversation } as T, readResetInFlightIds));
+        .map((item: any) => preserveOptimisticUnreadReset({ ...item.conversation } as T, readResetGuard));
     const removedIds = new Set(
         deltas
             .filter((item: any) => item && item.matchesFilter === false && item.id)
@@ -136,9 +139,23 @@ export function applyConversationDeltaPayload<T extends ConversationListItem>(
 
 function preserveOptimisticUnreadReset<T extends ConversationListItem>(
     conversation: T,
-    readResetInFlightIds: ReadonlySet<string>
+    readResetGuard: ConversationReadResetGuard
 ): T {
-    if (conversation.id && readResetInFlightIds.has(conversation.id)) {
+    if (!conversation.id) return conversation;
+
+    if (readResetGuard instanceof Map) {
+        const resetLastMessageDate = readResetGuard.get(conversation.id);
+        if (
+            typeof resetLastMessageDate === "number"
+            && Number(conversation.unreadCount || 0) > 0
+            && Number(conversation.lastMessageDate || 0) <= resetLastMessageDate
+        ) {
+            return { ...conversation, unreadCount: 0 };
+        }
+        return conversation;
+    }
+
+    if (readResetGuard.has(conversation.id)) {
         return { ...conversation, unreadCount: 0 };
     }
     return conversation;
