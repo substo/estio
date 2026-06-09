@@ -17,6 +17,11 @@ const REQUIREMENT_FIELD_LABELS: Record<string, string> = {
     requirementSummary: "Summary",
 };
 
+const CONTACT_VERIFICATION_ACTIONS = new Set([
+    "CONTACT_VERIFIED",
+    "AI_CONTACT_VERIFICATION_AUTO_APPLIED",
+]);
+
 function parseMaybeJson(value: unknown): unknown {
     if (typeof value !== "string") return value;
     try {
@@ -49,6 +54,15 @@ export function parseHistoryChanges(rawChanges: unknown, action?: string): Norma
 
     if (
         action === "AI_REQUIREMENTS_UPDATED"
+        && typeof parsed === "object"
+        && !Array.isArray(parsed)
+        && Array.isArray((parsed as any).changes)
+    ) {
+        return (parsed as any).changes.filter(isChangeLike).filter(hasVisibleChange);
+    }
+
+    if (
+        CONTACT_VERIFICATION_ACTIONS.has(String(action || ""))
         && typeof parsed === "object"
         && !Array.isArray(parsed)
         && Array.isArray((parsed as any).changes)

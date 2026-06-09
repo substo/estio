@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks, Phone, PhoneCall, PhoneOff } from 'lucide-react';
+import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks, Phone, PhoneCall, PhoneOff, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
@@ -62,6 +62,44 @@ function formatQuickSessionKind(sessionKind: string | null | undefined) {
     return "Viewing";
 }
 
+function parseActivityPayload(value: unknown): Record<string, unknown> | null {
+    if (!value) return null;
+    if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+    if (typeof value !== "string") return null;
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            ? parsed as Record<string, unknown>
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function formatVerificationStatus(value: unknown): string {
+    switch (value) {
+        case "verified_lead": return "Verified lead";
+        case "likely_agent": return "Likely agent";
+        case "likely_owner": return "Likely owner";
+        case "not_a_lead": return "Not a lead";
+        case "needs_review": return "Needs review";
+        default: return value ? String(value) : "Verified lead";
+    }
+}
+
+function formatContactVerificationFieldName(field: string): string {
+    switch (field) {
+        case "name": return "Display name";
+        case "firstName": return "First name";
+        case "lastName": return "Last name";
+        case "contactType": return "Type";
+        case "leadGoal": return "Goal";
+        case "qualificationStage": return "Qualification stage";
+        case "requirementSummary": return "Requirements";
+        default: return formatHistoryFieldName(field);
+    }
+}
+
 export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLogEntryProps) {
     const [expanded, setExpanded] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
@@ -70,11 +108,13 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
     const [preview, setPreview] = useState<any | null>(null);
     
     const changes = parseHistoryChanges(item.changes, item.action);
+    const rawPayload = useMemo(() => parseActivityPayload(item.changes), [item.changes]);
     const changeMap = useMemo(
         () => Object.fromEntries(changes.map((change) => [String(change.field || ''), change.new])),
         [changes]
     );
     const isRequirementsUpdate = isRequirementHistoryAction(item.action);
+    const isContactVerificationUpdate = item.action === 'AI_CONTACT_VERIFICATION_AUTO_APPLIED' || item.action === 'CONTACT_VERIFIED';
 
     // Determine config based on action
     let Icon = HelpCircle;
@@ -189,6 +229,30 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
             iconColor = "text-emerald-700 bg-emerald-100";
             actionLabel = "Requirements Updated";
             description = summarizeRequirementChanges(changes);
+            break;
+
+        case 'CONTACT_VERIFIED':
+            Icon = ShieldCheck;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "Contact Verified";
+            description = "Marked as a verified buyer/renter lead";
+            break;
+
+        case 'AI_CONTACT_VERIFICATION_AUTO_APPLIED':
+            Icon = ShieldCheck;
+            iconColor = "text-emerald-700 bg-emerald-100";
+            actionLabel = "Contact Verification Applied";
+            const verificationStatus = formatVerificationStatus(rawPayload?.status);
+            const verificationConfidence = rawPayload?.confidence;
+            const confidence = typeof verificationConfidence === "number"
+                ? ` · ${Math.round(verificationConfidence * 100)}% confidence`
+                : "";
+            const changedFields = changes.length > 0
+                ? changes.slice(0, 2).map((change) => formatContactVerificationFieldName(change.field)).join(", ")
+                : "";
+            description = changedFields
+                ? `${verificationStatus}${confidence} · Updated ${changedFields}${changes.length > 2 ? ` and ${changes.length - 2} more` : ""}`
+                : `${verificationStatus}${confidence}`;
             break;
 
         case 'WHATSAPP_CALL_REQUESTED':
@@ -447,7 +511,7 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
                                     <div key={idx} className="flex flex-col gap-0.5">
                                         {item.action === 'UPDATED' ? (
                                             <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
-                                                <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatHistoryFieldName(change.field)}:</span>
+                                                <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{isContactVerificationUpdate ? formatContactVerificationFieldName(change.field) : formatHistoryFieldName(change.field)}:</span>
                                                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                                     <span className="text-slate-400 line-through break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.old)}</span>
                                                     <span className="text-slate-400">→</span>
@@ -456,7 +520,7 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
                                             </div>
                                         ) : (
                                             <div className="grid min-w-0 grid-cols-[minmax(72px,auto)_minmax(0,1fr)] sm:grid-cols-[minmax(100px,auto)_minmax(0,1fr)] items-baseline gap-2">
-                                                <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{formatHistoryFieldName(change.field)}:</span>
+                                                <span className="font-semibold text-slate-500 min-w-[72px] sm:min-w-[100px] text-right">{isContactVerificationUpdate ? formatContactVerificationFieldName(change.field) : formatHistoryFieldName(change.field)}:</span>
                                                 <span className="text-slate-700 font-medium break-words [overflow-wrap:anywhere]">{formatHistoryValue(change.new)}</span>
                                             </div>
                                         )}

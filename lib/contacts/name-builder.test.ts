@@ -98,6 +98,12 @@ test("parseContactPersonNameFromDisplayName removes role and property reference 
         lastName: "",
         fullName: "Silvia",
     });
+
+    assert.deepEqual(parseContactPersonNameFromDisplayName("Kristina Grüße Lead Sale DT2937 2Bdr Town House Peyia"), {
+        firstName: "Kristina",
+        lastName: "Grüße",
+        fullName: "Kristina Grüße",
+    });
 });
 
 test("parseContactPersonNameFromDisplayName avoids company names and contact details", () => {

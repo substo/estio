@@ -60,3 +60,28 @@ test("parseHistoryChanges keeps normal object history compatible", () => {
         { field: "date", old: null, new: "2026-06-02" },
     ]);
 });
+
+test("parseHistoryChanges unwraps contact verification auto-apply payload", () => {
+    const changes = parseHistoryChanges({
+        proposalId: "proposal_123",
+        status: "verified_lead",
+        confidence: 1,
+        changes: [
+            { field: "name", old: "Kristina Lead Sale DT2937", new: "Kristina" },
+            {
+                field: "requirementSummary",
+                old: null,
+                new: "Interested in a 1-bedroom apartment in Kato Paphos.",
+            },
+        ],
+    }, "AI_CONTACT_VERIFICATION_AUTO_APPLIED");
+
+    assert.deepEqual(changes, [
+        { field: "name", old: "Kristina Lead Sale DT2937", new: "Kristina" },
+        {
+            field: "requirementSummary",
+            old: null,
+            new: "Interested in a 1-bedroom apartment in Kato Paphos.",
+        },
+    ]);
+});

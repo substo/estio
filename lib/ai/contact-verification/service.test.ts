@@ -4,6 +4,7 @@ import {
   buildContactVerificationAssessment,
   getContactVerificationPatchChanges,
   normalizeContactVerificationPatch,
+  preserveStructuredLeadDisplayNamePatch,
   shouldAutoApplyContactVerificationAssessment,
 } from "./service";
 
@@ -167,6 +168,45 @@ test("verification proposes clean first and last names from canonical display na
     result.evidence.find((item) => item.sourceId === "lead_verification")?.quote,
     "Contact type and lead goal are consistent with renter outreach.",
   );
+});
+
+test("verification preserves paste lead structured display name while filling person names", () => {
+  const result = buildContactVerificationAssessment({
+    contact: {
+      id: "contact_structured_name",
+      contactType: "Lead",
+      leadGoal: "To Buy",
+      name: "Kristina Grüße Lead Sale DT2937 2Bdr Town House Peyia",
+      qualificationStage: "unqualified",
+    },
+    recentMessages: [{ body: "Interested in buying a 1-bedroom apartment in Kato Paphos or Chloraka." }],
+  });
+
+  assert.equal(result.status, "verified_lead");
+  assert.equal("name" in result.proposedPatch, false);
+  assert.equal(result.proposedPatch.firstName, "Kristina");
+  assert.equal(result.proposedPatch.lastName, "Grüße");
+});
+
+test("verification sanitizer ignores AI attempt to strip paste lead structured display name", () => {
+  const patch = preserveStructuredLeadDisplayNamePatch({
+    contact: {
+      contactType: "Lead",
+      name: "Kristina Grüße Lead Sale DT2937 2Bdr Town House Peyia",
+    },
+    inferredRole: "Lead",
+    patch: {
+      name: "Kristina Grüße",
+      firstName: "Kristina",
+      lastName: "Grüße",
+      requirementSummary: "Interested in a 1-bedroom apartment in Kato Paphos.",
+    },
+  });
+
+  assert.equal("name" in patch, false);
+  assert.equal(patch.firstName, "Kristina");
+  assert.equal(patch.lastName, "Grüße");
+  assert.equal(patch.requirementSummary, "Interested in a 1-bedroom apartment in Kato Paphos.");
 });
 
 test("verification does not overwrite clean stored human names", () => {
