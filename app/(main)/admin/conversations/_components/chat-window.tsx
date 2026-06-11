@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -206,6 +206,8 @@ export function ChatWindow({
     const [selectedModel, setSelectedModel] = useState("");
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(conversation));
     const lastTimelineCountLogRef = useRef<string | null>(null);
+    const lastTimelineScrollTopRef = useRef(0);
+    const [mobileHeaderCollapsed, setMobileHeaderCollapsed] = useState(false);
     const {
         selectionBatch,
         isSummarizingBatch,
@@ -300,6 +302,8 @@ export function ChatWindow({
     useEffect(() => {
         setIsBulkTranscribingAudio(false);
         setActiveSurfaceChannel(getInitialSurfaceChannel(conversation));
+        setMobileHeaderCollapsed(false);
+        lastTimelineScrollTopRef.current = 0;
     }, [conversation.id]);
 
     const handleBulkTranscribeUnprocessedAudio = useCallback(async (window: "30d" | "all") => {
@@ -334,6 +338,27 @@ export function ChatWindow({
         || (!!isWhatsAppConversation && !!canUseTranscriptOnDemand && !!onBulkTranscribeUnprocessedAudio)
         || (!!isEmailConversation && !!onFetchHistory)
     );
+    const canCollapseMobileHeader = !!onBack && selectionBatch.length === 0 && !showTranscriptSearch;
+    const shouldCollapseMobileHeader = canCollapseMobileHeader && mobileHeaderCollapsed;
+    const handleTimelineScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+        if (!canCollapseMobileHeader) return;
+        const nextScrollTop = event.currentTarget.scrollTop;
+        const previousScrollTop = lastTimelineScrollTopRef.current;
+        const delta = nextScrollTop - previousScrollTop;
+        lastTimelineScrollTopRef.current = nextScrollTop;
+
+        if (nextScrollTop < 24) {
+            setMobileHeaderCollapsed(false);
+            return;
+        }
+        if (delta > 18 && nextScrollTop > 80) {
+            setMobileHeaderCollapsed(true);
+            return;
+        }
+        if (delta < -12) {
+            setMobileHeaderCollapsed(false);
+        }
+    }, [canCollapseMobileHeader]);
 
     return (
         <div
@@ -345,7 +370,12 @@ export function ChatWindow({
             className={cn("h-full min-h-0 flex flex-col min-w-0 overflow-hidden", surfaceTheme.rootClassName)}
         >
             {/* Header */}
-            <div className="h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
+            <div
+                className={cn(
+                    "h-16 border-b flex items-center px-3 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2 overflow-hidden transition-[height,opacity,border-color] duration-200 ease-out",
+                    shouldCollapseMobileHeader && "h-0 border-transparent opacity-0"
+                )}
+            >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                     {onBack && (
                         <Button
@@ -720,6 +750,7 @@ export function ChatWindow({
             {/* Messages Area */}
             <div
                 ref={scrollRef}
+                onScroll={handleTimelineScroll}
                 className={cn(
                     "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
                     getConversationTimelineScrollClassName(),

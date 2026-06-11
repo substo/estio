@@ -90,8 +90,9 @@ function getPlaceholderText(channel: ComposerChannel): string {
 }
 
 const EMPTY_COMPOSER_HEIGHT_PX = 36;
-const DRAFT_COMPOSER_MIN_ROWS = 7;
-const MOBILE_COMPOSER_MAX_VIEWPORT_RATIO = 0.5;
+const DRAFT_COMPOSER_MIN_ROWS = 1;
+const MOBILE_COMPOSER_MAX_VIEWPORT_RATIO = 0.32;
+const MOBILE_COMPOSER_MAX_HEIGHT_PX = 188;
 const DESKTOP_COMPOSER_MAX_HEIGHT_PX = 320;
 const EMPTY_AI_INSTRUCTION = "";
 
@@ -217,10 +218,11 @@ function resizeComposerTextarea(textarea: HTMLTextAreaElement | null, hasDraft: 
     const lineHeight = Number.parseFloat(computed.lineHeight) || 24;
     const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
     const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
-    const minHeight = Math.ceil((lineHeight * DRAFT_COMPOSER_MIN_ROWS) + paddingTop + paddingBottom);
-    const viewportMax = Math.floor(window.innerHeight * MOBILE_COMPOSER_MAX_VIEWPORT_RATIO);
+    const contentMinHeight = Math.ceil((lineHeight * DRAFT_COMPOSER_MIN_ROWS) + paddingTop + paddingBottom);
+    const minHeight = Math.max(EMPTY_COMPOSER_HEIGHT_PX, contentMinHeight);
+    const mobileViewportMax = Math.floor(window.innerHeight * MOBILE_COMPOSER_MAX_VIEWPORT_RATIO);
     const maxHeight = window.innerWidth < 640
-        ? Math.max(minHeight, viewportMax)
+        ? Math.max(minHeight, Math.min(MOBILE_COMPOSER_MAX_HEIGHT_PX, mobileViewportMax))
         : Math.max(minHeight, DESKTOP_COMPOSER_MAX_HEIGHT_PX);
     const nextHeight = Math.min(maxHeight, Math.max(minHeight, textarea.scrollHeight));
 
@@ -644,10 +646,9 @@ export function ConversationComposer({
                         value={draft}
                         onChange={(e) => onDraftChange(e.target.value)}
                         placeholder={getPlaceholderText(selectedChannel)}
-                        rows={composerHasDraft ? DRAFT_COMPOSER_MIN_ROWS : 1}
+                        rows={DRAFT_COMPOSER_MIN_ROWS}
                         className={cn(
-                            "max-h-[50dvh] w-full resize-none overflow-hidden border-0 bg-transparent px-3 py-2.5 text-base focus-visible:ring-0 sm:max-h-[320px] sm:text-sm",
-                            composerHasDraft ? "min-h-[188px] sm:min-h-[160px]" : "min-h-[36px]"
+                            "max-h-[188px] min-h-[36px] w-full resize-none overflow-hidden border-0 bg-transparent px-3 py-2.5 text-base focus-visible:ring-0 sm:max-h-[320px] sm:text-sm"
                         )}
                         style={composerHasDraft ? undefined : { height: `${EMPTY_COMPOSER_HEIGHT_PX}px` }}
                         disabled={isUnavailable || sending || isRecording}
