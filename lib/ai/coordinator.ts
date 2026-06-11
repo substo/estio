@@ -821,13 +821,12 @@ export async function generateDraft(context: CoordinationContext) {
             .map(m => (m.body || "").trim())
             .filter(Boolean)
             .join("\n");
-        const manualReplyLanguage = context.draftLanguage
-            ? context.draftLanguage
-            : (context.replyLanguageOverride === undefined
-                ? localConversationReplyLanguageOverride
-                : context.replyLanguageOverride);
+        const requestedDraftLanguage = String(context.draftLanguage || "").trim() || null;
+        const manualReplyLanguage = context.replyLanguageOverride === undefined
+            ? localConversationReplyLanguageOverride
+            : context.replyLanguageOverride;
         const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(context.locationId);
-        const languageResolution = resolveCommunicationLanguage({
+        const customerLanguageResolution = resolveCommunicationLanguage({
             manualOverrideLanguage: manualReplyLanguage,
             locationDefaultLanguage: locationDefaultReplyLanguage,
             latestInboundText: latestInboundMessage,
@@ -835,11 +834,22 @@ export async function generateDraft(context: CoordinationContext) {
             threadText,
             fallbackLanguage: locationDefaultReplyLanguage,
         });
+        const draftLanguageResolution = resolveCommunicationLanguage({
+            manualOverrideLanguage: requestedDraftLanguage,
+            locationDefaultLanguage: requestedDraftLanguage || locationDefaultReplyLanguage,
+            latestInboundText: latestInboundMessage,
+            contactPreferredLanguage: contact?.preferredLang ?? null,
+            threadText,
+            fallbackLanguage: locationDefaultReplyLanguage,
+        });
+        const expectedDraftLanguage = draftLanguageResolution.expectedLanguage || customerLanguageResolution.expectedLanguage || "en";
         const communicationContract = buildDealProtectiveCommunicationContract({
-            expectedLanguage: languageResolution.expectedLanguage,
-            latestInboundLanguage: languageResolution.latestInboundLanguage,
-            contactPreferredLanguage: languageResolution.contactPreferredLanguage,
-            contextLabel: "outbound real-estate communication",
+            expectedLanguage: expectedDraftLanguage,
+            latestInboundLanguage: customerLanguageResolution.latestInboundLanguage,
+            contactPreferredLanguage: customerLanguageResolution.contactPreferredLanguage,
+            contextLabel: requestedDraftLanguage
+                ? "the agent's internal review draft"
+                : "outbound real-estate communication",
         });
         const conversationalMessagingContract = buildConversationalMessagingContract({
             channel: channelName,
@@ -931,7 +941,9 @@ export async function generateDraft(context: CoordinationContext) {
         - Role: Intermediary connecting leads, owners, and agents.
         - Tone: ${isEmail ? "Professional, clear, polite, human." : "Natural, concise, friendly, human."}
         - Channel: ${channelName}
-        - Expected reply language: ${languageResolution.expectedLanguage || "en"}
+        - Agent review draft language: ${expectedDraftLanguage}
+        - Customer send language after preview/send translation: ${customerLanguageResolution.expectedLanguage || "auto"}
+        ${requestedDraftLanguage ? "- IMPORTANT: Generate this draft in the agent review draft language, not the customer send language. The app will prepare the customer-language send version separately." : ""}
 
         ${communicationContract}
 
@@ -1019,6 +1031,7 @@ export async function generateDraft(context: CoordinationContext) {
         
         Output Format:
         Just the draft message text the agent should send next.
+        ${requestedDraftLanguage ? `Write the draft in ${expectedDraftLanguage}. Ignore thread-history language for output language unless the agent explicitly asks otherwise.` : ""}
         `;
 
         // Add current composer draft and specific user instruction if provided.
@@ -1071,6 +1084,9 @@ export async function generateDraft(context: CoordinationContext) {
                 }
                 : null,
             operatorGreetingOverride: hasOperatorGreeting,
+            requestedDraftLanguage,
+            expectedDraftLanguage,
+            customerSendLanguage: customerLanguageResolution.expectedLanguage,
         }));
 
         const cachedStaticContext = `${DRAFT_STATIC_CONTEXT_PROMPT}
@@ -1210,8 +1226,8 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             risk: "medium",
             actions: [],
             draftReply: text,
-            expectedLanguage: languageResolution.expectedLanguage,
-            latestInboundLanguage: languageResolution.latestInboundLanguage,
+            expectedLanguage: expectedDraftLanguage,
+            latestInboundLanguage: customerLanguageResolution.latestInboundLanguage,
             draftLanguage,
             hasConfirmedReservation: policyEvidence.hasConfirmedReservation,
             hasConfirmedDeposit: policyEvidence.hasConfirmedDeposit,
@@ -1335,7 +1351,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 : `Generated based on conversation history and contact interest. Fallback used: ${actualModelName} (requested ${requestedModelName}).${policySummary}`,
             requiresHumanApproval,
             policyResult,
-            expectedLanguage: languageResolution.expectedLanguage,
+            expectedLanguage: expectedDraftLanguage,
             draftLanguage,
             truncated: wasTruncated,
             telemetry,

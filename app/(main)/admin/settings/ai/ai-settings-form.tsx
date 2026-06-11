@@ -846,7 +846,51 @@ function AudioTranscriptPolicySection({ initialData }: { initialData: AiSettings
     );
 }
 
-function ViewingSessionPolicySection({ initialData }: { initialData: AiSettingsInitialData }) {
+function OptionalModelSelect({
+    id,
+    name,
+    label,
+    value,
+    models,
+    description,
+}: {
+    id: string;
+    name: string;
+    label: string;
+    value?: string | null;
+    models: AiModelOption[];
+    description: string;
+}) {
+    return (
+        <div className="grid gap-2">
+            <Label htmlFor={id} className="text-xs text-slate-500 uppercase tracking-wider">
+                {label}
+            </Label>
+            <select
+                id={id}
+                name={name}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                defaultValue={String(value || "")}
+            >
+                <option value="">Use default model</option>
+                {models.map((model) => (
+                    <option key={model.value} value={model.value}>
+                        {model.label}
+                    </option>
+                ))}
+            </select>
+            <p className="text-[10px] text-muted-foreground">{description}</p>
+        </div>
+    );
+}
+
+function ViewingSessionPolicySection({
+    initialData,
+    modelOptions,
+}: {
+    initialData: AiSettingsInitialData;
+    modelOptions: AiModelOption[];
+}) {
     return (
         <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
             <div className="space-y-0.5">
@@ -854,7 +898,8 @@ function ViewingSessionPolicySection({ initialData }: { initialData: AiSettingsI
                     Viewing Sessions: Policy
                 </Label>
                 <p className="text-[10px] text-muted-foreground">
-                    Applies to live viewing-session transcripts and client join requirements.
+                    Applies only to live viewing-session transcripts, summaries, insights, and client join requirements.
+                    Conversation inbox translation uses the Conversation: Translation model above.
                 </p>
             </div>
 
@@ -928,7 +973,7 @@ function ViewingSessionPolicySection({ initialData }: { initialData: AiSettingsI
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
                     <Label htmlFor="viewingSessionAiDisclosureVersion" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Disclosure Version
+                        Viewing AI Disclosure Version
                     </Label>
                     <Input
                         id="viewingSessionAiDisclosureVersion"
@@ -940,41 +985,32 @@ function ViewingSessionPolicySection({ initialData }: { initialData: AiSettingsI
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div className="grid gap-2">
-                    <Label htmlFor="viewingSessionTranslationModel" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Translation Model Override
-                    </Label>
-                    <Input
-                        id="viewingSessionTranslationModel"
-                        name="viewingSessionTranslationModel"
-                        placeholder="gemini-2.5-flash"
-                        defaultValue={String(initialData?.viewingSessionTranslationModel || "")}
-                    />
-                </div>
+                <OptionalModelSelect
+                    id="viewingSessionTranslationModel"
+                    name="viewingSessionTranslationModel"
+                    label="Viewing Sessions: Translation"
+                    value={initialData?.viewingSessionTranslationModel}
+                    models={modelOptions}
+                    description="Optional override for translating live viewing transcripts."
+                />
 
-                <div className="grid gap-2">
-                    <Label htmlFor="viewingSessionInsightsModel" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Insights Model Override
-                    </Label>
-                    <Input
-                        id="viewingSessionInsightsModel"
-                        name="viewingSessionInsightsModel"
-                        placeholder="gemini-2.5-flash"
-                        defaultValue={String(initialData?.viewingSessionInsightsModel || "")}
-                    />
-                </div>
+                <OptionalModelSelect
+                    id="viewingSessionInsightsModel"
+                    name="viewingSessionInsightsModel"
+                    label="Viewing Sessions: Insights"
+                    value={initialData?.viewingSessionInsightsModel}
+                    models={modelOptions}
+                    description="Optional override for extracting live viewing insights."
+                />
 
-                <div className="grid gap-2">
-                    <Label htmlFor="viewingSessionSummaryModel" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Summary Model Override
-                    </Label>
-                    <Input
-                        id="viewingSessionSummaryModel"
-                        name="viewingSessionSummaryModel"
-                        placeholder="gemini-2.5-flash"
-                        defaultValue={String(initialData?.viewingSessionSummaryModel || "")}
-                    />
-                </div>
+                <OptionalModelSelect
+                    id="viewingSessionSummaryModel"
+                    name="viewingSessionSummaryModel"
+                    label="Viewing Sessions: Summary"
+                    value={initialData?.viewingSessionSummaryModel}
+                    models={modelOptions}
+                    description="Optional override for viewing-session summaries."
+                />
             </div>
         </div>
     );
@@ -1082,7 +1118,7 @@ function ModelConfigurationSection({
 
                 <AudioTranscriptPolicySection initialData={initialData} />
 
-                <ViewingSessionPolicySection initialData={initialData} />
+                <ViewingSessionPolicySection initialData={initialData} modelOptions={modelOptions} />
             </div>
         </div>
     );
