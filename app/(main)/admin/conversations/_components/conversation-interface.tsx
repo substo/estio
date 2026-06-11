@@ -16,7 +16,6 @@ import {
     generateComposerAIDraft,
     setConversationReplyLanguageOverride,
     translateConversationMessage,
-    previewTranslatedReply,
     deleteConversations,
     restoreConversations,
     archiveConversations,
@@ -1997,7 +1996,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!conversationId) {
             return { success: false as const, error: "No active conversation." };
         }
-        return previewTranslatedReply(conversationId, sourceText, channel, targetLanguage || null);
+        const response = await fetch("/api/conversations/preview-reply-translation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ conversationId, sourceText, channel, targetLanguage: targetLanguage || null }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!result) {
+            return { success: false as const, error: "Failed to generate translation preview." };
+        }
+        return result;
     }, []);
 
     const applyConversationReplyLanguageOverride = useCallback((conversationId: string, replyLanguageOverride: string | null) => {
@@ -2778,7 +2786,21 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!selectedDealConversation) {
             return { success: false as const, error: "No conversation selected." };
         }
-        return previewTranslatedReply(selectedDealConversation.id, sourceText, channel, targetLanguage || null);
+        const response = await fetch("/api/conversations/preview-reply-translation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                conversationId: selectedDealConversation.id,
+                sourceText,
+                channel,
+                targetLanguage: targetLanguage || null,
+            }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!result) {
+            return { success: false as const, error: "Failed to generate translation preview." };
+        }
+        return result;
     }, [selectedDealConversation]);
 
     const handleDealGenerateDraft = useCallback(async (
