@@ -468,6 +468,27 @@ const MESSAGE_TRANSLATION_STATUS = {
     completed: "completed",
     failed: "failed",
 } as const;
+const THREAD_TRANSLATION_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            results[index] = await worker(items[index], index);
+        }
+    }));
+
+    return results;
+}
 
 function stripHtmlToText(input: string): string {
     return String(input || "")
@@ -5618,7 +5639,6 @@ export async function translateConversationMessage(
             targetLanguage: resolvedTargetLanguage,
             sourceHash,
             status: MESSAGE_TRANSLATION_STATUS.completed,
-            model: translationModel,
         },
         orderBy: [{ updatedAt: "desc" }],
     });
@@ -5804,6 +5824,9 @@ export async function translateConversationThread(
         take: normalizedIds.length > 0 ? Math.min(normalizedIds.length, 250) : 120,
         select: {
             id: true,
+            body: true,
+            type: true,
+            conversationId: true,
         },
     });
 
@@ -5816,24 +5839,198 @@ export async function translateConversationThread(
     }> = [];
     const failed: Array<{ messageId: string; error: string }> = [];
 
-    for (const row of rows) {
-        const result = await translateConversationMessage(row.id, resolvedTargetLanguage);
-        if (result?.success) {
+    const translatableRows = rows.map((row) => {
+        const sourceRaw = String(row.body || "").trim();
+        const sourceText = String(row.type || "").toUpperCase().includes("EMAIL")
+            ? stripHtmlToText(sourceRaw)
+            : sourceRaw;
+        return {
+            ...row,
+            sourceText,
+            sourceHash: buildTranslationSourceHash(sourceText),
+        };
+    }).filter((row) => row.sourceText.length > 0);
+
+    if (translatableRows.length === 0) {
+        return {
+            success: true as const,
+            conversationId: conversation.id,
+            targetLanguage: resolvedTargetLanguage,
+            translatedCount: 0,
+            cachedCount: 0,
+            failedCount: 0,
+            translations,
+            failed,
+        };
+    }
+
+    const translationModel = await resolveConversationTranslationModel(location.id);
+    const cachedRows = await (db as any).messageTranslationCache.findMany({
+        where: {
+            messageId: { in: translatableRows.map((row) => row.id) },
+            targetLanguage: resolvedTargetLanguage,
+            status: MESSAGE_TRANSLATION_STATUS.completed,
+        },
+        orderBy: [{ updatedAt: "desc" }],
+    });
+    const cachedByMessageAndHash = new Map<string, any>();
+    for (const entry of cachedRows) {
+        const key = `${entry.messageId}:${entry.sourceHash}`;
+        if (!cachedByMessageAndHash.has(key)) {
+            cachedByMessageAndHash.set(key, entry);
+        }
+    }
+
+    const uncachedRows = [];
+    for (const row of translatableRows) {
+        const cached = cachedByMessageAndHash.get(`${row.id}:${row.sourceHash}`);
+        if (cached) {
             translatedCount += 1;
-            if ((result as any).cached) cachedCount += 1;
-            if ((result as any).translation) {
-                translations.push({
-                    messageId: row.id,
-                    translation: (result as any).translation,
-                    cached: !!(result as any).cached,
+            cachedCount += 1;
+            translations.push({
+                messageId: row.id,
+                translation: serializeMessageTranslationCache(cached),
+                cached: true,
+            });
+        } else {
+            uncachedRows.push(row);
+        }
+    }
+
+    const translationResults = await mapWithConcurrency(
+        uncachedRows,
+        THREAD_TRANSLATION_CONCURRENCY,
+        async (row) => {
+            try {
+                const translation = await runMessageTranslationLLM({
+                    sourceText: row.sourceText,
+                    targetLanguage: resolvedTargetLanguage,
+                    modelOverride: translationModel,
                 });
+
+                const stored = await (db as any).messageTranslationCache.upsert({
+                    where: {
+                        messageId_targetLanguage_sourceHash: {
+                            messageId: row.id,
+                            targetLanguage: resolvedTargetLanguage,
+                            sourceHash: row.sourceHash,
+                        },
+                    },
+                    create: {
+                        messageId: row.id,
+                        conversationId: row.conversationId,
+                        locationId: location.id,
+                        targetLanguage: resolvedTargetLanguage,
+                        sourceHash: row.sourceHash,
+                        sourceText: row.sourceText,
+                        translatedText: translation.translatedText,
+                        detectedSourceLanguage: translation.detectedSourceLanguage,
+                        detectionConfidence: translation.confidence,
+                        status: MESSAGE_TRANSLATION_STATUS.completed,
+                        provider: translation.provider,
+                        model: translation.model,
+                        error: null,
+                    },
+                    update: {
+                        conversationId: row.conversationId,
+                        locationId: location.id,
+                        sourceText: row.sourceText,
+                        translatedText: translation.translatedText,
+                        detectedSourceLanguage: translation.detectedSourceLanguage,
+                        detectionConfidence: translation.confidence,
+                        status: MESSAGE_TRANSLATION_STATUS.completed,
+                        provider: translation.provider,
+                        model: translation.model,
+                        error: null,
+                    },
+                });
+
+                await securelyRecordConversationAiUsage({
+                    locationId: location.id,
+                    conversationId: conversation.id,
+                    action: "translate_thread_message",
+                    provider: normalizeUsageProvider(translation.provider),
+                    model: translation.model,
+                    inputTokens: translation.usage.promptTokens || 0,
+                    outputTokens: translation.usage.completionTokens || 0,
+                    metadata: {
+                        source: "translateConversationThread",
+                        messageId: row.id,
+                        targetLanguage: resolvedTargetLanguage,
+                        cached: false,
+                    },
+                });
+
+                return {
+                    success: true as const,
+                    messageId: row.id,
+                    translation: serializeMessageTranslationCache(stored),
+                };
+            } catch (error: any) {
+                const messageText = String(error?.message || "Translation failed.");
+                await (db as any).messageTranslationCache.upsert({
+                    where: {
+                        messageId_targetLanguage_sourceHash: {
+                            messageId: row.id,
+                            targetLanguage: resolvedTargetLanguage,
+                            sourceHash: row.sourceHash,
+                        },
+                    },
+                    create: {
+                        messageId: row.id,
+                        conversationId: row.conversationId,
+                        locationId: location.id,
+                        targetLanguage: resolvedTargetLanguage,
+                        sourceHash: row.sourceHash,
+                        sourceText: row.sourceText,
+                        translatedText: "",
+                        detectedSourceLanguage: null,
+                        detectionConfidence: null,
+                        status: MESSAGE_TRANSLATION_STATUS.failed,
+                        provider: "google",
+                        model: translationModel,
+                        error: messageText,
+                    },
+                    update: {
+                        conversationId: row.conversationId,
+                        locationId: location.id,
+                        sourceText: row.sourceText,
+                        translatedText: "",
+                        detectedSourceLanguage: null,
+                        detectionConfidence: null,
+                        status: MESSAGE_TRANSLATION_STATUS.failed,
+                        provider: "google",
+                        model: translationModel,
+                        error: messageText,
+                    },
+                }).catch(() => null);
+                return {
+                    success: false as const,
+                    messageId: row.id,
+                    error: messageText,
+                };
             }
+        }
+    );
+
+    for (const result of translationResults) {
+        if (result.success) {
+            translatedCount += 1;
+            translations.push({
+                messageId: result.messageId,
+                translation: result.translation,
+                cached: false,
+            });
         } else {
             failed.push({
-                messageId: row.id,
-                error: String((result as any)?.error || "Translation failed"),
+                messageId: result.messageId,
+                error: result.error,
             });
         }
+    }
+
+    if (translationResults.some((result) => result.success)) {
+        invalidateConversationReadCaches(conversation.id);
     }
 
     emitConversationRealtimeEvent({
