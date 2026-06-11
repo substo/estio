@@ -49,6 +49,8 @@ model Location {
   aiSkillPolicies               AiSkillPolicy[]
   aiDecisions                   AiDecision[]
   aiRuntimeJobs                 AiRuntimeJob[]
+  contactClassificationRuns     ContactClassificationRun[]
+  contactClassificationRunItems ContactClassificationRunItem[]
   aiSuggestedResponses          AiSuggestedResponse[]
   contactRequirementProposals   ContactRequirementProposal[]
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
@@ -638,6 +640,7 @@ model Contact {
   userNotifications          UserNotification[]
   aiAutomationJobs           AiAutomationJob[]
   aiDecisions                AiDecision[]
+  contactClassificationRunItems ContactClassificationRunItem[]
   aiSuggestedResponses       AiSuggestedResponse[]
   requirementProposals       ContactRequirementProposal[]
   propertyMatchCandidates    PropertyMatchCandidate[]
@@ -682,6 +685,68 @@ model ContactLanguage {
   @@unique([contactId, language])
   @@index([locationId, language])
   @@index([contactId, lastSeenAt])
+}
+
+model ContactClassificationRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  status     String   @default("queued") // queued | running | paused | completed | failed | canceled
+  source     String   @default("manual") // manual | cron
+  model      String
+
+  totalQueued               Int @default(0)
+  checked                   Int @default(0)
+  verified                  Int @default(0)
+  proposals                 Int @default(0)
+  skipped                   Int @default(0)
+  failures                  Int @default(0)
+  reprocessedCampaignBlocks Int @default(0)
+
+  requestedByUserId String?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  lastHeartbeatAt   DateTime?
+  pauseRequestedAt  DateTime?
+  cancelRequestedAt DateTime?
+  lastError         String?   @db.Text
+
+  location Location                       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  items    ContactClassificationRunItem[]
+
+  @@index([locationId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model ContactClassificationRunItem {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runId      String
+  locationId String
+  contactId  String
+  status     String   @default("queued") // queued | running | completed | skipped | failed
+
+  attemptCount Int       @default(0)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  lockedAt     DateTime?
+  lockedBy     String?
+  resultStatus String?
+  proposalId   String?
+  lastError    String?   @db.Text
+
+  run      ContactClassificationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  location Location                 @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact  Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, contactId])
+  @@index([runId, status, createdAt])
+  @@index([locationId, status, createdAt])
+  @@index([contactId, status])
 }
 
 model WhatsAppIdentityMap {

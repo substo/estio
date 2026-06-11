@@ -39,6 +39,13 @@ export async function register() {
             } catch (err) {
                 console.error('[QueueBootstrap] Failed to initialize Paste Lead property import worker:', err);
             }
+
+            try {
+                const { initContactClassificationWorker } = await import('@/lib/queue/contact-classification');
+                await initContactClassificationWorker();
+            } catch (err) {
+                console.error('[QueueBootstrap] Failed to initialize contact classification worker:', err);
+            }
         }
 
         if (processRole === 'scrape-worker' || processRole === 'all') {

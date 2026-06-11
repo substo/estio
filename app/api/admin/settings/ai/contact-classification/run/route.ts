@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { autoApplyConfidentContactVerificationProposals } from "@/lib/ai/contact-verification/service";
 import {
     getContactProfileVerificationQueueStatus,
-    runContactProfileVerificationCron,
 } from "@/lib/ai/contact-profile-verification/cron";
-import { normalizeContactProfileVerificationBatchSize } from "@/lib/ai/contact-profile-verification/config";
+import { getCurrentContactClassificationRun } from "@/lib/ai/contact-classification/job";
+import { enqueueContactClassificationRun } from "@/lib/queue/contact-classification";
 import { authorizeContactClassificationRequest } from "../_shared";
 
 export const dynamic = "force-dynamic";
@@ -15,16 +15,12 @@ export async function POST(request: NextRequest) {
     const locationId = String(body?.locationId || "").trim();
     const authorization = await authorizeContactClassificationRequest(locationId);
     if (!authorization.ok) return authorization.response;
-    const modelOverride = String(body?.model || "").trim() || null;
 
     try {
-        const stats = await runContactProfileVerificationCron({
-            locationId: authorization.locationId,
-            batchSize: normalizeContactProfileVerificationBatchSize(body?.batchSize),
-            source: "manual",
-            force: true,
-            modelOverride,
-        });
+        const run = await getCurrentContactClassificationRun({ locationId: authorization.locationId });
+        if (run?.id && ["queued", "running"].includes(String(run.status))) {
+            await enqueueContactClassificationRun({ runId: run.id });
+        }
         const autoApply = await autoApplyConfidentContactVerificationProposals({
             locationId: authorization.locationId,
             actorUserId: null,
@@ -33,16 +29,30 @@ export async function POST(request: NextRequest) {
         const status = await getContactProfileVerificationQueueStatus({ locationId: authorization.locationId });
         console.info("[contact-classification:run] Processed batch", {
             locationId: authorization.locationId,
-            checked: stats.checked,
-            verified: stats.verified,
-            proposals: stats.proposals,
-            failures: stats.failures,
+            runId: run?.id || null,
+            checked: run?.checked || 0,
+            verified: run?.verified || 0,
+            proposals: run?.proposals || 0,
+            failures: run?.failures || 0,
             applied: autoApply.applied,
             autoApplyFailures: autoApply.failures,
             queued: status.queued,
-            model: modelOverride || "saved_setting",
+            model: run?.model || null,
         });
-        return NextResponse.json({ success: true, stats, autoApply, status });
+        return NextResponse.json({
+            success: true,
+            stats: {
+                checked: 0,
+                verified: 0,
+                proposals: 0,
+                skipped: 0,
+                failures: 0,
+                reprocessedCampaignBlocks: 0,
+            },
+            autoApply,
+            status,
+            run,
+        });
     } catch (error: unknown) {
         console.error("[contact-classification:run] Error:", error);
         return NextResponse.json(

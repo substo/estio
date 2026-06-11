@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { ensureDefaultSkillPolicies } from "@/lib/ai/runtime/engine";
 import { getContactProfileVerificationQueueStatus } from "@/lib/ai/contact-profile-verification/cron";
+import { getCurrentContactClassificationRun } from "@/lib/ai/contact-classification/job";
 
 export const EMPTY_AI_RUNTIME_SUMMARY = {
     totalPolicies: 0,
@@ -12,6 +13,7 @@ export const EMPTY_AI_RUNTIME_SUMMARY = {
     pendingRequirementProposals: 0,
     pendingVerificationProposals: 0,
     contactClassificationQueue: null,
+    contactClassificationRun: null,
     policies: [],
     recentDecisions: [],
     recentJobs: [],
@@ -30,6 +32,7 @@ export async function loadAiRuntimeSummary(locationId: string) {
             pendingRequirementProposals,
             pendingVerificationProposals,
             contactClassificationQueue,
+            contactClassificationRun,
             policies,
             recentDecisions,
             recentRuntimeJobs,
@@ -82,6 +85,7 @@ export async function loadAiRuntimeSummary(locationId: string) {
                 },
             }),
             getContactProfileVerificationQueueStatus({ locationId }),
+            getCurrentContactClassificationRun({ locationId }),
             db.aiSkillPolicy.findMany({
                 where: { locationId },
                 orderBy: [{ enabled: "desc" }, { objective: "asc" }, { skillId: "asc" }],
@@ -148,6 +152,7 @@ export async function loadAiRuntimeSummary(locationId: string) {
             pendingRequirementProposals,
             pendingVerificationProposals,
             contactClassificationQueue,
+            contactClassificationRun,
             policies: policies.map((item) => ({
                 id: item.id,
                 skillId: item.skillId,

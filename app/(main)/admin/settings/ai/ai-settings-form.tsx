@@ -12,7 +12,7 @@ import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, Pause, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import { SkillRuntimeSettings } from "./skill-runtime-settings";
 
@@ -97,9 +97,36 @@ type ContactClassificationQueueStatus = {
     latestQueuedAt?: string | null;
 };
 
+type ContactClassificationRunStatus = "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
+
+type ContactClassificationRun = {
+    id: string;
+    locationId: string;
+    status: ContactClassificationRunStatus;
+    source: string;
+    model: string;
+    totalQueued: number;
+    checked: number;
+    verified: number;
+    proposals: number;
+    skipped: number;
+    failures: number;
+    reprocessedCampaignBlocks: number;
+    remaining: number;
+    progressPercent: number;
+    startedAt: string | null;
+    finishedAt: string | null;
+    lastHeartbeatAt: string | null;
+    lastError: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+};
+
 type ContactClassificationProgress = {
     queuedCount: number;
     eligibleCount: number;
+    checkedCount: number;
+    qualifiedLeads: number;
     failedCount: number;
     progressPercent: number;
     statusLabel: string;
@@ -146,6 +173,7 @@ type AiRuntimeSummary = {
     pendingRequirementProposals?: number;
     pendingVerificationProposals?: number;
     contactClassificationQueue?: ContactClassificationQueueStatus | null;
+    contactClassificationRun?: ContactClassificationRun | null;
     requirementsIntelligence?: RequirementsIntelligenceSettings;
     contactProfileVerification?: ContactProfileVerificationSettings;
     policies: Array<{
@@ -298,17 +326,26 @@ function hasInitialModelValue(initialData: AiSettingsInitialData, key: string): 
 
 function deriveContactClassificationProgress(args: {
     queue: ContactClassificationQueueStatus | null | undefined;
-    runningVerification: boolean;
+    run: ContactClassificationRun | null | undefined;
 }): ContactClassificationProgress {
-    const queuedCount = Number(args.queue?.queued || 0);
+    const activeRun = args.run && ["queued", "running", "paused"].includes(args.run.status) ? args.run : null;
+    const queuedCount = activeRun ? Number(activeRun.remaining || 0) : Number(args.queue?.queued || 0);
     const eligibleCount = Number(args.queue?.eligible || 0);
+    const checkedCount = activeRun ? Number(activeRun.checked || 0) : Number(args.run?.checked || 0);
+    const qualifiedLeads = activeRun ? Number(activeRun.verified || 0) : Number(args.run?.verified || 0);
     const failedCount = Number(args.queue?.failed || 0);
-    const progressPercent = eligibleCount > 0
-        ? Math.max(0, Math.min(100, Math.round(((eligibleCount - queuedCount) / eligibleCount) * 100)))
-        : 100;
-    const statusLabel = args.runningVerification
+    const progressPercent = activeRun
+        ? Number(activeRun.progressPercent || 0)
+        : eligibleCount > 0
+            ? Math.max(0, Math.min(100, Math.round(((eligibleCount - queuedCount) / eligibleCount) * 100)))
+            : 100;
+    const statusLabel = activeRun?.status === "running" || activeRun?.status === "queued"
         ? "Checking contacts"
-        : queuedCount > 0
+        : activeRun?.status === "paused"
+            ? "Paused"
+            : args.run?.status === "failed"
+                ? "Needs attention"
+                : queuedCount > 0
             ? "Ready to check"
             : failedCount > 0
                 ? "Needs attention"
@@ -317,6 +354,8 @@ function deriveContactClassificationProgress(args: {
     return {
         queuedCount,
         eligibleCount,
+        checkedCount,
+        qualifiedLeads,
         failedCount,
         progressPercent,
         statusLabel,
@@ -464,6 +503,7 @@ function LeadIntelligenceSection({
     pendingRequirementProposals,
     pendingVerificationProposals,
     contactClassificationQueue,
+    contactClassificationRun,
     contactClassificationQueueUpdatedAt,
     requirementsLastRun,
     contactProfileVerificationLastRun,
@@ -472,6 +512,9 @@ function LeadIntelligenceSection({
     onContactProfileVerificationModelChange,
     onRunRequirementsScan,
     onVerifyContactsNow,
+    onPauseContactClassification,
+    onResumeContactClassification,
+    onCancelContactClassification,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -480,6 +523,7 @@ function LeadIntelligenceSection({
     pendingRequirementProposals: number;
     pendingVerificationProposals: number;
     contactClassificationQueue: ContactClassificationQueueStatus | null;
+    contactClassificationRun: ContactClassificationRun | null;
     contactClassificationQueueUpdatedAt: string | null;
     requirementsLastRun: RequirementsLastRun | null;
     contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
@@ -488,6 +532,9 @@ function LeadIntelligenceSection({
     onContactProfileVerificationModelChange: (value: string) => void;
     onRunRequirementsScan: () => void;
     onVerifyContactsNow: () => void;
+    onPauseContactClassification: () => void;
+    onResumeContactClassification: () => void;
+    onCancelContactClassification: () => void;
 }) {
     const requirements = initialData?.requirementsIntelligence || {};
     const verification = initialData?.contactProfileVerification || {};
@@ -504,13 +551,22 @@ function LeadIntelligenceSection({
     const reprocessEnabled = requirements.autoReprocessCampaignCandidates !== false
         && verification.autoReprocessCampaignBlocks !== false;
     const runningLeadIntelligence = runningRequirementsScan || runningVerifyContactsNow;
-    const runningAnyContactClassification = runningVerifyContactsNow;
+    const activeContactClassificationRun = contactClassificationRun && ["queued", "running"].includes(contactClassificationRun.status)
+        ? contactClassificationRun
+        : null;
+    const pausedContactClassificationRun = contactClassificationRun?.status === "paused" ? contactClassificationRun : null;
+    const runningAnyContactClassification = Boolean(activeContactClassificationRun || pausedContactClassificationRun) || runningVerifyContactsNow;
     const requirementWaitHours = Math.max(0, Math.min(24, Math.round(Number(requirements.activityDebounceMinutes ?? 24 * 60) / 60)));
-    const processedCount = Number(contactProfileVerificationLastRun?.stats?.checked || 0);
     const classificationProgress = deriveContactClassificationProgress({
         queue: contactClassificationQueue,
-        runningVerification: runningVerifyContactsNow,
+        run: contactClassificationRun,
     });
+    const activeRunModelChanged = Boolean(
+        activeContactClassificationRun
+        && contactProfileVerificationModel
+        && activeContactClassificationRun.model
+        && contactProfileVerificationModel !== activeContactClassificationRun.model
+    );
 
     return (
         <div className="space-y-3">
@@ -591,24 +647,54 @@ function LeadIntelligenceSection({
                         <div>
                             <div className="text-xs font-medium text-slate-700">Contact Classification</div>
                             <div className="text-[10px] text-muted-foreground">Classifies contacts as buyer/renter leads, owners, agents, not leads, or needs review. Confident decisions are applied automatically.</div>
-                            <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactProfileVerificationLastRun?.finishedAt)}</div>
+                            <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(contactClassificationRun?.finishedAt || contactProfileVerificationLastRun?.finishedAt)}</div>
                             <div className="mt-1 text-[10px] font-medium text-slate-700">{classificationProgress.statusLabel}</div>
-                            {runningVerifyContactsNow ? (
+                            {activeContactClassificationRun ? (
                                 <div className="text-[10px] text-muted-foreground">
-                                    Checking one contact at a time so the numbers update after each contact.
+                                    Running in the background. You can refresh this page and it will keep working.
+                                </div>
+                            ) : null}
+                            {activeRunModelChanged ? (
+                                <div className="text-[10px] text-muted-foreground">
+                                    Current run is using {activeContactClassificationRun?.model}. Model changes apply to the next run.
                                 </div>
                             ) : null}
                         </div>
-                        <Button type="button" size="sm" className="h-9 text-xs" disabled={runningAnyContactClassification} onClick={onVerifyContactsNow}>
-                            {runningAnyContactClassification ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-                            Verify Contacts Now
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                            <Button type="button" size="sm" className="h-9 text-xs" disabled={runningAnyContactClassification} onClick={onVerifyContactsNow}>
+                                {activeContactClassificationRun || runningVerifyContactsNow ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
+                                Verify Contacts Now
+                            </Button>
+                            {activeContactClassificationRun ? (
+                                <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onPauseContactClassification}>
+                                    <Pause className="mr-1.5 h-3.5 w-3.5" />
+                                    Pause
+                                </Button>
+                            ) : null}
+                            {pausedContactClassificationRun ? (
+                                <>
+                                    <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onResumeContactClassification}>
+                                        <Play className="mr-1.5 h-3.5 w-3.5" />
+                                        Resume
+                                    </Button>
+                                    <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onCancelContactClassification}>
+                                        <X className="mr-1.5 h-3.5 w-3.5" />
+                                        Cancel
+                                    </Button>
+                                </>
+                            ) : activeContactClassificationRun ? (
+                                <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onCancelContactClassification}>
+                                    <X className="mr-1.5 h-3.5 w-3.5" />
+                                    Cancel
+                                </Button>
+                            ) : null}
+                        </div>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-5">
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">To Check</p><p className="text-sm font-semibold">{classificationProgress.queuedCount}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Eligible</p><p className="text-sm font-semibold">{classificationProgress.eligibleCount}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{processedCount}</p></div>
-                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{Number(contactProfileVerificationLastRun?.stats?.verified || 0)}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Checked</p><p className="text-sm font-semibold">{classificationProgress.checkedCount}</p></div>
+                        <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Qualified Leads</p><p className="text-sm font-semibold">{classificationProgress.qualifiedLeads}</p></div>
                         <div><p className="text-[10px] uppercase tracking-wide text-slate-500">Needs Review</p><p className="text-sm font-semibold">{pendingVerificationProposals}</p></div>
                     </div>
                     <div className="mt-3">
@@ -625,7 +711,7 @@ function LeadIntelligenceSection({
                     </div>
                     <div className="mt-2 text-[10px] text-muted-foreground">
                         Verify Contacts Now queues eligible contacts, checks them one by one, applies safe decisions automatically, and leaves only uncertain contacts for review.
-                        Failed: {classificationProgress.failedCount}.
+                        Failed: {contactClassificationRun?.failures ?? classificationProgress.failedCount}.
                         {contactClassificationQueueUpdatedAt ? ` Last updated: ${formatDateLabel(contactClassificationQueueUpdatedAt)}.` : ""}
                     </div>
                 </div>
@@ -906,6 +992,7 @@ function ModelConfigurationSection({
     pendingRequirementProposals,
     pendingVerificationProposals,
     contactClassificationQueue,
+    contactClassificationRun,
     contactClassificationQueueUpdatedAt,
     requirementsLastRun,
     contactProfileVerificationLastRun,
@@ -919,6 +1006,9 @@ function ModelConfigurationSection({
     onContactProfileVerificationModelChange,
     onRunRequirementsScan,
     onVerifyContactsNow,
+    onPauseContactClassification,
+    onResumeContactClassification,
+    onCancelContactClassification,
 }: {
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
@@ -931,6 +1021,7 @@ function ModelConfigurationSection({
     pendingRequirementProposals: number;
     pendingVerificationProposals: number;
     contactClassificationQueue: ContactClassificationQueueStatus | null;
+    contactClassificationRun: ContactClassificationRun | null;
     contactClassificationQueueUpdatedAt: string | null;
     requirementsLastRun: RequirementsLastRun | null;
     contactProfileVerificationLastRun: ContactProfileVerificationLastRun | null;
@@ -944,6 +1035,9 @@ function ModelConfigurationSection({
     onContactProfileVerificationModelChange: (value: string) => void;
     onRunRequirementsScan: () => void;
     onVerifyContactsNow: () => void;
+    onPauseContactClassification: () => void;
+    onResumeContactClassification: () => void;
+    onCancelContactClassification: () => void;
 }) {
     return (
         <div className="space-y-4">
@@ -972,6 +1066,7 @@ function ModelConfigurationSection({
                     pendingRequirementProposals={pendingRequirementProposals}
                     pendingVerificationProposals={pendingVerificationProposals}
                     contactClassificationQueue={contactClassificationQueue}
+                    contactClassificationRun={contactClassificationRun}
                     contactClassificationQueueUpdatedAt={contactClassificationQueueUpdatedAt}
                     requirementsLastRun={requirementsLastRun}
                     contactProfileVerificationLastRun={contactProfileVerificationLastRun}
@@ -980,6 +1075,9 @@ function ModelConfigurationSection({
                     onContactProfileVerificationModelChange={onContactProfileVerificationModelChange}
                     onRunRequirementsScan={onRunRequirementsScan}
                     onVerifyContactsNow={onVerifyContactsNow}
+                    onPauseContactClassification={onPauseContactClassification}
+                    onResumeContactClassification={onResumeContactClassification}
+                    onCancelContactClassification={onCancelContactClassification}
                 />
 
                 <AudioTranscriptPolicySection initialData={initialData} />
@@ -1297,6 +1395,9 @@ export function AiSettingsForm({
     const [contactClassificationQueue, setContactClassificationQueue] = useState<ContactClassificationQueueStatus | null>(
         runtimeSummary?.contactClassificationQueue || null
     );
+    const [contactClassificationRun, setContactClassificationRun] = useState<ContactClassificationRun | null>(
+        runtimeSummary?.contactClassificationRun || null
+    );
     const [contactClassificationQueueUpdatedAt, setContactClassificationQueueUpdatedAt] = useState<string | null>(
         runtimeSummary?.contactClassificationQueue ? new Date().toISOString() : null
     );
@@ -1341,6 +1442,32 @@ export function AiSettingsForm({
         }
     }
 
+    function updateContactClassificationRun(run: ContactClassificationRun | null | undefined) {
+        setContactClassificationRun(run || null);
+        if (run) {
+            setContactProfileVerificationLastRun({
+                status: run.status,
+                source: run.source,
+                startedAt: run.startedAt || undefined,
+                finishedAt: run.finishedAt,
+                durationMs: run.startedAt
+                    ? Math.max(0, (new Date(run.finishedAt || run.updatedAt || new Date()).getTime() - new Date(run.startedAt).getTime()))
+                    : 0,
+                mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
+                batchSize: Number(initialData?.contactProfileVerification?.batchSize || 50),
+                stats: {
+                    checked: run.checked,
+                    verified: run.verified,
+                    proposals: run.proposals,
+                    skipped: run.skipped,
+                    failures: run.failures,
+                    reprocessedCampaignBlocks: run.reprocessedCampaignBlocks,
+                },
+                error: run.lastError,
+            });
+        }
+    }
+
     async function refreshContactClassificationQueue() {
         const params = new URLSearchParams({ locationId });
         const response = await fetch(`/api/admin/settings/ai/contact-classification/queue-all?${params.toString()}`);
@@ -1350,6 +1477,17 @@ export function AiSettingsForm({
         );
         updateContactClassificationQueue(result.status);
         return result.status as ContactClassificationQueueStatus | null;
+    }
+
+    async function refreshContactClassificationRun() {
+        const params = new URLSearchParams({ locationId });
+        const response = await fetch(`/api/admin/settings/ai/contact-classification/jobs?${params.toString()}`);
+        const result = await readJsonResponse<{ success: true; run?: ContactClassificationRun | null }>(
+            response,
+            "Could not load contact classification run",
+        );
+        updateContactClassificationRun(result.run || null);
+        return result.run || null;
     }
 
     useEffect(() => {
@@ -1369,6 +1507,7 @@ export function AiSettingsForm({
             if (summary?.contactClassificationQueue) {
                 updateContactClassificationQueue(summary.contactClassificationQueue);
             }
+            updateContactClassificationRun(summary?.contactClassificationRun || null);
         }
 
         loadRuntimeSummary().catch(() => null);
@@ -1405,15 +1544,18 @@ export function AiSettingsForm({
     }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel, hasConfiguredTranslationModel]);
 
     useEffect(() => {
-        const shouldPoll = Number(contactClassificationQueue?.queued || 0) > 0
+        const activeRun = contactClassificationRun && ["queued", "running", "paused"].includes(contactClassificationRun.status);
+        const shouldPoll = Boolean(activeRun)
+            || Number(contactClassificationQueue?.queued || 0) > 0
             || runningVerifyContactsNow;
         if (!shouldPoll) return;
 
         const interval = window.setInterval(() => {
             refreshContactClassificationQueue().catch(() => null);
-        }, 10000);
+            refreshContactClassificationRun().catch(() => null);
+        }, activeRun ? 3000 : 10000);
         return () => window.clearInterval(interval);
-    }, [contactClassificationQueue?.queued, locationId, runningVerifyContactsNow]);
+    }, [contactClassificationQueue?.queued, contactClassificationRun?.status, locationId, runningVerifyContactsNow]);
 
     const runRequirementsScan = async () => {
         setRunningRequirementsScan(true);
@@ -1445,127 +1587,75 @@ export function AiSettingsForm({
         }
     };
 
-    async function verifyContactsNowRequest(batchSize: number) {
-        const response = await fetch("/api/admin/settings/ai/contact-classification/verify-now", {
+    async function startContactClassificationJobRequest() {
+        const response = await fetch("/api/admin/settings/ai/contact-classification/jobs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ locationId, batchSize, model: contactProfileVerificationModel }),
+            body: JSON.stringify({ locationId, model: contactProfileVerificationModel }),
         });
         return readJsonResponse<{
             success: true;
-            batchSize?: number;
-            queued?: { success: true; due?: number };
-            firstAutoApply?: { applied?: number; failures?: number };
-            status?: ContactClassificationQueueStatus | null;
+            created?: boolean;
+            run?: ContactClassificationRun | null;
         }>(response, "Could not verify contacts");
     }
 
-    async function runContactClassificationBatchRequest(batchSize: number) {
-        const response = await fetch("/api/admin/settings/ai/contact-classification/run", {
+    async function updateContactClassificationJobRequest(action: "pause" | "resume" | "cancel") {
+        const runId = contactClassificationRun?.id;
+        if (!runId) throw new Error("No active contact classification run.");
+        const response = await fetch(`/api/admin/settings/ai/contact-classification/jobs/${encodeURIComponent(runId)}/${action}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ locationId, batchSize, autoApplyLimit: 200, model: contactProfileVerificationModel }),
+            body: JSON.stringify({ locationId }),
         });
         return readJsonResponse<{
             success: true;
-            stats?: ContactProfileVerificationLastRunStats;
-            autoApply?: { applied?: number; failures?: number };
-            status?: ContactClassificationQueueStatus | null;
-        }>(response, "Could not process contact classification batch");
-    }
-
-    function addContactClassificationStats(
-        target: ContactProfileVerificationLastRunStats,
-        source: ContactProfileVerificationLastRunStats | undefined,
-    ): ContactProfileVerificationLastRunStats {
-        return {
-            checked: Number(target.checked || 0) + Number(source?.checked || 0),
-            verified: Number(target.verified || 0) + Number(source?.verified || 0),
-            proposals: Number(target.proposals || 0) + Number(source?.proposals || 0),
-            skipped: Number(target.skipped || 0) + Number(source?.skipped || 0),
-            failures: Number(target.failures || 0) + Number(source?.failures || 0),
-            reprocessedCampaignBlocks: Number(target.reprocessedCampaignBlocks || 0) + Number(source?.reprocessedCampaignBlocks || 0),
-        };
+            run?: ContactClassificationRun | null;
+        }>(response, `Could not ${action} contact classification`);
     }
 
     const verifyContactsNow = async () => {
         setRunningVerifyContactsNow(true);
-        const startedAt = new Date();
-        let latestStats: ContactProfileVerificationLastRunStats = {};
-        let batchSize = 5;
         try {
-            batchSize = 1;
-            const startResult = await verifyContactsNowRequest(batchSize);
-            updateContactClassificationQueue(startResult.status);
-
-            let stats: ContactProfileVerificationLastRunStats = {};
-            let applied = Number(startResult.firstAutoApply?.applied || 0);
-            let latestStatus = startResult.status || null;
-            let remainingQueued = Number(latestStatus?.queued || 0);
-            let batches = 0;
-
-            setContactProfileVerificationLastRun({
-                status: "running",
-                source: "manual",
-                startedAt: startedAt.toISOString(),
-                finishedAt: null,
-                durationMs: Date.now() - startedAt.getTime(),
-                mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
-                batchSize,
-                stats,
-                error: null,
-            });
-
-            while (remainingQueued > 0 && batches < 1000) {
-                batches += 1;
-                const batchResult = await runContactClassificationBatchRequest(batchSize);
-                stats = addContactClassificationStats(stats, batchResult.stats);
-                latestStats = stats;
-                applied += Number(batchResult.autoApply?.applied || 0);
-                latestStatus = batchResult.status || latestStatus;
-                updateContactClassificationQueue(latestStatus);
-                remainingQueued = Number(latestStatus?.queued || 0);
-
-                setContactProfileVerificationLastRun({
-                    status: remainingQueued > 0 ? "running" : Number(stats.failures || 0) > 0 ? "failed" : "completed",
-                    source: "manual",
-                    startedAt: startedAt.toISOString(),
-                    finishedAt: remainingQueued > 0 ? null : new Date().toISOString(),
-                    durationMs: Date.now() - startedAt.getTime(),
-                    mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
-                    batchSize,
-                    stats,
-                    error: Number(stats.failures || 0) > 0 ? `${Number(stats.failures)} contact(s) failed.` : null,
-                });
-
-                if (Number(batchResult.stats?.checked || 0) === 0 && remainingQueued > 0) {
-                    throw new Error("Contact verification stopped because no contact was processed in the latest request.");
-                }
-            }
-
-            if (remainingQueued > 0) {
-                toast.info(`Verification paused after ${batches} contact${batches === 1 ? "" : "s"}. ${remainingQueued} contact${remainingQueued === 1 ? "" : "s"} still waiting.`);
-                return;
-            }
-
-            toast.success(
-                `Verification complete. Checked ${Number(stats.checked || 0)}, qualified ${Number(stats.verified || 0)}, applied ${applied} confident decision${applied === 1 ? "" : "s"}.`
-            );
+            const result = await startContactClassificationJobRequest();
+            updateContactClassificationRun(result.run || null);
+            await refreshContactClassificationQueue().catch(() => null);
+            toast.success(result.created ? "Contact classification started." : "Contact classification is already running.");
         } catch (error: unknown) {
-            setContactProfileVerificationLastRun({
-                status: "failed",
-                source: "manual",
-                startedAt: startedAt.toISOString(),
-                finishedAt: new Date().toISOString(),
-                durationMs: Date.now() - startedAt.getTime(),
-                mode: String(initialData?.contactProfileVerification?.mode || "manual_only"),
-                batchSize,
-                stats: latestStats,
-                error: error instanceof Error ? error.message : "Could not verify contacts.",
-            });
             toast.error(error instanceof Error ? error.message : "Could not verify contacts.");
         } finally {
             setRunningVerifyContactsNow(false);
+        }
+    };
+
+    const pauseContactClassification = async () => {
+        try {
+            const result = await updateContactClassificationJobRequest("pause");
+            updateContactClassificationRun(result.run || null);
+            toast.success("Contact classification paused.");
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Could not pause contact classification.");
+        }
+    };
+
+    const resumeContactClassification = async () => {
+        try {
+            const result = await updateContactClassificationJobRequest("resume");
+            updateContactClassificationRun(result.run || null);
+            toast.success("Contact classification resumed.");
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Could not resume contact classification.");
+        }
+    };
+
+    const cancelContactClassification = async () => {
+        try {
+            const result = await updateContactClassificationJobRequest("cancel");
+            updateContactClassificationRun(result.run || null);
+            await refreshContactClassificationQueue().catch(() => null);
+            toast.success("Contact classification canceled.");
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : "Could not cancel contact classification.");
         }
     };
 
@@ -1593,6 +1683,7 @@ export function AiSettingsForm({
                     pendingRequirementProposals={Number(runtimeSummaryState?.pendingRequirementProposals || 0)}
                     pendingVerificationProposals={Number(runtimeSummaryState?.pendingVerificationProposals || 0)}
                     contactClassificationQueue={contactClassificationQueue}
+                    contactClassificationRun={contactClassificationRun}
                     contactClassificationQueueUpdatedAt={contactClassificationQueueUpdatedAt}
                     requirementsLastRun={requirementsLastRun}
                     contactProfileVerificationLastRun={contactProfileVerificationLastRun}
@@ -1621,6 +1712,9 @@ export function AiSettingsForm({
                     onContactProfileVerificationModelChange={setContactProfileVerificationModel}
                     onRunRequirementsScan={runRequirementsScan}
                     onVerifyContactsNow={verifyContactsNow}
+                    onPauseContactClassification={pauseContactClassification}
+                    onResumeContactClassification={resumeContactClassification}
+                    onCancelContactClassification={cancelContactClassification}
                 />
 
                 <Separator />
