@@ -5,6 +5,7 @@ import { computeWhatsAppTypingDelay, type WhatsAppTypingDelayResult } from "@/li
 import { processWhatsAppOutboundOutboxJob } from "@/lib/whatsapp/outbound-outbox";
 import type { WhatsAppOutboundKind, WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
+import { toR2Uri } from "@/lib/whatsapp/media-r2";
 
 export type { WhatsAppOutboundKind, WhatsAppTransport };
 
@@ -232,7 +233,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                                     fileName: attachment.fileName,
                                     contentType: attachment.contentType,
                                     size: Number(attachment.size || 0),
-                                    url: `r2://${attachment.objectKey}`,
+                                    url: toR2Uri(attachment.objectKey),
                                 },
                             ],
                         },

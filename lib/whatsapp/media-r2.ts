@@ -195,6 +195,9 @@ export function toR2Uri(key: string) {
 export function parseR2Uri(uri: string): { bucket: string; key: string } | null {
     if (!uri.startsWith("r2://")) return null;
     const rest = uri.slice("r2://".length);
+    if (rest.startsWith("whatsapp/web-bridge/") || rest.startsWith("whatsapp/cloud/")) {
+        return { bucket: process.env.R2_BUCKET_NAME || DEFAULT_BUCKET_NAME, key: rest };
+    }
     const slash = rest.indexOf("/");
     if (slash <= 0) return null;
     const bucket = rest.slice(0, slash);
