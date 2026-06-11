@@ -48,6 +48,11 @@ export function mapConversationRowToUi(
         contactType: c.contact?.contactType || null,
         contactPreferredLanguage: c.contact?.preferredLang || null,
         replyLanguageOverride: c.replyLanguageOverride || null,
+        currentLanguage: c.currentLanguage || null,
+        currentLanguageSource: c.currentLanguageSource || null,
+        currentLanguageConfidence: Number.isFinite(Number(c.currentLanguageConfidence))
+            ? Number(c.currentLanguageConfidence)
+            : null,
         locationDefaultReplyLanguage: locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
         detectedThreadLanguage: c.detectedThreadLanguage || null,
         detectedThreadLanguageConfidence: Number.isFinite(Number(c.detectedThreadLanguageConfidence))

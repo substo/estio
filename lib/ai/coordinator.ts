@@ -834,8 +834,6 @@ export async function generateDraft(context: CoordinationContext) {
             contactPreferredLanguage: contact?.preferredLang ?? null,
             threadText,
             fallbackLanguage: locationDefaultReplyLanguage,
-            preferLocationDefaultLanguage: !manualReplyLanguage,
-            useContactPreferredLanguage: false,
         });
         const communicationContract = buildDealProtectiveCommunicationContract({
             expectedLanguage: languageResolution.expectedLanguage,

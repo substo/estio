@@ -469,7 +469,7 @@ model SiteConfig {
   googleAiModelExtraction    String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
   googleAiModelDesign        String? @default("gemini-1.5-pro") // Stage 2: High-End Designer
   googleAiModelTranscription String? @default("gemini-2.5-flash") // Phase 1: Audio transcription default
-  googleAiModelTranslation   String? @default("gemini-flash-latest") // Conversation translation default
+  googleAiModelTranslation   String? @default("gemini-flash-lite-latest") // Conversation translation default
   brandVoice                 String? // Custom instructions for AI Brand Voice
   homeSections               Json? // Configuration for Home Page Sections (order, visibility)
   favoritesConfig            Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
@@ -520,6 +520,7 @@ model Contact {
   message       String?
   preferredLang String? // "en", "el", etc.
   notes         String? // General notes ("contact_other")
+  languageProfiles ContactLanguage[]
 
   // Enhanced Demographics
   dateOfBirth DateTime?
@@ -660,6 +661,27 @@ model Contact {
   @@index([locationId, profileVerifiedAt])
   @@index([locationId, requirementsAssessmentDueAt])
   @@index([locationId, requirementsLastAssessedAt])
+}
+
+model ContactLanguage {
+  id String @id @default(cuid())
+
+  contactId  String
+  locationId String
+  language   String
+  confidence Float?
+  source     String  @default("detected") // detected | manual | imported | inferred
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, language])
+  @@index([locationId, language])
+  @@index([contactId, lastSeenAt])
 }
 
 model WhatsAppIdentityMap {
@@ -1587,6 +1609,10 @@ model Conversation {
   // Phase 6: Semi-Auto & Event-Driven
   semiAuto              Boolean   @default(false) // AI auto-drafts on incoming events (never auto-sends)
   replyLanguageOverride String? // Optional per-conversation language override (BCP-47, null = auto)
+  currentLanguage       String? // Detected/current customer language for this thread (BCP-47)
+  currentLanguageSource String? // detected | manual | imported | inferred
+  currentLanguageConfidence Float?
+  currentLanguageUpdatedAt DateTime?
   contextSummary        String?   @db.Text // Compacted conversation context for long threads
   lastSummarizedAt      DateTime? // When context was last compacted
 

@@ -323,7 +323,6 @@ export async function fetchMessagesForResolvedConversation(args: {
     const legacyCrmSubjectPatterns = (((legacyCrmSettings as any)?.legacyCrmLeadEmailSubjectPatterns || []) as string[]);
     const redactTranscriptContent = transcriptVisibility.restrictContent;
     const resolvedTranslationTargetLanguage = getResolvedConversationTranslationLanguage({
-        replyLanguageOverride: conversation.replyLanguageOverride || null,
         locationDefaultReplyLanguage,
     });
 

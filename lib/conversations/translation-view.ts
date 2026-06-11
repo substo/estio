@@ -12,10 +12,11 @@ function getPrimaryLanguageSubtag(language: string | null | undefined) {
     return normalized.split("-")[0] || normalized;
 }
 
-export function getResolvedConversationTranslationLanguage(conversation: Pick<Conversation, "replyLanguageOverride" | "locationDefaultReplyLanguage"> | null | undefined) {
+export function getResolvedConversationTranslationLanguage(conversation: (Partial<Pick<Conversation, "locationDefaultReplyLanguage">> & {
+    agentWorkingLanguage?: string | null;
+}) | null | undefined) {
     return String(
-        conversation?.replyLanguageOverride
-        || conversation?.locationDefaultReplyLanguage
+        conversation?.agentWorkingLanguage
         || DEFAULT_INTERNAL_LANGUAGE
     ).trim();
 }

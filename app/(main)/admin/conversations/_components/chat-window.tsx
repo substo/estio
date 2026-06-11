@@ -258,7 +258,6 @@ export function ChatWindow({
         threadTranslationMode,
         setThreadTranslationMode,
         resolvedTranslationTargetLanguage,
-        resolvedReplyLanguage,
         inboundForeignCandidates,
         resolvedTranslationTargetLanguageLabel,
         shouldShowTranslationBanner,
@@ -687,8 +686,8 @@ export function ChatWindow({
                         <Languages className="h-3.5 w-3.5" />
                         <span className="font-medium">
                             {threadTranslationMode === "translated"
-                                ? `Viewing translated to ${resolvedTranslationTargetLanguageLabel}.`
-                                : "Viewing original client text."}
+                                ? `View messages in: ${resolvedTranslationTargetLanguageLabel}.`
+                                : "Viewing original customer text."}
                         </span>
                         {(translatingVisibleThread || autoTranslatingThread) && (
                             <span className="inline-flex items-center gap-1 text-slate-500">
@@ -857,7 +856,6 @@ export function ChatWindow({
                 suggestions={suggestions}
                 onModelChange={setSelectedModel}
                 insertDraftSeed={composerInsertSeed}
-                translationTargetLanguageLabel={resolvedReplyLanguage}
                 viewingLanguageLabel={resolvedTranslationTargetLanguage}
                 smsRelayEnabled={smsRelayEnabled}
                 surfaceTheme={surfaceTheme}

@@ -9,6 +9,10 @@ import {
     REPLY_LANGUAGE_AUTO_VALUE,
 } from "@/lib/ai/reply-language-options";
 import { appendAiStreamText } from "@/lib/ai/stream-text";
+import {
+    getConversationLanguageSourceLabel,
+    resolveConversationLanguageContext,
+} from "@/lib/conversations/language-context";
 
 type GenerateDraft = (
     instruction?: string,
@@ -73,7 +77,9 @@ export function useConversationComposerAiDraft({
     handleAiDraft: (instructionOverride?: string, baseDraftOverride?: string | null) => Promise<void>;
     handleReplyLanguageSelect: (value: string) => Promise<void>;
     selectedReplyLanguageLabel: string;
+    agentWorkingLanguage: string;
     resolvedDraftLanguageLabel: string;
+    resolvedSendLanguage: string;
     resolvedSendLanguageLabel: string;
     resolvedViewingLanguageLabel: string;
     replyLanguageSourceHint: string;
@@ -212,20 +218,24 @@ export function useConversationComposerAiDraft({
         }
     };
 
+    const languageContext = resolveConversationLanguageContext({
+        manualOverrideLanguage: selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage,
+        contactPreferredLanguage: conversation?.contactPreferredLanguage || null,
+        conversationCurrentLanguage: conversation?.currentLanguage || conversation?.detectedThreadLanguage || null,
+        locationDefaultLanguage: conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
+        agentWorkingLanguage: agentDraftLanguage,
+        fallbackLanguage: DEFAULT_REPLY_LANGUAGE,
+    });
     const selectedReplyLanguageLabel = selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-        ? "Reply in: Auto"
-        : `Reply in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
+        ? "Send replies in: Auto"
+        : `Send replies in: ${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage}`;
     const resolvedDraftLanguageLabel = getReplyLanguageLabel(agentDraftLanguage) || agentDraftLanguage || DEFAULT_REPLY_LANGUAGE;
-    const autoTranslateTargetLabel = getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage;
-    const resolvedSendLanguageLabel = getReplyLanguageLabel(
-        selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE
-            ? (conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)
-            : selectedReplyLanguage
-    ) || translationTargetLanguageLabel || DEFAULT_REPLY_LANGUAGE;
+    const autoTranslateTargetLabel = languageContext.sendLanguageLabel;
+    const resolvedSendLanguageLabel = languageContext.sendLanguageLabel || translationTargetLanguageLabel || DEFAULT_REPLY_LANGUAGE;
     const resolvedViewingLanguageLabel = getReplyLanguageLabel(viewingLanguageLabel || null) || viewingLanguageLabel || DEFAULT_REPLY_LANGUAGE;
     const replyLanguageSourceHint = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE
         ? `Source: Conversation override (${getReplyLanguageLabel(selectedReplyLanguage) || selectedReplyLanguage})`
-        : `Source: Location default (${getReplyLanguageLabel(conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE) || conversation?.locationDefaultReplyLanguage || DEFAULT_REPLY_LANGUAGE})`;
+        : `Source: ${getConversationLanguageSourceLabel(languageContext.sendLanguageSource)} (${resolvedSendLanguageLabel})`;
 
     return {
         generatingDraft,
@@ -240,7 +250,9 @@ export function useConversationComposerAiDraft({
         handleAiDraft,
         handleReplyLanguageSelect,
         selectedReplyLanguageLabel,
+        agentWorkingLanguage: agentDraftLanguage,
         resolvedDraftLanguageLabel,
+        resolvedSendLanguage: languageContext.sendLanguage,
         resolvedSendLanguageLabel,
         resolvedViewingLanguageLabel,
         replyLanguageSourceHint,

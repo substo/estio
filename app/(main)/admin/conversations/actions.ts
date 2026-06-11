@@ -18,7 +18,7 @@ import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-languag
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
-import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
@@ -39,6 +39,11 @@ import {
     isUsableMessageTranslationText,
     parseTranslationModelOutput,
 } from "@/lib/conversations/translation-output";
+import {
+    resolveConversationLanguageContext,
+    type ConversationLanguageContextInput,
+} from "@/lib/conversations/language-context";
+import { recordConversationLanguageEvidence } from "@/lib/conversations/language-profile";
 import { loadConversationWorkspaceCore } from "@/lib/conversations/workspace-core-loading";
 import {
     buildConversationDeltaCursorFromRows,
@@ -513,6 +518,55 @@ function normalizeTranslationTargetLanguage(
     return normalizeReplyLanguage(input) || fallback;
 }
 
+async function getLatestInboundConversationText(conversationId: string): Promise<string | null> {
+    const latestInbound = await db.message.findFirst({
+        where: {
+            conversationId,
+            direction: "inbound",
+            body: { not: null },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { body: true, type: true },
+    });
+    const raw = String(latestInbound?.body || "").trim();
+    if (!raw) return null;
+    return String(latestInbound?.type || "").toUpperCase().includes("EMAIL")
+        ? stripHtmlToText(raw)
+        : raw;
+}
+
+async function resolveCustomerSendLanguage(args: {
+    conversation: {
+        id: string;
+        replyLanguageOverride?: string | null;
+        currentLanguage?: string | null;
+        contact?: { preferredLang?: string | null } | null;
+    };
+    locationId: string;
+    requestedTargetLanguage?: string | null;
+    fallbackLanguage?: string | null;
+}) {
+    const requested = normalizeReplyLanguage(args.requestedTargetLanguage);
+    if (requested) return requested;
+
+    const locationDefaultLanguage = await getLocationDefaultReplyLanguage(
+        args.locationId,
+        args.fallbackLanguage || DEFAULT_TRANSLATION_TARGET_LANGUAGE
+    );
+
+    const latestInboundText = await getLatestInboundConversationText(args.conversation.id);
+    const context = resolveConversationLanguageContext({
+        manualOverrideLanguage: args.conversation.replyLanguageOverride || null,
+        contactPreferredLanguage: args.conversation.contact?.preferredLang || null,
+        conversationCurrentLanguage: args.conversation.currentLanguage || null,
+        latestInboundText,
+        locationDefaultLanguage,
+        fallbackLanguage: locationDefaultLanguage,
+    } satisfies ConversationLanguageContextInput);
+
+    return context.sendLanguage;
+}
+
 function buildTranslationSourceHash(sourceText: string): string {
     return createHash("sha256").update(String(sourceText || "").trim(), "utf8").digest("hex");
 }
@@ -577,6 +631,49 @@ async function runMessageTranslationLLM(args: {
     };
 }
 
+function normalizePlainTranslationOutput(text: string): string {
+    return String(text || "")
+        .replace(/^```(?:text)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .replace(/^["“](.*)["”]$/s, "$1")
+        .trim();
+}
+
+async function runReplyTranslationLLM(args: {
+    sourceText: string;
+    targetLanguage: string;
+    modelOverride?: string;
+}) {
+    const modelId = String(args.modelOverride || "").trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
+    const systemPrompt = [
+        "You are a fast translation assistant for real-estate WhatsApp/SMS/email replies.",
+        "Translate the agent's draft into the requested customer language.",
+        "Preserve meaning, facts, URLs, prices, names, dates, tone, and line breaks.",
+        "Return only the translated message text. Do not return JSON, markdown, labels, or explanation.",
+    ].join("\n");
+    const userPrompt = [
+        `Target language (BCP-47): ${args.targetLanguage}`,
+        "Agent draft:",
+        String(args.sourceText || ""),
+    ].join("\n\n");
+
+    const { text, usage } = await callLLMWithMetadata(
+        modelId,
+        systemPrompt,
+        userPrompt,
+        { jsonMode: false, temperature: 0, maxOutputTokens: 2048, thinkingBudget: 0 }
+    );
+
+    return {
+        translatedText: normalizePlainTranslationOutput(text),
+        detectedSourceLanguage: null as string | null,
+        confidence: null as number | null,
+        provider: "google",
+        model: modelId,
+        usage,
+    };
+}
+
 function normalizeUsageProvider(provider: string | null | undefined): string {
     const normalized = String(provider || "").trim().toLowerCase();
     if (!normalized || normalized === "google") return "google_gemini";
@@ -599,7 +696,7 @@ async function resolveConversationTranslationModel(locationId: string): Promise<
     const configuredFromLegacy = String((siteConfig as any)?.googleAiModelTranslation || "").trim();
     if (configuredFromLegacy) return configuredFromLegacy;
 
-    return GEMINI_FLASH_LATEST_ALIAS;
+    return GEMINI_FLASH_LITE_LATEST_ALIAS;
 }
 
 function normalizeSingleLine(text: string, fallback: string): string {
@@ -5442,9 +5539,10 @@ export async function setConversationReplyLanguageOverride(
 export async function previewTranslatedReply(
     conversationId: string,
     sourceText: string,
-    channel: "SMS" | "Email" | "WhatsApp",
+    channel: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
     targetLanguage?: string | null
 ) {
+    const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedConversationId = String(conversationId || "").trim();
     const normalizedSourceText = String(sourceText || "").trim();
@@ -5469,18 +5567,27 @@ export async function previewTranslatedReply(
         return { success: false as const, error: "Conversation not found." };
     }
 
-    const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
-    );
+    const resolvedTargetLanguage = await resolveCustomerSendLanguage({
+        conversation: {
+            id: conversation.id,
+            replyLanguageOverride: conversation.replyLanguageOverride || null,
+            currentLanguage: (conversation as any).currentLanguage || null,
+            contact: conversation.contact,
+        },
+        locationId: location.id,
+        requestedTargetLanguage: targetLanguage || null,
+        fallbackLanguage: DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+    });
     const sourceHash = buildTranslationSourceHash(normalizedSourceText);
 
     try {
         const translationModel = await resolveConversationTranslationModel(location.id);
-        const translation = await runMessageTranslationLLM({
+        const translation = await runReplyTranslationLLM({
             sourceText: normalizedSourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
         });
+        const elapsedMs = Date.now() - startedAt;
 
         await securelyRecordConversationAiUsage({
             locationId: location.id,
@@ -5495,8 +5602,18 @@ export async function previewTranslatedReply(
                 channel: normalizedChannel,
                 targetLanguage: resolvedTargetLanguage,
                 cached: false,
+                elapsedMs,
+                mode: "fast_reply_translation",
             },
         });
+        console.info("[Conversation Translation Timing]", JSON.stringify({
+            event: "preview_translated_reply_end",
+            conversationId: conversation.id,
+            targetLanguage: resolvedTargetLanguage,
+            elapsedMs,
+            model: translation.model,
+            sourceChars: normalizedSourceText.length,
+        }));
 
         return {
             success: true as const,
@@ -5511,6 +5628,13 @@ export async function previewTranslatedReply(
             model: translation.model,
         };
     } catch (error: any) {
+        console.warn("[Conversation Translation Timing]", JSON.stringify({
+            event: "preview_translated_reply_failed",
+            conversationId: trimmedConversationId,
+            targetLanguage: resolvedTargetLanguage,
+            elapsedMs: Date.now() - startedAt,
+            reason: String(error?.message || error || "unknown"),
+        }));
         return {
             success: false as const,
             error: String(error?.message || "Failed to generate translation preview."),
@@ -5545,7 +5669,8 @@ export async function translateSelectedText(
     }
 
     const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
+        targetLanguage,
+        DEFAULT_TRANSLATION_TARGET_LANGUAGE
     );
 
     try {
@@ -5623,7 +5748,8 @@ export async function translateConversationMessage(
     }
 
     const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || message.conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
+        targetLanguage,
+        DEFAULT_TRANSLATION_TARGET_LANGUAGE
     );
     const sourceHash = buildTranslationSourceHash(sourceText);
     const translationModel = await resolveConversationTranslationModel(location.id);
@@ -5652,6 +5778,14 @@ export async function translateConversationMessage(
             sourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
+        });
+        await recordConversationLanguageEvidence({
+            locationId: location.id,
+            conversationId: message.conversation.id,
+            contactId: message.conversation.contactId,
+            language: translation.detectedSourceLanguage,
+            confidence: translation.confidence,
+            source: "detected",
         });
 
         const stored = await (db as any).messageTranslationCache.upsert({
@@ -5806,7 +5940,8 @@ export async function translateConversationThread(
         ? visibleMessageIds.map((id) => String(id || "").trim()).filter(Boolean)
         : [];
     const resolvedTargetLanguage = normalizeTranslationTargetLanguage(
-        targetLanguage || conversation.replyLanguageOverride || await getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
+        targetLanguage,
+        DEFAULT_TRANSLATION_TARGET_LANGUAGE
     );
 
     const rows = await db.message.findMany({
@@ -5947,6 +6082,15 @@ export async function translateConversationThread(
                         model: translation.model,
                         error: null,
                     },
+                });
+
+                await recordConversationLanguageEvidence({
+                    locationId: location.id,
+                    conversationId: conversation.id,
+                    contactId: conversation.contactId,
+                    language: translation.detectedSourceLanguage,
+                    confidence: translation.confidence,
+                    source: "detected",
                 });
 
                 await securelyRecordConversationAiUsage({

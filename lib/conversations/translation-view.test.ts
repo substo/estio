@@ -9,13 +9,13 @@ import {
     shouldDefaultThreadToTranslated,
 } from "./translation-view";
 
-test("getResolvedConversationTranslationLanguage prefers conversation override", () => {
+test("getResolvedConversationTranslationLanguage uses agent working language", () => {
     assert.equal(
         getResolvedConversationTranslationLanguage({
-            replyLanguageOverride: "es",
+            agentWorkingLanguage: "en-gb",
             locationDefaultReplyLanguage: "en",
         }),
-        "es"
+        "en-gb"
     );
 });
 

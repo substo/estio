@@ -5,7 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
-import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import {
     listAiDecisions,
     listAiRuntimeJobs,
@@ -144,7 +144,7 @@ export async function updateAiSettings(
         const expectedVersion = Number.isFinite(expectedVersionCandidate) ? expectedVersionCandidate : null;
 
         const transcriptionModel = normalizeTranscriptionModel(formData.get("googleAiModelTranscription"));
-        const translationModel = String(formData.get("googleAiModelTranslation") || "").trim() || GEMINI_FLASH_LATEST_ALIAS;
+        const translationModel = String(formData.get("googleAiModelTranslation") || "").trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
         const transcriptOnDemandEnabled = formData.get("whatsappTranscriptOnDemandEnabled") === "on";
         const transcriptRetentionDays = normalizeTranscriptRetentionDays(formData.get("whatsappTranscriptRetentionDays"));
         const transcriptVisibility = normalizeTranscriptVisibility(formData.get("whatsappTranscriptVisibility"));

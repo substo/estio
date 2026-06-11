@@ -31,17 +31,15 @@ test("resolveCommunicationLanguage prioritizes explicit manual override", () => 
     assert.equal(resolution.source, "conversation_override");
 });
 
-test("resolveCommunicationLanguage uses location default for auto mode when configured", () => {
+test("resolveCommunicationLanguage uses latest inbound before location default in auto mode", () => {
     const resolution = resolveCommunicationLanguage({
         locationDefaultLanguage: "pt",
         latestInboundText: "Καλησπέρα, ενδιαφέρομαι για το ακίνητο.",
         threadText: "Contact: Hello",
-        preferLocationDefaultLanguage: true,
-        useContactPreferredLanguage: false,
     });
 
-    assert.equal(resolution.expectedLanguage, "pt");
-    assert.equal(resolution.source, "location_default");
+    assert.equal(resolution.expectedLanguage, "el");
+    assert.equal(resolution.source, "latest_inbound");
 });
 
 test("resolveCommunicationLanguage falls back to preferred language", () => {

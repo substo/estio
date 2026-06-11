@@ -8,7 +8,7 @@ import {
 } from "./actions";
 import { Input } from "@/components/ui/input";
 import { DEFAULT_REPLY_LANGUAGE, REPLY_LANGUAGE_OPTIONS } from "@/lib/ai/reply-language-options";
-import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -1313,7 +1313,7 @@ export function AiSettingsForm({
         getInitialModelValue(initialData, ["googleAiModelTranscription", "googleAiModelExtraction"], GEMINI_FLASH_STABLE_FALLBACK)
     );
     const [googleAiModelTranslation, setGoogleAiModelTranslation] = useState(
-        getInitialModelValue(initialData, ["googleAiModelTranslation"], GEMINI_FLASH_LATEST_ALIAS)
+        getInitialModelValue(initialData, ["googleAiModelTranslation"], GEMINI_FLASH_LITE_LATEST_ALIAS)
     );
     const [contactProfileVerificationModel, setContactProfileVerificationModel] = useState(
         String(initialData?.contactProfileVerification?.model || initialData?.googleAiModelExtraction || initialData?.googleAiModel || GEMINI_FLASH_LATEST_ALIAS)
@@ -1396,7 +1396,7 @@ export function AiSettingsForm({
                         setGoogleAiModelTranscription(defaults?.extraction || defaults?.general || GEMINI_FLASH_STABLE_FALLBACK);
                     }
                     if (!hasUserSelectedTranslationModelRef.current && !hasConfiguredTranslationModel) {
-                        setGoogleAiModelTranslation(defaults?.translation || GEMINI_FLASH_LATEST_ALIAS);
+                        setGoogleAiModelTranslation(defaults?.translation || GEMINI_FLASH_LITE_LATEST_ALIAS);
                     }
                 }
             });

@@ -32,7 +32,7 @@ const MERGE_FILL_FIELD_LABELS: Record<typeof MERGE_FILL_SCALAR_FIELDS[number], s
     leadGoal: 'Lead goal',
     contactType: 'Contact type',
     notes: 'Notes',
-    preferredLang: 'Preferred language',
+    preferredLang: 'Preferred outbound language',
     message: 'Message',
     outlookContactId: 'Outlook contact ID',
 };

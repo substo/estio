@@ -133,8 +133,6 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
             latestInboundText: latestInboundMessage,
             threadText,
             fallbackLanguage: locationDefaultReplyLanguage,
-            preferLocationDefaultLanguage: true,
-            useContactPreferredLanguage: false,
         });
         const communicationContract = buildDealProtectiveCommunicationContract({
             expectedLanguage: languageResolution.expectedLanguage,

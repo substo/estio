@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { SETTINGS_DOMAINS } from "./constants";
 import { validateSettingsPayload } from "./schemas";
 
@@ -28,7 +28,7 @@ test("location AI settings schema fills defaults for legacy payloads", () => {
         viewingSessionSummaryModel: null,
     }) as any;
 
-    assert.equal(payload.googleAiModelTranslation, GEMINI_FLASH_LATEST_ALIAS);
+    assert.equal(payload.googleAiModelTranslation, GEMINI_FLASH_LITE_LATEST_ALIAS);
     assert.equal(payload.requirementsIntelligence.mode, "manual_only");
     assert.equal(payload.requirementsIntelligence.model, GEMINI_FLASH_LATEST_ALIAS);
     assert.deepEqual(payload.requirementsIntelligence.allowedPropertyDomains, []);

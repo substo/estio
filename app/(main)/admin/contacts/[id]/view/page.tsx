@@ -57,6 +57,12 @@ export default async function ContactViewPage({ params, searchParams }: { params
         return <div>Contact not found.</div>;
     }
 
+    const languageProfiles = await (db as any).contactLanguage.findMany({
+        where: { contactId: contact.id },
+        select: { language: true, confidence: true, source: true },
+        orderBy: [{ lastSeenAt: 'desc' }, { language: 'asc' }],
+    }).catch(() => []);
+
     // Viewings are fetched by EditContactForm now
 
     // Fetch Lead Sources
@@ -106,7 +112,7 @@ export default async function ContactViewPage({ params, searchParams }: { params
                 />
             </div>
             <EditContactForm
-                contact={contact}
+                contact={{ ...contact, languageProfiles }}
                 leadSources={leadSources}
                 initialMode="view"
                 isOutlookConnected={isOutlookConnected}

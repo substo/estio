@@ -6,7 +6,6 @@ import { getReplyLanguageLabel } from "@/lib/ai/reply-language-options";
 import {
     buildMessageTranslationState,
     getBrowserLanguage,
-    getResolvedConversationTranslationLanguage,
     isLikelyForeignLanguageMessage,
 } from "@/lib/conversations/translation-view";
 
@@ -57,10 +56,6 @@ export function useChatWindowThreadTranslation({
     }, [conversation.id]);
 
     const resolvedTranslationTargetLanguage = agentDisplayLanguage || "en";
-    const resolvedReplyLanguage = useMemo(
-        () => getResolvedConversationTranslationLanguage(conversation),
-        [conversation.locationDefaultReplyLanguage, conversation.replyLanguageOverride]
-    );
     const inboundForeignCandidates = useMemo(() => {
         return messages.filter((message) => isLikelyForeignLanguageMessage(message, resolvedTranslationTargetLanguage));
     }, [messages, resolvedTranslationTargetLanguage]);
@@ -184,7 +179,6 @@ export function useChatWindowThreadTranslation({
         threadTranslationMode,
         setThreadTranslationMode,
         resolvedTranslationTargetLanguage,
-        resolvedReplyLanguage,
         inboundForeignCandidates,
         eligibleInboundTranslationIds,
         threadSupportsTranslatedDefault,

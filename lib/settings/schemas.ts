@@ -2,7 +2,7 @@ import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
 import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
 import { contactProfileVerificationConfigSchema } from "@/lib/ai/contact-profile-verification/config";
-import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 
 const nullableTrimmedString = z.string().trim().nullish().transform((v) => v ?? null);
@@ -89,7 +89,7 @@ const aiSchema = z.object({
     googleAiModelExtraction: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelDesign: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelTranscription: z.string().trim().min(1).default(GEMINI_FLASH_STABLE_FALLBACK),
-    googleAiModelTranslation: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
+    googleAiModelTranslation: z.string().trim().min(1).default(GEMINI_FLASH_LITE_LATEST_ALIAS),
     defaultReplyLanguage: defaultReplyLanguageSchema,
     precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,

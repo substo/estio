@@ -40,6 +40,12 @@ export default async function ContactEditPage({ params, searchParams }: { params
         return <div>Contact not found.</div>;
     }
 
+    const languageProfiles = await (db as any).contactLanguage.findMany({
+        where: { contactId: contact.id },
+        select: { language: true, confidence: true, source: true },
+        orderBy: [{ lastSeenAt: 'desc' }, { language: 'asc' }],
+    }).catch(() => []);
+
     // Fetch Lead Sources
     const leadSourcesData = await db.leadSource.findMany({
         where: { locationId },
@@ -56,7 +62,7 @@ export default async function ContactEditPage({ params, searchParams }: { params
     return (
         <div className="p-6 max-w-6xl mx-auto">
             <EditContactForm
-                contact={{ ...contact, leadOtherDetails: contact.notes ?? undefined }}
+                contact={{ ...contact, languageProfiles, leadOtherDetails: contact.notes ?? undefined }}
                 leadSources={leadSources}
                 initialMode="edit"
                 isOutlookConnected={isOutlookConnected}

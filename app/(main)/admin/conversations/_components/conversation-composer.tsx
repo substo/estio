@@ -14,6 +14,7 @@ import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles,
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
+import { languagesMatch } from "@/lib/conversations/language-context";
 import {
     type ComposerChannel,
     useConversationComposerTranslationPreview,
@@ -271,6 +272,8 @@ export function ConversationComposer({
         handleAiDraft,
         handleReplyLanguageSelect,
         selectedReplyLanguageLabel,
+        agentWorkingLanguage,
+        resolvedSendLanguage,
         resolvedDraftLanguageLabel,
         resolvedViewingLanguageLabel,
         replyLanguageSourceHint,
@@ -331,6 +334,8 @@ export function ConversationComposer({
         selectedChannel,
         selectedReplyLanguage,
         autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
+        resolvedSendLanguage,
+        agentWorkingLanguage,
         canUseWriteTranslation,
         translationPreviewText,
         translationPreviewLanguage,
@@ -378,7 +383,9 @@ export function ConversationComposer({
         return () => window.removeEventListener("resize", handleResize);
     }, [composerHasDraft]);
 
-    const willAutoTranslate = selectedReplyLanguage !== REPLY_LANGUAGE_AUTO_VALUE && canUseWriteTranslation && !!onPreviewTranslatedReply;
+    const willAutoTranslate = canUseWriteTranslation
+        && !!onPreviewTranslatedReply
+        && !languagesMatch(agentWorkingLanguage, resolvedSendLanguage);
 
     const smsSegmentInfo = getSmsSegmentInfo(draft);
     const showSmsRelaySegmentInfo = selectedChannel === "SMS_RELAY" && draft.length > 0;
@@ -655,7 +662,7 @@ export function ConversationComposer({
                         <div className="mx-3 mb-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
                             <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                                 <span>
-                                    Preview translation
+                                    Will send to customer
                                     {translationPreviewLanguage ? ` (${translationPreviewLanguage})` : ""}
                                 </span>
                                 <button
@@ -733,7 +740,7 @@ export function ConversationComposer({
                                                             onSelect={() => handleReplyLanguageSelect(REPLY_LANGUAGE_AUTO_VALUE)}
                                                         >
                                                             <Check className={cn("mr-2 h-3.5 w-3.5", selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? "opacity-100" : "opacity-0")} />
-                                                            Auto (location default)
+                                                            Auto (customer language)
                                                         </CommandItem>
                                                         {REPLY_LANGUAGE_OPTIONS.map((option) => (
                                                             <CommandItem
@@ -913,7 +920,7 @@ export function ConversationComposer({
                                         disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     >
                                         {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                                        <span className="ml-1 text-[11px]">Send translated</span>
+                                        <span className="ml-1 text-[11px]">Send in {autoTranslateTargetLabel}</span>
                                     </Button>
                                 </>
                             ) : willAutoTranslate ? (
@@ -925,10 +932,10 @@ export function ConversationComposer({
                                     )}
                                     onClick={() => handleSend("original")}
                                     disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
-                                    title={`Message will be auto-translated to ${autoTranslateTargetLabel} before sending`}
+                                    title={`Message will be prepared in ${autoTranslateTargetLabel} before sending`}
                                 >
                                     {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                                    <span className="text-[11px]">in {autoTranslateTargetLabel}</span>
+                                    <span className="text-[11px]">Send in {autoTranslateTargetLabel}</span>
                                 </Button>
                             ) : (
                                 <Button
@@ -950,8 +957,8 @@ export function ConversationComposer({
                 {onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
                         {willAutoTranslate
-                            ? `Draft in ${resolvedDraftLanguageLabel} · Auto-translates to ${autoTranslateTargetLabel} on send · ${replyLanguageSourceHint}`
-                            : `Viewing in ${resolvedViewingLanguageLabel}. Drafting in ${resolvedDraftLanguageLabel}. ${replyLanguageSourceHint}`
+                            ? `View messages in: ${resolvedViewingLanguageLabel} · Working draft: ${resolvedDraftLanguageLabel} · Will send in: ${autoTranslateTargetLabel} · ${replyLanguageSourceHint}`
+                            : `View messages in: ${resolvedViewingLanguageLabel} · Working draft: ${resolvedDraftLanguageLabel} · Send replies in: ${autoTranslateTargetLabel} · ${replyLanguageSourceHint}`
                         }
                     </div>
                 )}

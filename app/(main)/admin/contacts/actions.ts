@@ -35,6 +35,7 @@ import {
   type MergeContactPreview,
 } from '@/lib/contacts/merge';
 import { normalizeReplyLanguage } from '@/lib/ai/reply-language-options';
+import { upsertContactLanguageEvidence } from '@/lib/conversations/language-profile';
 import {
   normalizeIanaTimeZoneOrThrow,
   parseViewingDateTimeInput,
@@ -134,6 +135,22 @@ function parsePreferredLanguage(input: string | null | undefined): string | null
 
   const normalized = normalizeReplyLanguage(raw);
   return normalized || null;
+}
+
+async function upsertManualContactLanguage(
+  tx: any,
+  contactId: string,
+  locationId: string,
+  language: string | null | undefined
+) {
+  await upsertContactLanguageEvidence({
+    client: tx,
+    contactId,
+    locationId,
+    language,
+    confidence: 1,
+    source: 'manual',
+  });
 }
 
 // --- Helpers & Zod Transforms ---
@@ -818,6 +835,7 @@ export async function createContact(
         }
       });
       console.log('[createContact] Contact created', contact.id);
+      await upsertManualContactLanguage(tx, contact.id, data.locationId, contact.preferredLang);
 
       await handleContactRoles(tx, contact.id, data);
 
@@ -951,6 +969,7 @@ async function updateContactCore(
         where: { id: data.contactId },
         data: withChangedProfileVerificationInvalidation(contactInput, currentContact),
       });
+      await upsertManualContactLanguage(tx, updatedContact.id, updatedContact.locationId, updatedContact.preferredLang);
       savedContactSummary = {
         id: updatedContact.id,
         name: updatedContact.name || '',
@@ -2513,6 +2532,12 @@ export async function getContactDetails(contactId: string) {
   const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
   if (!hasAccess) return null;
 
+  const languageProfiles = await (db as any).contactLanguage.findMany({
+    where: { contactId: contact.id },
+    select: { language: true, confidence: true, source: true },
+    orderBy: [{ lastSeenAt: 'desc' }, { language: 'asc' }],
+  }).catch(() => []);
+
   const leadSources = await db.leadSource.findMany({
     where: { locationId: contact.locationId, isActive: true },
     select: { name: true },
@@ -2574,6 +2599,7 @@ export async function getContactDetails(contactId: string) {
   return {
     contact: {
       ...contact,
+      languageProfiles,
       viewings: contact.viewings.map(v => ({
         ...v,
         date: v.date.toISOString(),

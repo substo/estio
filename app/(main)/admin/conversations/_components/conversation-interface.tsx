@@ -1990,7 +1990,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const handlePreviewTranslatedReply = useCallback(async (
         sourceText: string,
-        channel: "SMS" | "Email" | "WhatsApp",
+        channel: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
         targetLanguage?: string | null
     ) => {
         const conversationId = String(activeIdRef.current || "").trim();
@@ -2772,7 +2772,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
     const handleDealPreviewTranslatedReply = useCallback(async (
         sourceText: string,
-        channel: "SMS" | "Email" | "WhatsApp",
+        channel: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
         targetLanguage?: string | null
     ) => {
         if (!selectedDealConversation) {

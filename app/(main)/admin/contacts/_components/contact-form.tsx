@@ -65,6 +65,11 @@ export type ContactData = {
     email: string | null;
     phone: string | null;
     preferredLang?: string | null;
+    languageProfiles?: Array<{
+        language: string;
+        confidence?: number | null;
+        source?: string | null;
+    }>;
     locationId: string;
     contactType?: string | null;
     createdAt?: Date | string | null;
@@ -626,9 +631,13 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
     const districts = ["Any District", "Paphos", "Nicosia", "Famagusta", "Limassol", "Larnaca"];
     const replyLanguageOptions = [
-        { value: REPLY_LANGUAGE_AUTO_VALUE, label: "Auto (detect from conversation)" },
+        { value: REPLY_LANGUAGE_AUTO_VALUE, label: "Auto (use conversation language)" },
         ...REPLY_LANGUAGE_OPTIONS,
     ];
+    const knownLanguageLabels = (contact?.languageProfiles || [])
+        .map((entry) => getReplyLanguageLabel(entry.language) || entry.language)
+        .filter(Boolean)
+        .join(', ');
 
     // Count visible tabs including additional tabs
     const visibleTabCount = currentConfig.visibleTabs.length + (additionalTabs ? (additionalTabCount || 1) : 0);
@@ -856,10 +865,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 <Input id="tags" name="tags" placeholder="Tag1, Tag2 (comma separated)" defaultValue={contact?.tags?.join(', ') || ''} />
                             </RenderField>
                             <RenderField
-                                label="Preferred Reply Language"
+                                label="Preferred Outbound Language"
                                 value={contact?.preferredLang
                                     ? getReplyLanguageLabel(contact?.preferredLang)
-                                    : "Auto (detected from conversation)"}
+                                    : "Auto (use conversation language)"}
                                 isEditing={isEditing}
                             >
                                 <SearchableSelect
@@ -867,12 +876,24 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                     options={replyLanguageOptions}
                                     value={preferredLangSelection}
                                     onChange={(value) => setPreferredLangSelection(value || REPLY_LANGUAGE_AUTO_VALUE)}
-                                    placeholder="Auto (detect from conversation)"
+                                    placeholder="Auto (use conversation language)"
                                     searchPlaceholder="Search language..."
                                     emptyMessage="No language found."
                                 />
                             </RenderField>
                         </div>
+
+                        {knownLanguageLabels && (
+                            <div className="grid grid-cols-2 gap-4">
+                                <RenderField
+                                    label="Known Languages"
+                                    value={knownLanguageLabels}
+                                    isEditing={false}
+                                >
+                                    <span />
+                                </RenderField>
+                            </div>
+                        )}
 
                         {/* Address Section */}
                         <div className="border-t pt-4 mt-2">

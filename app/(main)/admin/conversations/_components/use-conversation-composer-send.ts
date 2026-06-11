@@ -1,5 +1,6 @@
 import { type RefObject, useState } from "react";
 import { type ComposerChannel } from "./use-conversation-composer-translation-preview";
+import { languagesMatch } from "@/lib/conversations/language-context";
 
 type PreviewTranslatedReply = (
     sourceText: string,
@@ -27,6 +28,8 @@ interface UseConversationComposerSendArgs {
     selectedChannel: ComposerChannel;
     selectedReplyLanguage: string;
     autoReplyLanguageValue: string;
+    resolvedSendLanguage: string | null;
+    agentWorkingLanguage: string | null;
     canUseWriteTranslation: boolean;
     translationPreviewText: string;
     translationPreviewLanguage: string | null;
@@ -48,6 +51,8 @@ export function useConversationComposerSend({
     selectedChannel,
     selectedReplyLanguage,
     autoReplyLanguageValue,
+    resolvedSendLanguage,
+    agentWorkingLanguage,
     canUseWriteTranslation,
     translationPreviewText,
     translationPreviewLanguage,
@@ -83,23 +88,25 @@ export function useConversationComposerSend({
             }
         } else if (
             mode === "original" &&
-            selectedReplyLanguage !== autoReplyLanguageValue &&
             canUseWriteTranslation &&
-            onPreviewTranslatedReply
+            onPreviewTranslatedReply &&
+            !languagesMatch(agentWorkingLanguage, resolvedSendLanguage)
         ) {
-            // Auto-translate on send: reply language is explicitly set, seamlessly translate
-            // before sending (enterprise best practice — matches Intercom/Zendesk behavior).
-            // This catches both AI-drafted and manually-typed messages.
+            // Auto-translate on send when the customer language differs from
+            // the agent's working draft language.
             setSending(true);
             try {
-                const result = await onPreviewTranslatedReply(sourceText, selectedChannel, selectedReplyLanguage);
+                const requestedTargetLanguage = selectedReplyLanguage === autoReplyLanguageValue
+                    ? null
+                    : (resolvedSendLanguage || selectedReplyLanguage);
+                const result = await onPreviewTranslatedReply(sourceText, selectedChannel, requestedTargetLanguage);
                 if (result?.success && result.translatedText?.trim()) {
                     const translated = result.translatedText.trim();
                     if (translated !== sourceText) {
                         textToSend = translated;
                         translationMeta = {
                             translationSourceText: sourceText,
-                            translationTargetLanguage: result.targetLanguage || selectedReplyLanguage,
+                            translationTargetLanguage: result.targetLanguage || resolvedSendLanguage || requestedTargetLanguage,
                             translationDetectedSourceLanguage: result.detectedSourceLanguage || null,
                         };
                     }

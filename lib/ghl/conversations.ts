@@ -24,6 +24,9 @@ export interface Conversation {
     contactType?: string | null;
     contactPreferredLanguage?: string | null;
     replyLanguageOverride?: string | null;
+    currentLanguage?: string | null;
+    currentLanguageSource?: string | null;
+    currentLanguageConfidence?: number | null;
     locationDefaultReplyLanguage?: string | null;
     detectedThreadLanguage?: string | null;
     detectedThreadLanguageConfidence?: number | null;

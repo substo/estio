@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import {
     GEMINI_DRAFT_FAST_DEFAULT,
+    GEMINI_FLASH_LITE_LATEST_ALIAS,
     GEMINI_FLASH_LATEST_ALIAS,
     GEMINI_FLASH_STABLE_FALLBACK,
     GOOGLE_AI_MODELS as FALLBACK_MODELS,
@@ -283,6 +284,32 @@ export async function resolveAiModelDefault(
         if (firstFastDraft) return firstFastDraft.value;
 
         return GEMINI_FLASH_STABLE_FALLBACK;
+    }
+
+    if (kind === "translation") {
+        if (values.has(GEMINI_FLASH_LITE_LATEST_ALIAS)) {
+            return GEMINI_FLASH_LITE_LATEST_ALIAS;
+        }
+
+        if (values.has(GEMINI_DRAFT_FAST_DEFAULT)) {
+            return GEMINI_DRAFT_FAST_DEFAULT;
+        }
+
+        if (values.has(GEMINI_FLASH_LATEST_ALIAS)) {
+            return GEMINI_FLASH_LATEST_ALIAS;
+        }
+
+        if (values.has(GEMINI_FLASH_STABLE_FALLBACK)) {
+            return GEMINI_FLASH_STABLE_FALLBACK;
+        }
+
+        const firstFlashLite = available.find((m) => m.value.toLowerCase().includes("flash-lite"));
+        if (firstFlashLite) return firstFlashLite.value;
+
+        const firstFlash = available.find((m) => m.value.toLowerCase().includes("flash"));
+        if (firstFlash) return firstFlash.value;
+
+        return GEMINI_DRAFT_FAST_DEFAULT;
     }
 
     if (values.has(GEMINI_FLASH_LATEST_ALIAS)) {

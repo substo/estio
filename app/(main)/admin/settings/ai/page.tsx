@@ -2,7 +2,7 @@ import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
 import { cookies } from "next/headers";
 import { DEFAULT_REPLY_LANGUAGE } from "@/lib/ai/reply-language-options";
-import { GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
 import {
@@ -50,7 +50,7 @@ function buildAiInitialData({
             googleAiModelExtraction: aiPayload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction,
             googleAiModelDesign: aiPayload?.googleAiModelDesign || siteConfig?.googleAiModelDesign,
             googleAiModelTranscription: aiPayload?.googleAiModelTranscription || siteConfig?.googleAiModelTranscription,
-            googleAiModelTranslation: aiPayload?.googleAiModelTranslation || (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LATEST_ALIAS,
+            googleAiModelTranslation: aiPayload?.googleAiModelTranslation || (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LITE_LATEST_ALIAS,
             defaultReplyLanguage: aiPayload?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiPayload?.precisionRemoveEnabled === true,
             brandVoice: aiPayload?.brandVoice || siteConfig?.brandVoice,
@@ -78,7 +78,7 @@ function buildAiInitialData({
 
     return {
         ...siteConfig,
-        googleAiModelTranslation: (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LATEST_ALIAS,
+        googleAiModelTranslation: (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LITE_LATEST_ALIAS,
         defaultReplyLanguage: DEFAULT_REPLY_LANGUAGE,
         precisionRemoveEnabled: aiPayload?.precisionRemoveEnabled === true,
         requirementsIntelligence: aiPayload?.requirementsIntelligence || getDefaultRequirementsIntelligence(

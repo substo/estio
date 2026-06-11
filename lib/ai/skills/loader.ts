@@ -559,7 +559,6 @@ async function synthesizeReplyFromToolResults(params: {
         contactPreferredLanguage: params.context.contactPreferredLanguage || params.context.expectedReplyLanguage || null,
         threadText: params.context.conversationHistory,
         fallbackLanguage: params.context.expectedReplyLanguage || params.context.threadDefaultLanguage || "en",
-        useContactPreferredLanguage: false,
     });
     const communicationContract = buildDealProtectiveCommunicationContract({
         expectedLanguage: languageResolution.expectedLanguage,
@@ -711,7 +710,6 @@ export async function executeSkill(
         contactPreferredLanguage: context.contactPreferredLanguage || context.expectedReplyLanguage || null,
         threadText: context.conversationHistory,
         fallbackLanguage: context.expectedReplyLanguage || context.threadDefaultLanguage || "en",
-        useContactPreferredLanguage: false,
     });
     const communicationContract = buildDealProtectiveCommunicationContract({
         expectedLanguage: languageResolution.expectedLanguage,
