@@ -50,7 +50,8 @@ function readEnv(...keys: string[]): string | undefined {
  *
  * Supported env values per flag: on | off | canary
  * - If set to canary, the flag is enabled only for location IDs listed in CONVERSATIONS_CANARY_LOCATIONS.
- * - Defaults are on to keep the optimized path active unless explicitly disabled.
+ * - Translation defaults to canary because it depends on model cost and UX rollout.
+ * - Other optimized conversation paths default on unless explicitly disabled.
  */
 export function getConversationFeatureFlags(locationId?: string | null, opts?: { locationSmsRelayEnabled?: boolean }): ConversationFeatureFlags {
     const canaryLocations = parseLocationList(
@@ -84,15 +85,15 @@ export function getConversationFeatureFlags(locationId?: string | null, opts?: {
     );
     const translationReadMode = parseMode(
         readEnv("CONVERSATIONS_TRANSLATION_READ", "conversation_translation_read", "TRANSLATION_READ"),
-        "off"
+        "canary"
     );
     const translationWriteMode = parseMode(
         readEnv("CONVERSATIONS_TRANSLATION_WRITE", "conversation_translation_write", "TRANSLATION_WRITE"),
-        "off"
+        "canary"
     );
     const translationBannerMode = parseMode(
         readEnv("CONVERSATIONS_TRANSLATION_BANNER", "conversation_translation_banner", "TRANSLATION_BANNER"),
-        "off"
+        "canary"
     );
 
     const smsRelayMode = parseMode(

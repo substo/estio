@@ -68,6 +68,17 @@ test("isLikelyForeignLanguageMessage ignores inbound text already matching targe
     );
 });
 
+test("isLikelyForeignLanguageMessage detects Chinese inbound text", () => {
+    assert.equal(
+        isLikelyForeignLanguageMessage({
+            direction: "inbound",
+            body: "我正在寻找一套豪华别墅。",
+            detectedLanguage: null,
+        }, "en"),
+        true
+    );
+});
+
 test("shouldDefaultThreadToTranslated prefers translated view when foreign inbound messages already have overlays", () => {
     assert.equal(
         shouldDefaultThreadToTranslated([

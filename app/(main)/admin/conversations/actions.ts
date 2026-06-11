@@ -420,6 +420,55 @@ function parseJsonObjectFromModelOutput(rawText: string): any {
     }
 }
 
+function parseTranslationModelOutput(rawText: string): {
+    translatedText: string;
+    detectedSourceLanguage: string | null;
+    confidence: number | null;
+} {
+    let parsed: any;
+    try {
+        parsed = parseJsonObjectFromModelOutput(rawText);
+    } catch {
+        const fallbackText = String(rawText || "")
+            .replace(/```json/gi, "")
+            .replace(/```/g, "")
+            .trim();
+        if (!fallbackText) {
+            throw new Error("Model did not return a valid JSON object");
+        }
+        return {
+            translatedText: fallbackText,
+            detectedSourceLanguage: null,
+            confidence: null,
+        };
+    }
+
+    if (typeof parsed === "string") {
+        const translatedText = parsed.trim();
+        if (!translatedText) {
+            throw new Error("Translation model returned empty output.");
+        }
+        return {
+            translatedText,
+            detectedSourceLanguage: null,
+            confidence: null,
+        };
+    }
+
+    const translatedText = String((parsed as any)?.translatedText || "").trim();
+    if (!translatedText) {
+        throw new Error("Translation model returned empty output.");
+    }
+
+    const detectedSourceLanguage = normalizeReplyLanguage(String((parsed as any)?.detectedSourceLanguage || "").trim()) || null;
+    const confidenceRaw = Number((parsed as any)?.confidence);
+    const confidence = Number.isFinite(confidenceRaw)
+        ? Math.min(1, Math.max(0, confidenceRaw))
+        : null;
+
+    return { translatedText, detectedSourceLanguage, confidence };
+}
+
 function runDetachedTask(taskName: string, task: () => Promise<void>) {
     void task().catch((error) => {
         console.error(`[DetachedTask:${taskName}] Failed:`, error);
@@ -560,22 +609,12 @@ async function runMessageTranslationLLM(args: {
         userPrompt,
         { jsonMode: true, temperature: 0.1, maxOutputTokens: 1200, thinkingBudget: 0 }
     );
-    const parsed = parseJsonObjectFromModelOutput(text);
-    const translatedText = String((parsed as any)?.translatedText || "").trim();
-    if (!translatedText) {
-        throw new Error("Translation model returned empty output.");
-    }
-
-    const detectedSourceLanguage = normalizeReplyLanguage(String((parsed as any)?.detectedSourceLanguage || "").trim()) || null;
-    const confidenceRaw = Number((parsed as any)?.confidence);
-    const confidence = Number.isFinite(confidenceRaw)
-        ? Math.min(1, Math.max(0, confidenceRaw))
-        : null;
+    const parsed = parseTranslationModelOutput(text);
 
     return {
-        translatedText,
-        detectedSourceLanguage,
-        confidence,
+        translatedText: parsed.translatedText,
+        detectedSourceLanguage: parsed.detectedSourceLanguage,
+        confidence: parsed.confidence,
         provider: "google",
         model: modelId,
         usage,

@@ -60,6 +60,7 @@ const GREEK_REGEX = /[\u0370-\u03ff\u1f00-\u1fff]/;
 const CYRILLIC_REGEX = /[\u0400-\u04ff]/;
 const ARABIC_REGEX = /[\u0600-\u06ff]/;
 const HEBREW_REGEX = /[\u0590-\u05ff]/;
+const HAN_REGEX = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 
 function toLanguageDisplayName(language: string | null): string {
     if (!language) return "the contact's language";
@@ -78,6 +79,11 @@ function toLanguageDisplayName(language: string | null): string {
         pt: "Portuguese",
         tr: "Turkish",
         ru: "Russian",
+        uk: "Ukrainian",
+        ro: "Romanian",
+        pl: "Polish",
+        bg: "Bulgarian",
+        zh: "Chinese",
         ar: "Arabic",
         he: "Hebrew",
     };
@@ -103,6 +109,7 @@ export function detectLanguageFromText(text: string | null | undefined): string 
     if (CYRILLIC_REGEX.test(value)) return "ru";
     if (ARABIC_REGEX.test(value)) return "ar";
     if (HEBREW_REGEX.test(value)) return "he";
+    if (HAN_REGEX.test(value)) return "zh";
 
     const tokens = (value.toLowerCase().match(/[a-z\u00c0-\u024f]+/g) || [])
         .map(token => token.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));

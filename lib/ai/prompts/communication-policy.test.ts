@@ -113,6 +113,10 @@ test("detectLanguageFromText identifies greek script", () => {
     assert.equal(detectLanguageFromText("Θα ήθελα πληροφορίες για το ακίνητο."), "el");
 });
 
+test("detectLanguageFromText identifies Chinese script", () => {
+    assert.equal(detectLanguageFromText("我正在寻找一套豪华别墅。"), "zh");
+});
+
 test("communication contract includes core deal-protective constraints", () => {
     const contract = buildDealProtectiveCommunicationContract({
         expectedLanguage: "el",

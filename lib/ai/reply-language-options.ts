@@ -22,6 +22,9 @@ export const REPLY_LANGUAGE_OPTIONS: ReplyLanguageOption[] = [
     { value: "ro", label: "Romanian (ro)" },
     { value: "pl", label: "Polish (pl)" },
     { value: "bg", label: "Bulgarian (bg)" },
+    { value: "zh", label: "Chinese (zh)" },
+    { value: "zh-cn", label: "Chinese Simplified (zh-CN)" },
+    { value: "zh-tw", label: "Chinese Traditional (zh-TW)" },
     { value: "ar", label: "Arabic (ar)" },
     { value: "he", label: "Hebrew (he)" },
 ];
