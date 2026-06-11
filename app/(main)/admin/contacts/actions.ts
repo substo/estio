@@ -25,10 +25,13 @@ import {
   buildMergeAuditSummary,
   buildMergeContactPreview,
   buildPreservedSourceHistoryRows,
+  buildSourceContactMergeSnapshot,
   findMergeTargetForSource,
   prepareContactMergeFillData,
+  splitContactMergeFillDataForSourceDelete,
   transferContactCompanyRoles,
   transferContactPropertyRoles,
+  type MergeContactFieldChoices,
   type MergeContactPreview,
 } from '@/lib/contacts/merge';
 import { normalizeReplyLanguage } from '@/lib/ai/reply-language-options';
@@ -2822,7 +2825,7 @@ export async function searchContactsAction(query: string) {
   return scored;
 }
 
-export type { MergeContactPreview };
+export type { MergeContactFieldChoices, MergeContactPreview };
 
 export async function previewMergeContacts(sourceContactId: string, targetContactId: string): Promise<{
   success: boolean;
@@ -2870,7 +2873,11 @@ export async function previewMergeContacts(sourceContactId: string, targetContac
   return { success: true, preview };
 }
 
-export async function mergeContacts(sourceContactId: string, targetContactId: string) {
+export async function mergeContacts(
+  sourceContactId: string,
+  targetContactId: string,
+  fieldChoices: MergeContactFieldChoices = {}
+) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: "Unauthorized" };
 
@@ -2999,12 +3006,13 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       });
 
       // 7. Fill blank fields and additive arrays on target from source
-      const { fillData, tagsAdded } = prepareContactMergeFillData(source, target);
+      const { fillData, tagsAdded } = prepareContactMergeFillData(source, target, fieldChoices);
+      const { nonUniqueFillData, uniqueFillData } = splitContactMergeFillDataForSourceDelete(fillData);
 
-      if (Object.keys(fillData).length > 0) {
+      if (Object.keys(nonUniqueFillData).length > 0) {
         await tx.contact.update({
           where: { id: targetContactId },
-          data: fillData
+          data: nonUniqueFillData
         });
       }
 
@@ -3044,6 +3052,13 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
       // 8. Delete Source Contact
       await tx.contact.delete({ where: { id: sourceContactId } });
 
+      if (Object.keys(uniqueFillData).length > 0) {
+        await tx.contact.update({
+          where: { id: targetContactId },
+          data: uniqueFillData
+        });
+      }
+
       // 9. Enhanced Audit Log
       await logContactHistory(tx, targetContactId, internalUserId, "MERGED_FROM", {
         sourceId: sourceContactId,
@@ -3054,6 +3069,8 @@ export async function mergeContacts(sourceContactId: string, targetContactId: st
         sourceGhlContactId: source.ghlContactId,
         sourceGoogleContactId: source.googleContactId,
         sourceOutlookContactId: source.outlookContactId,
+        sourceSnapshot: buildSourceContactMergeSnapshot(source),
+        fieldChoices,
         ...auditSummary,
         rolesTransferred: {
           propertyRoles: sourcePropertyRoles.length,

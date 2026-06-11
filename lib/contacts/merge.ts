@@ -51,11 +51,18 @@ const MERGE_ARRAY_FIELD_LABELS: Record<typeof MERGE_ARRAY_FIELDS[number], string
 
 type MergeFillScalarField = typeof MERGE_FILL_SCALAR_FIELDS[number];
 type MergeArrayField = typeof MERGE_ARRAY_FIELDS[number];
+type MergeUniqueFillField = Extract<MergeFillScalarField, 'email' | 'phone'>;
+export type MergeContactFieldChoice = 'source' | 'target';
+export type MergeContactFieldChoices = Partial<Record<MergeFillScalarField, MergeContactFieldChoice>>;
 type MergeContactFillInput = Partial<Record<MergeFillScalarField, unknown>>
     & Partial<Record<MergeArrayField, readonly string[] | null>>
     & { tags?: readonly string[] | null };
 
 type MergeContactFillData = Prisma.ContactUpdateInput & Record<string, unknown>;
+type SplitContactMergeFillData = {
+    nonUniqueFillData: MergeContactFillData;
+    uniqueFillData: MergeContactFillData;
+};
 
 const MERGE_CONTACT_PREVIEW_SELECT = {
     id: true,
@@ -114,6 +121,7 @@ export type MergeContactPreview = {
     swipesAffected: number;
     tagsAdded: string[];
     blankFieldsFilled: Array<{ field: string; label: string }>;
+    conflictingFields: Array<{ field: MergeFillScalarField; label: string; sourceValue: string; targetValue: string }>;
     arrayFieldsMerged: Array<{ field: string; label: string; addedCount: number }>;
     providerCleanupWarning: {
         hasProviderIds: boolean;
@@ -236,7 +244,7 @@ export async function buildMergeContactPreview(
     const duplicateCompanyRoleCount = sourceCompanyRoles.filter((role) => targetCompanyRoleKeys.has(`${role.companyId}:${role.role}`)).length;
 
     const tagsAdded = (source.tags || []).filter((tag) => !(target.tags || []).includes(tag));
-    const { blankFieldsFilled, arrayFieldsMerged } = buildMergeFieldPreview(source, target);
+    const { blankFieldsFilled, conflictingFields, arrayFieldsMerged } = buildMergeFieldPreview(source, target);
 
     const providers = [
         source.googleContactId ? 'Google' : null,
@@ -271,6 +279,7 @@ export async function buildMergeContactPreview(
         swipesAffected,
         tagsAdded,
         blankFieldsFilled,
+        conflictingFields,
         arrayFieldsMerged,
         providerCleanupWarning: {
             hasProviderIds: providers.length > 0,
@@ -279,11 +288,17 @@ export async function buildMergeContactPreview(
     };
 }
 
-export function prepareContactMergeFillData(source: MergeContactFillInput, target: MergeContactFillInput) {
+export function prepareContactMergeFillData(
+    source: MergeContactFillInput,
+    target: MergeContactFillInput,
+    fieldChoices: MergeContactFieldChoices = {}
+) {
     const fillData: MergeContactFillData = {};
 
     for (const field of MERGE_FILL_SCALAR_FIELDS) {
-        if (!target[field] && source[field]) {
+        if (!hasMergeValue(source[field])) continue;
+
+        if (!hasMergeValue(target[field]) || (fieldChoices[field] === 'source' && !mergeValuesEqual(source[field], target[field]))) {
             fillData[field] = source[field];
         }
     }
@@ -312,6 +327,54 @@ export function prepareContactMergeFillData(source: MergeContactFillInput, targe
     }
 
     return { fillData, tagsAdded };
+}
+
+export function splitContactMergeFillDataForSourceDelete(fillData: MergeContactFillData): SplitContactMergeFillData {
+    const nonUniqueFillData: MergeContactFillData = {};
+    const uniqueFillData: MergeContactFillData = {};
+    const uniqueFields = new Set<MergeUniqueFillField>(['email', 'phone']);
+
+    for (const [field, value] of Object.entries(fillData)) {
+        if (uniqueFields.has(field as MergeUniqueFillField)) {
+            uniqueFillData[field] = value;
+        } else {
+            nonUniqueFillData[field] = value;
+        }
+    }
+
+    return { nonUniqueFillData, uniqueFillData };
+}
+
+export function buildSourceContactMergeSnapshot(source: MergeContactFillInput & {
+    id?: string | null;
+    locationId?: string | null;
+    createdAt?: Date | string | null;
+    updatedAt?: Date | string | null;
+    ghlContactId?: string | null;
+    googleContactId?: string | null;
+    outlookContactId?: string | null;
+    lid?: string | null;
+}) {
+    const snapshot: Record<string, unknown> = {
+        id: source.id ?? null,
+        locationId: source.locationId ?? null,
+        createdAt: serializeMergeSnapshotValue(source.createdAt),
+        updatedAt: serializeMergeSnapshotValue(source.updatedAt),
+        ghlContactId: source.ghlContactId ?? null,
+        googleContactId: source.googleContactId ?? null,
+        lid: source.lid ?? null,
+    };
+
+    for (const field of MERGE_FILL_SCALAR_FIELDS) {
+        snapshot[field] = serializeMergeSnapshotValue(source[field]);
+    }
+
+    snapshot.tags = serializeMergeSnapshotValue(source.tags || []);
+    for (const field of MERGE_ARRAY_FIELDS) {
+        snapshot[field] = serializeMergeSnapshotValue(source[field] || []);
+    }
+
+    return snapshot;
 }
 
 export async function transferContactPropertyRoles(args: {
@@ -433,8 +496,17 @@ export function buildPreservedSourceHistoryRows(args: {
 
 function buildMergeFieldPreview(source: MergeContactFillInput, target: MergeContactFillInput) {
     const blankFieldsFilled = MERGE_FILL_SCALAR_FIELDS
-        .filter((field) => !target[field] && source[field])
+        .filter((field) => !hasMergeValue(target[field]) && hasMergeValue(source[field]))
         .map((field) => ({ field, label: MERGE_FILL_FIELD_LABELS[field] }));
+
+    const conflictingFields = MERGE_FILL_SCALAR_FIELDS
+        .filter((field) => hasMergeValue(source[field]) && hasMergeValue(target[field]) && !mergeValuesEqual(source[field], target[field]))
+        .map((field) => ({
+            field,
+            label: MERGE_FILL_FIELD_LABELS[field],
+            sourceValue: formatMergePreviewValue(source[field]),
+            targetValue: formatMergePreviewValue(target[field]),
+        }));
 
     const arrayFieldsMerged = MERGE_ARRAY_FIELDS
         .map((field) => {
@@ -444,5 +516,41 @@ function buildMergeFieldPreview(source: MergeContactFillInput, target: MergeCont
         })
         .filter((item) => item.addedCount > 0);
 
-    return { blankFieldsFilled, arrayFieldsMerged };
+    return { blankFieldsFilled, conflictingFields, arrayFieldsMerged };
+}
+
+function hasMergeValue(value: unknown) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+}
+
+function mergeValuesEqual(left: unknown, right: unknown) {
+    return normalizeMergeComparableValue(left) === normalizeMergeComparableValue(right);
+}
+
+function normalizeMergeComparableValue(value: unknown): string {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'string') return value.trim();
+    return JSON.stringify(value);
+}
+
+function formatMergePreviewValue(value: unknown): string {
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (Array.isArray(value)) return value.join(', ');
+    if (typeof value === 'string') return value;
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    return value == null ? '' : String(value);
+}
+
+function serializeMergeSnapshotValue(value: unknown): unknown {
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map(serializeMergeSnapshotValue);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, nestedValue]) => [key, serializeMergeSnapshotValue(nestedValue)])
+        );
+    }
+    return value ?? null;
 }

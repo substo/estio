@@ -15,7 +15,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { AlertCircle, Check, ChevronsUpDown, Loader2, Merge } from "lucide-react";
 import { toast } from "sonner";
-import { mergeContacts, previewMergeContacts, searchContactsAction, type MergeContactPreview } from "@/app/(main)/admin/contacts/actions";
+import { mergeContacts, previewMergeContacts, searchContactsAction, type MergeContactFieldChoices, type MergeContactPreview } from "@/app/(main)/admin/contacts/actions";
 import { summarizeConversationMergeEffects } from "@/lib/conversations/merge";
 import { cn } from "@/lib/utils";
 import {
@@ -30,6 +30,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 interface MergeContactDialogProps {
     sourceContactId: string;
@@ -51,6 +52,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
     const [preview, setPreview] = useState<MergeContactPreview | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
+    const [fieldChoices, setFieldChoices] = useState<MergeContactFieldChoices>({});
     const previewRequestRef = React.useRef(0);
 
     // Search State
@@ -100,6 +102,9 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
 
                 if (result.success && result.preview) {
                     setPreview(result.preview);
+                    setFieldChoices(Object.fromEntries(
+                        result.preview.conflictingFields.map((field) => [field.field, 'target'])
+                    ) as MergeContactFieldChoices);
                     setPreviewError(null);
                 } else if (result.message?.startsWith("already_merged:")) {
                     setPreviewError("This source contact was already merged. Confirm is disabled.");
@@ -126,6 +131,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
             setPreview(null);
             setPreviewError(null);
             setPreviewLoading(false);
+            setFieldChoices({});
         }
     }, [resolvedOpen]);
 
@@ -141,7 +147,7 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
 
         setIsMerging(true);
         try {
-            const result = await mergeContacts(sourceContactId, targetContactId);
+            const result = await mergeContacts(sourceContactId, targetContactId, fieldChoices);
             if (result.success) {
                 toast.success("Contacts merged successfully!");
                 setOpen(false);
@@ -258,6 +264,10 @@ export function MergeContactDialog({ sourceContactId, sourceName, trigger, open,
                                 preview={preview}
                                 loading={previewLoading}
                                 error={previewError}
+                                fieldChoices={fieldChoices}
+                                onFieldChoiceChange={(field, choice) => {
+                                    setFieldChoices((current) => ({ ...current, [field]: choice }));
+                                }}
                             />
                         )}
                     </div>
@@ -277,10 +287,14 @@ function MergePreviewPanel({
     preview,
     loading,
     error,
+    fieldChoices,
+    onFieldChoiceChange,
 }: {
     preview: MergeContactPreview | null;
     loading: boolean;
     error: string | null;
+    fieldChoices: MergeContactFieldChoices;
+    onFieldChoiceChange: (field: MergeContactPreview["conflictingFields"][number]["field"], choice: 'source' | 'target') => void;
 }) {
     if (loading) {
         return (
@@ -380,11 +394,64 @@ function MergePreviewPanel({
                 </div>
             </div>
 
+            {preview.conflictingFields.length > 0 && (
+                <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
+                    <div className="font-medium">Field conflicts</div>
+                    <div className="mt-2 space-y-2">
+                        {preview.conflictingFields.map((field) => (
+                            <div key={field.field} className="rounded border border-amber-200 bg-background p-2">
+                                <div className="text-xs font-medium text-muted-foreground">{field.label}</div>
+                                <RadioGroup
+                                    value={fieldChoices[field.field] || 'target'}
+                                    onValueChange={(value) => onFieldChoiceChange(field.field, value as 'source' | 'target')}
+                                    className="mt-2 grid gap-2"
+                                >
+                                    <ConflictValueOption
+                                        id={`merge-${field.field}-target`}
+                                        value="target"
+                                        label="Keep target"
+                                        displayValue={field.targetValue}
+                                    />
+                                    <ConflictValueOption
+                                        id={`merge-${field.field}-source`}
+                                        value="source"
+                                        label="Use source"
+                                        displayValue={field.sourceValue}
+                                    />
+                                </RadioGroup>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {preview.providerCleanupWarning.hasProviderIds && (
                 <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
                     Source provider IDs exist for {providers}; external cleanup may run after the merge.
                 </div>
             )}
+        </div>
+    );
+}
+
+function ConflictValueOption({
+    id,
+    value,
+    label,
+    displayValue,
+}: {
+    id: string;
+    value: 'source' | 'target';
+    label: string;
+    displayValue: string;
+}) {
+    return (
+        <div className="flex min-w-0 items-start gap-2 rounded border px-2 py-1.5">
+            <RadioGroupItem value={value} id={id} className="mt-0.5" />
+            <Label htmlFor={id} className="min-w-0 cursor-pointer text-xs leading-5">
+                <span className="font-medium text-foreground">{label}:</span>{" "}
+                <span className="break-words text-muted-foreground">{displayValue || "Empty"}</span>
+            </Label>
         </div>
     );
 }
