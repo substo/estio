@@ -35,6 +35,10 @@ import {
     fetchMessagesForResolvedConversation as loadMessagesForResolvedConversation,
     type FetchMessagesOptions,
 } from "@/lib/conversations/message-loading";
+import {
+    isUsableMessageTranslationText,
+    parseTranslationModelOutput,
+} from "@/lib/conversations/translation-output";
 import { loadConversationWorkspaceCore } from "@/lib/conversations/workspace-core-loading";
 import {
     buildConversationDeltaCursorFromRows,
@@ -420,55 +424,6 @@ function parseJsonObjectFromModelOutput(rawText: string): any {
     }
 }
 
-function parseTranslationModelOutput(rawText: string): {
-    translatedText: string;
-    detectedSourceLanguage: string | null;
-    confidence: number | null;
-} {
-    let parsed: any;
-    try {
-        parsed = parseJsonObjectFromModelOutput(rawText);
-    } catch {
-        const fallbackText = String(rawText || "")
-            .replace(/```json/gi, "")
-            .replace(/```/g, "")
-            .trim();
-        if (!fallbackText) {
-            throw new Error("Model did not return a valid JSON object");
-        }
-        return {
-            translatedText: fallbackText,
-            detectedSourceLanguage: null,
-            confidence: null,
-        };
-    }
-
-    if (typeof parsed === "string") {
-        const translatedText = parsed.trim();
-        if (!translatedText) {
-            throw new Error("Translation model returned empty output.");
-        }
-        return {
-            translatedText,
-            detectedSourceLanguage: null,
-            confidence: null,
-        };
-    }
-
-    const translatedText = String((parsed as any)?.translatedText || "").trim();
-    if (!translatedText) {
-        throw new Error("Translation model returned empty output.");
-    }
-
-    const detectedSourceLanguage = normalizeReplyLanguage(String((parsed as any)?.detectedSourceLanguage || "").trim()) || null;
-    const confidenceRaw = Number((parsed as any)?.confidence);
-    const confidence = Number.isFinite(confidenceRaw)
-        ? Math.min(1, Math.max(0, confidenceRaw))
-        : null;
-
-    return { translatedText, detectedSourceLanguage, confidence };
-}
-
 function runDetachedTask(taskName: string, task: () => Promise<void>) {
     void task().catch((error) => {
         console.error(`[DetachedTask:${taskName}] Failed:`, error);
@@ -513,6 +468,7 @@ function queueGhlConversationStatusSync(args: {
 
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
 const MESSAGE_TRANSLATION_MODEL = GEMINI_DRAFT_FAST_DEFAULT;
+const MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS = 4096;
 const MESSAGE_TRANSLATION_STATUS = {
     completed: "completed",
     failed: "failed",
@@ -607,7 +563,7 @@ async function runMessageTranslationLLM(args: {
         modelId,
         systemPrompt,
         userPrompt,
-        { jsonMode: true, temperature: 0.1, maxOutputTokens: 1200, thinkingBudget: 0 }
+        { jsonMode: true, temperature: 0.1, maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS, thinkingBudget: 0 }
     );
     const parsed = parseTranslationModelOutput(text);
 
@@ -5681,7 +5637,7 @@ export async function translateConversationMessage(
         },
         orderBy: [{ updatedAt: "desc" }],
     });
-    if (existing) {
+    if (existing && isUsableMessageTranslationText(existing.translatedText)) {
         return {
             success: true as const,
             conversationId: message.conversation.id,
@@ -5829,6 +5785,7 @@ export async function translateConversationThread(
     targetLanguage?: string | null,
     visibleMessageIds?: string[] | null
 ) {
+    const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedConversationId = String(conversationId || "").trim();
     if (!trimmedConversationId) {
@@ -5891,6 +5848,12 @@ export async function translateConversationThread(
     }).filter((row) => row.sourceText.length > 0);
 
     if (translatableRows.length === 0) {
+        console.log("[ConversationTranslation] Thread translation skipped", {
+            conversationId: conversation.id,
+            targetLanguage: resolvedTargetLanguage,
+            rowCount: rows.length,
+            durationMs: Date.now() - startedAt,
+        });
         return {
             success: true as const,
             conversationId: conversation.id,
@@ -5921,9 +5884,10 @@ export async function translateConversationThread(
     }
 
     const uncachedRows = [];
+    let invalidCachedCount = 0;
     for (const row of translatableRows) {
         const cached = cachedByMessageAndHash.get(`${row.id}:${row.sourceHash}`);
-        if (cached) {
+        if (cached && isUsableMessageTranslationText(cached.translatedText)) {
             translatedCount += 1;
             cachedCount += 1;
             translations.push({
@@ -5932,6 +5896,7 @@ export async function translateConversationThread(
                 cached: true,
             });
         } else {
+            if (cached) invalidCachedCount += 1;
             uncachedRows.push(row);
         }
     }
@@ -6071,6 +6036,19 @@ export async function translateConversationThread(
     if (translationResults.some((result) => result.success)) {
         invalidateConversationReadCaches(conversation.id);
     }
+
+    console.log("[ConversationTranslation] Thread translation completed", {
+        conversationId: conversation.id,
+        targetLanguage: resolvedTargetLanguage,
+        rowCount: rows.length,
+        translatableCount: translatableRows.length,
+        cachedCount,
+        invalidCachedCount,
+        uncachedCount: uncachedRows.length,
+        translatedCount,
+        failedCount: failed.length,
+        durationMs: Date.now() - startedAt,
+    });
 
     emitConversationRealtimeEvent({
         locationId: location.id,

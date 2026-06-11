@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { ensureConversationHistory } from "@/lib/ghl/sync";
 import { buildMessageTranslationState, getResolvedConversationTranslationLanguage } from "@/lib/conversations/translation-view";
+import { isUsableMessageTranslationText } from "@/lib/conversations/translation-output";
 import { getWhatsAppMediaObjectBytes, parseR2Uri } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia, parseVCardContacts } from "@/lib/contacts/vcard";
 import { buildVisibleMessageSourceWhere } from "./internal-message-visibility";
@@ -332,7 +333,9 @@ export async function fetchMessagesForResolvedConversation(args: {
         const webBridgeMedia = webBridgeSync?.metadata && typeof webBridgeSync.metadata === "object"
             ? (webBridgeSync.metadata as any).webBridgeMedia || null
             : null;
-        const translationEntries = (m.translationCaches || []).map((entry: any) => ({
+        const validTranslationCaches = (m.translationCaches || [])
+            .filter((entry: any) => isUsableMessageTranslationText(entry.translatedText));
+        const translationEntries = validTranslationCaches.map((entry: any) => ({
             id: entry.id,
             targetLanguage: entry.targetLanguage,
             sourceLanguage: entry.detectedSourceLanguage || null,
@@ -345,9 +348,9 @@ export async function fetchMessagesForResolvedConversation(args: {
             model: entry.model || null,
             updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : null,
         }));
-        const detectedLanguage = ((m.translationCaches?.[0]?.detectedSourceLanguage || null) || null);
-        const detectedLanguageConfidence = Number.isFinite(Number(m.translationCaches?.[0]?.detectionConfidence))
-            ? Number(m.translationCaches?.[0]?.detectionConfidence)
+        const detectedLanguage = ((validTranslationCaches?.[0]?.detectedSourceLanguage || null) || null);
+        const detectedLanguageConfidence = Number.isFinite(Number(validTranslationCaches?.[0]?.detectionConfidence))
+            ? Number(validTranslationCaches?.[0]?.detectionConfidence)
             : null;
 
         return {

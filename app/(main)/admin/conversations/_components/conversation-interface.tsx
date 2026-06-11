@@ -16,7 +16,6 @@ import {
     generateComposerAIDraft,
     setConversationReplyLanguageOverride,
     translateConversationMessage,
-    translateConversationThread,
     previewTranslatedReply,
     deleteConversations,
     restoreConversations,
@@ -1937,7 +1936,31 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return { success: false as const, error: "No active conversation." };
         }
 
-        const result = await translateConversationThread(activeConversationId, targetLanguage || null, visibleMessageIds || []);
+        let result: any = null;
+        try {
+            const response = await fetch("/api/admin/conversations/translate-thread", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    conversationId: activeConversationId,
+                    targetLanguage: targetLanguage || null,
+                    visibleMessageIds: Array.isArray(visibleMessageIds) ? visibleMessageIds : [],
+                }),
+            });
+            result = await response.json().catch(() => null);
+            if (!response.ok) {
+                return {
+                    success: false as const,
+                    error: String(result?.error || "Failed to translate thread."),
+                };
+            }
+        } catch (error: any) {
+            return {
+                success: false as const,
+                error: String(error?.message || "Failed to translate thread."),
+            };
+        }
+
         if (!result?.success) {
             return { success: false as const, error: String(result?.error || "Failed to translate thread.") };
         }
