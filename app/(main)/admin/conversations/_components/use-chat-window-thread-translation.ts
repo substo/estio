@@ -30,6 +30,10 @@ function getThreadTranslationPreferenceKey(conversationId: string, targetLanguag
     return `conversation-thread-translation:${conversationId}:${targetLanguage.toLowerCase()}`;
 }
 
+function getThreadTranslationBannerDismissalKey(conversationId: string, targetLanguage: string) {
+    return `conversation-thread-translation-banner-dismissed:${conversationId}:${targetLanguage.toLowerCase()}`;
+}
+
 export function useChatWindowThreadTranslation({
     conversation,
     messages,
@@ -49,7 +53,6 @@ export function useChatWindowThreadTranslation({
     }, []);
 
     useEffect(() => {
-        setTranslationBannerDismissed(false);
         setThreadTranslationMode("original");
         setAutoTranslatingThread(false);
         autoTranslationAttemptedRef.current = null;
@@ -83,6 +86,12 @@ export function useChatWindowThreadTranslation({
 
     useEffect(() => {
         if (typeof window === "undefined") return;
+        const storageKey = getThreadTranslationBannerDismissalKey(conversation.id, resolvedTranslationTargetLanguage);
+        setTranslationBannerDismissed(window.localStorage.getItem(storageKey) === "dismissed");
+    }, [conversation.id, resolvedTranslationTargetLanguage]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
         const storageKey = getThreadTranslationPreferenceKey(conversation.id, resolvedTranslationTargetLanguage);
         const stored = window.localStorage.getItem(storageKey);
         if (stored === "original" || stored === "translated") {
@@ -98,6 +107,13 @@ export function useChatWindowThreadTranslation({
         window.localStorage.setItem(storageKey, threadTranslationMode);
     }, [conversation.id, resolvedTranslationTargetLanguage, threadTranslationMode]);
 
+    const dismissTranslationBanner = useCallback(() => {
+        setTranslationBannerDismissed(true);
+        if (typeof window === "undefined") return;
+        const storageKey = getThreadTranslationBannerDismissalKey(conversation.id, resolvedTranslationTargetLanguage);
+        window.localStorage.setItem(storageKey, "dismissed");
+    }, [conversation.id, resolvedTranslationTargetLanguage]);
+
     const handleTranslateVisibleThread = useCallback(async (options?: { silent?: boolean; auto?: boolean }) => {
         if (!onTranslateVisibleThread || translatingVisibleThread || autoTranslatingThread) return;
         const visibleInboundIds = eligibleInboundTranslationIds.length > 0
@@ -110,7 +126,7 @@ export function useChatWindowThreadTranslation({
 
         const previousThreadTranslationMode = threadTranslationMode;
         setThreadTranslationMode("translated");
-        setTranslationBannerDismissed(true);
+        dismissTranslationBanner();
 
         if (options?.auto) {
             setAutoTranslatingThread(true);
@@ -148,7 +164,7 @@ export function useChatWindowThreadTranslation({
                 setTranslatingVisibleThread(false);
             }
         }
-    }, [autoTranslatingThread, eligibleInboundTranslationIds, messages, onTranslateVisibleThread, resolvedTranslationTargetLanguage, threadTranslationMode, translatingVisibleThread]);
+    }, [autoTranslatingThread, dismissTranslationBanner, eligibleInboundTranslationIds, messages, onTranslateVisibleThread, resolvedTranslationTargetLanguage, threadTranslationMode, translatingVisibleThread]);
 
     useEffect(() => {
         if (!translationReadEnabled || !onTranslateVisibleThread) return;
@@ -175,7 +191,7 @@ export function useChatWindowThreadTranslation({
         translatingVisibleThread,
         autoTranslatingThread,
         translationBannerDismissed,
-        setTranslationBannerDismissed,
+        dismissTranslationBanner,
         threadTranslationMode,
         setThreadTranslationMode,
         resolvedTranslationTargetLanguage,

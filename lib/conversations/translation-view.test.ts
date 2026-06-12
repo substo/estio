@@ -79,6 +79,17 @@ test("isLikelyForeignLanguageMessage detects Chinese inbound text", () => {
     );
 });
 
+test("isLikelyForeignLanguageMessage ignores emoji-only English messages", () => {
+    assert.equal(
+        isLikelyForeignLanguageMessage({
+            direction: "inbound",
+            body: "Thanks 😀😀😀😀",
+            detectedLanguage: null,
+        }, "en"),
+        false
+    );
+});
+
 test("shouldDefaultThreadToTranslated prefers translated view when foreign inbound messages already have overlays", () => {
     assert.equal(
         shouldDefaultThreadToTranslated([

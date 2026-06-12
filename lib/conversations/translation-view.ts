@@ -97,8 +97,10 @@ export function isLikelyForeignLanguageMessage(
         return true;
     }
 
-    const nonAsciiChars = body.replace(/[ -~]/g, "");
-    if (nonAsciiChars.length >= 4) return true;
+    const nonAsciiLetters = Array.from(body.matchAll(/[^\x00-\x7F]/gu))
+        .map((match) => match[0])
+        .filter((char) => /\p{L}/u.test(char));
+    if (nonAsciiLetters.length >= 4) return true;
 
     return /\b(hola|bonjour|ciao|merci|gracias|buenos|ola|γειά|привет|salut|buenas)\b/i.test(body);
 }

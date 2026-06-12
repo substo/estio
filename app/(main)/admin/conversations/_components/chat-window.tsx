@@ -258,7 +258,7 @@ export function ChatWindow({
     const {
         translatingVisibleThread,
         autoTranslatingThread,
-        setTranslationBannerDismissed,
+        dismissTranslationBanner,
         threadTranslationMode,
         setThreadTranslationMode,
         resolvedTranslationTargetLanguage,
@@ -676,7 +676,7 @@ export function ChatWindow({
                             size="sm"
                             variant="ghost"
                             className="h-7 px-2 text-[11px]"
-                            onClick={() => setTranslationBannerDismissed(true)}
+                            onClick={dismissTranslationBanner}
                         >
                             Not now
                         </Button>
