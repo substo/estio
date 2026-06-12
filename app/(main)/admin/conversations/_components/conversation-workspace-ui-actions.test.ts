@@ -9,6 +9,8 @@ import {
     isShellContactContext,
     mergeActivityTimelineEntries,
     patchWorkspaceCoreSnapshotActivityEntry,
+    removeActivityTimelineEntry,
+    removeWorkspaceCoreSnapshotActivityEntry,
     type ActivityTimelineItem,
 } from './conversation-workspace-ui-actions';
 
@@ -163,6 +165,35 @@ test('patchWorkspaceCoreSnapshotActivityEntry copies the snapshot and patches on
     assert.equal(patched.transcriptOnDemandEnabled, true);
     assert.deepEqual(patched.activityTimeline.map((entry) => entry.id), ['entry-a', 'entry-b']);
     assert.deepEqual((snapshot.activityTimeline as ActivityTimelineItem[]).map((entry) => entry.id), ['entry-b']);
+});
+
+test('removeActivityTimelineEntry removes matching entries without mutating current entries', () => {
+    const current = [
+        activityEntry('entry-a', '2026-01-01T00:00:00.000Z'),
+        activityEntry('entry-b', '2026-01-02T00:00:00.000Z'),
+    ];
+
+    const next = removeActivityTimelineEntry(current, 'entry-a');
+
+    assert.deepEqual(next.map((entry) => entry.id), ['entry-b']);
+    assert.deepEqual(current.map((entry) => entry.id), ['entry-a', 'entry-b']);
+});
+
+test('removeWorkspaceCoreSnapshotActivityEntry patches only activityTimeline', () => {
+    const snapshot = {
+        conversationHeader: { id: 'conv-1' } as Conversation,
+        messages: [],
+        activityTimeline: [
+            activityEntry('entry-a', '2026-01-01T00:00:00.000Z'),
+            activityEntry('entry-b', '2026-01-02T00:00:00.000Z'),
+        ],
+    } as WorkspaceCoreSnapshot;
+
+    const patched = removeWorkspaceCoreSnapshotActivityEntry(snapshot, 'entry-b');
+
+    assert.notEqual(patched, snapshot);
+    assert.deepEqual(patched.activityTimeline.map((entry) => entry.id), ['entry-a']);
+    assert.deepEqual((snapshot.activityTimeline as ActivityTimelineItem[]).map((entry) => entry.id), ['entry-a', 'entry-b']);
 });
 
 function activityEntry(id: string, createdAt: string): ActivityTimelineItem {

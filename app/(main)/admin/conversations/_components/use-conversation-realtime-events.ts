@@ -34,6 +34,7 @@ type RealtimeEnvelopeRoutingArgs = {
     }) => Promise<any>;
     applyRealtimeMessagePatch: (conversationId: string | null | undefined, payload: Record<string, unknown>) => boolean;
     upsertActivityEntryInWorkspace: (conversationId: string | null | undefined, activityEntry: ActivityTimelineItem | null | undefined) => void;
+    removeActivityEntryFromWorkspace: (conversationId: string | null | undefined, activityId: string | null | undefined) => void;
     prefetchWorkspaceCore: (conversationId: string) => Promise<void>;
     getCachedWorkspaceCoreSnapshot: (conversationId: string) => any | null;
     cacheWorkspaceCoreSnapshot: (conversationId: string, snapshot: any) => void;
@@ -65,6 +66,7 @@ export function routeConversationRealtimeEnvelope({
     refreshActiveDealWorkspace,
     applyRealtimeMessagePatch,
     upsertActivityEntryInWorkspace,
+    removeActivityEntryFromWorkspace,
     prefetchWorkspaceCore,
     getCachedWorkspaceCoreSnapshot,
     cacheWorkspaceCoreSnapshot,
@@ -110,7 +112,7 @@ export function routeConversationRealtimeEnvelope({
         return;
     }
 
-    if (viewMode === "chats" && conversationId && eventType === "activity.created") {
+    if (viewMode === "chats" && conversationId && (eventType === "activity.created" || eventType === "activity.updated")) {
         const payload = parseRealtimePayload(event);
         const activityEntry = payload?.activityEntry && typeof payload.activityEntry === "object"
             ? payload.activityEntry as ActivityTimelineItem
@@ -118,6 +120,19 @@ export function routeConversationRealtimeEnvelope({
 
         if (activityEntry?.id) {
             upsertActivityEntryInWorkspace(conversationId, activityEntry);
+            return;
+        }
+
+        runEventDrivenRefresh(conversationId);
+        return;
+    }
+
+    if (viewMode === "chats" && conversationId && eventType === "activity.deleted") {
+        const payload = parseRealtimePayload(event);
+        const activityId = payload?.activityId ? String(payload.activityId) : "";
+
+        if (activityId) {
+            removeActivityEntryFromWorkspace(conversationId, activityId);
             return;
         }
 
@@ -178,6 +193,7 @@ export function useConversationRealtimeEvents({
     refreshActiveDealWorkspace,
     applyRealtimeMessagePatch,
     upsertActivityEntryInWorkspace,
+    removeActivityEntryFromWorkspace,
     prefetchWorkspaceCore,
     getCachedWorkspaceCoreSnapshot,
     cacheWorkspaceCoreSnapshot,
@@ -239,9 +255,10 @@ export function useConversationRealtimeEvents({
                     setMessages,
                     runRealtimeRefresh,
                     refreshActiveDealWorkspace,
-                    applyRealtimeMessagePatch,
-                    upsertActivityEntryInWorkspace,
-                    prefetchWorkspaceCore,
+                        applyRealtimeMessagePatch,
+                        upsertActivityEntryInWorkspace,
+                        removeActivityEntryFromWorkspace,
+                        prefetchWorkspaceCore,
                     getCachedWorkspaceCoreSnapshot,
                     cacheWorkspaceCoreSnapshot,
                     workspaceCoreInFlightRef,

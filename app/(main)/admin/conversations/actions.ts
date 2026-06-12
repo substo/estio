@@ -44,6 +44,10 @@ import {
     type ConversationLanguageContextInput,
 } from "@/lib/conversations/language-context";
 import { recordConversationLanguageEvidence } from "@/lib/conversations/language-profile";
+import {
+    deleteManualActivityEntry as deleteManualActivityEntryRow,
+    updateManualActivityEntry as updateManualActivityEntryRow,
+} from "@/lib/contacts/manual-activity-entries";
 import { loadConversationWorkspaceCore } from "@/lib/conversations/workspace-core-loading";
 import {
     buildConversationDeltaCursorFromRows,
@@ -13678,6 +13682,89 @@ export async function addConversationActivityEntry(
         success: true,
         activityEntry,
         clientMutationId: normalizedClientMutationId,
+    };
+}
+
+async function resolveManualActivityMutationActor() {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) throw new Error("Unauthorized");
+
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const user = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: { id: true, name: true, email: true },
+    });
+
+    if (!user) throw new Error("User not found");
+    return { location, user };
+}
+
+export async function updateConversationActivityEntry(
+    historyId: string,
+    entryText: string,
+    dateIso: string
+) {
+    const { location, user } = await resolveManualActivityMutationActor();
+    const result = await updateManualActivityEntryRow({
+        db,
+        historyId,
+        locationId: location.id,
+        actor: user,
+        entry: entryText,
+        dateIso,
+    });
+
+    revalidatePath(`/admin/contacts/${result.history.contactId}/view`);
+    for (const conversationId of result.conversationIds) {
+        invalidateConversationReadCaches(conversationId, { skipPath: true });
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId,
+            type: "activity.updated",
+            payload: { activityEntry: result.activityEntry },
+        });
+    }
+    runDetachedTask(`requirements_activity_note_edit:${result.history.id}`, async () => {
+        queueRequirementProposalForNewActivity({
+            locationId: location.id,
+            contactId: result.history.contactId,
+            conversationId: result.conversationIds[0] || null,
+            sourceType: "activity_note",
+            sourceIds: [result.history.id],
+            actorUserId: user.id,
+        });
+    });
+
+    return {
+        success: true,
+        activityEntry: result.activityEntry,
+    };
+}
+
+export async function deleteConversationActivityEntry(historyId: string, reason?: string) {
+    const { location, user } = await resolveManualActivityMutationActor();
+    const result = await deleteManualActivityEntryRow({
+        db,
+        historyId,
+        locationId: location.id,
+        actor: user,
+        reason,
+    });
+
+    revalidatePath(`/admin/contacts/${result.contactId}/view`);
+    for (const conversationId of result.conversationIds) {
+        invalidateConversationReadCaches(conversationId, { skipPath: true });
+        emitConversationRealtimeEvent({
+            locationId: location.id,
+            conversationId,
+            type: "activity.deleted",
+            payload: { activityId: result.activityId },
+        });
+    }
+
+    return {
+        success: true,
+        activityId: result.activityId,
     };
 }
 

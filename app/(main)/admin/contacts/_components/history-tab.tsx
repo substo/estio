@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, Plus, Wand2 } from 'lucide-react';
+import { CalendarIcon, Check, Pencil, Plus, Trash2, Wand2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { addContactHistoryEntry } from '../actions';
+import { addContactHistoryEntry, deleteManualActivityEntry, updateManualActivityEntry } from '../actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 import { toast } from 'sonner';
@@ -42,25 +43,27 @@ interface HistoryTabProps {
     contact?: { id?: string; createdAt?: Date | string | null; updatedAt?: Date | string | null };
 }
 
+function toDatetimeLocalValue(value: unknown): string {
+    const date = value ? new Date(String(value)) : new Date();
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    const offsetMs = safeDate.getTimezoneOffset() * 60_000;
+    return new Date(safeDate.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
 export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
-    if (loading) {
-        return <div className="p-4 text-sm text-muted-foreground">Loading history...</div>;
-    }
-
-    if (!history || history.length === 0) {
-        return <div className="p-4 text-sm text-muted-foreground">No history recorded yet.</div>;
-    }
-
-
+    const [localHistory, setLocalHistory] = useState<HistoryItem[]>(history || []);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editText, setEditText] = useState('');
+    const [editDate, setEditDate] = useState('');
 
     // Derive Publishing Info
     // Creator: Find first CREATED action
-    const createdAction = history.find(h => h.action === 'CREATED');
+    const createdAction = localHistory.find(h => h.action === 'CREATED');
     const createdBy = createdAction?.user?.name || createdAction?.user?.email || 'System';
     const createdAt = contact?.createdAt ? new Date(contact.createdAt) : (createdAction ? new Date(createdAction.createdAt) : null);
 
     // Updater: Find first UPDATED action (history is desc) or use latest history item
-    const lastUpdate = history[0];
+    const lastUpdate = localHistory[0];
     const updatedBy = lastUpdate?.user?.name || lastUpdate?.user?.email || 'System';
     const updatedAt = contact?.updatedAt ? new Date(contact.updatedAt) : (lastUpdate ? new Date(lastUpdate.createdAt) : null);
 
@@ -70,6 +73,10 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
     const [isAddingNote, setIsAddingNote] = useState(false);
     const [isImprovingNote, setIsImprovingNote] = useState(false);
     const { resolveModelForKind } = useAiModelCatalog();
+
+    useEffect(() => {
+        setLocalHistory(history || []);
+    }, [history]);
 
     const handleAddNote = () => {
         if (!noteText.trim() || !contact?.id) return;
@@ -111,6 +118,56 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
             setIsImprovingNote(false);
         }
     };
+
+    const openEdit = (item: HistoryItem, changes: Change[]) => {
+        setEditingId(item.id);
+        setEditText(String(changes.find((change) => change.field === 'entry')?.new || ''));
+        setEditDate(toDatetimeLocalValue(changes.find((change) => change.field === 'date')?.new || item.createdAt));
+    };
+
+    const cancelEdit = () => {
+        setEditingId(null);
+        setEditText('');
+        setEditDate('');
+    };
+
+    const handleSaveEdit = (item: HistoryItem) => {
+        const nextText = editText.trim();
+        if (!nextText || !editDate) return;
+
+        startTransition(async () => {
+            const result = await updateManualActivityEntry(item.id, nextText, new Date(editDate).toISOString());
+            if (!result.success || !result.activityEntry) {
+                toast.error(result.message || 'Failed to update entry');
+                return;
+            }
+            setLocalHistory((prev) => prev.map((historyItem) => (
+                historyItem.id === item.id
+                    ? { ...historyItem, changes: result.activityEntry.changes }
+                    : historyItem
+            )));
+            cancelEdit();
+            toast.success('Entry updated');
+        });
+    };
+
+    const handleDeleteEntry = (item: HistoryItem) => {
+        if (!window.confirm('Delete this history entry?')) return;
+
+        startTransition(async () => {
+            const result = await deleteManualActivityEntry(item.id, 'Deleted by user');
+            if (!result.success) {
+                toast.error(result.message || 'Failed to delete entry');
+                return;
+            }
+            setLocalHistory((prev) => prev.filter((historyItem) => historyItem.id !== item.id));
+            toast.success('Entry deleted');
+        });
+    };
+
+    if (loading) {
+        return <div className="p-4 text-sm text-muted-foreground">Loading history...</div>;
+    }
 
     return (
         <div className="flex flex-col h-[600px]">
@@ -183,9 +240,14 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
 
             <div className="flex-1 pr-4 overflow-y-auto custom-scrollbar">
                 <div className="space-y-4">
-                    {history.map((item) => {
+                    {localHistory.length === 0 && (
+                        <div className="p-4 text-sm text-muted-foreground">No history recorded yet.</div>
+                    )}
+                    {localHistory.map((item) => {
                         const changes = parseHistoryChanges(item.changes, item.action) as Change[];
                         const isRequirementsUpdate = isRequirementHistoryAction(item.action);
+                        const isManualEntry = item.action === 'MANUAL_ENTRY';
+                        const isEditing = editingId === item.id;
 
                         return (
                             <div key={item.id} className="flex flex-col gap-2 p-3 border rounded-lg bg-card text-card-foreground shadow-sm">
@@ -203,7 +265,45 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
                                     </span>
                                 </div>
 
-                                {changes && changes.length > 0 && (
+                                {isManualEntry && (
+                                    <div className="flex justify-end gap-1">
+                                        {isEditing ? (
+                                            <>
+                                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={cancelEdit} disabled={isPending} title="Cancel edit">
+                                                    <X className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleSaveEdit(item)} disabled={isPending || !editText.trim() || !editDate} title="Save edit">
+                                                    <Check className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(item, changes)} disabled={isPending} title="Edit entry">
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700" onClick={() => handleDeleteEntry(item)} disabled={isPending} title="Delete entry">
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+
+                                {isEditing ? (
+                                    <div className="space-y-2">
+                                        <Input
+                                            type="datetime-local"
+                                            value={editDate}
+                                            onChange={(event) => setEditDate(event.target.value)}
+                                            className="h-8 text-xs"
+                                        />
+                                        <Textarea
+                                            value={editText}
+                                            onChange={(event) => setEditText(event.target.value)}
+                                            className="min-h-[90px] resize-none text-xs"
+                                        />
+                                    </div>
+                                ) : changes && changes.length > 0 && (
                                     isRequirementsUpdate ? (
                                         <div className="mt-1 space-y-2 rounded-md border border-emerald-100 bg-emerald-50/60 p-2">
                                             <div className="text-xs font-medium text-emerald-800">{summarizeRequirementChanges(changes)}</div>

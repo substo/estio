@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import db from '@/lib/db';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { after } from 'next/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
@@ -60,6 +60,11 @@ import {
   findContactsByPhoneDigitsWithFallback,
   phoneDigitsLikelyMatch,
 } from '@/lib/contacts/phone-lookup';
+import {
+  deleteManualActivityEntry as deleteManualActivityEntryRow,
+  updateManualActivityEntry as updateManualActivityEntryRow,
+} from '@/lib/contacts/manual-activity-entries';
+import { publishConversationRealtimeEvent } from '@/lib/realtime/conversation-events';
 
 async function resolvePreferredChannelTypeForPhone(
   _location: unknown,
@@ -2487,8 +2492,15 @@ export async function addContactHistoryEntry(contactId: string, entry: string, d
   if (!userId) return { success: false, message: 'Unauthorized' };
 
   try {
-    const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+    const location = await getLocationContext();
+    if (!location?.id) return { success: false, message: 'Location not found' };
+
+    const [dbUser, contact] = await Promise.all([
+      db.user.findUnique({ where: { clerkId: userId }, select: { id: true } }),
+      db.contact.findFirst({ where: { id: contactId, locationId: location.id }, select: { id: true } }),
+    ]);
     if (!dbUser) return { success: false, message: 'User not found' };
+    if (!contact) return { success: false, message: 'Contact not found' };
 
     await logContactHistory(db, contactId, dbUser.id, 'MANUAL_ENTRY', { entry, date });
 
@@ -2497,6 +2509,139 @@ export async function addContactHistoryEntry(contactId: string, entry: string, d
   } catch (error) {
     console.error('Failed to add history entry:', error);
     return { success: false, message: 'Failed to add entry.' };
+  }
+}
+
+async function resolveManualActivityActor() {
+  const { userId } = await auth();
+  if (!userId) return { error: 'Unauthorized' as const };
+
+  const [location, user] = await Promise.all([
+    getLocationContext(),
+    db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, name: true, email: true },
+    }),
+  ]);
+
+  if (!location?.id) return { error: 'Location not found' as const };
+  if (!user) return { error: 'User not found' as const };
+  return { location, user };
+}
+
+function invalidateManualActivityReads(contactId: string, conversationIds: string[]) {
+  revalidatePath('/admin/contacts');
+  revalidatePath(`/admin/contacts/${contactId}/view`);
+  revalidateTag('conversations:list');
+  revalidateTag('conversations:workspace');
+  revalidateTag('conversations:workspace:core');
+  revalidateTag('conversations:workspace:sidebar');
+  for (const conversationId of conversationIds) {
+    revalidatePath(`/admin/conversations?id=${encodeURIComponent(conversationId)}`);
+  }
+}
+
+function publishManualActivityMutation(args: {
+  locationId: string;
+  conversationIds: string[];
+  type: 'activity.updated' | 'activity.deleted';
+  payload: Record<string, unknown>;
+}) {
+  for (const conversationId of args.conversationIds) {
+    void publishConversationRealtimeEvent({
+      locationId: args.locationId,
+      conversationId,
+      type: args.type,
+      payload: args.payload,
+    });
+  }
+}
+
+function queueRequirementRefreshForEditedManualActivity(args: {
+  locationId: string;
+  contactId: string;
+  conversationIds: string[];
+  historyId: string;
+  actorUserId: string;
+}) {
+  after(async () => {
+    try {
+      const { queueRequirementProposalForNewActivity } = await import('@/lib/ai/requirements-intelligence/service');
+      queueRequirementProposalForNewActivity({
+        locationId: args.locationId,
+        contactId: args.contactId,
+        conversationId: args.conversationIds[0] || null,
+        sourceType: 'activity_note',
+        sourceIds: [args.historyId],
+        actorUserId: args.actorUserId,
+      });
+    } catch (error) {
+      console.error('[manual-activity-entry] Failed to queue requirement refresh:', error);
+    }
+  });
+}
+
+export async function updateManualActivityEntry(historyId: string, entry: string, dateIso: string) {
+  const actor = await resolveManualActivityActor();
+  if ('error' in actor) return { success: false, message: actor.error };
+
+  try {
+    const result = await updateManualActivityEntryRow({
+      db,
+      historyId,
+      locationId: actor.location.id,
+      actor: actor.user,
+      entry,
+      dateIso,
+    });
+
+    invalidateManualActivityReads(result.history.contactId, result.conversationIds);
+    publishManualActivityMutation({
+      locationId: actor.location.id,
+      conversationIds: result.conversationIds,
+      type: 'activity.updated',
+      payload: { activityEntry: result.activityEntry },
+    });
+    queueRequirementRefreshForEditedManualActivity({
+      locationId: actor.location.id,
+      contactId: result.history.contactId,
+      conversationIds: result.conversationIds,
+      historyId: result.history.id,
+      actorUserId: actor.user.id,
+    });
+
+    return { success: true, activityEntry: result.activityEntry };
+  } catch (error: any) {
+    console.error('Failed to update manual activity entry:', error);
+    return { success: false, message: error?.message || 'Failed to update entry.' };
+  }
+}
+
+export async function deleteManualActivityEntry(historyId: string, reason?: string) {
+  const actor = await resolveManualActivityActor();
+  if ('error' in actor) return { success: false, message: actor.error };
+
+  try {
+    const result = await deleteManualActivityEntryRow({
+      db,
+      historyId,
+      locationId: actor.location.id,
+      actor: actor.user,
+      reason,
+    });
+
+    invalidateManualActivityReads(result.contactId, result.conversationIds);
+    publishManualActivityMutation({
+      locationId: actor.location.id,
+      conversationIds: result.conversationIds,
+      type: 'activity.deleted',
+      payload: { activityId: result.activityId },
+    });
+
+    return { success: true, activityId: result.activityId };
+  } catch (error: any) {
+    console.error('Failed to delete manual activity entry:', error);
+    return { success: false, message: error?.message || 'Failed to delete entry.' };
   }
 }
 

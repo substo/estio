@@ -43,6 +43,9 @@ function createHarness(overrides?: {
         upsertActivityEntryInWorkspace: (conversationId, activityEntry) => {
             calls.push(`activity:${conversationId}:${activityEntry?.id || ''}`);
         },
+        removeActivityEntryFromWorkspace: (conversationId, activityId) => {
+            calls.push(`activity-delete:${conversationId}:${activityId || ''}`);
+        },
         prefetchWorkspaceCore: async (conversationId: string) => {
             calls.push(`prefetch:${conversationId}`);
         },
@@ -175,6 +178,34 @@ test('activity.created with entry upserts without refresh', () => {
     });
 
     assert.deepEqual(harness.calls, ['activity:conv-1:act-1']);
+});
+
+test('activity.updated with entry upserts without refresh', () => {
+    const harness = createHarness();
+
+    harness.route({
+        id: 'evt-activity-updated',
+        type: 'activity.updated',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:00.000Z',
+        payload: { activityEntry: { id: 'act-1', type: 'note', changes: { entry: 'Updated' } } },
+    });
+
+    assert.deepEqual(harness.calls, ['activity:conv-1:act-1']);
+});
+
+test('activity.deleted removes without refresh', () => {
+    const harness = createHarness();
+
+    harness.route({
+        id: 'evt-activity-deleted',
+        type: 'activity.deleted',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:00.000Z',
+        payload: { activityId: 'act-1' },
+    });
+
+    assert.deepEqual(harness.calls, ['activity-delete:conv-1:act-1']);
 });
 
 test('message.inbound active conversation appends and refreshes', () => {

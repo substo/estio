@@ -112,6 +112,8 @@ interface ChatWindowProps {
     translationWriteEnabled?: boolean;
     translationBannerEnabled?: boolean;
     onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
+    onActivityEntryUpdated?: (activityEntry: ActivityLogItem) => void;
+    onActivityEntryDeleted?: (activityId: string) => void;
     suggestedResponseQueue?: SuggestedResponseQueueItem[];
     suggestedResponseQueueLoading?: boolean;
     onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
@@ -177,6 +179,8 @@ export function ChatWindow({
     translationBannerEnabled = false,
     onFetchHistory,
     onAddActivityEntry,
+    onActivityEntryUpdated,
+    onActivityEntryDeleted,
     suggestedResponseQueue = [],
     suggestedResponseQueueLoading = false,
     onAcceptSuggestedResponse,
@@ -756,6 +760,8 @@ export function ChatWindow({
                                         item={item.activity}
                                         contactName={conversation.contactName}
                                         surfaceTheme={surfaceTheme}
+                                        onActivityUpdated={onActivityEntryUpdated}
+                                        onActivityDeleted={onActivityEntryDeleted}
                                     />
                                 </div>
                             );

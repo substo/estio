@@ -419,7 +419,7 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
         conversationId: { in: conversationIds },
         ...buildVisibleMessageSourceWhere(),
     };
-    const historyWhere: any = { contactId: { in: contactIds } };
+    const historyWhere: any = { contactId: { in: contactIds }, deletedAt: null };
     const viewingWhere: any = { contactId: { in: contactIds } };
     const taskWhere: any = { contactId: { in: contactIds }, deletedAt: null };
 

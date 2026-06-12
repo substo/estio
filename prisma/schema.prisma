@@ -1541,12 +1541,17 @@ model Subscriber {
 }
 
 model ContactHistory {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  contactId String
-  userId    String? // Optional, null for System/GHL updates
-  action    String // CREATED, UPDATED, VIEWING_ADDED, etc.
-  changes   Json? // Array of { field, old, new } or similar structure
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  contactId     String
+  userId        String? // Optional, null for System/GHL updates
+  action        String // CREATED, UPDATED, VIEWING_ADDED, etc.
+  changes       Json? // Array of { field, old, new } or similar structure
+  updatedById   String?
+  deletedAt     DateTime?
+  deletedById   String?
+  deletedReason String?
 
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
   user    User?   @relation(fields: [userId], references: [id])
@@ -1554,6 +1559,7 @@ model ContactHistory {
   @@index([contactId])
   @@index([createdAt])
   @@index([contactId, createdAt(sort: Desc)])
+  @@index([contactId, deletedAt, createdAt(sort: Desc)])
 }
 
 model DealContext {

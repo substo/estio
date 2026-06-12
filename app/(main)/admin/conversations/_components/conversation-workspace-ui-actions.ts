@@ -109,3 +109,25 @@ export function patchWorkspaceCoreSnapshotActivityEntry(
         ),
     };
 }
+
+export function removeActivityTimelineEntry(
+    currentEntries: ActivityTimelineItem[],
+    activityId: string
+): ActivityTimelineItem[] {
+    const normalizedActivityId = String(activityId || "").trim();
+    if (!normalizedActivityId) return Array.isArray(currentEntries) ? currentEntries : [];
+    return (Array.isArray(currentEntries) ? currentEntries : []).filter((entry) => entry?.id !== normalizedActivityId);
+}
+
+export function removeWorkspaceCoreSnapshotActivityEntry(
+    snapshot: WorkspaceCoreSnapshot,
+    activityId: string
+): WorkspaceCoreSnapshot {
+    return {
+        ...snapshot,
+        activityTimeline: removeActivityTimelineEntry(
+            (snapshot.activityTimeline || []) as ActivityTimelineItem[],
+            activityId
+        ),
+    };
+}

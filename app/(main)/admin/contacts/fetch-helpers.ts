@@ -158,7 +158,7 @@ export async function getContactHistory(contactId: string) {
         }
 
         const history = await db.contactHistory.findMany({
-            where: { contactId },
+            where: { contactId, deletedAt: null },
             include: {
                 user: { select: { name: true, email: true } }
             },

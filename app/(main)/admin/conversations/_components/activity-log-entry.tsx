@@ -3,12 +3,16 @@
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks, Phone, PhoneCall, PhoneOff, ShieldCheck } from 'lucide-react';
+import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks, Phone, PhoneCall, PhoneOff, ShieldCheck, Trash2, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState, useTransition } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
 import { LinkifiedText } from './linkified-text';
+import { deleteConversationActivityEntry, updateConversationActivityEntry } from '../actions';
+import { toast } from 'sonner';
 import {
     formatHistoryFieldName,
     formatHistoryValue,
@@ -37,6 +41,8 @@ interface ActivityLogEntryProps {
     };
     contactName?: string;
     surfaceTheme?: ConversationSurfaceTheme;
+    onActivityUpdated?: (activityEntry: ActivityLogEntryProps["item"] & { type: "activity" }) => void;
+    onActivityDeleted?: (activityId: string) => void;
 }
 
 function formatViewingWhen(changes: Array<{ field?: string; new?: unknown }>): string | null {
@@ -100,12 +106,29 @@ function formatContactVerificationFieldName(field: string): string {
     }
 }
 
-function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: ActivityLogEntryProps) {
+function toDatetimeLocalValue(value: unknown): string {
+    const date = value ? new Date(String(value)) : new Date();
+    const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+    const offsetMs = safeDate.getTimezoneOffset() * 60_000;
+    return new Date(safeDate.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function formatManualEntryDate(value: string): string | null {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return null;
+    return format(date, 'MMM d, yyyy h:mm a');
+}
+
+function ActivityLogEntryComponent({ item, contactName, surfaceTheme, onActivityUpdated, onActivityDeleted }: ActivityLogEntryProps) {
     const [expanded, setExpanded] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewPending, setPreviewPending] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
     const [preview, setPreview] = useState<any | null>(null);
+    const [editOpen, setEditOpen] = useState(false);
+    const [editText, setEditText] = useState("");
+    const [editDate, setEditDate] = useState("");
+    const [isMutating, startMutation] = useTransition();
     
     const changes = useMemo(
         () => parseHistoryChanges(item.changes, item.action),
@@ -118,6 +141,13 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: Activity
     );
     const isRequirementsUpdate = isRequirementHistoryAction(item.action);
     const isContactVerificationUpdate = item.action === 'AI_CONTACT_VERIFICATION_AUTO_APPLIED' || item.action === 'CONTACT_VERIFIED';
+    const manualEntryText = item.action === 'MANUAL_ENTRY'
+        ? String(changes.find(c => c.field === 'entry')?.new || '')
+        : "";
+    const manualEntryDate = item.action === 'MANUAL_ENTRY'
+        ? String(changes.find(c => c.field === 'date')?.new || item.createdAt || '')
+        : "";
+    const manualEntryDateLabel = manualEntryDate ? formatManualEntryDate(manualEntryDate) : null;
 
     // Determine config based on action
     let Icon = HelpCircle;
@@ -140,8 +170,7 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: Activity
             actionLabel = "Added Note";
             
             // Extract the note text and actual date if present
-            const noteEntry = changes.find(c => c.field === 'entry')?.new;
-            const actualDate = changes.find(c => c.field === 'date')?.new;
+            const noteEntry = manualEntryText;
             
             if (noteEntry) {
                 description = String(noteEntry);
@@ -403,6 +432,49 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: Activity
     const hasChanges = changes.length > 0 && item.action !== 'MANUAL_ENTRY';
     const isManualEntry = item.action === 'MANUAL_ENTRY';
 
+    const openEditDialog = () => {
+        setEditText(manualEntryText);
+        setEditDate(toDatetimeLocalValue(manualEntryDate || item.createdAt));
+        setEditOpen(true);
+    };
+
+    const handleSaveEdit = () => {
+        const nextText = editText.trim();
+        if (!nextText) {
+            toast.error("Entry cannot be empty");
+            return;
+        }
+        startMutation(async () => {
+            try {
+                const result = await updateConversationActivityEntry(item.id, nextText, new Date(editDate).toISOString());
+                if (!result?.success || !result.activityEntry) {
+                    throw new Error("Failed to update note");
+                }
+                onActivityUpdated?.(result.activityEntry as ActivityLogEntryProps["item"] & { type: "activity" });
+                setEditOpen(false);
+                toast.success("Note updated");
+            } catch (error: any) {
+                toast.error(error?.message || "Failed to update note");
+            }
+        });
+    };
+
+    const handleDelete = () => {
+        if (!window.confirm("Delete this activity note?")) return;
+        startMutation(async () => {
+            try {
+                const result = await deleteConversationActivityEntry(item.id, "Deleted by user");
+                if (!result?.success || !result.activityId) {
+                    throw new Error("Failed to delete note");
+                }
+                onActivityDeleted?.(result.activityId);
+                toast.success("Note deleted");
+            } catch (error: any) {
+                toast.error(error?.message || "Failed to delete note");
+            }
+        });
+    };
+
     useEffect(() => {
         if (!previewOpen || !sessionThreadId || preview || previewPending) return;
 
@@ -473,8 +545,39 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: Activity
             {(description || expanded || hasSessionPreview) && (
                 <div className={cn("mt-1.5 max-w-[80%] mx-auto relative z-10 w-full animate-in fade-in slide-in-from-top-2 duration-200 text-sm border shadow-sm rounded-lg px-2.5 py-1.5", resolvedSurfaceTheme.activityContentClassName)}>
                     {description && isManualEntry && (
-                        <div className="text-slate-700 text-xs whitespace-pre-wrap leading-snug">
-                            <LinkifiedText text={description} />
+                        <div className="flex items-start gap-2">
+                            <div className="min-w-0 flex-1 text-slate-700 text-xs whitespace-pre-wrap leading-snug">
+                                {manualEntryDateLabel && (
+                                    <div className="mb-1 font-mono text-[10px] text-slate-400">
+                                        {manualEntryDateLabel}
+                                    </div>
+                                )}
+                                <LinkifiedText text={description} />
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={openEditDialog}
+                                    disabled={isMutating}
+                                    title="Edit note"
+                                >
+                                    <Pencil className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-red-600 hover:text-red-700"
+                                    onClick={handleDelete}
+                                    disabled={isMutating}
+                                    title="Delete note"
+                                >
+                                    <Trash2 className="h-3 w-3" />
+                                </Button>
+                            </div>
                         </div>
                     )}
                     
@@ -607,6 +710,38 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: Activity
                             </div>
                         </div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Edit Activity Note</DialogTitle>
+                        <DialogDescription>Update the note text or activity date.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <Textarea
+                            value={editText}
+                            onChange={(event) => setEditText(event.target.value)}
+                            className="min-h-[120px] resize-none text-sm"
+                        />
+                        <Input
+                            type="datetime-local"
+                            value={editDate}
+                            onChange={(event) => setEditDate(event.target.value)}
+                            className="h-9 text-sm"
+                        />
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setEditOpen(false)} disabled={isMutating}>
+                                <X className="mr-1 h-3.5 w-3.5" />
+                                Cancel
+                            </Button>
+                            <Button type="button" size="sm" onClick={handleSaveEdit} disabled={isMutating || !editText.trim() || !editDate}>
+                                <Check className="mr-1 h-3.5 w-3.5" />
+                                {isMutating ? "Saving..." : "Save"}
+                            </Button>
+                        </div>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

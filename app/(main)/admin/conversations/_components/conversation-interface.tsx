@@ -134,6 +134,8 @@ import {
     buildContactContextShell,
     mergeActivityTimelineEntries,
     patchWorkspaceCoreSnapshotActivityEntry,
+    removeActivityTimelineEntry,
+    removeWorkspaceCoreSnapshotActivityEntry,
     type ActivityTimelineItem,
 } from './conversation-workspace-ui-actions';
 import {
@@ -833,6 +835,27 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot]);
 
+    const removeActivityEntryFromWorkspace = useCallback((
+        conversationId: string | null | undefined,
+        activityId: string | null | undefined
+    ) => {
+        const normalizedConversationId = String(conversationId || "").trim();
+        const normalizedActivityId = String(activityId || "").trim();
+        if (!normalizedConversationId || !normalizedActivityId) return;
+
+        if (activeIdRef.current === normalizedConversationId) {
+            setActivityLog((prev) => removeActivityTimelineEntry(prev as ActivityTimelineItem[], normalizedActivityId));
+        }
+
+        const cached = getCachedWorkspaceCoreSnapshot(normalizedConversationId);
+        if (cached) {
+            cacheWorkspaceCoreSnapshot(
+                normalizedConversationId,
+                removeWorkspaceCoreSnapshotActivityEntry(cached, normalizedActivityId)
+            );
+        }
+    }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot]);
+
     const isDealWorkspaceHydrationBusy = useCallback((dealId?: string | null) => {
         const key = String(dealId || "");
         if (!key) return false;
@@ -1421,6 +1444,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         refreshActiveDealWorkspace,
         applyRealtimeMessagePatch,
         upsertActivityEntryInWorkspace,
+        removeActivityEntryFromWorkspace,
         prefetchWorkspaceCore,
         getCachedWorkspaceCoreSnapshot,
         cacheWorkspaceCoreSnapshot,
@@ -2690,6 +2714,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     }, [activeConversation, upsertActivityEntryInWorkspace]);
 
+    const handleChatActivityEntryUpdated = useCallback((activityEntry: ActivityTimelineItem) => {
+        if (!activeConversation) return;
+        upsertActivityEntryInWorkspace(activeConversation.id, activityEntry);
+    }, [activeConversation, upsertActivityEntryInWorkspace]);
+
+    const handleChatActivityEntryDeleted = useCallback((activityId: string) => {
+        if (!activeConversation) return;
+        removeActivityEntryFromWorkspace(activeConversation.id, activityId);
+    }, [activeConversation, removeActivityEntryFromWorkspace]);
+
     const handleChatFetchHistory = useCallback(async () => {
         if (!activeConversation) return;
 
@@ -2928,6 +2962,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
             transcriptOnDemandEnabled={transcriptOnDemandEnabled}
             onSync={handleSync}
             onAddActivityEntry={handleChatAddActivityEntry}
+            onActivityEntryUpdated={handleChatActivityEntryUpdated}
+            onActivityEntryDeleted={handleChatActivityEntryDeleted}
             onFetchHistory={handleChatFetchHistory}
             suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
             suggestedResponseQueue={suggestedResponseQueue}
