@@ -28,7 +28,7 @@ export type LeadImportParsedData = {
         name?: string | null;
         firstName?: string | null;
         lastName?: string | null;
-        role?: "Lead" | "Owner" | "Agent" | null;
+        role?: "Lead" | "Owner" | "Agent" | "Tenant" | null;
         phone?: string | null;
         countryCode?: string | null;
         email?: string | null;

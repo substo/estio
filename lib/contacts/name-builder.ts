@@ -208,24 +208,28 @@ export function splitLeadPersonName(contact?: BuilderContactData) {
 }
 
 export type InferredLeadContactRole = "Lead" | "Owner" | "Agent";
+export type InferredContactRole = InferredLeadContactRole | "Tenant";
 
-function normalizeRole(value?: string | null): InferredLeadContactRole | null {
+function normalizeRole(value?: string | null): InferredContactRole | null {
     const text = normalizeWhitespace(value);
-    if (text === "Lead" || text === "Owner" || text === "Agent") return text;
+    if (text === "Lead" || text === "Owner" || text === "Agent" || text === "Tenant") return text;
     return null;
 }
 
-function inferRoleFromName(value?: string | null): Exclude<InferredLeadContactRole, "Lead"> | null {
+function inferRoleFromName(value?: string | null): Exclude<InferredContactRole, "Lead"> | null {
     const text = normalizeWhitespace(value).toLowerCase();
     if (!text) return null;
+    if (/\b(tenant|occupant)\b/.test(text)) return "Tenant";
     if (/\b(owner|landlord|landlady|vendor|seller)\b/.test(text)) return "Owner";
     if (/\b(agent|agency|estate agent|realtor|broker|developer|property consultant|sales consultant)\b/.test(text)) return "Agent";
     return null;
 }
 
-function inferRoleFromContext(value?: string | null): Exclude<InferredLeadContactRole, "Lead"> | null {
+function inferRoleFromContext(value?: string | null): Exclude<InferredContactRole, "Lead"> | null {
     const text = normalizeWhitespace(value).toLowerCase();
     if (!text) return null;
+    if (/\b(?:contact\s+type|role|contact\s+role|person\s+type)\s*[:=-]?\s*(tenant|occupant)\b/.test(text)) return "Tenant";
+    if (/\b(?:tenant(?:'s)?\s+name|occupant(?:'s)?\s+name)\b/.test(text)) return "Tenant";
     if (/\b(?:contact\s+type|role|contact\s+role|person\s+type)\s*[:=-]?\s*(owner|landlord|landlady|vendor|seller)\b/.test(text)) return "Owner";
     if (/\b(?:owner\s+name|landlord\s+name|vendor\s+name|seller\s+name)\b/.test(text)) return "Owner";
     if (/\b(?:contact\s+type|role|contact\s+role|person\s+type)\s*[:=-]?\s*(agent|agency|estate agent|realtor|broker|developer|property consultant|sales consultant)\b/.test(text)) return "Agent";
@@ -238,7 +242,7 @@ export function inferLeadContactRoleFromSignals(args: {
     contactType?: string | null;
     name?: string | null;
     texts?: Array<string | null | undefined>;
-}): InferredLeadContactRole {
+}): InferredContactRole {
     const parsedRole = normalizeRole(args.parsedRole);
     if (parsedRole && parsedRole !== "Lead") return parsedRole;
 
@@ -257,7 +261,7 @@ export function inferLeadContactRoleFromSignals(args: {
     return "Lead";
 }
 
-export function inferLeadContactRole(rawLeadText: string, parsedRole?: string | null): "Lead" | "Owner" | "Agent" {
+export function inferLeadContactRole(rawLeadText: string, parsedRole?: string | null): InferredContactRole {
     return inferLeadContactRoleFromSignals({
         parsedRole,
         name: rawLeadText,
@@ -346,6 +350,21 @@ export function buildCanonicalContactName(args: {
         return normalizeWhitespace([
             personName,
             hasRole ? null : contactType,
+            refs[0] && !hasRef ? refs[0] : null,
+        ].filter(Boolean).join(" "));
+    }
+
+    if (contactType === "Tenant") {
+        const refs = (args.propertyRefs || extractPropertyRefsFromLeadText(args.rawLeadText || ""))
+            .map((ref) => normalizeWhitespace(ref).toUpperCase())
+            .filter(Boolean);
+        const lowerName = personName.toLowerCase();
+        const hasRole = /\btenant\b/.test(lowerName);
+        const hasRef = refs.some((ref) => lowerName.includes(ref.toLowerCase()));
+        return normalizeWhitespace([
+            personName,
+            hasRole ? null : "Tenant",
+            formatLeadGoalLabel(args.inferredStatus),
             refs[0] && !hasRef ? refs[0] : null,
         ].filter(Boolean).join(" "));
     }

@@ -61,6 +61,17 @@ test("buildCanonicalContactName uses contact role naming for non-leads", () => {
     assert.equal(result, "Andreas Owner DT4930");
 });
 
+test("buildCanonicalContactName preserves explicit tenant role with sale property context", () => {
+    const result = buildCanonicalContactName({
+        contact: { name: "Aisha", role: "Tenant" },
+        contactType: "Tenant",
+        rawLeadText: "DT4942\nTenant's name is Aisha. Please contact her directly to arrange viewing.",
+        inferredStatus: "For Sale",
+    });
+
+    assert.equal(result, "Aisha Tenant Sale DT4942");
+});
+
 test("buildCanonicalContactName avoids duplicate non-lead role labels", () => {
     assert.equal(buildCanonicalContactName({
         contact: { name: "Maria Agent" },
@@ -166,6 +177,13 @@ test("inferLeadContactRoleFromSignals detects structured role context but avoids
         contactType: "Lead",
         texts: ["Client asked whether the owner would accept a lower offer."],
     }), "Lead");
+});
+
+test("inferLeadContactRoleFromSignals detects explicit tenant context", () => {
+    assert.equal(inferLeadContactRoleFromSignals({
+        contactType: "Lead",
+        texts: ["The tenant's name is Aisha. Contact her for viewing."],
+    }), "Tenant");
 });
 
 test("inferLeadContactRoleFromSignals keeps normal buyer and renter leads eligible", () => {
