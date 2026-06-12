@@ -325,11 +325,11 @@ export function EditContactDialog({ contact, leadSources = [], trigger, isOutloo
                 )}
             </DialogTrigger>
             <DialogContent
-                className="sm:max-w-[700px] max-h-[90vh] flex flex-col"
+                className="flex max-h-[calc(100dvh-1rem)] min-h-0 w-[calc(100vw-1rem)] flex-col overflow-hidden p-4 sm:max-h-[90vh] sm:max-w-[700px] sm:p-6"
                 data-contact-edit-dialog="true"
                 data-contact-edit-shell-ready="true"
             >
-                <DialogHeader>
+                <DialogHeader className="shrink-0 pr-8">
                     <DialogTitle>Edit Contact</DialogTitle>
                     <DialogDescription>
                         Update contact details.

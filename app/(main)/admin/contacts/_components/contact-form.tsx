@@ -747,12 +747,12 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     };
 
     return (
-        <form action={formAction} onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+        <form action={formAction} onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <input type="hidden" name="locationId" value={locationId} />
             {contact && <input type="hidden" name="contactId" value={contact.id} />}
             <input type="hidden" name="contactType" value={contactType} />
 
-            <div className={`flex-1 overflow-y-auto px-1 py-2 ${!isEditing ? 'bg-muted/10' : ''}`}>
+            <div className={`min-h-0 flex-1 overflow-y-auto px-1 py-2 ${!isEditing ? 'bg-muted/10' : ''}`}>
 
                 {/* SYNC ERROR BANNER */}
                 {contact?.error && (
@@ -812,7 +812,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     <TabsContent value="details" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
                         {/* Basic Info */}
                         {/* Basic Info */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <RenderField label="Full Name" value={contact?.name} isEditing={isEditing}>
                                 <Input id="name" name="name" required placeholder="Full Name" defaultValue={contact?.name || ''} />
                                 {state.errors?.name && <p className="text-sm text-red-500">{state.errors.name.join(', ')}</p>}
@@ -851,7 +851,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             </RenderField>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <RenderField label="First Name" value={contact?.firstName} isEditing={isEditing}>
                                 <Input id="firstName" name="firstName" placeholder="First Name" defaultValue={contact?.firstName || ''} />
                             </RenderField>
@@ -860,7 +860,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             </RenderField>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <RenderField label="Tags" value={contact?.tags?.join(', ')} isEditing={isEditing}>
                                 <Input id="tags" name="tags" placeholder="Tag1, Tag2 (comma separated)" defaultValue={contact?.tags?.join(', ') || ''} />
                             </RenderField>
@@ -884,7 +884,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         </div>
 
                         {knownLanguageLabels && (
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField
                                     label="Known Languages"
                                     value={knownLanguageLabels}
@@ -898,7 +898,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         {/* Address Section */}
                         <div className="border-t pt-4 mt-2">
                             <Label className="mb-2 block font-semibold">Address</Label>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField label="Address Line 1" value={contact?.address1} isEditing={isEditing}>
                                     <Input id="address1" name="address1" placeholder="Street Address" defaultValue={contact?.address1 || ''} />
                                 </RenderField>
@@ -919,7 +919,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
                         {/* Lead Fields (conditional) */}
                         {currentConfig.showLeadFields && (
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField label="AI Score" value={contact?.leadScore !== undefined && contact?.leadScore !== null ? <div className="flex items-center gap-2"><LeadScoreBadge score={contact.leadScore} />{contact.qualificationStage && <span className="text-xs uppercase text-muted-foreground">{contact.qualificationStage.replace('_', ' ')}</span>}</div> : null} isEditing={isEditing}>
                                     <div className="flex items-center h-10 px-3 py-2 border rounded-md bg-muted/30 gap-2">
                                         <LeadScoreBadge score={contact?.leadScore || 0} />
@@ -993,7 +993,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 <RenderField label="Follow Up Date" value={contact?.leadFollowUpDate ? formatDate(contact?.leadFollowUpDate) : null} isEditing={isEditing}>
                                     <Input name="leadFollowUpDate" type="date" defaultValue={formatDate(contact?.leadFollowUpDate)} />
                                 </RenderField>
-                                <div className="col-span-2">
+                                <div className="sm:col-span-2">
                                     <RenderField label="Lead Other Details" value={contact?.leadOtherDetails ?? contact?.notes} isEditing={isEditing}>
                                         <Textarea
                                             name="leadOtherDetails"
@@ -1126,7 +1126,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     {/* Requirements Tab */}
                     {currentConfig.visibleTabs.includes('requirements') && (
                         <TabsContent value="requirements" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField label="Requirement Status" value={contact?.requirementStatus} isEditing={isEditing}>
                                     <Select name="requirementStatus" defaultValue={contact?.requirementStatus || "For Sale"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1199,7 +1199,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                     modal={true}
                                 />
                             </RenderField>
-                            <div className="col-span-2">
+                            <div className="sm:col-span-2">
                                 <RenderField label="Requirement Other Details" value={contact?.requirementOtherDetails} isEditing={isEditing}>
                                     <Textarea name="requirementOtherDetails" placeholder="Add other specific requirements..." defaultValue={contact?.requirementOtherDetails || ''} />
                                 </RenderField>
@@ -1210,7 +1210,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     {/* Matching Tab */}
                     {currentConfig.visibleTabs.includes('matching') && (
                         <TabsContent value="matching" forceMount={true} className="space-y-4 pt-4 data-[state=inactive]:hidden">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField label="Properties To Match" value={contact?.matchingPropertiesToMatch} isEditing={isEditing}>
                                     <Select name="matchingPropertiesToMatch" defaultValue={contact?.matchingPropertiesToMatch || "Updated and New"}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1328,7 +1328,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             {(contact) && (
                                 <div className="border-t pt-4">
                                     <h3 className="font-semibold mb-2">Property Won</h3>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                         <RenderField label="Property Won Reference" value={contact.propertyWonReference} isEditing={isEditing}>
                                             <Input name="propertyWonReference" defaultValue={contact.propertyWonReference || ''} />
                                         </RenderField>
@@ -1351,8 +1351,8 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 </Tabs>
             </div>
 
-            <div className={`pt-4 border-t flex items-center justify-between ${!isEditing ? 'bg-background p-2' : ''}`}>
-                <div className="flex gap-2">
+            <div className={`shrink-0 border-t pt-3 flex flex-col gap-3 pb-[max(env(safe-area-inset-bottom),0px)] sm:flex-row sm:items-center sm:justify-between sm:pt-4 ${!isEditing ? 'bg-background p-2' : ''}`}>
+                <div className="flex flex-wrap gap-2">
                     {isEditing ? (
                         <>
                             {contact && !isCreating && (
@@ -1384,7 +1384,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             )}
                         </>
                     ) : (
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                             {/* Manage Sync Button (Only in View Mode) */}
                             {contact && !isCreating && (
                                 <>
@@ -1429,7 +1429,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         </div>
                     )}
                 </div>
-                <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} saving={isSavingContactType} />
+                <div className="flex justify-end">
+                    <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} saving={isSavingContactType} />
+                </div>
             </div>
 
             {contact && (

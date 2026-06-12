@@ -70,8 +70,8 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className={`${mode === 'edit' ? 'sm:max-w-[700px]' : 'sm:max-w-[1000px]'} max-h-[85vh] flex flex-col p-6`}>
-                <DialogHeader className={mode === 'view' ? 'hidden' : ''}>
+            <DialogContent className={`${mode === 'edit' ? 'sm:max-w-[700px]' : 'sm:max-w-[1000px]'} flex max-h-[calc(100dvh-1rem)] min-h-0 w-[calc(100vw-1rem)] flex-col overflow-hidden p-4 sm:max-h-[85vh] sm:p-6`}>
+                <DialogHeader className={mode === 'view' ? 'hidden' : 'shrink-0 pr-8'}>
                     <DialogTitle>{mode === 'edit' ? 'Edit Contact' : 'Contact Details'}</DialogTitle>
                     {mode === 'edit' && <DialogDescription>Update contact information.</DialogDescription>}
                 </DialogHeader>
