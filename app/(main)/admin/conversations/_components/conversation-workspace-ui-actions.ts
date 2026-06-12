@@ -10,6 +10,34 @@ export type ActivityTimelineItem = {
     user?: { name: string | null; email: string | null } | null;
 };
 
+function resolveActivitySortTimestampMs(entry: Pick<ActivityTimelineItem, "createdAt"> | null | undefined): number {
+    const parsed = Date.parse(String(entry?.createdAt || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareActivityTimelineEntries(left: ActivityTimelineItem, right: ActivityTimelineItem): number {
+    const leftTs = resolveActivitySortTimestampMs(left);
+    const rightTs = resolveActivitySortTimestampMs(right);
+    if (leftTs !== rightTs) return leftTs - rightTs;
+    return String(left.id || "").localeCompare(String(right.id || ""));
+}
+
+function findActivityInsertIndex(entries: ActivityTimelineItem[], incomingEntry: ActivityTimelineItem): number {
+    let low = 0;
+    let high = entries.length;
+
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (compareActivityTimelineEntries(entries[mid], incomingEntry) <= 0) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    return low;
+}
+
 export function buildContactContextShell(
     conversation: Conversation | null | undefined,
     appLocationId: string
@@ -53,22 +81,18 @@ export function mergeActivityTimelineEntries(
 ): ActivityTimelineItem[] {
     const nextEntries = [...(Array.isArray(currentEntries) ? currentEntries : [])];
     const existingIndex = nextEntries.findIndex((item) => item?.id === incomingEntry.id);
-
-    if (existingIndex >= 0) {
-        nextEntries[existingIndex] = {
+    const mergedEntry = existingIndex >= 0
+        ? {
             ...nextEntries[existingIndex],
             ...incomingEntry,
-        };
-    } else {
-        nextEntries.push(incomingEntry);
+        }
+        : incomingEntry;
+
+    if (existingIndex >= 0) {
+        nextEntries.splice(existingIndex, 1);
     }
 
-    nextEntries.sort((left, right) => {
-        const leftTs = new Date(left.createdAt).getTime();
-        const rightTs = new Date(right.createdAt).getTime();
-        if (leftTs === rightTs) return String(left.id || "").localeCompare(String(right.id || ""));
-        return leftTs - rightTs;
-    });
+    nextEntries.splice(findActivityInsertIndex(nextEntries, mergedEntry), 0, mergedEntry);
 
     return nextEntries;
 }

@@ -5,11 +5,21 @@ import { buildVisibleMessageSourceWhere } from "./internal-message-visibility";
 
 type TimelineMode = "chat" | "deal";
 
+type ResolvedTimelineConversationInput = {
+    id?: string | null;
+    ghlConversationId?: string | null;
+    contactId?: string | null;
+    contactName?: string | null;
+    contactEmail?: string | null;
+    lastMessageAt?: Date | string | null;
+};
+
 type AssembleTimelineOptions =
     | {
         mode: "chat";
         locationId: string;
         conversationId: string;
+        resolvedConversation?: ResolvedTimelineConversationInput | null;
         includeMessages?: boolean;
         includeActivities?: boolean;
         take?: number;
@@ -264,6 +274,19 @@ function resolvePerSourceTake(take?: number): number | undefined {
 
 async function resolveConversations(options: AssembleTimelineOptions): Promise<ResolvedConversation[]> {
     if (options.mode === "chat") {
+        if (options.resolvedConversation?.id && options.resolvedConversation?.contactId) {
+            return [{
+                id: options.resolvedConversation.id,
+                ghlConversationId: options.resolvedConversation.ghlConversationId || options.resolvedConversation.id,
+                contactId: options.resolvedConversation.contactId,
+                contactName: options.resolvedConversation.contactName || null,
+                contactEmail: options.resolvedConversation.contactEmail || null,
+                lastMessageAt: options.resolvedConversation.lastMessageAt
+                    ? new Date(options.resolvedConversation.lastMessageAt)
+                    : null,
+            }];
+        }
+
         const row = await db.conversation.findFirst({
             where: {
                 locationId: options.locationId,
@@ -443,6 +466,13 @@ export async function assembleTimelineEvents(options: AssembleTimelineOptions): 
                     { id: { lt: cursor.id } },
                 ],
             },
+        ];
+    }
+
+    if (includeActivities) {
+        historyWhere.NOT = [
+            { action: { in: Array.from(VIEWING_HISTORY_ACTIONS) } },
+            { action: { startsWith: "TASK_" } },
         ];
     }
 

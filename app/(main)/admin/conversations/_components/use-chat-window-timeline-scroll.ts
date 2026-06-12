@@ -23,6 +23,11 @@ export type ChatWindowTimelineItem =
         activity: ActivityLogItem;
     };
 
+function resolveTimelineSortTimestampMs(value: string | null | undefined): number {
+    const parsed = Date.parse(String(value || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
 interface UseChatWindowTimelineScrollOptions {
     conversationId: string;
     messages: Message[];
@@ -54,15 +59,20 @@ export function useChatWindowTimelineScroll({
     const timelineItems = useMemo<ChatWindowTimelineItem[]>(() => {
         const msgItems = messages.map((message) => ({
             kind: "message" as const,
-            sortDate: new Date(message.dateAdded).getTime(),
+            sortDate: resolveTimelineSortTimestampMs(message.dateAdded),
             message,
         }));
         const actItems = activityLog.map((activity) => ({
             kind: "activity" as const,
-            sortDate: new Date(activity.createdAt).getTime(),
+            sortDate: resolveTimelineSortTimestampMs(activity.createdAt),
             activity,
         }));
-        return [...msgItems, ...actItems].sort((a, b) => a.sortDate - b.sortDate);
+        return [...msgItems, ...actItems].sort((left, right) => {
+            if (left.sortDate !== right.sortDate) return left.sortDate - right.sortDate;
+            const leftId = left.kind === "message" ? left.message.id : left.activity.id;
+            const rightId = right.kind === "message" ? right.message.id : right.activity.id;
+            return String(leftId || "").localeCompare(String(rightId || ""));
+        });
     }, [messages, activityLog]);
 
     const messageIndexById = useMemo(() => {

@@ -20,6 +20,20 @@ export type ConversationWorkspaceCoreMetadataForLoading = {
     };
 };
 
+function buildResolvedTimelineConversation(metadata: ConversationWorkspaceCoreMetadataForLoading) {
+    const resolvedConversation = metadata.resolvedConversation;
+    if (!resolvedConversation?.id || !resolvedConversation.contactId) return null;
+
+    return {
+        id: resolvedConversation.id,
+        ghlConversationId: resolvedConversation.ghlConversationId || null,
+        contactId: resolvedConversation.contactId,
+        contactName: metadata.conversationHeader?.contactName || null,
+        contactEmail: metadata.conversationHeader?.contactEmail || null,
+        lastMessageAt: metadata.freshness.latestMessageAt || null,
+    };
+}
+
 type ConversationWorkspaceMessageWindow = {
     oldestCursor: string | null;
     newestCursor: string | null;
@@ -113,6 +127,7 @@ export async function loadConversationWorkspaceCore(args: {
                 mode: "chat",
                 locationId: args.location.id,
                 conversationId: args.conversationId,
+                resolvedConversation: buildResolvedTimelineConversation(args.metadata),
                 includeMessages: false,
                 includeActivities: true,
                 take: args.activityLimit,

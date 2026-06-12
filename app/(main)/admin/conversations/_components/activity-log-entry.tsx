@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Pencil, UserPlus, Home, Merge, Import, NotebookPen, HelpCircle, Languages, ListChecks, Phone, PhoneCall, PhoneOff, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { formatViewingDateTimeWithTimeZoneLabel } from '@/lib/viewings/datetime';
 import { LinkifiedText } from './linkified-text';
 import {
@@ -100,14 +100,17 @@ function formatContactVerificationFieldName(field: string): string {
     }
 }
 
-export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLogEntryProps) {
+function ActivityLogEntryComponent({ item, contactName, surfaceTheme }: ActivityLogEntryProps) {
     const [expanded, setExpanded] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewPending, setPreviewPending] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
     const [preview, setPreview] = useState<any | null>(null);
     
-    const changes = parseHistoryChanges(item.changes, item.action);
+    const changes = useMemo(
+        () => parseHistoryChanges(item.changes, item.action),
+        [item.action, item.changes]
+    );
     const rawPayload = useMemo(() => parseActivityPayload(item.changes), [item.changes]);
     const changeMap = useMemo(
         () => Object.fromEntries(changes.map((change) => [String(change.field || ''), change.new])),
@@ -609,3 +612,5 @@ export function ActivityLogEntry({ item, contactName, surfaceTheme }: ActivityLo
         </div>
     );
 }
+
+export const ActivityLogEntry = memo(ActivityLogEntryComponent);

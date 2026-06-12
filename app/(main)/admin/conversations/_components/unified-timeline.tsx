@@ -239,13 +239,7 @@ export function UnifiedTimeline({
                                 return (
                                     <ActivityLogEntry
                                         key={event.activity.id}
-                                        item={{
-                                            id: event.activity.id,
-                                            createdAt: event.activity.createdAt,
-                                            action: event.activity.action,
-                                            changes: event.activity.changes,
-                                            user: event.activity.user || null,
-                                        }}
+                                        item={event.activity}
                                         contactName={event.activity.contactName || undefined}
                                         surfaceTheme={surfaceTheme}
                                     />
