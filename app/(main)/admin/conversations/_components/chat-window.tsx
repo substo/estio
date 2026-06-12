@@ -658,8 +658,34 @@ export function ChatWindow({
             )}
 
             {shouldShowTranslationBanner && (
-                <div className="border-b bg-amber-50/70 px-4 py-2.5">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-amber-900">
+                <div className="border-b bg-amber-50/70 px-3 py-1.5 sm:px-4 sm:py-2.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-amber-900 sm:hidden">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
+                            <Languages className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">Translate thread?</span>
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                                type="button"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => void handleTranslateVisibleThread()}
+                                disabled={translatingVisibleThread}
+                            >
+                                {translatingVisibleThread ? "Translating..." : "Translate"}
+                            </Button>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={dismissTranslationBanner}
+                            >
+                                Hide
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="hidden flex-wrap items-center gap-2 text-xs text-amber-900 sm:flex">
                         <Languages className="h-3.5 w-3.5" />
                         <span className="font-medium">Some inbound messages appear to be in another language.</span>
                         <Button
@@ -685,8 +711,46 @@ export function ChatWindow({
             )}
 
             {translationReadEnabled && inboundForeignCandidates.length >= 2 && (
-                <div className="border-b bg-slate-50 px-4 py-2">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                <div className="border-b bg-slate-50 px-3 py-1.5 sm:px-4 sm:py-2">
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600 sm:hidden">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
+                            <Languages className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">
+                                {threadTranslationMode === "translated"
+                                    ? `Viewing ${resolvedTranslationTargetLanguageLabel}`
+                                    : "Viewing original"}
+                            </span>
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1">
+                            {(translatingVisibleThread || autoTranslatingThread) && (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                            )}
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7"
+                                        aria-label="Change message language view"
+                                    >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44">
+                                    <DropdownMenuLabel>Message view</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => setThreadTranslationMode("translated")}>
+                                        Show translation
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => setThreadTranslationMode("original")}>
+                                        Show original
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
+                    </div>
+                    <div className="hidden flex-wrap items-center gap-2 text-[11px] text-slate-600 sm:flex">
                         <Languages className="h-3.5 w-3.5" />
                         <span className="font-medium">
                             {threadTranslationMode === "translated"
