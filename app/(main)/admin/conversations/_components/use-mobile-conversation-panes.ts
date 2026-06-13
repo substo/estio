@@ -6,6 +6,27 @@ export type MobilePane = 'list' | 'window' | 'mission';
 
 type ConversationViewMode = 'chats' | 'deals';
 
+export function buildMobileConversationListHref(pathname: string, search: string): string {
+    const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+    params.delete('id');
+    const query = params.toString();
+    return query ? `${pathname}?${query}` : pathname;
+}
+
+export function shouldPushMobileConversationHistory(args: {
+    isMobileViewport: boolean;
+    workflowUrlMode: ConversationViewMode | 'tasks';
+    activeId: string | null;
+    previousUrlConversationId: string | null;
+}): boolean {
+    return !!(
+        args.isMobileViewport
+        && args.workflowUrlMode === 'chats'
+        && args.activeId
+        && !args.previousUrlConversationId
+    );
+}
+
 type UseMobileConversationPanesArgs = {
     viewMode: ConversationViewMode;
     activeId: string | null;

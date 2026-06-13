@@ -76,7 +76,12 @@ import { PropertyMatchCampaignsDialog } from './property-match-campaigns-dialog'
 import type { NewConversationCreatedResult } from './new-conversation-dialog-helpers';
 import { ConversationWorkspaceLayout } from './conversation-workspace-layout';
 import { useSuggestedResponseQueue } from './use-suggested-response-queue';
-import { useMobileConversationPanes, type MobilePane } from './use-mobile-conversation-panes';
+import {
+    buildMobileConversationListHref,
+    shouldPushMobileConversationHistory,
+    useMobileConversationPanes,
+    type MobilePane,
+} from './use-mobile-conversation-panes';
 import { useConversationComposerDrafts } from './use-conversation-composer-drafts';
 import {
     applyConversationIdentityPatch,
@@ -476,6 +481,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const initialUrlConversationId = getSearchParam('id') || initialSelectedConversationId || null;
     const [urlConversationId, setUrlConversationId] = useState<string | null>(initialUrlConversationId);
     const urlConversationIdRef = useRef<string | null>(urlConversationId);
+    const mobileConversationBackHistoryReadyRef = useRef(false);
     
     useEffect(() => {
         urlConversationIdRef.current = urlConversationId;
@@ -581,11 +587,33 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setActiveId(null);
     }, [initialSelectedConversationId, isMobileViewport, viewMode, urlConversationId]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (!isMobileViewport || viewMode !== 'chats' || currentMobilePane !== 'window') return;
+        if (!activeId || !urlConversationId) return;
+        if (mobileConversationBackHistoryReadyRef.current) return;
+
+        const detailHref = `${window.location.pathname}${window.location.search}`;
+        const listHref = buildMobileConversationListHref(window.location.pathname, window.location.search);
+        if (listHref === detailHref) return;
+
+        const baseState = window.history.state || {};
+        window.history.replaceState({ ...baseState, as: listHref, url: listHref }, '', listHref);
+        window.history.pushState({ ...baseState, as: detailHref, url: detailHref }, '', detailHref);
+        mobileConversationBackHistoryReadyRef.current = true;
+    }, [activeId, currentMobilePane, isMobileViewport, urlConversationId, viewMode]);
+
     // Sync workflow, selected item, and task detail state to the URL without a Next route transition.
     useEffect(() => {
         const workflowUrlMode = viewFilter === 'tasks' ? 'tasks' : viewMode;
         const previousWorkflowUrlMode = previousWorkflowUrlModeRef.current;
-        const historyMode = previousWorkflowUrlMode && previousWorkflowUrlMode !== workflowUrlMode ? 'push' : 'replace';
+        const shouldPushMobileChat = shouldPushMobileConversationHistory({
+            isMobileViewport,
+            workflowUrlMode,
+            activeId,
+            previousUrlConversationId: urlConversationIdRef.current,
+        });
+        const historyMode = shouldPushMobileChat || (previousWorkflowUrlMode && previousWorkflowUrlMode !== workflowUrlMode) ? 'push' : 'replace';
         previousWorkflowUrlModeRef.current = workflowUrlMode;
         const view = viewFilter === 'archived' || viewFilter === 'trash' ? viewFilter : null;
         updateUrl({
@@ -595,8 +623,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             dealId: workflowUrlMode === 'deals' ? activeDealId : null,
             task: viewFilter === 'tasks' ? selectedTaskId : null,
         }, historyMode);
+        if (shouldPushMobileChat) {
+            mobileConversationBackHistoryReadyRef.current = true;
+        }
         setUrlConversationId(activeId);
-    }, [viewMode, activeDealId, viewFilter, activeId, selectedTaskId, updateUrl]);
+    }, [viewMode, activeDealId, viewFilter, activeId, selectedTaskId, updateUrl, isMobileViewport]);
 
     useEffect(() => {
         if (viewFilter === 'tasks') return;
