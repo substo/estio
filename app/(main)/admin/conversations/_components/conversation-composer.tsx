@@ -904,26 +904,16 @@ export function ConversationComposer({
                                 </span>
                             )}
                             {canUseWriteTranslation && hasTranslationPreview ? (
-                                <>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 rounded-lg px-2.5 text-[11px]"
-                                        onClick={() => handleSend("original")}
-                                        disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
-                                    >
-                                        Send Original
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        className={cn("h-7 rounded-lg px-3 transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName)}
-                                        onClick={() => handleSend("translated")}
-                                        disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
-                                    >
-                                        {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                                        <span className="ml-1 text-[11px]">Send in {autoTranslateTargetLabel}</span>
-                                    </Button>
-                                </>
+                                <Button
+                                    size="sm"
+                                    className={cn("h-7 rounded-lg px-3 transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName)}
+                                    onClick={() => handleSend("translated")}
+                                    disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
+                                    title="Sends the previewed customer-language version and preserves your working draft."
+                                >
+                                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                    <span className="ml-1 text-[11px]">Send in {autoTranslateTargetLabel}</span>
+                                </Button>
                             ) : willAutoTranslate ? (
                                 <Button
                                     size="sm"

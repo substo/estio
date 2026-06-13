@@ -70,7 +70,7 @@ export function MessageBubbleBody({
     const isRichHtml = body ? isRichHtmlBody(body) : false;
     const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
     const translatedText = String(activeTranslation?.translatedText || "").trim();
-    const showTranslatedText = !!translatedText && effectiveViewMode === "translated";
+    const showTranslatedText = !isOutbound && !!translatedText && effectiveViewMode === "translated";
     const sourceText = isOutbound && activeTranslation?.sourceText
         ? String(activeTranslation.sourceText || "").trim()
         : "";
@@ -104,7 +104,7 @@ export function MessageBubbleBody({
     if ((isEmail || isRichHtml) && !activeTranslation) {
         return <EmailFrame html={body} onSelectionChange={onEmailSelectionChange} />;
     }
-    if (sourceText) {
+    if (sourceText && effectiveViewMode === "translated") {
         return (
             <div className="space-y-0.5">
                 <div className={cn(

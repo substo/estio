@@ -31,6 +31,11 @@ export async function POST(req: NextRequest) {
             contactId: String(body?.contactId || ""),
             messageBody: String(body?.messageBody || ""),
             clientMessageId: body?.clientMessageId ? String(body.clientMessageId) : null,
+            translationSourceText: body?.translationSourceText ? String(body.translationSourceText) : null,
+            translationTargetLanguage: body?.translationTargetLanguage ? String(body.translationTargetLanguage) : null,
+            translationDetectedSourceLanguage: body?.translationDetectedSourceLanguage
+                ? String(body.translationDetectedSourceLanguage)
+                : null,
         });
 
         return NextResponse.json(result, { status: result.success ? 200 : 400 });

@@ -7,6 +7,7 @@ import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-ev
 import { enqueueSmsRelayOutbox } from "@/lib/sms-relay/outbox";
 import { enqueueSmsRelayOutboxQueueJob } from "@/lib/queue/sms-relay-outbox";
 import { resolveSmsRelayAvailabilityForLocation } from "@/lib/sms-relay/availability";
+import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 
 type SmsRelaySendResult =
     | {
@@ -34,12 +35,23 @@ function normalizePhoneSuffix(phone: string): string {
     return digits.length > 7 ? digits.slice(-7) : digits;
 }
 
+function buildTranslationSourceHash(sourceText: string): string {
+    return createHash("sha256").update(String(sourceText || "").trim(), "utf8").digest("hex");
+}
+
+function normalizeTranslationTargetLanguage(input: string | null | undefined): string {
+    return normalizeReplyLanguage(input) || "en";
+}
+
 export async function sendSmsRelayMessage(args: {
     locationId: string;
     conversationId: string;
     contactId: string;
     messageBody: string;
     clientMessageId?: string | null;
+    translationSourceText?: string | null;
+    translationTargetLanguage?: string | null;
+    translationDetectedSourceLanguage?: string | null;
 }): Promise<SmsRelaySendResult> {
     const locationId = String(args.locationId || "").trim();
     const conversationId = String(args.conversationId || "").trim();
@@ -119,6 +131,28 @@ export async function sendSmsRelayMessage(args: {
             createdAt: new Date(),
         },
     });
+
+    const translationSourceText = String(args.translationSourceText || "").trim();
+    if (translationSourceText && translationSourceText !== normalizedBody) {
+        await (db as any).messageTranslationCache.create({
+            data: {
+                messageId: localMessage.id,
+                conversationId: conversation.id,
+                locationId,
+                targetLanguage: normalizeTranslationTargetLanguage(args.translationTargetLanguage || null),
+                sourceHash: buildTranslationSourceHash(translationSourceText),
+                sourceText: translationSourceText,
+                translatedText: normalizedBody,
+                detectedSourceLanguage: normalizeReplyLanguage(args.translationDetectedSourceLanguage || null),
+                detectionConfidence: null,
+                status: "completed",
+                provider: "manual_send_preview",
+                model: "manual_send_preview",
+            },
+        }).catch((error: any) => {
+            console.warn("[SmsRelaySend] Failed to persist outbound translation cache:", error?.message || error);
+        });
+    }
 
     await updateConversationLastMessage({
         conversationId: conversation.id,

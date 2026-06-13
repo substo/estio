@@ -1828,6 +1828,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         contactId: capturedContactId,
                         messageBody: text,
                         clientMessageId: optimisticClientMessageId,
+                        translationSourceText: options?.translationSourceText || null,
+                        translationTargetLanguage: options?.translationTargetLanguage || null,
+                        translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
                     }),
                 }).then(async (response) => {
                     const payload = await response.json().catch(() => ({}));

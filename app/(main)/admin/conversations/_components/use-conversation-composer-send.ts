@@ -21,6 +21,45 @@ type SendTranslationMeta = {
     translationDetectedSourceLanguage?: string | null;
 };
 
+export type ComposerSendPayload = {
+    textToSend: string;
+    translationMeta?: {
+        translationSourceText: string;
+        translationTargetLanguage: string | null;
+        translationDetectedSourceLanguage: string | null;
+    };
+};
+
+export function resolveComposerPreviewSendPayload(args: {
+    sourceText: string;
+    translationPreviewText?: string | null;
+    translationPreviewLanguage?: string | null;
+    translationPreviewDetectedSource?: string | null;
+    selectedReplyLanguage: string;
+    autoReplyLanguageValue: string;
+}): ComposerSendPayload {
+    const sourceText = String(args.sourceText || "").trim();
+    const previewText = String(args.translationPreviewText || "").trim();
+
+    if (!previewText) {
+        return { textToSend: sourceText };
+    }
+
+    if (previewText === sourceText) {
+        return { textToSend: previewText };
+    }
+
+    return {
+        textToSend: previewText,
+        translationMeta: {
+            translationSourceText: sourceText,
+            translationTargetLanguage: args.translationPreviewLanguage
+                || (args.selectedReplyLanguage === args.autoReplyLanguageValue ? null : args.selectedReplyLanguage),
+            translationDetectedSourceLanguage: args.translationPreviewDetectedSource || null,
+        },
+    };
+}
+
 interface UseConversationComposerSendArgs {
     draft: string;
     isUnavailable: boolean;
@@ -64,7 +103,7 @@ export function useConversationComposerSend({
 }: UseConversationComposerSendArgs) {
     const [sending, setSending] = useState(false);
 
-    const handleSend = async (mode: "original" | "translated" = "original") => {
+    const handleSend = async (_mode: "original" | "translated" = "original") => {
         const currentlyRecording = typeof isRecording === "boolean" ? isRecording : isRecording.current;
         if (isUnavailable || currentlyRecording || !draft.trim()) return;
 
@@ -76,18 +115,20 @@ export function useConversationComposerSend({
             translationDetectedSourceLanguage: string | null;
         } | undefined;
 
-        if (mode === "translated" && translationPreviewText.trim()) {
-            // User explicitly clicked "Send Translated" with an active preview
-            textToSend = translationPreviewText.trim();
-            if (sourceText !== textToSend) {
-                translationMeta = {
-                    translationSourceText: sourceText,
-                    translationTargetLanguage: translationPreviewLanguage || (selectedReplyLanguage === autoReplyLanguageValue ? null : selectedReplyLanguage),
-                    translationDetectedSourceLanguage: translationPreviewDetectedSource || null,
-                };
-            }
+        const previewPayload = resolveComposerPreviewSendPayload({
+            sourceText,
+            translationPreviewText,
+            translationPreviewLanguage,
+            translationPreviewDetectedSource,
+            selectedReplyLanguage,
+            autoReplyLanguageValue,
+        });
+
+        if (translationPreviewText.trim()) {
+            textToSend = previewPayload.textToSend;
+            translationMeta = previewPayload.translationMeta;
         } else if (
-            mode === "original" &&
+            _mode === "original" &&
             canUseWriteTranslation &&
             onPreviewTranslatedReply &&
             !languagesMatch(agentWorkingLanguage, resolvedSendLanguage)
