@@ -81,6 +81,44 @@ test('applyRealtimeMessagePatchToMessages carries outbox state updates', () => {
     assert.equal((result.messages[0] as any).outboxState.lastError, 'temporary provider error');
 });
 
+test('applyRealtimeMessagePatchToMessages replaces optimistic body and translation state', () => {
+    const original = message({
+        id: 'opt-cmid-greek',
+        clientMessageId: 'cmid-greek',
+        body: 'English optimistic draft',
+    });
+    const translation = {
+        active: {
+            targetLanguage: 'el',
+            sourceLanguage: 'en',
+            sourceText: 'English source',
+            translatedText: 'Ελληνικό μήνυμα',
+            status: 'completed',
+            provider: 'manual_send_preview',
+            model: 'manual_send_preview',
+            updatedAt: '2026-06-13T10:55:29.946Z',
+        },
+        available: [],
+        viewDefault: 'original',
+    };
+
+    const result = applyRealtimeMessagePatchToMessages([original], {
+        messageId: 'server-greek-1',
+        clientMessageId: 'cmid-greek',
+        body: 'Ελληνικό μήνυμα',
+        translation,
+        translations: [translation.active],
+        status: 'sending',
+    });
+
+    assert.equal(result.matched, true);
+    assert.equal(result.messages[0].id, 'server-greek-1');
+    assert.equal(result.messages[0].body, 'Ελληνικό μήνυμα');
+    assert.equal((result.messages[0] as any).translation.active.sourceText, 'English source');
+    assert.equal((result.messages[0] as any).translation.active.translatedText, 'Ελληνικό μήνυμα');
+    assert.equal((result.messages[0] as any).translations[0].targetLanguage, 'el');
+});
+
 test('applyRealtimeMessagePatchToMessages patches by wamId', () => {
     const original = message({ id: 'local-1', wamId: 'wam-1' });
 

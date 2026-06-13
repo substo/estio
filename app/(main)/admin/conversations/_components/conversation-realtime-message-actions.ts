@@ -5,6 +5,9 @@ export type RealtimeMessagePatchPayload = {
     messageId: string;
     clientMessageId: string;
     wamId: string;
+    body?: string;
+    translation?: unknown;
+    translations?: unknown[];
     status: string;
     outboxJobId?: string;
     outboxStatus?: string;
@@ -37,6 +40,9 @@ export function normalizeRealtimeMessagePatchPayload(payload: Record<string, unk
         messageId: String(payload?.messageId || "").trim(),
         clientMessageId: String(payload?.clientMessageId || "").trim(),
         wamId: String(payload?.wamId || "").trim(),
+        body: typeof payload?.body === "string" ? payload.body : undefined,
+        translation: payload?.translation && typeof payload.translation === "object" ? payload.translation : undefined,
+        translations: Array.isArray(payload?.translations) ? payload.translations : undefined,
         status: String(payload?.status || "").trim(),
         outboxJobId: String(payload?.outboxJobId || "").trim(),
         outboxStatus: String(payload?.outboxStatus || "").trim(),
@@ -75,6 +81,9 @@ export function applyRealtimeMessagePatchToMessages(
             ...(normalized.messageId ? { id: normalized.messageId } : {}),
             ...(normalized.clientMessageId ? { clientMessageId: normalized.clientMessageId } : {}),
             ...(normalized.wamId ? { wamId: normalized.wamId } : {}),
+            ...(typeof normalized.body === "string" ? { body: normalized.body } : {}),
+            ...(normalized.translation && typeof normalized.translation === "object" ? { translation: normalized.translation as any } : {}),
+            ...(Array.isArray(normalized.translations) ? { translations: normalized.translations as any } : {}),
             ...(normalized.status ? { status: normalized.status } : {}),
             ...(normalized.status ? { sendState: getRealtimeMessageSendState(normalized.status) } : {}),
             ...(normalized.outboxStatus ? {

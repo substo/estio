@@ -17,6 +17,9 @@ type TranslationOptions = {
 type SendAck = {
     messageId?: unknown;
     clientMessageId?: unknown;
+    body?: unknown;
+    translation?: unknown;
+    translations?: unknown;
     outboxJobId?: unknown;
     queued?: unknown;
     queueAccepted?: unknown;
@@ -475,6 +478,9 @@ export function applySendAckByCorrelation(messages: Message[], args: {
             ...message,
             ...(ackState.ackMessageId ? { id: ackState.ackMessageId } : {}),
             clientMessageId: ackState.ackClientMessageId,
+            ...(typeof args.ack.body === "string" ? { body: args.ack.body } : {}),
+            ...(args.ack.translation && typeof args.ack.translation === "object" ? { translation: args.ack.translation as any } : {}),
+            ...(Array.isArray(args.ack.translations) ? { translations: args.ack.translations as any } : {}),
             status: ackState.fallbackSent ? 'sent' : (ackState.queued ? 'sending' : 'sent'),
             sendState: ackState.fallbackSent ? 'sent' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent')),
             outboxState: {

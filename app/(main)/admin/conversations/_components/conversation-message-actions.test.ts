@@ -111,6 +111,48 @@ test('text send ack applies queued, degraded, and fallback states by correlation
     assert.equal(fallback.outboxState.status, 'completed');
 });
 
+test('text send ack replaces optimistic body and translation state with server canonical values', () => {
+    const optimistic = buildOptimisticTextMessage({
+        clientMessageId: 'cmid_translation_ack',
+        conversation,
+        text: 'English optimistic draft',
+        type: 'WhatsApp',
+    }) as any;
+    const translation = {
+        active: {
+            targetLanguage: 'el',
+            sourceLanguage: 'en',
+            sourceText: 'English source',
+            translatedText: 'Ελληνικό μήνυμα',
+            status: 'completed',
+            provider: 'manual_send_preview',
+            model: 'manual_send_preview',
+            updatedAt: '2026-06-13T10:55:29.946Z',
+        },
+        available: [],
+        viewDefault: 'original',
+    };
+
+    const acknowledged = applySendAckByCorrelation([optimistic], {
+        optimisticMessageId: optimistic.id,
+        optimisticClientMessageId: 'cmid_translation_ack',
+        ack: {
+            messageId: 'server-greek-1',
+            clientMessageId: 'cmid_translation_ack',
+            queued: true,
+            body: 'Ελληνικό μήνυμα',
+            translation,
+            translations: [translation.active],
+        },
+    })[0] as any;
+
+    assert.equal(acknowledged.id, 'server-greek-1');
+    assert.equal(acknowledged.body, 'Ελληνικό μήνυμα');
+    assert.equal(acknowledged.translation.active.sourceText, 'English source');
+    assert.equal(acknowledged.translation.active.translatedText, 'Ελληνικό μήνυμα');
+    assert.equal(acknowledged.translations[0].targetLanguage, 'el');
+});
+
 test('deriveOutboundWhatsAppUiState maps queued and scheduled states clearly', () => {
     const queued = deriveOutboundWhatsAppUiState(baseMessage as any, { nowMs: Date.parse('2026-05-21T10:00:00.000Z') });
     assert.equal(queued?.label, 'Queued');

@@ -575,6 +575,39 @@ function buildTranslationSourceHash(sourceText: string): string {
     return createHash("sha256").update(String(sourceText || "").trim(), "utf8").digest("hex");
 }
 
+function buildManualOutboundTranslationPayload(args: {
+    sourceText?: string | null;
+    translatedText?: string | null;
+    targetLanguage?: string | null;
+    detectedSourceLanguage?: string | null;
+}) {
+    const sourceText = String(args.sourceText || "").trim();
+    const translatedText = String(args.translatedText || "").trim();
+    if (!sourceText || !translatedText || sourceText === translatedText) {
+        return { translation: null, translations: [] };
+    }
+
+    const variant = {
+        targetLanguage: normalizeTranslationTargetLanguage(args.targetLanguage || null),
+        sourceLanguage: normalizeReplyLanguage(args.detectedSourceLanguage || null),
+        sourceText,
+        translatedText,
+        status: MESSAGE_TRANSLATION_STATUS.completed,
+        provider: "manual_send_preview",
+        model: "manual_send_preview",
+        updatedAt: new Date().toISOString(),
+    };
+
+    return {
+        translation: {
+            active: variant,
+            available: [variant],
+            viewDefault: "original" as const,
+        },
+        translations: [variant],
+    };
+}
+
 function serializeMessageTranslationCache(entry: {
     id: string;
     targetLanguage: string;
@@ -4909,6 +4942,12 @@ export async function sendReply(
 
             const translationSourceText = String(options?.translationSourceText || "").trim();
             const translationTargetLanguage = normalizeTranslationTargetLanguage(options?.translationTargetLanguage || null);
+            const outboundTranslationPayload = buildManualOutboundTranslationPayload({
+                sourceText: translationSourceText,
+                translatedText: normalizedBody,
+                targetLanguage: translationTargetLanguage,
+                detectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+            });
             if (translationSourceText && translationSourceText !== normalizedBody && enqueueResult?.messageId) {
                 const sourceHash = buildTranslationSourceHash(translationSourceText);
                 await (db as any).messageTranslationCache.create({
@@ -4942,6 +4981,9 @@ export async function sendReply(
                     queued: true,
                     messageId: enqueueResult.messageId,
                     clientMessageId: enqueueResult.clientMessageId,
+                    body: normalizedBody,
+                    translation: outboundTranslationPayload.translation,
+                    translations: outboundTranslationPayload.translations,
                     outboxJobId: enqueueResult.outboxJobId,
                     queueAccepted: enqueueResult.queueAccepted,
                     dispatchMode: enqueueResult.dispatchMode,
@@ -4958,6 +5000,9 @@ export async function sendReply(
                 queued: true as const,
                 messageId: enqueueResult.messageId,
                 clientMessageId: enqueueResult.clientMessageId,
+                body: normalizedBody,
+                translation: outboundTranslationPayload.translation,
+                translations: outboundTranslationPayload.translations,
                 outboxJobId: enqueueResult.outboxJobId,
                 scheduledAt: enqueueResult.scheduledAt,
                 typingDelayMs: enqueueResult.typing.delayMs,
