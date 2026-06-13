@@ -39,6 +39,26 @@ import { getMessageBubbleTheme } from "./message-bubble-theme";
 
 const EMPTY_ATTACHMENTS: NormalizedMessageAttachment[] = [];
 
+function getPrimaryLanguageSubtag(language: string | null | undefined) {
+    const normalized = String(language || "").trim().toLowerCase();
+    return normalized.split("-")[0] || normalized;
+}
+
+function isLikelyForeignTextForDisplayLanguage(text: string, displayLanguage: string | null | undefined) {
+    const body = String(text || "").trim();
+    if (!body) return false;
+
+    const displayPrimary = getPrimaryLanguageSubtag(displayLanguage);
+    const nonAsciiLetters = Array.from(body.matchAll(/[^\x00-\x7F]/gu))
+        .map((match) => match[0])
+        .filter((char) => /\p{L}/u.test(char));
+
+    if (displayPrimary === "en" && nonAsciiLetters.length >= 4) return true;
+    if (displayPrimary && displayPrimary !== "el" && /[\u0370-\u03FF]/u.test(body)) return true;
+
+    return false;
+}
+
 export interface MessageBubbleProps {
     message: {
         id: string;
@@ -307,7 +327,7 @@ export function MessageBubble({
     }, [extractActionAttachmentId, message.id, onExtractViewingNotes]);
 
     const canTranslateMessage = translationReadEnabled
-        && !isOutbound
+        && (!isOutbound || isLikelyForeignTextForDisplayLanguage(message.body || "", preferredDisplayLanguage || null))
         && !!onTranslateMessage
         && String(message.body || "").trim().length > 0;
 

@@ -46,14 +46,32 @@ const getEmailSnippet = (html: string) => {
 
 export function getMessageBubbleTranslationToggleLabel({
     isOutbound,
+    activeTranslation,
     translationViewMode,
     threadTranslationMode,
-}: Pick<MessageBubbleTranslationActionsProps, "isOutbound" | "translationViewMode" | "threadTranslationMode">) {
+}: Pick<MessageBubbleTranslationActionsProps, "isOutbound" | "activeTranslation" | "translationViewMode" | "threadTranslationMode">) {
     const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
     if (isOutbound) {
-        return effectiveViewMode === "translated" ? "Show sent" : "Show source";
+        if (isManualSendPreviewTranslation(activeTranslation)) {
+            return effectiveViewMode === "translated" ? "Show sent" : "Show source";
+        }
+        return effectiveViewMode === "translated" ? "Show sent" : "Show translation";
     }
     return effectiveViewMode === "translated" ? "Show original" : "Show translation";
+}
+
+export function isManualSendPreviewTranslation(activeTranslation: MessageTranslationVariant | null) {
+    const provider = String(activeTranslation?.provider || "").trim();
+    const model = String(activeTranslation?.model || "").trim();
+    return provider === "manual_send_preview" || model === "manual_send_preview";
+}
+
+export function getOutboundTranslationDisplayMode(
+    activeTranslation: MessageTranslationVariant | null,
+    effectiveViewMode: "original" | "translated"
+): "sent" | "source" | "translation" {
+    if (effectiveViewMode !== "translated" || !activeTranslation) return "sent";
+    return isManualSendPreviewTranslation(activeTranslation) ? "source" : "translation";
 }
 
 export function MessageBubbleBody({
@@ -74,6 +92,9 @@ export function MessageBubbleBody({
     const sourceText = isOutbound && activeTranslation?.sourceText
         ? String(activeTranslation.sourceText || "").trim()
         : "";
+    const outboundDisplayMode = isOutbound
+        ? getOutboundTranslationDisplayMode(activeTranslation, effectiveViewMode)
+        : "sent";
 
     if (isEmail && !isExpanded) {
         return (
@@ -104,7 +125,18 @@ export function MessageBubbleBody({
     if ((isEmail || isRichHtml) && !activeTranslation) {
         return <EmailFrame html={body} onSelectionChange={onEmailSelectionChange} />;
     }
-    if (sourceText && effectiveViewMode === "translated") {
+    if (isOutbound && outboundDisplayMode === "translation" && translatedText) {
+        return (
+            <div className="space-y-0.5">
+                <div className={cn("text-[11px] font-medium", theme.translationMetaClassName)}>
+                    Translated for you
+                </div>
+                <LinkifiedText text={translatedText} linkClassName={theme.linkClassName} />
+            </div>
+        );
+    }
+
+    if (sourceText && outboundDisplayMode === "source") {
         return (
             <div className="space-y-0.5">
                 <div className={cn(
@@ -167,6 +199,7 @@ export function MessageBubbleTranslationActions({
                         >
                             {getMessageBubbleTranslationToggleLabel({
                                 isOutbound,
+                                activeTranslation,
                                 translationViewMode,
                                 threadTranslationMode,
                             })}
