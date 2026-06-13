@@ -237,11 +237,17 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
            --exclude='Down-Town-Cyprus-Website-Redesign' \
            --exclude='.git' \
            --exclude='.env*' \
+           --exclude='.DS_Store' \
+           --exclude='*.tsbuildinfo' \
+           --exclude='gcp-kms-credentials.json' \
            --exclude='*.log' \
            --exclude='debug*.ts' \
            --exclude='check_*.py' \
            --exclude='check_*.js' \
            --exclude='*.bak' \
+           --exclude='SIMRelay/simrelay-android/.gradle/' \
+           --exclude='SIMRelay/simrelay-android/.idea/' \
+           --exclude='SIMRelay/simrelay-android/app/build/' \
            --exclude='tmp/' \
            --exclude='documentation/' \
             ./ $SERVER:$TARGET_DIR/
