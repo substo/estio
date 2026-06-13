@@ -78,6 +78,11 @@ export type CreateParsedLeadImportResult =
     | {
         success: false;
         error: string;
+        parsedLead?: LeadImportParsedData;
+        originalText?: string;
+        partialContactId?: string | null;
+        partialConversationId?: string | null;
+        failedStage?: string | null;
         conversationId?: string;
         internalConversationId?: string;
         contactId?: string | null;
@@ -439,6 +444,8 @@ export async function createParsedLeadForLocation(
     const backgroundJobsSkipped: string[] = [];
     const preferredUserId = options.preferredUserId ?? null;
     const pasteLeadTraceId = options.pasteLeadTraceId;
+    let contactId: string | null = null;
+    let conversationId: string | null = null;
     const statuses: PasteLeadImportStatus[] = [...(options.initialStatuses || [])];
     const emitStatus = createPasteLeadStatusRecorder({
         pasteLeadTraceId,
@@ -454,7 +461,6 @@ export async function createParsedLeadForLocation(
             }
         }
 
-        let contactId: string | null = null;
         let isNewContact = false;
         let existingContactForMerge: {
             id: string;
@@ -667,6 +673,7 @@ export async function createParsedLeadForLocation(
             where: { locationId: location.id, contactId: contactId! }
         });
         let conversationWasCreated = false;
+        conversationId = conversation?.id || null;
 
         if (!conversation) {
             const ghlId = `import_${Date.now()}`;
@@ -688,6 +695,7 @@ export async function createParsedLeadForLocation(
                 throw createErr;
             }
             conversationWasCreated = true;
+            conversationId = conversation.id;
             emitStatus("conversation_created", "completed", conversation.id);
         } else {
             const conversationUpdateData: Prisma.ConversationUpdateInput = {};
@@ -706,8 +714,10 @@ export async function createParsedLeadForLocation(
                     where: { id: conversation.id },
                     data: conversationUpdateData,
                 });
+                conversationId = conversation.id;
                 emitStatus("conversation_updated", "completed", conversation.id);
             } else {
+                conversationId = conversation.id;
                 emitStatus("conversation_updated", "completed", conversation.id);
             }
         }
@@ -1010,11 +1020,21 @@ export async function createParsedLeadForLocation(
             statuses,
         };
     } catch (e: any) {
-        emitStatus("paste_lead_import_failed", "failed", e?.message || String(e), Date.now() - importStartedAt);
+        const failedStage = [...statuses].reverse().find((status) => status.state === "failed")?.event || null;
+        const errorMessage = e?.message || String(e);
+        emitStatus("paste_lead_import_failed", "failed", errorMessage, Date.now() - importStartedAt);
         console.error("createParsedLead Error:", e);
         return {
             success: false,
-            error: e.message,
+            error: errorMessage,
+            parsedLead: data,
+            originalText,
+            partialContactId: contactId,
+            partialConversationId: conversationId,
+            contactId,
+            conversationId: conversationId || undefined,
+            internalConversationId: conversationId || undefined,
+            failedStage,
             pasteLeadTraceId,
             importLatencyMs: Date.now() - importStartedAt,
             backgroundJobsQueued,

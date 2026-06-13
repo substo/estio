@@ -147,6 +147,32 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         confirmParsedLeadImport,
     } = pasteLead;
     const creating = phone.creatingPhone || whatsApp.creatingWhatsApp || google.creatingGoogle || pasteLead.creatingPasteLead;
+    const pasteLeadHasFailedAfterParse = Boolean(
+        parsedLead &&
+        pasteLeadStatuses.some((status) => status.event === 'lead_parse_completed') &&
+        pasteLeadStatuses.some((status) => status.event === 'paste_lead_import_failed')
+    );
+
+    const updateParsedLeadContact = (field: 'name' | 'phone' | 'email', value: string) => {
+        setParsedLead((current) => current
+            ? { ...current, contact: { ...(current.contact || {}), [field]: value || null } }
+            : current
+        );
+    };
+
+    const updateParsedLeadRequirements = (field: 'type' | 'location' | 'budget', value: string) => {
+        setParsedLead((current) => current
+            ? { ...current, requirements: { ...(current.requirements || {}), [field]: value || null } }
+            : current
+        );
+    };
+
+    const updateParsedLeadField = (field: 'messageContent' | 'internalNotes', value: string) => {
+        setParsedLead((current) => current
+            ? { ...current, [field]: value || null }
+            : current
+        );
+    };
 
     // Load chats when "Pick from WhatsApp" tab is activated
     const handleTabChange = async (tab: string) => {
@@ -495,18 +521,53 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                             </div>
                         ) : (
                             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                {pasteLeadHasFailedAfterParse && (
+                                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                                        Import failed after parsing. The extracted fields are still available below; fix anything missing and save the reviewed lead.
+                                    </div>
+                                )}
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                    <Card className="p-3 bg-slate-50 space-y-1">
+                                    <Card className="p-3 bg-slate-50 space-y-2">
                                         <div className="text-xs font-medium text-gray-500 uppercase">Contact</div>
-                                        <div className="truncate font-medium text-sm">{parsedLead.contact?.name || "Unknown Name"}</div>
-                                        <div className="truncate text-sm">{parsedLead.contact?.phone || "No Phone"}</div>
-                                        <div className="truncate text-xs text-gray-500">{parsedLead.contact?.email}</div>
+                                        <Input
+                                            value={parsedLead.contact?.name || ''}
+                                            onChange={(e) => updateParsedLeadContact('name', e.target.value)}
+                                            placeholder="Name"
+                                            className="h-8 bg-white text-sm"
+                                        />
+                                        <Input
+                                            value={parsedLead.contact?.phone || ''}
+                                            onChange={(e) => updateParsedLeadContact('phone', e.target.value)}
+                                            placeholder="Phone"
+                                            className="h-8 bg-white text-sm"
+                                        />
+                                        <Input
+                                            value={parsedLead.contact?.email || ''}
+                                            onChange={(e) => updateParsedLeadContact('email', e.target.value)}
+                                            placeholder="Email"
+                                            className="h-8 bg-white text-sm"
+                                        />
                                     </Card>
-                                    <Card className="p-3 bg-slate-50 space-y-1">
+                                    <Card className="p-3 bg-slate-50 space-y-2">
                                         <div className="text-xs font-medium text-gray-500 uppercase">Requirements</div>
-                                        <div className="truncate text-sm font-medium">{parsedLead.requirements?.type || "Any Type"}</div>
-                                        <div className="truncate text-xs">{parsedLead.requirements?.location}</div>
-                                        <div className="truncate text-xs">{parsedLead.requirements?.budget ? `Budget: ${parsedLead.requirements.budget}` : ''}</div>
+                                        <Input
+                                            value={parsedLead.requirements?.type || ''}
+                                            onChange={(e) => updateParsedLeadRequirements('type', e.target.value)}
+                                            placeholder="Property type"
+                                            className="h-8 bg-white text-sm"
+                                        />
+                                        <Input
+                                            value={parsedLead.requirements?.location || ''}
+                                            onChange={(e) => updateParsedLeadRequirements('location', e.target.value)}
+                                            placeholder="Location"
+                                            className="h-8 bg-white text-sm"
+                                        />
+                                        <Input
+                                            value={parsedLead.requirements?.budget || ''}
+                                            onChange={(e) => updateParsedLeadRequirements('budget', e.target.value)}
+                                            placeholder="Budget"
+                                            className="h-8 bg-white text-sm"
+                                        />
                                     </Card>
                                 </div>
 
@@ -517,7 +578,11 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             <MessageCircle className="w-3.5 h-3.5 text-indigo-600" />
                                             <span className="text-xs font-semibold text-indigo-900">Inbound Message (Will Trigger AI)</span>
                                         </div>
-                                        <p className="text-sm text-indigo-800 italic">"{parsedLead.messageContent}"</p>
+                                        <Textarea
+                                            value={parsedLead.messageContent || ''}
+                                            onChange={(e) => updateParsedLeadField('messageContent', e.target.value)}
+                                            className="min-h-[72px] bg-white text-sm text-indigo-900"
+                                        />
                                     </div>
                                 ) : (
                                     <div className="bg-amber-50 border border-amber-100 rounded-md p-3">
@@ -525,7 +590,12 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                             <BadgeAlert className="w-3.5 h-3.5 text-amber-600" />
                                             <span className="text-xs font-semibold text-amber-900">Internal Notes Only (No Auto-Reply)</span>
                                         </div>
-                                        <p className="text-sm text-amber-800">{parsedLead.internalNotes || "No notes extracted"}</p>
+                                        <Textarea
+                                            value={parsedLead.internalNotes || ''}
+                                            onChange={(e) => updateParsedLeadField('internalNotes', e.target.value)}
+                                            placeholder="No notes extracted"
+                                            className="min-h-[72px] bg-white text-sm text-amber-900"
+                                        />
                                     </div>
                                 )}
 
@@ -544,7 +614,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                                         disabled={creating}
                                         className="bg-green-600 hover:bg-green-700"
                                     >
-                                        {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm & Import"}
+                                        {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save Reviewed Lead"}
                                     </Button>
                                 </div>
                                 {(creating || pasteLeadStatuses.length > 0) && (

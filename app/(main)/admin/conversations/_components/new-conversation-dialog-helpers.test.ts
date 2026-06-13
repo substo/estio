@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    buildPasteLeadRecoverableImportError,
     buildInitialPasteLeadStatuses,
     buildGoogleRowOutcomeLabel,
     buildNewConversationResultError,
     canStartGoogleContactConversation,
     getGoogleContactDisabledReason,
     getGoogleConnectionErrorMessage,
+    getPasteLeadRecoverableParsedLead,
     getGoogleConversationOutcomeLabel,
     getGoogleImportOutcomeLabel,
     mergePasteLeadResultStatuses,
@@ -107,4 +109,25 @@ test('uses server Paste Lead statuses when present and otherwise appends termina
 
     const succeeded = mergePasteLeadResultStatuses(current, { success: true, pasteLeadTraceId: 'trace-4' });
     assert.equal(succeeded.at(-1)?.event, 'paste_lead_import_completed');
+});
+
+test('exposes recoverable Paste Lead parsed data after import failure', () => {
+    const parsedLead = {
+        contact: { name: 'Jane Lead', phone: '+35799000000' },
+        requirements: { location: 'Paphos' },
+        goal: 'To Buy',
+    } as const;
+
+    assert.equal(getPasteLeadRecoverableParsedLead({ success: false, parsedLead }), parsedLead);
+    assert.equal(getPasteLeadRecoverableParsedLead({ success: false, data: parsedLead }), parsedLead);
+    assert.equal(getPasteLeadRecoverableParsedLead({ success: true, parsedLead }), null);
+
+    const message = buildPasteLeadRecoverableImportError({
+        error: 'Conversation create failed',
+        failedStage: 'conversation_create_failed',
+        partialContactId: 'contact-1',
+    });
+    assert.match(message, /Review the extracted details/);
+    assert.match(message, /conversation_create_failed/);
+    assert.match(message, /Contact was saved/);
 });

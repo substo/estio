@@ -3,6 +3,22 @@ import {
     type PasteLeadImportStatus,
 } from '@/lib/conversations/paste-lead-status';
 
+type RecoverableParsedLead = {
+    contact?: {
+        name?: string | null;
+        phone?: string | null;
+        email?: string | null;
+        [key: string]: unknown;
+    };
+    requirements?: {
+        budget?: string | null;
+        location?: string | null;
+        type?: string | null;
+        [key: string]: unknown;
+    };
+    [key: string]: unknown;
+};
+
 export interface WhatsAppChat {
     jid: string;
     phone: string | null;
@@ -174,4 +190,27 @@ export function mergePasteLeadResultStatuses(
             detail: result?.error || undefined,
         }),
     ];
+}
+
+export function getPasteLeadRecoverableParsedLead<TParsedLead extends RecoverableParsedLead>(result: {
+    success?: boolean;
+    parsedLead?: TParsedLead | null;
+    data?: TParsedLead | null;
+}) {
+    if (result?.success) return null;
+    return result?.parsedLead || result?.data || null;
+}
+
+export function buildPasteLeadRecoverableImportError(result: {
+    error?: string | null;
+    failedStage?: string | null;
+    partialContactId?: string | null;
+    partialConversationId?: string | null;
+}) {
+    const parts = ['Import failed after the lead was parsed. Review the extracted details below and save what can be recovered.'];
+    if (result?.failedStage) parts.push(`Failed stage: ${result.failedStage}.`);
+    if (result?.partialContactId) parts.push('Contact was saved before the failure.');
+    if (result?.partialConversationId) parts.push('Conversation was saved before the failure.');
+    if (result?.error) parts.push(result.error);
+    return parts.join(' ');
 }

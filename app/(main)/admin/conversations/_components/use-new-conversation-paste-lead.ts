@@ -19,8 +19,10 @@ import {
 } from '../actions';
 import { buildLeadTextFromClipboardData, insertTextIntoTextareaValue } from './paste-lead-rich-text';
 import {
+    buildPasteLeadRecoverableImportError,
     buildInitialPasteLeadStatuses,
     buildNewConversationResultError,
+    getPasteLeadRecoverableParsedLead,
     mergePasteLeadResultStatuses,
 } from './new-conversation-dialog-helpers';
 
@@ -178,7 +180,13 @@ export function useNewConversationPasteLead(args: {
                 args.onConversationCreated?.(res.conversationId);
                 await args.onCloseAfterStatusSettles();
             } else {
-                args.setError(res.error || 'Failed to import lead');
+                const recoverableParsedLead = getPasteLeadRecoverableParsedLead(res);
+                if (recoverableParsedLead) {
+                    setParsedLead(recoverableParsedLead);
+                    args.setError(buildPasteLeadRecoverableImportError(res));
+                } else {
+                    args.setError(res.error || 'Failed to import lead');
+                }
             }
         } catch (error: any) {
             const message = buildNewConversationResultError(error, 'Paste Lead import request failed.');
@@ -214,7 +222,13 @@ export function useNewConversationPasteLead(args: {
                 args.onConversationCreated?.(res.conversationId);
                 await args.onCloseAfterStatusSettles();
             } else {
-                args.setError(res.error || 'Failed to create conversation');
+                const recoverableParsedLead = getPasteLeadRecoverableParsedLead(res);
+                if (recoverableParsedLead) {
+                    setParsedLead(recoverableParsedLead);
+                    args.setError(buildPasteLeadRecoverableImportError(res));
+                } else {
+                    args.setError(res.error || 'Failed to create conversation');
+                }
             }
         } catch (error: any) {
             const message = buildNewConversationResultError(error, 'Paste Lead import request failed.');
