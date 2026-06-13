@@ -1,10 +1,10 @@
 # Google Contact Sync Specification
 
 ## Overview
-The Google Contact Sync feature provides a **Manual synchronization** mechanism between Estio Contacts, Google Contacts, and GoHighLevel. Its primary goal is to **solve the "Caller ID" problem**—identifying leads instantly on incoming calls without cluttering the contact's actual Name field.
+The Google Contact Sync feature provides a **manual-by-default synchronization** mechanism between Estio Contacts, Google Contacts, and GoHighLevel. Its primary goal is to **solve the "Caller ID" problem**—identifying leads instantly on incoming calls without cluttering the contact's actual Name field.
 
 > [!IMPORTANT]
-> **Manual Control Only**: Previous logic relied on automatic background synchronization. As of Feb 2026, **all automatic syncs are disabled**. Updates ONLY occur when a user explicitly clicks "Sync", "Link", or "Import" in the Google Sync Manager.
+> **Manual by Default**: Previous logic relied on broad automatic background synchronization. Manual Sync Manager actions remain the default. Per-flow Google automation is opt-in under **Settings > Integrations > Google > Contact Automation** and is limited by source switches, sync mode, and push-update settings.
 
 ## The "Visual ID" Strategy
 
@@ -57,18 +57,19 @@ This guarantees that on iOS/Android, the incoming call screen shows the Name (bi
 
 ### 2. Manual Synchronization Logic
 
-#### Sync Trigger Matrix (Updated Feb 2026)
+#### Sync Trigger Matrix (Updated Jun 2026)
 
 | Trigger | GHL Sync | Google Sync | Notes |
 | :--- | :---: | :---: | :--- |
-| **Create Contact** | ✅ (Auto) | ❌ | Google Sync is NOT automatic. |
-| **Update Contact** | ✅ (Auto) | ❌ | Google Sync is NOT automatic. |
-| **New WhatsApp Message** | ✅ (Auto) | ❌ | No opportunistic sync. |
+| **Create Contact** | ✅ (Auto) | Optional | Runs only when Contact Form automation is enabled. |
+| **Update Contact** | ✅ (Auto) | Optional | Linked-contact update pushes require the push-updates setting. |
+| **New WhatsApp Message** | ✅ (Auto) | Optional | Runs only when WhatsApp Inbound automation is enabled. |
+| **Lead Capture / Paste Lead** | ✅ (Auto) | Optional | Runs only when Lead Capture automation is enabled. |
 | **Contacts Changed on Mobile**| — | ❌ | No background polling. |
-| **User Clicks "Link/Sync"** | — | ✅ | **The ONLY way to sync.** |
+| **User Clicks "Link/Sync"** | — | ✅ | Always available when Google is connected. |
 
 #### Use Case: Manual Sync vs. Automatic
-We moved to manual sync to prevent data accidents where a WhatsApp message from a typo'd name overwrites a carefully curated contact in Google. Users now have full agency.
+Manual sync remains the default to prevent data accidents where a WhatsApp message from a typo'd name overwrites a carefully curated contact in Google. Opt-in automation can link existing contacts or create/update Google contacts for trusted flows.
 
 ### 3. Google Sync Manager (The Control Center)
 The **Google Sync Manager** is the unified UI for managing connections for *existing* contacts in Estio.
@@ -108,7 +109,7 @@ When a new message arrives:
     -   *If available*: "Martin Green"
     -   *If missing*: "WhatsApp User +357..."
 2.  **Contact Creation**: Created locally in Estio.
-3.  **Auto-Sync Disabled**: We **DO NOT** automatically push this to Google Contacts. This prevents "Martin Green" in your phone from being overwritten by a casual "Martin" WhatsApp profile. Sync only happens when you manually click "Sync" in the manager.
+3.  **Auto-Sync Optional**: By default we **DO NOT** automatically push this to Google Contacts. If WhatsApp Inbound automation is enabled, the automation wrapper applies the configured mode (`LINK_ONLY` or `LINK_OR_CREATE`) and update rules.
 
 #### C. GoHighLevel Sync (`lib/ghl/stakeholders.ts`)
 *   When syncing to GHL, we inject the generated Visual ID into the GHL `companyName` field.
@@ -354,11 +355,11 @@ We replaced the simple "Conflict Modal" with a comprehensive **Google Sync Manag
 -   **Healthy State**: View live side-by-side comparison of Estio vs Google data.
     -   Actions: *Push Local -> Google*, *Pull Google -> Local*, *Unlink*.
 -   **Unlinked State**: 
-    -   **Auto-Search**: Automatically searches Google by phone number when opened. If `searchContacts` returns no results for a phone query, automatically falls back to `connections.list` with local filtering.
+    -   **Auto-Search**: Automatically performs a lightweight Google search when opened, preferring email/name before phone. It intentionally skips the expensive full phone-directory fallback on open.
     -   **Smart Actions**: "Find Match" button auto-populates search.
     -   **Options**: Link to existing or Create New.
 -   **Broken Link (Linked-but-Gone)**:
-    -   **Smart Recovery**: If the linked Google contact is deleted (404), the Manager automatically switches to Search Mode, pre-fills the phone number, and executes a search to find the correct contact immediately.
+    -   **Smart Recovery**: If the linked Google contact is deleted (404), the Manager automatically switches to Search Mode, pre-fills the best available identifier, and performs a lightweight search.
 -   **Conflict State**: Resolve data mismatches or broken links.
 -   **Session Expired**: If the Google OAuth token is invalid (revoked/expired), the manager displays a "Session Expired" alert with a one-click "Reconnect" link.
 
@@ -368,7 +369,7 @@ To balance safety with usability, we use two different search strategies:
 2.  **Broad/Fuzzy Matching (Manual Search)**: When a user searches manually in the Sync Manager, we use Google's "Smart Search" which supports partial names, email prefixes, and global directory lookup. This allows users to find contacts easily even with partial information.
 
 > [!IMPORTANT]
-> **Phone Search Fallback**: Google People API `searchContacts` has a known bug where phone number queries return empty results. To work around this, both `searchGoogleContacts` (UI) and `findMatchingGoogleContact` (sync) detect phone-like queries and, if `searchContacts` returns nothing, fall back to `people.connections.list` with local digit-based filtering. This is transparent to the user — the Sync Manager simply finds the contact via the fallback path. See `lib/google/people.ts`: `searchByPhoneFallback()`.
+> **Phone Search Fallback**: Google People API `searchContacts` has a known bug where phone number queries return empty results. Manual phone searches and automated strict sync matching can fall back to `people.connections.list` with local digit-based filtering. The Sync Manager's automatic open check skips this fallback to avoid scanning thousands of contacts before the user asks for a deep phone search. See `lib/google/people.ts`: `searchByPhoneFallback()`.
 
 #### C. Manual "Link Only"
 The Sync Manager supports a **"Link Only"** action. This connects an Estio Contact to a Google Contact **without overwriting data** on either side. This is useful when you know they are the same person but want to preserve distinct data on each platform (e.g., maintaining a specific "Visual ID" company name in Google while keeping role data in Estio).
