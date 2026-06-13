@@ -15,7 +15,6 @@ import {
     sendWhatsAppMediaReply,
     generateComposerAIDraft,
     setConversationReplyLanguageOverride,
-    translateConversationMessage,
     deleteConversations,
     restoreConversations,
     archiveConversations,
@@ -1938,7 +1937,30 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return { success: false as const, error: "No active conversation." };
         }
 
-        const result = await translateConversationMessage(normalizedMessageId, targetLanguage || null);
+        let result: any = null;
+        try {
+            const response = await fetch("/api/admin/conversations/translate-message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    messageId: normalizedMessageId,
+                    targetLanguage: targetLanguage || null,
+                }),
+            });
+            result = await response.json().catch(() => null);
+            if (!response.ok) {
+                return {
+                    success: false as const,
+                    error: String(result?.error || "Failed to translate message."),
+                };
+            }
+        } catch (error: any) {
+            return {
+                success: false as const,
+                error: String(error?.message || "Failed to translate message."),
+            };
+        }
+
         if (!result?.success || !result.translation) {
             return {
                 success: false as const,

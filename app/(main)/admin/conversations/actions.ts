@@ -37,7 +37,6 @@ import {
 } from "@/lib/conversations/message-loading";
 import {
     isUsableMessageTranslationText,
-    parseTranslationModelOutput,
 } from "@/lib/conversations/translation-output";
 import {
     resolveConversationLanguageContext,
@@ -90,7 +89,10 @@ import {
     AiSkillPolicySchema,
 } from "@/lib/ai/runtime/config";
 import { REAL_ESTATE_COORDINATOR_LIFECYCLE_PROMPT } from "@/lib/ai/prompts/coordinator-lifecycle";
-import { buildConversationalMessagingContract } from "@/lib/ai/prompts/communication-policy";
+import {
+    buildConversationalMessagingContract,
+    detectLanguageFromText,
+} from "@/lib/ai/prompts/communication-policy";
 import {
     runAiRuntimeCron,
     runAiSkillDecision,
@@ -477,7 +479,7 @@ function queueGhlConversationStatusSync(args: {
 
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
 const MESSAGE_TRANSLATION_MODEL = GEMINI_DRAFT_FAST_DEFAULT;
-const MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS = 4096;
+const MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS = 2048;
 const MESSAGE_TRANSLATION_STATUS = {
     completed: "completed",
     failed: "failed",
@@ -638,11 +640,11 @@ async function runMessageTranslationLLM(args: {
 }) {
     const modelId = String(args.modelOverride || "").trim() || MESSAGE_TRANSLATION_MODEL;
     const systemPrompt = [
-        "You are a translation assistant for enterprise SaaS conversation inboxes.",
-        "Translate the source text to the requested target language while preserving meaning, tone, and business intent.",
+        "You are a fast translation assistant for enterprise SaaS conversation inboxes.",
+        "Translate the source text to the requested target language.",
+        "Preserve meaning, tone, business intent, names, prices, dates, URLs, and line breaks.",
         "Do not add or remove factual content.",
-        "Return strict JSON: {\"translatedText\": string, \"detectedSourceLanguage\": string, \"confidence\": number}.",
-        "Confidence must be a number between 0 and 1.",
+        "Return only the translated message text. Do not return JSON, markdown, labels, or explanation.",
     ].join("\n");
     const userPrompt = [
         `Target language (BCP-47): ${args.targetLanguage}`,
@@ -654,14 +656,14 @@ async function runMessageTranslationLLM(args: {
         modelId,
         systemPrompt,
         userPrompt,
-        { jsonMode: true, temperature: 0.1, maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS, thinkingBudget: 0 }
+        { jsonMode: false, temperature: 0, maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS, thinkingBudget: 0 }
     );
-    const parsed = parseTranslationModelOutput(text);
+    const detectedSourceLanguage = normalizeReplyLanguage(detectLanguageFromText(args.sourceText));
 
     return {
-        translatedText: parsed.translatedText,
-        detectedSourceLanguage: parsed.detectedSourceLanguage,
-        confidence: parsed.confidence,
+        translatedText: normalizePlainTranslationOutput(text),
+        detectedSourceLanguage,
+        confidence: detectedSourceLanguage ? 0.75 : null,
         provider: "google",
         model: modelId,
         usage,
@@ -5763,6 +5765,7 @@ export async function translateConversationMessage(
     messageId: string,
     targetLanguage?: string | null
 ) {
+    const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedMessageId = String(messageId || "").trim();
     if (!trimmedMessageId) {
@@ -5813,6 +5816,13 @@ export async function translateConversationMessage(
         orderBy: [{ updatedAt: "desc" }],
     });
     if (existing && isUsableMessageTranslationText(existing.translatedText)) {
+        console.info("[Conversation Translation Timing]", JSON.stringify({
+            event: "translate_message_cache_hit",
+            conversationId: message.conversation.id,
+            messageId: message.id,
+            targetLanguage: resolvedTargetLanguage,
+            elapsedMs: Date.now() - startedAt,
+        }));
         return {
             success: true as const,
             conversationId: message.conversation.id,
@@ -5823,11 +5833,13 @@ export async function translateConversationMessage(
     }
 
     try {
+        const modelStartedAt = Date.now();
         const translation = await runMessageTranslationLLM({
             sourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
         });
+        const modelMs = Date.now() - modelStartedAt;
         await recordConversationLanguageEvidence({
             locationId: location.id,
             conversationId: message.conversation.id,
@@ -5899,8 +5911,21 @@ export async function translateConversationMessage(
                 messageId: message.id,
                 targetLanguage: resolvedTargetLanguage,
                 cached: false,
+                elapsedMs: Date.now() - startedAt,
+                modelMs,
+                mode: "fast_message_translation",
             },
         });
+        console.info("[Conversation Translation Timing]", JSON.stringify({
+            event: "translate_message_end",
+            conversationId: message.conversation.id,
+            messageId: message.id,
+            targetLanguage: resolvedTargetLanguage,
+            elapsedMs: Date.now() - startedAt,
+            modelMs,
+            model: translation.model,
+            sourceChars: sourceText.length,
+        }));
 
         return {
             success: true as const,
@@ -5911,13 +5936,15 @@ export async function translateConversationMessage(
         };
     } catch (error: any) {
         const messageText = String(error?.message || "Translation failed.");
-        console.warn("[Conversation Translation] Message translation failed", {
+        console.warn("[Conversation Translation Timing]", JSON.stringify({
+            event: "translate_message_failed",
             locationId: location.id,
             conversationId: message.conversation.id,
             messageId: message.id,
             targetLanguage: resolvedTargetLanguage,
+            elapsedMs: Date.now() - startedAt,
             error: messageText,
-        });
+        }));
         await (db as any).messageTranslationCache.upsert({
             where: {
                 messageId_targetLanguage_sourceHash: {
