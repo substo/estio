@@ -23,6 +23,11 @@ export type ExtractionSummary = {
     nextActions: string;
 };
 
+export type AudioAttachmentDisplayInput = {
+    fileName?: string | null;
+    mimeType?: string | null;
+};
+
 export function isPendingStatus(status: TranscriptStatus): boolean {
     return status === "pending" || status === "processing";
 }
@@ -66,6 +71,33 @@ export function getTranscriptActionLabel({
     if (resolvedMode === "start") return isActive ? "Starting..." : "Transcribe now";
     if (resolvedMode === "retry") return isActive ? "Retrying..." : "Retry transcript";
     return isActive ? "Regenerating..." : "Regenerate transcript";
+}
+
+export function getAudioAttachmentTitle(index: number): string {
+    return index === 0 ? "Voice message" : `Voice message ${index + 1}`;
+}
+
+export function getAudioAttachmentDescription(attachment: AudioAttachmentDisplayInput): string {
+    const fileName = String(attachment.fileName || "").trim();
+    const lowerFileName = fileName.toLowerCase();
+    const hasHumanFileName = !!fileName
+        && !lowerFileName.endsWith(".bin")
+        && !lowerFileName.startsWith("false_")
+        && !lowerFileName.startsWith("true_");
+
+    if (hasHumanFileName) return fileName;
+
+    const mimeType = String(attachment.mimeType || "").split(";")[0].trim().toLowerCase();
+    if (mimeType) return mimeType.replace(/^audio\//, "").toUpperCase();
+
+    return "WhatsApp voice note";
+}
+
+export function getTranscriptStatusLabel(status: TranscriptStatus): string {
+    if (status === "completed") return "Transcribed";
+    if (status === "failed") return "Transcription failed";
+    if (isPendingStatus(status)) return "Transcribing";
+    return "Transcript status unknown";
 }
 
 export function getExtractionActionLabel({

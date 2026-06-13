@@ -16,7 +16,9 @@ import {
     deriveBodyVCardDownloadHref,
     deriveMediaUnavailableState,
     deriveSharedContactsFromMessageBody,
+    isLikelyMediaPlaceholderBody,
     normalizeMessageAttachments,
+    shouldSuppressMediaPlaceholderBody,
     type MessageAttachment,
     type NormalizedMessageAttachment,
     type WebBridgeMediaState,
@@ -237,7 +239,7 @@ export function MessageBubble({
         contactAttachments,
         fileAttachments,
     } = useMemo(() => classifyMessageAttachments(attachments), [attachments]);
-    const hasLikelyMediaPlaceholder = ["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"].includes(String(message.body || "").trim());
+    const hasLikelyMediaPlaceholder = isLikelyMediaPlaceholderBody(message.body);
     const webBridgeMedia = message.webBridgeMedia || null;
     const hasUnstoredWebBridgeMedia = deriveMediaUnavailableState({
         isWhatsApp,
@@ -254,6 +256,7 @@ export function MessageBubble({
     }), [hasRenderableMediaAttachment, isContactMessage, isEmail, message.body]);
     const isMediaRefetchInProgress = ["queued", "processing"].includes(String(webBridgeMedia?.refetch?.status || ""));
     const canRefetchMedia = !!onRefetchMedia && !isMediaRefetchInProgress && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
+    const shouldRenderMessageBody = isContactMessage || !shouldSuppressMediaPlaceholderBody(message.body, hasRenderableMediaAttachment);
     const failureFallbackUi = useMemo(() => getWhatsAppFailureFallbackUiState({
         message,
         smsRelayEnabled,
@@ -406,37 +409,39 @@ export function MessageBubble({
                 />
 
                 {/* Content Area */}
-                <div className={cn(
-                    "w-full max-w-full overflow-x-hidden transition-all duration-300 ease-in-out relative break-words [overflow-wrap:anywhere]",
-                    isEmail ? "bg-white text-black" : "", // Force white background for emails
-                    isEmail && "p-4",
-                    !isEmail && "whitespace-pre-wrap [word-break:break-word]"
-                )}
-                    ref={contentRef}
-                >
-                    {isContactMessage && sharedContacts ? (
-                        <MessageSharedContactCards
-                            sharedContacts={sharedContacts}
-                            bodyVCardDownloadHref={bodyVCardDownloadHref}
-                            messageId={message.id}
-                            locationId={locationId}
-                            router={router}
-                            theme={theme}
-                        />
-                    ) : (
-                        <MessageBubbleBody
-                            body={message.body}
-                            isEmail={isEmail}
-                            isExpanded={isExpanded}
-                            isOutbound={isOutbound}
-                            theme={theme}
-                            activeTranslation={activeTranslation}
-                            translationViewMode={translationViewMode}
-                            threadTranslationMode={threadTranslationMode}
-                            onEmailSelectionChange={handleEmailSelectionChange}
-                        />
+                {shouldRenderMessageBody && (
+                    <div className={cn(
+                        "w-full max-w-full overflow-x-hidden transition-all duration-300 ease-in-out relative break-words [overflow-wrap:anywhere]",
+                        isEmail ? "bg-white text-black" : "", // Force white background for emails
+                        isEmail && "p-4",
+                        !isEmail && "whitespace-pre-wrap [word-break:break-word]"
                     )}
-                </div>
+                        ref={contentRef}
+                    >
+                        {isContactMessage && sharedContacts ? (
+                            <MessageSharedContactCards
+                                sharedContacts={sharedContacts}
+                                bodyVCardDownloadHref={bodyVCardDownloadHref}
+                                messageId={message.id}
+                                locationId={locationId}
+                                router={router}
+                                theme={theme}
+                            />
+                        ) : (
+                            <MessageBubbleBody
+                                body={message.body}
+                                isEmail={isEmail}
+                                isExpanded={isExpanded}
+                                isOutbound={isOutbound}
+                                theme={theme}
+                                activeTranslation={activeTranslation}
+                                translationViewMode={translationViewMode}
+                                threadTranslationMode={threadTranslationMode}
+                                onEmailSelectionChange={handleEmailSelectionChange}
+                            />
+                        )}
+                    </div>
+                )}
 
                 {linkPreviewCandidate && (
                     <MessageLinkPreviewCard

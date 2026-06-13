@@ -4,9 +4,12 @@ import test from 'node:test';
 import {
     formatExtractionList,
     formatExtractionSummary,
+    getAudioAttachmentDescription,
+    getAudioAttachmentTitle,
     getExtractionActionLabel,
     getTranscriptActionLabel,
     getTranscriptPreviewText,
+    getTranscriptStatusLabel,
     isPendingStatus,
     shouldShowTranscriptToggle,
 } from './message-bubble-transcript-actions';
@@ -74,6 +77,28 @@ test('getTranscriptActionLabel preserves transcript button labels', () => {
     assert.equal(getTranscriptActionLabel({ activeAttachmentId: 'a1', attachmentId: 'a1', mode: 'regenerate' }), 'Regenerating...');
     assert.equal(getTranscriptActionLabel({ activeAttachmentId: null, attachmentId: 'a1', mode: 'retry' }), 'Retry transcript');
     assert.equal(getTranscriptActionLabel({ activeAttachmentId: 'a1', attachmentId: 'a1', mode: 'retry' }), 'Retrying...');
+});
+
+test('audio attachment display helpers avoid raw bridge filenames', () => {
+    assert.equal(getAudioAttachmentTitle(0), 'Voice message');
+    assert.equal(getAudioAttachmentTitle(1), 'Voice message 2');
+    assert.equal(getAudioAttachmentDescription({
+        fileName: 'false_256310847225967_lid_3EB.bin',
+        mimeType: 'audio/ogg; codecs=opus',
+    }), 'OGG');
+    assert.equal(getAudioAttachmentDescription({
+        fileName: 'client-note.m4a',
+        mimeType: 'audio/mp4',
+    }), 'client-note.m4a');
+    assert.equal(getAudioAttachmentDescription({}), 'WhatsApp voice note');
+});
+
+test('getTranscriptStatusLabel maps internal statuses to readable labels', () => {
+    assert.equal(getTranscriptStatusLabel('completed'), 'Transcribed');
+    assert.equal(getTranscriptStatusLabel('failed'), 'Transcription failed');
+    assert.equal(getTranscriptStatusLabel('pending'), 'Transcribing');
+    assert.equal(getTranscriptStatusLabel('processing'), 'Transcribing');
+    assert.equal(getTranscriptStatusLabel(null), 'Transcript status unknown');
 });
 
 test('getExtractionActionLabel preserves extraction button labels', () => {

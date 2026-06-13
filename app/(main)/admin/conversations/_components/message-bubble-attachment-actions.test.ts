@@ -7,7 +7,9 @@ import {
     deriveBodyVCardDownloadHref,
     deriveMediaUnavailableState,
     deriveSharedContactsFromMessageBody,
+    isLikelyMediaPlaceholderBody,
     normalizeMessageAttachments,
+    shouldSuppressMediaPlaceholderBody,
     type NormalizedMessageAttachment,
 } from './message-bubble-attachment-actions';
 
@@ -137,6 +139,16 @@ test('deriveAttachmentDownloadUrl marks local attachment URLs for download', () 
         deriveAttachmentDownloadUrl('https://example.test/photo.jpg'),
         'https://example.test/photo.jpg'
     );
+});
+
+test('media placeholder detection hides raw placeholders only when media is renderable', () => {
+    assert.equal(isLikelyMediaPlaceholderBody('[Audio]'), true);
+    assert.equal(isLikelyMediaPlaceholderBody(' [Image] '), true);
+    assert.equal(isLikelyMediaPlaceholderBody('Actual customer text'), false);
+
+    assert.equal(shouldSuppressMediaPlaceholderBody('[Audio]', true), true);
+    assert.equal(shouldSuppressMediaPlaceholderBody('[Audio]', false), false);
+    assert.equal(shouldSuppressMediaPlaceholderBody('Actual customer text', true), false);
 });
 
 test('deriveMediaUnavailableState preserves WhatsApp web bridge unavailable detection', () => {

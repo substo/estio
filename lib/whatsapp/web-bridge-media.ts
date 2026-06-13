@@ -8,8 +8,8 @@ import {
 } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia } from "@/lib/contacts/vcard";
 
-const DEFAULT_TRANSIENT_INGEST_ATTEMPTS = 3;
-const DEFAULT_TRANSIENT_INGEST_BACKOFF_MS = 250;
+const DEFAULT_TRANSIENT_INGEST_ATTEMPTS = 5;
+const DEFAULT_TRANSIENT_INGEST_BACKOFF_MS = 1000;
 
 type WebBridgeMediaIngestDependencies = {
     dbClient?: typeof db;
@@ -221,7 +221,7 @@ async function ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params: {
         String(params.media?.filename || wamId),
         contentType,
     );
-    const size = Number(params.media?.size || buffer.length) || buffer.length;
+    const size = buffer.length;
 
     const key = buildWhatsAppInboundAttachmentKey({
         locationId: message.conversation.locationId,

@@ -164,34 +164,36 @@ export async function POST(req: NextRequest) {
 
             if (message.hasMedia && message.media?.data && result?.status !== "deferred_unresolved_lid") {
                 const { ingestWhatsAppWebBridgeMediaAttachment } = await import("@/lib/whatsapp/web-bridge-media");
-                void ingestWhatsAppWebBridgeMediaAttachment({
-                    wamId,
-                    media: message.media,
-                    messageType: String(message.type || "text"),
-                }).then((ingestResult: any) => {
+                try {
+                    const ingestResult = await ingestWhatsAppWebBridgeMediaAttachment({
+                        wamId,
+                        media: message.media,
+                        messageType: String(message.type || "text"),
+                    });
                     if (ingestResult?.status === "stored") {
-                        return updateBridgeMessageMediaMetadata(wamId, {
+                        await updateBridgeMessageMediaMetadata(wamId, {
                             status: "stored",
                             key: ingestResult.key || null,
                             meta: message.mediaMeta || null,
                             error: null,
                         });
+                    } else {
+                        await updateBridgeMessageMediaMetadata(wamId, {
+                            status: ingestResult?.status || "skipped",
+                            reason: ingestResult?.reason || "unknown",
+                            meta: message.mediaMeta || null,
+                            error: null,
+                        });
                     }
-                    return updateBridgeMessageMediaMetadata(wamId, {
-                        status: ingestResult?.status || "skipped",
-                        reason: ingestResult?.reason || "unknown",
-                        meta: message.mediaMeta || null,
-                        error: null,
-                    });
-                }).catch((error) => {
+                } catch (error: any) {
                     console.error(`[WhatsApp Web Bridge Webhook] Failed to ingest media for ${wamId}:`, error);
-                    void updateBridgeMessageMediaMetadata(wamId, {
+                    await updateBridgeMessageMediaMetadata(wamId, {
                         status: "failed",
                         reason: "ingest_exception",
                         meta: message.mediaMeta || null,
                         error: error?.message || "Failed to ingest media.",
                     });
-                });
+                }
             } else if (message.hasMedia && message.mediaError) {
                 console.warn(
                     `[WhatsApp Web Bridge Webhook] Media not ingested for ${wamId}:`,

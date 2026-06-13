@@ -8,10 +8,13 @@ import {
     S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 const DEFAULT_BUCKET_NAME = "whatsapp-media";
 const DEFAULT_UPLOAD_TTL_SECONDS = 600;
 const DEFAULT_READ_TTL_SECONDS = 300;
+const DEFAULT_R2_CONNECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_R2_REQUEST_TIMEOUT_MS = 20_000;
 
 let r2ClientSingleton: S3Client | null = null;
 
@@ -56,6 +59,10 @@ function getR2Client() {
         region: "auto",
         endpoint: config.endpoint,
         forcePathStyle: true,
+        requestHandler: new NodeHttpHandler({
+            connectionTimeout: Number(process.env.R2_CONNECTION_TIMEOUT_MS || DEFAULT_R2_CONNECTION_TIMEOUT_MS),
+            requestTimeout: Number(process.env.R2_REQUEST_TIMEOUT_MS || DEFAULT_R2_REQUEST_TIMEOUT_MS),
+        }),
         credentials: {
             accessKeyId: config.accessKeyId,
             secretAccessKey: config.secretAccessKey,

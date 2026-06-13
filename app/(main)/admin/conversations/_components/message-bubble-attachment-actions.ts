@@ -78,6 +78,8 @@ export type MediaUnavailableInput = {
     attachments: NormalizedMessageAttachment[];
 };
 
+const MEDIA_PLACEHOLDER_BODIES = new Set(["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"]);
+
 function isAudioAttachment(attachment: NormalizedMessageAttachment): boolean {
     const mimeType = (attachment.mimeType || "").toLowerCase();
     if (mimeType.startsWith("audio/")) return true;
@@ -161,6 +163,14 @@ export function deriveAttachmentDownloadUrl(url: string): string {
         // Fall through to original URL.
     }
     return url;
+}
+
+export function isLikelyMediaPlaceholderBody(body?: string | null): boolean {
+    return MEDIA_PLACEHOLDER_BODIES.has(String(body || "").trim());
+}
+
+export function shouldSuppressMediaPlaceholderBody(body: string | null | undefined, hasRenderableMediaAttachment: boolean): boolean {
+    return hasRenderableMediaAttachment && isLikelyMediaPlaceholderBody(body);
 }
 
 export function classifyMessageAttachments(attachments: NormalizedMessageAttachment[]): ClassifiedMessageAttachments {

@@ -89,6 +89,37 @@ test("transient upload failure is retried and creates an attachment", async () =
     assert.equal(db.createdAttachments[0].contentType, "audio/ogg; codecs=opus");
 });
 
+test("upload content length uses decoded bytes instead of bridge estimate", async () => {
+    const db = createDbMock();
+    const body = Buffer.from("voice-note-with-padding");
+    const uploadedLengths: any[] = [];
+
+    const result = await ingestWhatsAppWebBridgeMediaAttachment({
+        wamId: "wam_size_mismatch",
+        media: {
+            ...media,
+            data: body.toString("base64"),
+            size: body.length + 2,
+        },
+        messageType: "ptt",
+        transientBackoffMs: 0,
+        dependencies: {
+            dbClient: db.dbClient as any,
+            sleep: async () => undefined,
+            putMediaObject: async (input) => {
+                uploadedLengths.push(input.contentLength);
+                return { key: "media/key.ogg", r2Uri: "r2://bucket/media/key.ogg" };
+            },
+            initAudioTranscriptionWorker: async () => undefined,
+            enqueueAudioTranscription: async () => undefined,
+        },
+    });
+
+    assert.equal(result.status, "stored");
+    assert.deepEqual(uploadedLengths, [body.length]);
+    assert.equal(db.createdAttachments[0].size, body.length);
+});
+
 test("ambiguous transient upload failure verifies existing object and creates attachment", async () => {
     const db = createDbMock();
     const queued: any[] = [];

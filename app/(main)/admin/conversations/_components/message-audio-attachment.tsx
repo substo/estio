@@ -1,15 +1,18 @@
 "use client";
 
-import { Download } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileAudio, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import type { MouseEvent } from "react";
 import { cn } from "@/lib/utils";
 import type { NormalizedMessageAttachment } from "./message-bubble-attachment-actions";
 import type { MessageBubbleTheme } from "./message-bubble-theme";
 import {
     formatExtractionSummary,
+    getAudioAttachmentDescription,
+    getAudioAttachmentTitle,
     getExtractionActionLabel,
     getTranscriptActionLabel,
     getTranscriptPreviewText,
+    getTranscriptStatusLabel,
     isPendingStatus,
     shouldShowTranscriptToggle,
 } from "./message-bubble-transcript-actions";
@@ -68,50 +71,86 @@ export function MessageAudioAttachment({
     const transcriptText = transcript?.text || "";
     const extraction = transcript?.extraction;
     const extractionSummary = extraction ? formatExtractionSummary(extraction.payload) : null;
+    const hasTranscript = !!attachment.transcript;
+    const transcriptStatus = attachment.transcript?.status || null;
+    const canRequestTranscript = !!onRequestTranscript && !!attachment.id;
+    const canRetryTranscript = (!!onRequestTranscript || !!onRetryTranscript) && !!attachment.id;
+    const isTranscriptActionActive = transcriptActionAttachmentId === attachment.id;
+    const description = getAudioAttachmentDescription(attachment);
+    const title = getAudioAttachmentTitle(index);
+    const StatusIcon = transcriptStatus === "completed"
+        ? CheckCircle2
+        : transcriptStatus === "failed"
+            ? AlertTriangle
+            : isPendingStatus(transcriptStatus)
+                ? Loader2
+                : Sparkles;
 
     return (
         <div
             className={cn(
-                "rounded-lg border border-black/10 bg-black/5 p-2 overflow-x-auto w-full max-w-full min-w-0",
+                "rounded-lg border border-black/10 bg-black/5 p-2.5 overflow-x-auto w-full max-w-full min-w-0",
                 theme.attachmentShellClassName
             )}
             onClick={(e) => e.stopPropagation()}
         >
-            <audio
-                controls
-                preload="metadata"
-                src={attachment.url}
-                className="w-full max-w-full min-w-0 sm:max-w-[320px]"
-            />
-            <div className="mt-1 flex items-center gap-2 text-[11px] min-w-0">
-                <span className="min-w-0 flex-1 truncate">{attachment.fileName || `Audio attachment ${index + 1}`}</span>
+            <div className="mb-2 flex min-w-0 items-start gap-2">
+                <div className={cn(
+                    "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/70",
+                    theme.attachmentCardClassName
+                )}>
+                    <FileAudio className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="font-medium leading-5">{title}</span>
+                        <span className={cn(
+                            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                            hasTranscript ? theme.transcriptStatusTone(transcriptStatus) : theme.attachmentButtonClassName
+                        )}>
+                            <StatusIcon className={cn("h-3 w-3", isPendingStatus(transcriptStatus) && "animate-spin")} />
+                            {hasTranscript ? getTranscriptStatusLabel(transcriptStatus) : "Needs transcript"}
+                        </span>
+                    </div>
+                    <p className={cn("mt-0.5 text-[11px]", theme.attachmentMutedTextClassName)}>
+                        {description}
+                    </p>
+                </div>
                 <a
                     href={getDownloadUrl(attachment.url)}
                     download={attachment.fileName || `audio-${index + 1}`}
                     className={cn(
-                        "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-black/10 shrink-0",
+                        "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] hover:bg-black/10",
                         theme.attachmentDownloadClassName
                     )}
+                    title="Download voice message"
                 >
-                    <Download className="h-3 w-3" />
+                    <Download className="h-3.5 w-3.5" />
                     Download
                 </a>
             </div>
-            {!attachment.transcript && onRequestTranscript && attachment.id && (
-                <div className="mt-2 rounded-md border border-black/10 bg-white/70 px-2 py-1.5 text-xs">
-                    <div className="flex items-center gap-2">
-                        <span className={cn("text-[11px]", theme.attachmentMutedTextClassName)}>
-                            No transcript yet.
+            <audio
+                controls
+                preload="metadata"
+                src={attachment.url}
+                className="w-full max-w-full min-w-0"
+            />
+            {!hasTranscript && canRequestTranscript && (
+                <div className={cn("mt-2 rounded-md border px-2 py-1.5 text-xs", theme.attachmentCardClassName)}>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className={cn("text-[11px]", theme.attachmentPrimaryTextClassName)}>
+                            Transcript has not been created yet.
                         </span>
                         <button
                             type="button"
                             onClick={(e) => handleRequestTranscript(e, attachment.id, { force: false })}
-                            disabled={transcriptActionAttachmentId === attachment.id}
+                            disabled={isTranscriptActionActive}
                             className={cn(
                                 "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
                                 theme.attachmentButtonClassName
                             )}
                         >
+                            <Sparkles className="h-3 w-3" />
                             {getTranscriptActionLabel({
                                 activeAttachmentId: transcriptActionAttachmentId,
                                 attachmentId: attachment.id,
@@ -122,7 +161,7 @@ export function MessageAudioAttachment({
                 </div>
             )}
 
-            {attachment.transcript && (
+            {hasTranscript && attachment.transcript && (
                 <div
                     className={cn(
                         "mt-2 rounded-md border px-2 py-1.5 text-xs",
@@ -134,10 +173,11 @@ export function MessageAudioAttachment({
                             Transcript
                         </span>
                         <span className={cn(
-                            "rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
                             theme.transcriptStatusTone(attachment.transcript.status)
                         )}>
-                            {attachment.transcript.status}
+                            <StatusIcon className={cn("h-3 w-3", isPendingStatus(attachment.transcript.status) && "animate-spin")} />
+                            {getTranscriptStatusLabel(attachment.transcript.status)}
                         </span>
                         {attachment.transcript.model && (
                             <span className={cn(
@@ -192,12 +232,13 @@ export function MessageAudioAttachment({
                                         <button
                                             type="button"
                                             onClick={(e) => handleRequestTranscript(e, attachment.id, { force: true })}
-                                            disabled={transcriptActionAttachmentId === attachment.id}
+                                            disabled={isTranscriptActionActive}
                                             className={cn(
                                                 "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
                                                 theme.attachmentButtonClassName
                                             )}
                                         >
+                                            <RefreshCw className="h-3 w-3" />
                                             {getTranscriptActionLabel({
                                                 activeAttachmentId: transcriptActionAttachmentId,
                                                 attachmentId: attachment.id,
@@ -238,12 +279,13 @@ export function MessageAudioAttachment({
                                 <button
                                     type="button"
                                     onClick={(e) => handleRequestTranscript(e, attachment.id, { force: true })}
-                                    disabled={transcriptActionAttachmentId === attachment.id}
+                                    disabled={!canRetryTranscript || isTranscriptActionActive}
                                     className={cn(
                                         "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
                                         theme.attachmentButtonClassName
                                     )}
                                 >
+                                    <RefreshCw className="h-3 w-3" />
                                     {getTranscriptActionLabel({
                                         activeAttachmentId: transcriptActionAttachmentId,
                                         attachmentId: attachment.id,
