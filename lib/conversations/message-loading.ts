@@ -226,6 +226,17 @@ export async function fetchMessagesForResolvedConversation(args: {
                             url: true,
                             contentType: true,
                             fileName: true,
+                            transcript: {
+                                select: {
+                                    id: true,
+                                    status: true,
+                                    text: true,
+                                    error: true,
+                                    model: true,
+                                    provider: true,
+                                    updatedAt: true,
+                                },
+                            },
                         },
                     }),
             },
@@ -308,9 +319,7 @@ export async function fetchMessagesForResolvedConversation(args: {
                 } as any
             })
             : Promise.resolve(null),
-        includeHeavyMessageMetadata
-            ? args.dependencies.resolveTranscriptVisibilityAccess(location.id)
-            : Promise.resolve({ canViewTranscripts: true, restrictContent: false }),
+        args.dependencies.resolveTranscriptVisibilityAccess(location.id),
         includeHeavyMessageMetadata
             ? getLocationDefaultReplyLanguage(location.id, DEFAULT_TRANSLATION_TARGET_LANGUAGE)
             : Promise.resolve(DEFAULT_TRANSLATION_TARGET_LANGUAGE),

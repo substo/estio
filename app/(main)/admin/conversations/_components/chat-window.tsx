@@ -874,9 +874,9 @@ export function ChatWindow({
                                     contactEmail={conversation.contactEmail}
                                     contactName={conversation.contactName}
                                     onRefetchMedia={onRefetchMedia}
-                                    onRequestTranscript={canUseTranscriptOnDemand ? onRequestTranscript : undefined}
-                                    onExtractViewingNotes={canUseTranscriptOnDemand ? onExtractViewingNotes : undefined}
-                                    onRetryTranscript={canUseTranscriptOnDemand ? onRetryTranscript : undefined}
+                                    onRequestTranscript={onRequestTranscript}
+                                    onExtractViewingNotes={onExtractViewingNotes}
+                                    onRetryTranscript={onRetryTranscript}
                                     aiModel={selectedModel}
                                     selectionBatch={selectionBatch}
                                     onAddSelectionToBatch={handleAddSelectionToBatch}

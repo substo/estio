@@ -104,13 +104,29 @@ export function MessageAudioAttachment({
                 <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                         <span className="font-medium leading-5">{title}</span>
-                        <span className={cn(
-                            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-                            hasTranscript ? theme.transcriptStatusTone(transcriptStatus) : theme.attachmentButtonClassName
-                        )}>
-                            <StatusIcon className={cn("h-3 w-3", isPendingStatus(transcriptStatus) && "animate-spin")} />
-                            {hasTranscript ? getTranscriptStatusLabel(transcriptStatus) : "Needs transcript"}
-                        </span>
+                        {!hasTranscript && canRequestTranscript ? (
+                            <button
+                                type="button"
+                                onClick={(e) => handleRequestTranscript(e, attachment.id, { force: false })}
+                                disabled={isTranscriptActionActive}
+                                className={cn(
+                                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                                    theme.attachmentButtonClassName
+                                )}
+                                title="Transcribe voice message"
+                            >
+                                <Sparkles className="h-3 w-3" />
+                                {isTranscriptActionActive ? "Starting..." : "Transcribe"}
+                            </button>
+                        ) : (
+                            <span className={cn(
+                                "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                                hasTranscript ? theme.transcriptStatusTone(transcriptStatus) : theme.attachmentButtonClassName
+                            )}>
+                                <StatusIcon className={cn("h-3 w-3", isPendingStatus(transcriptStatus) && "animate-spin")} />
+                                {hasTranscript ? getTranscriptStatusLabel(transcriptStatus) : "Transcribe"}
+                            </span>
+                        )}
                     </div>
                     <p className={cn("mt-0.5 text-[11px]", theme.attachmentMutedTextClassName)}>
                         {description}
@@ -135,32 +151,6 @@ export function MessageAudioAttachment({
                 src={attachment.url}
                 className="w-full max-w-full min-w-0"
             />
-            {!hasTranscript && canRequestTranscript && (
-                <div className={cn("mt-2 rounded-md border px-2 py-1.5 text-xs", theme.attachmentCardClassName)}>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <span className={cn("text-[11px]", theme.attachmentPrimaryTextClassName)}>
-                            Transcript has not been created yet.
-                        </span>
-                        <button
-                            type="button"
-                            onClick={(e) => handleRequestTranscript(e, attachment.id, { force: false })}
-                            disabled={isTranscriptActionActive}
-                            className={cn(
-                                "ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]",
-                                theme.attachmentButtonClassName
-                            )}
-                        >
-                            <Sparkles className="h-3 w-3" />
-                            {getTranscriptActionLabel({
-                                activeAttachmentId: transcriptActionAttachmentId,
-                                attachmentId: attachment.id,
-                                mode: "start",
-                            })}
-                        </button>
-                    </div>
-                </div>
-            )}
-
             {hasTranscript && attachment.transcript && (
                 <div
                     className={cn(
