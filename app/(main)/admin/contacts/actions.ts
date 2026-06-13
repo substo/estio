@@ -13,7 +13,7 @@ import {
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 import { enqueueContactSync } from '@/lib/contacts/sync-engine';
-import { enqueueGhlContactSync, enqueueGoogleContactSync } from '@/lib/integrations/provider-outbox-enqueue';
+import { enqueueGhlContactSync } from '@/lib/integrations/provider-outbox-enqueue';
 import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
@@ -79,6 +79,7 @@ function enqueueProviderContactMirrorsAfterResponse(args: {
   contactId: string;
   userId?: string | null;
   reason: string;
+  googleEvent: 'create' | 'update';
 }) {
   after(async () => {
     try {
@@ -87,11 +88,12 @@ function enqueueProviderContactMirrorsAfterResponse(args: {
         contactId: args.contactId,
         payload: { reason: args.reason },
       });
-      await enqueueGoogleContactSync({
+      await runGoogleAutoSyncForContact({
         locationId: args.locationId,
         contactId: args.contactId,
-        userId: args.userId,
-        payload: { reason: args.reason },
+        source: 'CONTACT_FORM',
+        event: args.googleEvent,
+        preferredUserId: args.userId,
       });
     } catch (error) {
       console.error('[ProviderOutbox] Failed to enqueue contact mirrors:', error);
@@ -862,6 +864,7 @@ export async function createContact(
       contactId: contact.id,
       userId: internalUserId,
       reason: 'contact_create',
+      googleEvent: 'create',
     });
 
     revalidatePath('/admin/contacts');
@@ -1040,6 +1043,7 @@ async function updateContactCore(
       contactId: data.contactId,
       userId: internalUserId,
       reason: 'contact_update',
+      googleEvent: 'update',
     });
 
     log('11_returning');
@@ -1185,6 +1189,7 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
     contactId: existing.id,
     userId: internalUserId,
     reason: 'contact_type_update',
+    googleEvent: 'update',
   });
 
   revalidatePath('/admin/contacts');
@@ -1410,7 +1415,7 @@ export async function getGoogleContactAction(resourceName: string) {
   }
 }
 
-export async function searchGoogleContactsAction(query: string) {
+export async function searchGoogleContactsAction(query: string, options?: { phoneFallback?: boolean }) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
@@ -1426,7 +1431,7 @@ export async function searchGoogleContactsAction(query: string) {
     }
 
     const { searchGoogleContacts } = await import('@/lib/google/people');
-    const results = await searchGoogleContacts(user.id, query);
+    const results = await searchGoogleContacts(user.id, query, options);
     return { success: true, data: results };
   } catch (error: any) {
     if (error.message === 'GOOGLE_AUTH_EXPIRED') {

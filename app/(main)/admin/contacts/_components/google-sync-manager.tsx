@@ -106,12 +106,13 @@ export function GoogleSyncManager({
             fetchLinkedContact(contact.googleContactId);
         }
         else {
-            // Email search is indexed and fast. Phone fallback can scan the
-            // address book, so keep it as the secondary automatic option.
-            const initialQuery = contact.email || contact.phone;
+            // Email/name search is indexed and fast. Phone fallback can scan
+            // the address book, so automatic open uses only the lightweight
+            // People API search. Manual Search still enables the deep fallback.
+            const initialQuery = contact.email || contact.name || contact.phone;
             if (initialQuery) {
                 setSearchQuery(initialQuery);
-                handleSearch(initialQuery, true); // true = auto-fetch
+                handleSearch(initialQuery, true, { phoneFallback: false }); // true = auto-fetch
             }
             // Always go to search mode if not linked
             setStep('search');
@@ -139,7 +140,7 @@ export function GoogleSyncManager({
                 const fallbackQuery = contact.email || contact.phone;
                 if (fallbackQuery) {
                     setSearchQuery(fallbackQuery);
-                    handleSearch(fallbackQuery, true);
+                    handleSearch(fallbackQuery, true, { phoneFallback: false });
                     setStep('search');
                 }
             }
@@ -150,11 +151,15 @@ export function GoogleSyncManager({
         }
     };
 
-    const handleSearch = async (query: string, isAutoFetch = false) => {
+    const handleSearch = async (
+        query: string,
+        isAutoFetch = false,
+        options?: { phoneFallback?: boolean }
+    ) => {
         setLoading(true);
         setNotConnected(false);
         try {
-            const res = await searchGoogleContactsAction(query);
+            const res = await searchGoogleContactsAction(query, options);
             if (res.success && res.data) {
                 setSearchResults(res.data);
 

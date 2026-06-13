@@ -680,7 +680,27 @@ async function findMatchingGoogleContact(
     people: people_v1.People,
     contact: { phone?: string | null, email?: string | null }
 ): Promise<{ resourceName: string; etag?: string } | null> {
-    // 1. Search by Phone (Clean digits)
+    // 1. Search by Email first. It is indexed and avoids the slow phone
+    // fallback scan for contacts that already have a stable email identity.
+    if (contact.email) {
+        const searchRes = await people.people.searchContacts({
+            query: contact.email,
+            readMask: 'names,emailAddresses,metadata'
+        });
+        const found = searchRes.data.results?.find(r => {
+            return r.person?.emailAddresses?.some(e => e.value?.toLowerCase() === contact.email?.toLowerCase());
+        });
+
+        if (found?.person?.resourceName) {
+            console.log(`[Google Sync] Found existing contact by email: ${found.person.resourceName}`);
+            return {
+                resourceName: found.person.resourceName,
+                etag: found.person.etag || undefined
+            };
+        }
+    }
+
+    // 2. Search by Phone (Clean digits)
     if (contact.phone) {
         const phoneDigits = contact.phone.replace(/\D/g, '');
         // Search query needs to be precise. Google People API search is fuzzy.
@@ -722,34 +742,20 @@ async function findMatchingGoogleContact(
         }
     }
 
-    // 2. Search by Email (if no phone match)
-    if (contact.email) {
-        const searchRes = await people.people.searchContacts({
-            query: contact.email,
-            readMask: 'names,emailAddresses,metadata'
-        });
-        const found = searchRes.data.results?.find(r => {
-            return r.person?.emailAddresses?.some(e => e.value?.toLowerCase() === contact.email?.toLowerCase());
-        });
-
-        if (found?.person?.resourceName) {
-            console.log(`[Google Sync] Found existing contact by email: ${found.person.resourceName}`);
-            return {
-                resourceName: found.person.resourceName,
-                etag: found.person.etag || undefined
-            };
-        }
-    }
-
     return null;
 }
 
-export async function searchGoogleContacts(userId: string, query: string) {
+export async function searchGoogleContacts(
+    userId: string,
+    query: string,
+    options: { phoneFallback?: boolean } = {}
+) {
     try {
         const auth = await getValidAccessToken(userId);
         const people = google.people({ version: 'v1', auth });
 
         const phoneQuery = isPhoneQuery(query);
+        const allowPhoneFallback = options.phoneFallback ?? true;
 
         // Try searchContacts first (works for names/emails, unreliable for phones)
         const response = await people.people.searchContacts({
@@ -778,7 +784,7 @@ export async function searchGoogleContacts(userId: string, query: string) {
         const hasPhoneMatch = phoneQuery && response.data.results?.some(r =>
             personHasEquivalentPhone(r.person, query)
         );
-        if (phoneQuery && !hasPhoneMatch) {
+        if (phoneQuery && allowPhoneFallback && !hasPhoneMatch) {
             const phoneDigits = query.replace(/\D/g, '');
             const fallbackMatches = await searchByPhoneFallback(
                 people, phoneDigits,
