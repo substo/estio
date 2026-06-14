@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
-import { Loader2, Plus, Trash2, CheckCircle2, Clock3, AlertCircle, Ban, Pencil, Minus, Wand2, Radio, MessageSquareText, Navigation, Copy, ExternalLink } from 'lucide-react';
+import { Loader2, Plus, Trash2, Clock3, Pencil, Minus, Wand2, Radio, MessageSquareText, Navigation, Copy, ExternalLink, CheckCircle2, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +37,8 @@ import {
     createViewing,
     updateViewing,
     deleteViewing,
+    updateViewingStatus,
+    updateViewingFeedback,
     generateViewingReminderDraftAction,
     queueViewingLeadRemindersAction,
     openOrStartConversationForContact,
@@ -44,7 +46,7 @@ import {
 import { createViewingSession } from '@/app/(main)/admin/viewings/sessions/actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
-import { getContactViewings, getPropertiesForSelect, getUsersForSelect, getContactsForSelect } from '@/app/(main)/admin/contacts/fetch-helpers';
+import { getContactViewings, getViewingFormOptions } from '@/app/(main)/admin/contacts/fetch-helpers';
 import { SearchableSelect } from '@/app/(main)/admin/contacts/_components/searchable-select';
 import {
     formatDateTimeLocalInTimeZone,
@@ -55,17 +57,20 @@ import { toast } from 'sonner';
 import { QuickAssistStartButton } from '@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button';
 import { VIEWING_SESSION_QUICK_START_SOURCES } from '@/lib/viewings/sessions/types';
 
-// Reuse the badge logic from Tasks, adapting it for viewings
-const VIEWING_SYNC_MAX_ATTEMPTS = 6;
 const VIEWING_DURATION_DEFAULT = 30;
 const VIEWING_DURATION_STEP = 15;
 const VIEWING_DURATION_MIN = 15;
 const VIEWING_DURATION_MAX = 480;
+const VIEWING_STATUS_OPTIONS = [
+    { value: 'scheduled', label: 'Scheduled' },
+    { value: 'confirmed', label: 'Confirmed' },
+    { value: 'lead_confirmed', label: 'Lead Confirmed' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' },
+    { value: 'no_show', label: 'No Show' },
+] as const;
+type ViewingStatusValue = typeof VIEWING_STATUS_OPTIONS[number]['value'];
 
-type SyncRecord = { provider: string; status?: string | null; lastSyncedAt?: string | Date | null; lastError?: string | null };
-type OutboxJob = { provider: string; status?: string | null; operation?: string | null; attemptCount?: number | null; scheduledAt?: string | Date | null; lastError?: string | null; createdAt?: string | Date | null };
-type ProviderSyncStatus = 'synced' | 'error' | 'pending' | 'processing' | 'retrying' | 'dead' | 'disabled';
-type ProviderBadge = { provider: string; key: string; status: ProviderSyncStatus; attemptsText?: string; title?: string };
 type ReminderPreviewState = {
     audience: 'lead' | 'owner';
     body: string;
@@ -79,11 +84,22 @@ type ReminderPreviewState = {
     locationLabel: string | null;
     fallbackHint?: string | null;
 };
-
-const PROVIDER_ICON_SOURCES: Record<string, { src: string; alt: string }> = {
-    ghl: { src: 'https://www.gohighlevel.com/favicon.ico', alt: 'GoHighLevel' },
-    google: { src: 'https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg', alt: 'Google Calendar' },
+type FeedbackDraftState = {
+    viewingId: string;
+    overallRating: string;
+    interestedInOffer: 'yes' | 'no' | 'maybe' | 'unknown';
+    liked: string;
+    disliked: string;
+    comments: string;
 };
+type ReminderBadge = {
+    key: string;
+    label: string;
+    tone: string;
+    title?: string;
+};
+type ViewingFormOptions = Awaited<ReturnType<typeof getViewingFormOptions>>;
+type ViewingFormUser = ViewingFormOptions['users'][number];
 
 function formatDueLabel(input?: Date | string | null) {
     if (!input) return null;
@@ -107,129 +123,99 @@ function formatViewingDuration(value: number): string {
     return `${hours}h ${minutes}m`;
 }
 
-function getProviderSyncTone(status: ProviderSyncStatus) {
-    if (status === 'synced') return 'bg-emerald-50 border-emerald-200';
-    if (status === 'processing') return 'bg-blue-50 border-blue-200';
-    if (status === 'pending') return 'bg-sky-50 border-sky-200';
-    if (status === 'retrying') return 'bg-amber-50 border-amber-200';
-    if (status === 'dead' || status === 'error') return 'bg-red-50 border-red-200';
-    if (status === 'disabled') return 'bg-zinc-50 border-zinc-200';
-    return 'bg-slate-50 border-slate-200';
+function getViewingStatusLabel(status?: string | null): string {
+    return VIEWING_STATUS_OPTIONS.find((option) => option.value === status)?.label || 'Scheduled';
 }
 
-function getProviderName(provider: string) {
-    const normalized = String(provider || '').toLowerCase();
-    if (normalized === 'ghl') return 'GoHighLevel';
-    if (normalized === 'google') return 'Google Calendar';
-    return provider.toUpperCase();
+function getViewingStatusTone(status?: string | null): string {
+    if (status === 'completed') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'confirmed' || status === 'lead_confirmed') return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (status === 'cancelled') return 'bg-red-50 text-red-700 border-red-200';
+    if (status === 'no_show') return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-slate-50 text-slate-700 border-slate-200';
 }
 
-function getProviderStatusLabel(status: ProviderSyncStatus, attemptsText?: string) {
-    if (status === 'synced') return 'synced';
-    if (status === 'processing') return 'syncing now';
-    if (status === 'retrying') return attemptsText ? `retrying (${attemptsText})` : 'retrying';
-    if (status === 'pending') return 'queued';
-    if (status === 'disabled') return 'disabled';
-    if (status === 'dead') return 'attention required';
-    return 'sync error';
+function formatReminderOffsetLabel(offsetMinutes: number): string {
+    if (offsetMinutes === 1440) return '24h';
+    if (offsetMinutes % 60 === 0) return `${offsetMinutes / 60}h`;
+    return `${offsetMinutes}m`;
 }
 
-function renderProviderStatusIcon(status: ProviderSyncStatus) {
-    if (status === 'synced') return <CheckCircle2 className="h-3 w-3 text-emerald-600" />;
-    if (status === 'processing') return <Loader2 className="h-3 w-3 animate-spin text-blue-600" />;
-    if (status === 'pending') return <Clock3 className="h-3 w-3 text-sky-600" />;
-    if (status === 'retrying') return <Clock3 className="h-3 w-3 text-amber-600" />;
-    if (status === 'disabled') return <Ban className="h-3 w-3 text-zinc-600" />;
-    return <AlertCircle className="h-3 w-3 text-red-600" />;
+function getReminderStatusTone(status?: string | null): string {
+    if (status === 'queued') return 'border-blue-200 bg-blue-50 text-blue-700';
+    if (status === 'suggested') return 'border-violet-200 bg-violet-50 text-violet-700';
+    if (status === 'skipped') return 'border-slate-200 bg-slate-50 text-slate-600';
+    if (status === 'failed') return 'border-red-200 bg-red-50 text-red-700';
+    return 'border-amber-200 bg-amber-50 text-amber-700';
 }
 
-function ProviderPlatformIcon({ provider }: { provider: string }) {
-    const normalized = String(provider || '').toLowerCase();
-    const source = PROVIDER_ICON_SOURCES[normalized];
-    const [failedToLoad, setFailedToLoad] = useState(false);
+function formatReminderDueLabel(input?: string | null) {
+    return formatDueLabel(input);
+}
 
-    if (!source || failedToLoad) {
-        return (
-            <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded bg-slate-200 text-[9px] font-semibold text-slate-700">
-                {normalized.slice(0, 2).toUpperCase() || '?'}
-            </span>
-        );
+function buildReminderBadges(reminders: any): ReminderBadge[] {
+    if (!reminders || typeof reminders !== 'object' || Array.isArray(reminders)) return [];
+    const badges: ReminderBadge[] = [];
+    const leadEntries = reminders.lead && typeof reminders.lead === 'object' && !Array.isArray(reminders.lead)
+        ? reminders.lead
+        : {};
+
+    for (const [key, rawEntry] of Object.entries(leadEntries)) {
+        if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) continue;
+        const entry = rawEntry as any;
+        const offsetMinutes = Number(entry.offsetMinutes ?? key);
+        const status = String(entry.status || 'pending').toLowerCase();
+        const dueLabel = formatReminderDueLabel(entry.dueAt || null);
+        const labelPrefix = Number.isFinite(offsetMinutes) ? formatReminderOffsetLabel(offsetMinutes) : 'Lead';
+        const statusLabel = status === 'queued'
+            ? 'queued'
+            : status === 'suggested'
+                ? 'draft'
+                : status === 'skipped'
+                    ? 'skipped'
+                    : status === 'failed'
+                        ? 'failed'
+                        : 'pending';
+
+        badges.push({
+            key: `lead-${key}`,
+            label: `${labelPrefix} ${statusLabel}`,
+            tone: getReminderStatusTone(status),
+            title: [
+                dueLabel ? `Due ${dueLabel}` : null,
+                entry.reason || entry.lastError || null,
+            ].filter(Boolean).join('\n') || undefined,
+        });
     }
 
-    return (
-        <img src={source.src} alt={source.alt} className="h-3.5 w-3.5 shrink-0 rounded-[2px]" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailedToLoad(true)} />
-    );
-}
-
-function pickProviderOutboxState(outboxJobs: OutboxJob[]) {
-    if (!outboxJobs.length) return null;
-    const byPriority = ['dead', 'failed', 'processing', 'pending'];
-    for (const status of byPriority) {
-        const match = outboxJobs.filter((job) => (job.status || '').toLowerCase() === status).sort((a, b) => +new Date(b.createdAt || 0) - +new Date(a.createdAt || 0))[0];
-        if (match) return match;
-    }
-    return null;
-}
-
-function buildProviderBadges(syncRecords: SyncRecord[], outboxJobs: OutboxJob[]): ProviderBadge[] {
-    const providers = new Set<string>();
-    syncRecords.forEach((record) => providers.add(String(record.provider || '').toLowerCase()));
-    outboxJobs.forEach((job) => providers.add(String(job.provider || '').toLowerCase()));
-
-    const badges: ProviderBadge[] = [];
-
-    for (const provider of providers) {
-        if (!provider) continue;
-        const syncRecord = syncRecords.find((record) => String(record.provider || '').toLowerCase() === provider);
-        const providerOutbox = outboxJobs.filter((job) => String(job.provider || '').toLowerCase() === provider);
-        const outboxState = pickProviderOutboxState(providerOutbox);
-
-        if (outboxState) {
-            const status = String(outboxState.status || '').toLowerCase();
-
-            if (status === 'dead') {
-                badges.push({ provider, key: `${provider}-dead`, status: 'dead', title: outboxState.lastError || 'Sync is dead; requires manual intervention' });
-                continue;
-            }
-            if (status === 'failed') {
-                const attempts = Math.max(1, Number(outboxState.attemptCount || 1));
-                const nextRetry = formatDueLabel(outboxState.scheduledAt || null);
-                const retryTitle = nextRetry ? `Retry ${attempts}/${VIEWING_SYNC_MAX_ATTEMPTS} scheduled for ${nextRetry}` : `Retry ${attempts}/${VIEWING_SYNC_MAX_ATTEMPTS} scheduled`;
-                badges.push({ provider, key: `${provider}-retrying`, status: 'retrying', attemptsText: `${attempts}/${VIEWING_SYNC_MAX_ATTEMPTS}`, title: outboxState.lastError ? `${retryTitle}\n${outboxState.lastError}` : retryTitle });
-                continue;
-            }
-            if (status === 'processing') {
-                badges.push({ provider, key: `${provider}-processing`, status: 'processing', title: 'Sync operation in progress' });
-                continue;
-            }
-            badges.push({ provider, key: `${provider}-pending`, status: 'pending', title: 'Sync queued' });
-            continue;
-        }
-
-        const syncStatus = String(syncRecord?.status || '').toLowerCase();
-        if (syncStatus === 'synced') {
-            badges.push({ provider, key: `${provider}-synced`, status: 'synced', title: syncRecord?.lastSyncedAt ? `Last synced ${formatDueLabel(syncRecord.lastSyncedAt)}` : 'Synced' });
-            continue;
-        }
-        if (syncStatus === 'disabled') {
-            continue; // hide completely if disabled by rule for viewings
-        }
-        if (syncStatus === 'error') {
-            badges.push({ provider, key: `${provider}-error`, status: 'error', title: syncRecord?.lastError || 'Last sync attempt failed' });
-            continue;
-        }
-        badges.push({ provider, key: `${provider}-pending`, status: 'pending', title: 'Awaiting first successful sync' });
+    if (reminders.leadManualDraftedAt) {
+        badges.push({
+            key: 'lead-manual-draft',
+            label: 'lead draft',
+            tone: 'border-slate-200 bg-slate-50 text-slate-700',
+            title: `Drafted ${formatReminderDueLabel(reminders.leadManualDraftedAt) || reminders.leadManualDraftedAt}`,
+        });
     }
 
-    return badges.sort((a, b) => a.provider.localeCompare(b.provider));
+    if (reminders.owner?.manualDraftedAt) {
+        badges.push({
+            key: 'owner-manual-draft',
+            label: 'owner draft',
+            tone: 'border-slate-200 bg-slate-50 text-slate-700',
+            title: `Drafted ${formatReminderDueLabel(reminders.owner.manualDraftedAt) || reminders.owner.manualDraftedAt}`,
+        });
+    }
+
+    return badges.sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function normalizeViewing(viewing: any) {
-    return {
-        ...viewing,
-        syncRecords: Array.isArray(viewing?.syncRecords) ? viewing.syncRecords : [],
-        outboxJobs: Array.isArray(viewing?.outboxJobs) ? viewing.outboxJobs : [],
-    };
+    return { ...viewing };
+}
+
+function getViewingUserTimeZone(users: ViewingFormUser[], userId?: string | null) {
+    const user = users.find((option) => option.id === userId);
+    return user?.effectiveTimeZone || user?.timeZone || null;
 }
 
 export function ContactViewingManager({
@@ -250,9 +236,10 @@ export function ContactViewingManager({
     const router = useRouter();
     const [viewings, setViewings] = useState<any[]>([]);
     const [properties, setProperties] = useState<{ id: string; title: string; unitNumber?: string | null }[]>([]);
-    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; ghlCalendarId?: string | null; timeZone?: string | null; effectiveTimeZone?: string | null }[]>([]);
+    const [users, setUsers] = useState<{ id: string; name: string | null; email: string; timeZone?: string | null; effectiveTimeZone?: string | null }[]>([]);
     const [contacts, setContacts] = useState<{ id: string; name: string | null }[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingFormOptions, setLoadingFormOptions] = useState(false);
 
     const [modalOpen, setModalOpen] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -268,10 +255,21 @@ export function ContactViewingManager({
     const [improvingViewingDescription, setImprovingViewingDescription] = useState(false);
     const [viewingLocation, setViewingLocation] = useState('');
     const [viewingDuration, setViewingDuration] = useState<number>(VIEWING_DURATION_DEFAULT);
+    const [viewingStatus, setViewingStatus] = useState('scheduled');
     const [editingViewingId, setEditingViewingId] = useState<string | null>(null);
 
     // Deletion Modal
     const [viewingToDeleteId, setViewingToDeleteId] = useState<string | null>(null);
+    const [statusChangeRequest, setStatusChangeRequest] = useState<null | {
+        viewingId: string;
+        status: ViewingStatusValue;
+        label: string;
+        reasonLabel: string;
+    }>(null);
+    const [statusChangeReason, setStatusChangeReason] = useState('');
+    const [updatingViewingStatusId, setUpdatingViewingStatusId] = useState<string | null>(null);
+    const [feedbackDraft, setFeedbackDraft] = useState<FeedbackDraftState | null>(null);
+    const [savingFeedback, setSavingFeedback] = useState(false);
     const [startingLiveViewingId, setStartingLiveViewingId] = useState<string | null>(null);
     const [draftingViewingKey, setDraftingViewingKey] = useState<string | null>(null);
     const [queueingViewingId, setQueueingViewingId] = useState<string | null>(null);
@@ -290,6 +288,9 @@ export function ContactViewingManager({
     const { resolveModelForKind } = useAiModelCatalog();
 
     const loadRequestIdRef = useRef(0);
+    const formOptionsLoadedRef = useRef(false);
+    const formOptionsRef = useRef<ViewingFormOptions | null>(null);
+    const formOptionsRequestRef = useRef<Promise<ViewingFormOptions | null> | null>(null);
     const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
 
     const loadData = useCallback(async (options?: { silent?: boolean }) => {
@@ -299,20 +300,14 @@ export function ContactViewingManager({
         if (!silent) setLoading(true);
 
         try {
-            const [viewingsRes, props, usrs, cnts] = await Promise.all([
-                contactId ? getContactViewings(contactId) : Promise.resolve({ viewings: [], currentUserId: null, interestedProperties: [] }),
-                getPropertiesForSelect(locationId),
-                getUsersForSelect(locationId),
-                getContactsForSelect(locationId)
-            ]);
+            const viewingsRes = contactId
+                ? await getContactViewings(contactId)
+                : { viewings: [], currentUserId: null, interestedProperties: [] };
 
             if (requestId !== loadRequestIdRef.current) return;
 
             const res = viewingsRes || { viewings: [], currentUserId: null, interestedProperties: [] };
             setViewings((res.viewings || []).map(normalizeViewing));
-            setProperties(props);
-            setUsers(usrs);
-            setContacts(cnts);
             setError(null);
 
             // Set Defaults
@@ -327,10 +322,47 @@ export function ContactViewingManager({
         }
     }, [contactId, locationId]);
 
+    const ensureFormOptions = useCallback(async () => {
+        if (formOptionsLoadedRef.current) return formOptionsRef.current;
+        if (formOptionsRequestRef.current) return formOptionsRequestRef.current;
+
+        setLoadingFormOptions(true);
+        const request = getViewingFormOptions(locationId)
+            .then((options) => {
+                setProperties(options.properties || []);
+                setUsers(options.users || []);
+                setContacts(options.contacts || []);
+                formOptionsRef.current = options;
+                formOptionsLoadedRef.current = true;
+                setError(null);
+                return options;
+            })
+            .catch((formOptionsError: any) => {
+                setError(formOptionsError?.message || 'Failed to load viewing form options');
+                return null;
+            })
+            .finally(() => {
+                setLoadingFormOptions(false);
+                formOptionsRequestRef.current = null;
+            });
+
+        formOptionsRequestRef.current = request;
+        return request;
+    }, [locationId]);
+
     useEffect(() => {
         void loadData();
         // No specific viewing mutated event logic yet, could add window event listener here
     }, [loadData]);
+
+    useEffect(() => {
+        formOptionsLoadedRef.current = false;
+        formOptionsRef.current = null;
+        formOptionsRequestRef.current = null;
+        setProperties([]);
+        setUsers([]);
+        setContacts([]);
+    }, [locationId]);
 
     const selectedViewingAgentTimeZone = useMemo(() => {
         const selectedUser = users.find((user) => user.id === viewingUserId);
@@ -409,6 +441,7 @@ export function ContactViewingManager({
         formData.append('description', viewingDescription);
         formData.append('location', viewingLocation);
         formData.append('duration', String(viewingDuration));
+        formData.append('status', viewingStatus);
 
         try {
             let result;
@@ -433,11 +466,17 @@ export function ContactViewingManager({
         }
     };
 
-    const handleEdit = (viewing: any) => {
+    const handleAddViewing = async () => {
+        resetForm();
+        setModalOpen(true);
+        await ensureFormOptions();
+    };
+
+    const handleEdit = async (viewing: any) => {
+        const formOptions = await ensureFormOptions();
         setEditingViewingId(viewing.id);
-        const fallbackTimeZone = users.find((user) => user.id === viewing.userId)?.effectiveTimeZone
-            || users.find((user) => user.id === viewing.userId)?.timeZone
-            || browserTimeZone;
+        const optionUsers = formOptions?.users || users;
+        const fallbackTimeZone = getViewingUserTimeZone(optionUsers, viewing.userId) || browserTimeZone;
         const targetTimeZone = viewing.scheduledTimeZone || fallbackTimeZone;
 
         let localISOTime = '';
@@ -457,11 +496,89 @@ export function ContactViewingManager({
         setViewingDescription(viewing.description || viewing.notes || '');
         setViewingLocation(viewing.location || '');
         setViewingDuration(normalizeViewingDuration(viewing.duration));
+        setViewingStatus(viewing.status || 'scheduled');
         setModalOpen(true);
     };
 
     const handleDelete = async (viewingId: string) => {
         setViewingToDeleteId(viewingId);
+    };
+
+    const applyViewingStatus = async (viewingId: string, status: ViewingStatusValue, reason?: string | null) => {
+        if (updatingViewingStatusId) return;
+        setUpdatingViewingStatusId(viewingId);
+        setError(null);
+        try {
+            const result = await updateViewingStatus(viewingId, status, reason || null);
+            if (result.success) {
+                toast.success(result.message || 'Viewing status updated');
+                void loadData({ silent: true });
+            } else {
+                setError(result.message || 'Failed to update viewing status.');
+            }
+        } catch (statusError: any) {
+            setError(statusError?.message || 'Failed to update viewing status.');
+        } finally {
+            setUpdatingViewingStatusId(null);
+        }
+    };
+
+    const requestViewingStatusChange = (viewingId: string, status: ViewingStatusValue) => {
+        const label = getViewingStatusLabel(status);
+        const reasonLabel = status === 'cancelled'
+            ? 'Cancellation reason'
+            : status === 'no_show'
+                ? 'No-show note'
+                : 'Status note';
+        setStatusChangeReason('');
+        setStatusChangeRequest({ viewingId, status, label, reasonLabel });
+    };
+
+    const confirmViewingStatusChange = async () => {
+        if (!statusChangeRequest) return;
+        const request = statusChangeRequest;
+        setStatusChangeRequest(null);
+        await applyViewingStatus(request.viewingId, request.status, statusChangeReason.trim() || null);
+        setStatusChangeReason('');
+    };
+
+    const openFeedbackDialog = (viewing: any) => {
+        const feedback = viewing?.feedback && typeof viewing.feedback === 'object' ? viewing.feedback : {};
+        setFeedbackDraft({
+            viewingId: viewing.id,
+            overallRating: feedback.overallRating ? String(feedback.overallRating) : '',
+            interestedInOffer: feedback.interestedInOffer || 'unknown',
+            liked: feedback.liked || '',
+            disliked: feedback.disliked || '',
+            comments: feedback.comments || '',
+        });
+    };
+
+    const saveFeedback = async () => {
+        if (!feedbackDraft || savingFeedback) return;
+        setSavingFeedback(true);
+        setError(null);
+        try {
+            const result = await updateViewingFeedback({
+                viewingId: feedbackDraft.viewingId,
+                overallRating: feedbackDraft.overallRating ? Number(feedbackDraft.overallRating) : null,
+                interestedInOffer: feedbackDraft.interestedInOffer,
+                liked: feedbackDraft.liked,
+                disliked: feedbackDraft.disliked,
+                comments: feedbackDraft.comments,
+            });
+            if (result.success) {
+                toast.success(result.message || 'Viewing feedback saved');
+                setFeedbackDraft(null);
+                void loadData({ silent: true });
+            } else {
+                setError(result.message || 'Failed to save viewing feedback.');
+            }
+        } catch (feedbackError: any) {
+            setError(feedbackError?.message || 'Failed to save viewing feedback.');
+        } finally {
+            setSavingFeedback(false);
+        }
     };
 
     const confirmDelete = async () => {
@@ -525,6 +642,7 @@ export function ContactViewingManager({
         setViewingDescription('');
         setViewingLocation('');
         setViewingDuration(VIEWING_DURATION_DEFAULT);
+        setViewingStatus('scheduled');
         setEditingViewingId(null);
         setViewingContactId(contactId || '');
 
@@ -648,7 +766,7 @@ export function ContactViewingManager({
                 <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-semibold">{title}</div>
                     {isEditing && (
-                        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => { resetForm(); setModalOpen(true); }}>
+                        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={handleAddViewing}>
                             <Plus className="mr-1 h-3.5 w-3.5" />
                             Add Viewing
                         </Button>
@@ -658,7 +776,7 @@ export function ContactViewingManager({
 
             {!title && isEditing && (
                 <div className="flex items-center justify-end">
-                    <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => { resetForm(); setModalOpen(true); }}>
+                    <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={handleAddViewing}>
                         <Plus className="mr-1 h-3.5 w-3.5" />
                         Add Viewing
                     </Button>
@@ -686,8 +804,13 @@ export function ContactViewingManager({
                         } catch {
                             // Keep local browser fallback if timezone metadata is missing/invalid.
                         }
-                        const providerBadges = buildProviderBadges(viewing.syncRecords, viewing.outboxJobs);
                         const propertyName = viewing.property?.unitNumber ? `[${viewing.property.unitNumber}] ${viewing.property.title}` : viewing.property?.title || 'No Property Linked';
+                        const isStatusUpdating = updatingViewingStatusId === viewing.id;
+                        const isCancelled = viewing.status === 'cancelled';
+                        const isCompleted = viewing.status === 'completed';
+                        const isNoShow = viewing.status === 'no_show';
+                        const hasFeedback = Boolean(viewing.feedbackReceived || viewing.feedback);
+                        const reminderBadges = buildReminderBadges(viewing.reminders);
 
                         return (
                             <div key={viewing.id} className="rounded-md border bg-card p-2.5 text-xs space-y-1.5">
@@ -763,9 +886,70 @@ export function ContactViewingManager({
                                                     : <Clock3 className="mr-1 h-3 w-3" />}
                                                 Queue Lead
                                             </Button>
-                                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => handleEdit(viewing)}>
+                                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => void handleEdit(viewing)}>
                                                 <Pencil className="h-3.5 w-3.5" />
                                             </Button>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-6 w-6 text-muted-foreground hover:text-primary"
+                                                onClick={() => void handleEdit(viewing)}
+                                                title="Reschedule"
+                                            >
+                                                <Clock3 className="h-3.5 w-3.5" />
+                                            </Button>
+                                            {!isCompleted && !isCancelled && !isNoShow ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-muted-foreground hover:text-emerald-600"
+                                                    onClick={() => void applyViewingStatus(viewing.id, 'completed')}
+                                                    disabled={isStatusUpdating}
+                                                    title="Mark completed"
+                                                >
+                                                    {isStatusUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                                </Button>
+                                            ) : null}
+                                            {!isCancelled && !isCompleted ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                                    onClick={() => requestViewingStatusChange(viewing.id, 'cancelled')}
+                                                    disabled={isStatusUpdating}
+                                                    title="Cancel viewing"
+                                                >
+                                                    <Ban className="h-3.5 w-3.5" />
+                                                </Button>
+                                            ) : null}
+                                            {!isNoShow && !isCancelled && !isCompleted ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-muted-foreground hover:text-amber-600"
+                                                    onClick={() => requestViewingStatusChange(viewing.id, 'no_show')}
+                                                    disabled={isStatusUpdating}
+                                                    title="Mark no-show"
+                                                >
+                                                    <Minus className="h-3.5 w-3.5" />
+                                                </Button>
+                                            ) : null}
+                                            {isCompleted ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-muted-foreground hover:text-primary"
+                                                    onClick={() => openFeedbackDialog(viewing)}
+                                                    title={hasFeedback ? 'Edit feedback' : 'Add feedback'}
+                                                >
+                                                    <MessageSquareText className="h-3.5 w-3.5" />
+                                                </Button>
+                                            ) : null}
                                             <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(viewing.id)}>
                                                 <Trash2 className="h-3.5 w-3.5" />
                                             </Button>
@@ -787,10 +971,21 @@ export function ContactViewingManager({
                                             {dateLabel}
                                         </span>
                                     )}
-                                    {providerBadges.map((badge) => (
-                                        <span key={`${viewing.id}-${badge.key}`} className={cn('inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[10px]', getProviderSyncTone(badge.status))} title={badge.title}>
-                                            <ProviderPlatformIcon provider={badge.provider} />
-                                            {renderProviderStatusIcon(badge.status)}
+                                    <span className={cn('inline-flex h-5 items-center rounded-md border px-1.5 text-[10px]', getViewingStatusTone(viewing.status))}>
+                                        {getViewingStatusLabel(viewing.status)}
+                                    </span>
+                                    {hasFeedback ? (
+                                        <span className="inline-flex h-5 items-center rounded-md border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] text-emerald-700">
+                                            Feedback saved
+                                        </span>
+                                    ) : null}
+                                    {reminderBadges.map((badge) => (
+                                        <span
+                                            key={`${viewing.id}-${badge.key}`}
+                                            className={cn('inline-flex h-5 items-center rounded-md border px-1.5 text-[10px]', badge.tone)}
+                                            title={badge.title}
+                                        >
+                                            {badge.label}
                                         </span>
                                     ))}
                                 </div>
@@ -805,13 +1000,19 @@ export function ContactViewingManager({
                     <DialogHeader>
                         <DialogTitle>{editingViewingId ? 'Edit Viewing' : 'Schedule Viewing'}</DialogTitle>
                         <DialogDescription>
-                            {editingViewingId ? 'Update the details of the viewing below.' : 'Enter the details for the new viewing. It will sync automatically to Google Calendar and GHL if configured.'}
+                            {editingViewingId ? 'Update the details of the viewing below.' : 'Enter the details for the new viewing.'}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
+                        {loadingFormOptions && (
+                            <div className="flex items-center gap-2 rounded-md border bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Loading form options...
+                            </div>
+                        )}
                         {/* Title */}
                         <div className="space-y-2">
-                            <Label>Title <span className="text-muted-foreground text-[10px]">(optional — auto-generated from property if blank)</span></Label>
+                            <Label>Title <span className="text-muted-foreground text-[10px]">(optional - auto-generated from property if blank)</span></Label>
                             <Input value={viewingTitle} onChange={e => setViewingTitle(e.target.value)} placeholder="e.g. Viewing: 3BR Villa in Limassol" />
                         </div>
 
@@ -924,6 +1125,18 @@ export function ContactViewingManager({
                             </div>
                         </div>
 
+                        <div className="space-y-2">
+                            <Label>Status</Label>
+                            <Select value={viewingStatus} onValueChange={setViewingStatus}>
+                                <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                                <SelectContent>
+                                    {VIEWING_STATUS_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
                         {/* Location */}
                         <div className="space-y-2">
                             <Label>Location <span className="text-muted-foreground text-[10px]">(address or meeting point)</span></Label>
@@ -932,7 +1145,7 @@ export function ContactViewingManager({
 
                         {/* Description */}
                         <div className="space-y-2">
-                            <Label>Description <span className="text-muted-foreground text-[10px]">(synced to calendar)</span></Label>
+                            <Label>Description <span className="text-muted-foreground text-[10px]">(internal notes)</span></Label>
                             <textarea
                                 className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                 value={viewingDescription}
@@ -1079,7 +1292,7 @@ export function ContactViewingManager({
                     <AlertDialogHeader>
                         <AlertDialogTitle>Are you sure you want to delete this viewing?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            This will remove the viewing record and automatically cancel any linked Google Calendar or GoHighLevel appointments. This action cannot be undone.
+                            This will remove the viewing record from Estio. This action cannot be undone.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -1088,6 +1301,119 @@ export function ContactViewingManager({
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            <AlertDialog open={!!statusChangeRequest} onOpenChange={(open) => {
+                if (!open) {
+                    setStatusChangeRequest(null);
+                    setStatusChangeReason('');
+                }
+            }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Mark viewing as {statusChangeRequest?.label}?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This updates the viewing status inside Estio and keeps the viewing record in the contact timeline.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-2">
+                        <Label>{statusChangeRequest?.reasonLabel || 'Status note'} <span className="text-muted-foreground text-[10px]">(optional)</span></Label>
+                        <textarea
+                            className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={statusChangeReason}
+                            onChange={(event) => setStatusChangeReason(event.target.value)}
+                            placeholder="Add a short internal note..."
+                            maxLength={500}
+                        />
+                    </div>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmViewingStatusChange}>Update Status</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <Dialog open={!!feedbackDraft} onOpenChange={(open) => !open && setFeedbackDraft(null)}>
+                <DialogContent className="sm:max-w-[560px]">
+                    <DialogHeader>
+                        <DialogTitle>Viewing Feedback</DialogTitle>
+                        <DialogDescription>
+                            Capture what happened after the viewing.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-2">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>Overall Rating</Label>
+                                <Select
+                                    value={feedbackDraft?.overallRating || ''}
+                                    onValueChange={(value) => setFeedbackDraft((draft) => draft ? { ...draft, overallRating: value } : draft)}
+                                >
+                                    <SelectTrigger><SelectValue placeholder="Select rating" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="5">5 - Excellent</SelectItem>
+                                        <SelectItem value="4">4 - Good</SelectItem>
+                                        <SelectItem value="3">3 - Neutral</SelectItem>
+                                        <SelectItem value="2">2 - Poor</SelectItem>
+                                        <SelectItem value="1">1 - Bad</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Interested in Offer</Label>
+                                <Select
+                                    value={feedbackDraft?.interestedInOffer || 'unknown'}
+                                    onValueChange={(value) => setFeedbackDraft((draft) => draft ? { ...draft, interestedInOffer: value as FeedbackDraftState['interestedInOffer'] } : draft)}
+                                >
+                                    <SelectTrigger><SelectValue placeholder="Select interest" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="unknown">Unknown</SelectItem>
+                                        <SelectItem value="yes">Yes</SelectItem>
+                                        <SelectItem value="maybe">Maybe</SelectItem>
+                                        <SelectItem value="no">No</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Liked</Label>
+                            <textarea
+                                className="flex min-h-[70px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={feedbackDraft?.liked || ''}
+                                onChange={(event) => setFeedbackDraft((draft) => draft ? { ...draft, liked: event.target.value } : draft)}
+                                placeholder="What did they like?"
+                                maxLength={1000}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Disliked</Label>
+                            <textarea
+                                className="flex min-h-[70px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={feedbackDraft?.disliked || ''}
+                                onChange={(event) => setFeedbackDraft((draft) => draft ? { ...draft, disliked: event.target.value } : draft)}
+                                placeholder="What objections or issues came up?"
+                                maxLength={1000}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Comments</Label>
+                            <textarea
+                                className="flex min-h-[90px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={feedbackDraft?.comments || ''}
+                                onChange={(event) => setFeedbackDraft((draft) => draft ? { ...draft, comments: event.target.value } : draft)}
+                                placeholder="Follow-up notes, next steps, decision makers..."
+                                maxLength={2000}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="ghost" onClick={() => setFeedbackDraft(null)}>Cancel</Button>
+                        <Button type="button" onClick={saveFeedback} disabled={savingFeedback}>
+                            {savingFeedback && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Save Feedback
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

@@ -102,6 +102,54 @@ export async function getUsersForSelect(locationId: string) {
     }
 }
 
+export async function getViewingFormOptions(locationId: string) {
+    try {
+        const { userId } = await auth();
+        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
+            return { properties: [], users: [], contacts: [] };
+        }
+
+        const [location, properties, users, contacts] = await Promise.all([
+            db.location.findUnique({
+                where: { id: locationId },
+                select: { timeZone: true },
+            }),
+            db.property.findMany({
+                where: { locationId },
+                select: { id: true, title: true, reference: true, unitNumber: true },
+                orderBy: { reference: 'asc' },
+            }),
+            db.user.findMany({
+                where: {
+                    locations: {
+                        some: { id: locationId }
+                    }
+                },
+                select: { id: true, name: true, email: true, timeZone: true },
+                orderBy: { name: 'asc' },
+            }),
+            db.contact.findMany({
+                where: { locationId },
+                select: { id: true, name: true },
+                orderBy: { name: 'asc' },
+            }),
+        ]);
+
+        const fallbackTimeZone = location?.timeZone || null;
+        return {
+            properties,
+            users: users.map((user) => ({
+                ...user,
+                effectiveTimeZone: user.timeZone || fallbackTimeZone,
+            })),
+            contacts: contacts.map(c => ({ ...c, name: c.name || "Unknown Contact" })),
+        };
+    } catch (error) {
+        console.error('Failed to fetch viewing form options:', error);
+        return { properties: [], users: [], contacts: [] };
+    }
+}
+
 export async function getContactViewings(contactId: string) {
     try {
         const { userId } = await auth();
@@ -110,34 +158,23 @@ export async function getContactViewings(contactId: string) {
         const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
         const internalUserId = dbUser?.id || null;
 
-        const [viewings, contact] = await Promise.all([
-            db.viewing.findMany({
-                where: { contactId },
-                include: {
-                    property: { select: { title: true, unitNumber: true, reference: true } },
-                    user: { select: { name: true } },
-                    syncRecords: true,
-                    outboxJobs: {
-                        select: {
-                            id: true,
-                            provider: true,
-                            operation: true,
-                            status: true,
-                            attemptCount: true,
-                            scheduledAt: true,
-                            lastError: true,
-                            createdAt: true
-                        },
-                        where: { status: { notIn: ['completed'] } }
-                    }
-                },
-                orderBy: { date: 'desc' },
-            }),
-            db.contact.findUnique({
-                where: { id: contactId },
-                select: { propertiesInterested: true }
-            })
-        ]);
+        const contact = await db.contact.findUnique({
+            where: { id: contactId },
+            select: { locationId: true, propertiesInterested: true }
+        });
+        if (!contact?.locationId || !(await verifyUserHasAccessToLocation(userId, contact.locationId))) {
+            return { viewings: [], currentUserId: internalUserId, interestedProperties: [] };
+        }
+
+        const viewings = await db.viewing.findMany({
+            where: { contactId },
+            include: {
+                property: { select: { title: true, unitNumber: true, reference: true } },
+                user: { select: { name: true } },
+            },
+            // Keep reminder state local to Estio; do not load provider sync records here.
+            orderBy: { date: 'desc' },
+        });
 
         return {
             viewings,
@@ -145,7 +182,7 @@ export async function getContactViewings(contactId: string) {
             interestedProperties: contact?.propertiesInterested || []
         };
     } catch (error) {
-        console.error('Failed to fetch viewings:', error);
+        console.error('Failed to fetch viewings:', { contactId, error });
         return { viewings: [], currentUserId: null, interestedProperties: [] };
     }
 }

@@ -1781,11 +1781,14 @@ export async function createCompany(
 
 // Viewings
 
+const viewingStatusSchema = z.enum(['scheduled', 'confirmed', 'lead_confirmed', 'completed', 'cancelled', 'no_show']);
+
 const viewingSchema = z.object({
   locationId: z.string().min(1, 'Location ID is required'),
   contactId: z.string().optional().nullable(),
   propertyId: z.string().optional().nullable(),
   userId: z.string().min(1, 'Agent/User ID is required'),
+  status: viewingStatusSchema.default('scheduled'),
   date: z.string().optional(),
   scheduledAtIso: z.string().optional(),
   scheduledLocal: z.string().optional(),
@@ -1879,6 +1882,137 @@ function toViewingDateTimeErrorMessage(error: unknown): string {
   return error.message || 'Failed to parse viewing datetime.';
 }
 
+const ACTIVE_VIEWING_SCHEDULE_STATUSES = ['scheduled', 'confirmed', 'lead_confirmed'];
+const VIEWING_CONFLICT_LOOKAROUND_MS = 12 * 60 * 60 * 1000;
+const VIEWING_DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
+
+function getViewingEndAt(row: { date: Date; endAt?: Date | null; duration?: number | null }) {
+  if (row.endAt) return row.endAt;
+  const duration = Number.isFinite(Number(row.duration)) ? Number(row.duration) : 30;
+  return new Date(row.date.getTime() + duration * 60 * 1000);
+}
+
+function viewingRangesOverlap(leftStart: Date, leftEnd: Date, rightStart: Date, rightEnd: Date) {
+  return leftStart < rightEnd && leftEnd > rightStart;
+}
+
+function formatViewingConflictTime(row: { date: Date; scheduledLocal?: string | null; scheduledTimeZone?: string | null }) {
+  if (row.scheduledLocal) {
+    return row.scheduledTimeZone ? `${row.scheduledLocal} (${row.scheduledTimeZone})` : row.scheduledLocal;
+  }
+  return row.date.toISOString();
+}
+
+function formatViewingConflictSubject(row: any) {
+  const property = row.property?.reference || row.property?.title || null;
+  const contact = row.contact?.name || null;
+  if (property && contact) return `${property} with ${contact}`;
+  return property || contact || row.title || 'another viewing';
+}
+
+async function validateViewingScheduleAvailability(params: {
+  viewingId?: string | null;
+  userId: string;
+  contactId?: string | null;
+  propertyId?: string | null;
+  status: z.infer<typeof viewingStatusSchema>;
+  startAt: Date;
+  endAt: Date;
+}) {
+  if (!ACTIVE_VIEWING_SCHEDULE_STATUSES.includes(params.status)) {
+    return { ok: true as const };
+  }
+
+  const viewingIdFilter = params.viewingId ? { id: { not: params.viewingId } } : {};
+  const windowStart = new Date(params.startAt.getTime() - VIEWING_CONFLICT_LOOKAROUND_MS);
+  const windowEnd = new Date(params.endAt.getTime() + VIEWING_CONFLICT_LOOKAROUND_MS);
+  const duplicateStart = new Date(params.startAt.getTime() - VIEWING_DUPLICATE_WINDOW_MS);
+  const duplicateEnd = new Date(params.startAt.getTime() + VIEWING_DUPLICATE_WINDOW_MS);
+
+  const baseSelect = {
+    id: true,
+    title: true,
+    date: true,
+    endAt: true,
+    duration: true,
+    scheduledLocal: true,
+    scheduledTimeZone: true,
+    contact: { select: { name: true } },
+    property: { select: { reference: true, title: true } },
+  };
+
+  const [agentCandidates, contactCandidates, duplicateCandidates] = await Promise.all([
+    db.viewing.findMany({
+      where: {
+        ...viewingIdFilter,
+        userId: params.userId,
+        status: { in: ACTIVE_VIEWING_SCHEDULE_STATUSES },
+        date: { gte: windowStart, lt: windowEnd },
+      },
+      select: baseSelect,
+      orderBy: { date: 'asc' },
+      take: 12,
+    }),
+    params.contactId
+      ? db.viewing.findMany({
+        where: {
+          ...viewingIdFilter,
+          contactId: params.contactId,
+          status: { in: ACTIVE_VIEWING_SCHEDULE_STATUSES },
+          date: { gte: windowStart, lt: windowEnd },
+        },
+        select: baseSelect,
+        orderBy: { date: 'asc' },
+        take: 12,
+      })
+      : Promise.resolve([]),
+    params.contactId && params.propertyId
+      ? db.viewing.findMany({
+        where: {
+          ...viewingIdFilter,
+          contactId: params.contactId,
+          propertyId: params.propertyId,
+          status: { in: ACTIVE_VIEWING_SCHEDULE_STATUSES },
+          date: { gte: duplicateStart, lte: duplicateEnd },
+        },
+        select: baseSelect,
+        orderBy: { date: 'asc' },
+        take: 4,
+      })
+      : Promise.resolve([]),
+  ]);
+
+  const agentConflict = agentCandidates.find((candidate) =>
+    viewingRangesOverlap(params.startAt, params.endAt, candidate.date, getViewingEndAt(candidate))
+  );
+  if (agentConflict) {
+    return {
+      ok: false as const,
+      message: `Assigned agent already has ${formatViewingConflictSubject(agentConflict)} at ${formatViewingConflictTime(agentConflict)}.`,
+    };
+  }
+
+  const contactConflict = contactCandidates.find((candidate) =>
+    viewingRangesOverlap(params.startAt, params.endAt, candidate.date, getViewingEndAt(candidate))
+  );
+  if (contactConflict) {
+    return {
+      ok: false as const,
+      message: `This contact already has ${formatViewingConflictSubject(contactConflict)} at ${formatViewingConflictTime(contactConflict)}.`,
+    };
+  }
+
+  const duplicateViewing = duplicateCandidates[0] || null;
+  if (duplicateViewing) {
+    return {
+      ok: false as const,
+      message: `A viewing for this contact and property is already scheduled around ${formatViewingConflictTime(duplicateViewing)}.`,
+    };
+  }
+
+  return { ok: true as const };
+}
+
 async function syncContactInspectedPropertiesFromViewings(
   prismaClient: any,
   contactId: string
@@ -1903,13 +2037,6 @@ async function syncContactInspectedPropertiesFromViewings(
   return dedupedPropertyIds;
 }
 
-import { createAppointment } from '@/lib/ghl/calendars';
-import {
-  enqueueViewingSyncJobs,
-  type EnqueueViewingSyncJobsResult,
-} from '@/lib/viewings/sync-engine';
-import { triggerTaskSyncCronNow } from '@/lib/cron/task-sync-trigger';
-
 export async function createViewing(
   prevState: any,
   formData: FormData
@@ -1919,6 +2046,7 @@ export async function createViewing(
     contactId: formData.get('contactId') || undefined,
     propertyId: formData.get('propertyId') || undefined,
     userId: formData.get('userId'),
+    status: formData.get('status') || 'scheduled',
     date: formData.get('date') || undefined,
     scheduledAtIso: formData.get('scheduledAtIso') || undefined,
     scheduledLocal: formData.get('scheduledLocal') || undefined,
@@ -2015,6 +2143,18 @@ export async function createViewing(
 
   try {
     const endAt = new Date(parsedSchedule.utcDate.getTime() + data.duration * 60 * 1000);
+    const availability = await validateViewingScheduleAvailability({
+      userId: data.userId,
+      contactId: data.contactId || null,
+      propertyId: data.propertyId || null,
+      status: data.status,
+      startAt: parsedSchedule.utcDate,
+      endAt,
+    });
+    if (!availability.ok) {
+      return { success: false, message: availability.message };
+    }
+
     const viewingResult = await db.viewing.create({
       data: {
         // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
@@ -2031,13 +2171,8 @@ export async function createViewing(
         location: data.location || null,
         duration: data.duration,
         endAt,
-        status: 'scheduled',
+        status: data.status,
       }
-    });
-
-    const syncResult: EnqueueViewingSyncJobsResult = await enqueueViewingSyncJobs({
-      viewingId: viewingResult.id,
-      operation: 'create',
     });
 
     if (data.contactId) {
@@ -2065,22 +2200,9 @@ export async function createViewing(
     }
     revalidatePath('/admin/contacts');
 
-    // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
-    const currentUserForSync = await db.user.findUnique({
-      where: { clerkId: currentUserId },
-      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
-    });
-    // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
-    // if (currentUserForSync?.googleSyncEnabled && currentUserForSync?.googleRefreshToken) {
-    //   const { syncContactToGoogle } = await import('@/lib/google/people');
-    //   syncContactToGoogle(currentUserForSync.id, contact.id).catch(e => console.error(e));
-    // }
-
     return {
       success: true,
       message: 'Viewing scheduled successfully!',
-      queuedProviders: syncResult.queuedProviders,
-      skippedProviders: syncResult.skippedProviders,
     };
   } catch (error: any) {
     console.error('Failed to create viewing:', error);
@@ -2098,6 +2220,7 @@ export async function updateViewing(
     contactId: formData.get('contactId') || undefined,
     propertyId: formData.get('propertyId') || undefined,
     userId: formData.get('userId'),
+    status: formData.get('status') || 'scheduled',
     date: formData.get('date') || undefined,
     scheduledAtIso: formData.get('scheduledAtIso') || undefined,
     scheduledLocal: formData.get('scheduledLocal') || undefined,
@@ -2196,6 +2319,19 @@ export async function updateViewing(
 
   try {
     const endAt = new Date(parsedSchedule.utcDate.getTime() + validatedFields.data.duration * 60 * 1000);
+    const availability = await validateViewingScheduleAvailability({
+      viewingId,
+      userId: validatedFields.data.userId,
+      contactId: validatedFields.data.contactId || null,
+      propertyId: validatedFields.data.propertyId || null,
+      status: validatedFields.data.status,
+      startAt: parsedSchedule.utcDate,
+      endAt,
+    });
+    if (!availability.ok) {
+      return { success: false, message: availability.message };
+    }
+
     await db.viewing.update({
       where: { id: viewingId },
       data: {
@@ -2204,6 +2340,7 @@ export async function updateViewing(
         scheduledTimeZone: parsedSchedule.scheduledTimeZone,
         scheduledLocal: parsedSchedule.scheduledLocal,
         userId: validatedFields.data.userId,
+        status: validatedFields.data.status,
         // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
         contactId: validatedFields.data.contactId || null,
         // @ts-ignore: Prisma types cache might not reflect the optional schema change yet
@@ -2216,24 +2353,6 @@ export async function updateViewing(
         endAt,
       }
     });
-
-    await enqueueViewingSyncJobs({
-      viewingId,
-      operation: 'update',
-    });
-
-    // Trigger cron immediately so sync doesn't wait for the next scheduler tick.
-    void triggerTaskSyncCronNow({
-      source: 'viewing_update',
-      viewingId,
-      timeoutMs: 3500,
-    })
-      .catch((syncError) => {
-        console.warn('[viewing_sync_trigger_failed]', {
-          viewingId,
-          error: syncError instanceof Error ? syncError.message : String(syncError),
-        });
-      });
 
     // Log Viewing Updated
     // We need contactId here, but it's in formData as optional/string. The schema validates it.
@@ -2254,17 +2373,6 @@ export async function updateViewing(
         timeZone: parsedSchedule.scheduledTimeZone,
         notes: validatedFields.data.notes,
       });
-
-      // Trigger Google Sync for Visual ID Update (only if current user has Google connected)
-      const currentUserForSync = await db.user.findUnique({
-        where: { clerkId: currentUserId },
-        select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
-      });
-      // DISABLED: Auto-sync removed. Use Google Sync Manager for manual sync.
-      // if (currentUserForSync?.googleSyncEnabled && currentUserForSync?.googleRefreshToken) {
-      //   const { syncContactToGoogle } = await import('@/lib/google/people');
-      //   syncContactToGoogle(currentUserForSync.id, contactId).catch(e => console.error(e));
-      // }
 
       await syncContactInspectedPropertiesFromViewings(db, contactId);
     }
@@ -2290,19 +2398,178 @@ export async function deleteViewing(viewingId: string) {
       return { success: false, message: 'Viewing not found.' };
     }
 
-    // Create the delete outbox jobs first
-    await enqueueViewingSyncJobs({
-      viewingId,
-      operation: 'delete',
-    });
-
     await db.viewing.delete({ where: { id: viewingId } });
-    await syncContactInspectedPropertiesFromViewings(db, existingViewing.contactId);
-    revalidatePath(`/admin/properties/${existingViewing.propertyId}`);
+    if (existingViewing.contactId) {
+      await syncContactInspectedPropertiesFromViewings(db, existingViewing.contactId);
+    }
+    if (existingViewing.propertyId) {
+      revalidatePath(`/admin/properties/${existingViewing.propertyId}`);
+    }
     revalidatePath('/admin/contacts');
     return { success: true, message: 'Viewing deleted.' };
   } catch (e) {
     return { success: false, message: 'Failed to delete viewing.' };
+  }
+}
+
+async function getViewingMutationContext(viewingId: string, clerkUserId: string) {
+  const existingViewing = await db.viewing.findUnique({
+    where: { id: viewingId },
+    select: {
+      id: true,
+      status: true,
+      contactId: true,
+      propertyId: true,
+      date: true,
+      scheduledLocal: true,
+      scheduledTimeZone: true,
+      contact: { select: { locationId: true } },
+      property: { select: { locationId: true, reference: true, title: true } },
+    }
+  });
+
+  if (!existingViewing) {
+    return { ok: false as const, message: 'Viewing not found.' };
+  }
+
+  const accessLocationId = existingViewing.contact?.locationId || existingViewing.property?.locationId || null;
+  if (!accessLocationId || !(await verifyUserHasAccessToLocation(clerkUserId, accessLocationId))) {
+    return { ok: false as const, message: 'Unauthorized' };
+  }
+
+  return { ok: true as const, viewing: existingViewing };
+}
+
+function revalidateViewingMutationPaths(viewing: { propertyId?: string | null }) {
+  if (viewing.propertyId) {
+    revalidatePath(`/admin/properties/${viewing.propertyId}`);
+  }
+  revalidatePath('/admin/contacts');
+}
+
+export async function updateViewingStatus(
+  viewingId: string,
+  status: z.infer<typeof viewingStatusSchema>,
+  reason?: string | null
+) {
+  const parsed = z.object({
+    viewingId: z.string().min(1),
+    status: viewingStatusSchema,
+    reason: z.string().trim().max(500).optional().nullable(),
+  }).safeParse({ viewingId, status, reason });
+
+  if (!parsed.success) {
+    return { success: false, message: 'Invalid viewing status update.' };
+  }
+
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+  const internalUserId = dbUser?.id || null;
+
+  try {
+    const context = await getViewingMutationContext(parsed.data.viewingId, userId);
+    if (!context.ok) {
+      return { success: false, message: context.message };
+    }
+    const existingViewing = context.viewing;
+
+    await db.viewing.update({
+      where: { id: parsed.data.viewingId },
+      data: {
+        status: parsed.data.status,
+        syncVersion: { increment: 1 },
+      }
+    });
+
+    if (existingViewing.contactId) {
+      await logContactHistory(db, existingViewing.contactId, internalUserId, 'VIEWING_STATUS_UPDATED', {
+        viewingId: existingViewing.id,
+        previousStatus: existingViewing.status,
+        status: parsed.data.status,
+        reason: parsed.data.reason || null,
+        property: existingViewing.property?.reference || existingViewing.property?.title || null,
+        date: existingViewing.date.toISOString(),
+        scheduledLocal: existingViewing.scheduledLocal,
+        timeZone: existingViewing.scheduledTimeZone,
+      });
+    }
+
+    revalidateViewingMutationPaths(existingViewing);
+
+    return { success: true, message: 'Viewing status updated.' };
+  } catch (error: any) {
+    console.error('Failed to update viewing status:', error);
+    return { success: false, message: `Failed to update viewing status: ${error?.message || String(error)}` };
+  }
+}
+
+const viewingFeedbackSchema = z.object({
+  viewingId: z.string().min(1),
+  overallRating: z.coerce.number().int().min(1).max(5).optional().nullable(),
+  interestedInOffer: z.enum(['yes', 'no', 'maybe', 'unknown']).default('unknown'),
+  liked: z.string().trim().max(1000).optional().nullable(),
+  disliked: z.string().trim().max(1000).optional().nullable(),
+  comments: z.string().trim().max(2000).optional().nullable(),
+});
+
+export async function updateViewingFeedback(input: z.input<typeof viewingFeedbackSchema>) {
+  const parsed = viewingFeedbackSchema.safeParse(input || {});
+
+  if (!parsed.success) {
+    return { success: false, message: 'Invalid viewing feedback.' };
+  }
+
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+  const internalUserId = dbUser?.id || null;
+
+  try {
+    const context = await getViewingMutationContext(parsed.data.viewingId, userId);
+    if (!context.ok) {
+      return { success: false, message: context.message };
+    }
+    const existingViewing = context.viewing;
+
+    const feedback = {
+      overallRating: parsed.data.overallRating || null,
+      interestedInOffer: parsed.data.interestedInOffer,
+      liked: parsed.data.liked || null,
+      disliked: parsed.data.disliked || null,
+      comments: parsed.data.comments || null,
+      recordedAt: new Date().toISOString(),
+      recordedByUserId: internalUserId,
+    };
+
+    await db.viewing.update({
+      where: { id: parsed.data.viewingId },
+      data: {
+        feedback,
+        feedbackReceived: true,
+        syncVersion: { increment: 1 },
+      }
+    });
+
+    if (existingViewing.contactId) {
+      await logContactHistory(db, existingViewing.contactId, internalUserId, 'VIEWING_FEEDBACK_UPDATED', {
+        viewingId: existingViewing.id,
+        property: existingViewing.property?.reference || existingViewing.property?.title || null,
+        date: existingViewing.date.toISOString(),
+        scheduledLocal: existingViewing.scheduledLocal,
+        timeZone: existingViewing.scheduledTimeZone,
+        feedback,
+      });
+    }
+
+    revalidateViewingMutationPaths(existingViewing);
+
+    return { success: true, message: 'Viewing feedback saved.' };
+  } catch (error: any) {
+    console.error('Failed to update viewing feedback:', error);
+    return { success: false, message: `Failed to update viewing feedback: ${error?.message || String(error)}` };
   }
 }
 
