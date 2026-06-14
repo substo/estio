@@ -391,12 +391,13 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                 />
             ) : (
                 <div className="min-w-0 overflow-x-auto rounded-lg border">
-                    <table className="w-full min-w-[1180px] table-fixed text-left text-sm">
+                    <table className="w-full min-w-[1292px] table-fixed text-left text-sm">
                     <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
                             <th className="w-[144px] p-4">Date</th>
                             <th className="w-[180px] p-4">Name</th>
-                            <th className="w-[220px] p-4">Contact</th>
+                            <th className="w-[220px] p-4">Contact Info</th>
+                            <th className="w-[112px] p-4">Type</th>
                             <th className="w-[320px] p-4">Roles & Properties</th>
                             <th className="w-[96px] p-4">Score</th>
                             <th className="w-[120px] p-4">Status</th>
@@ -407,7 +408,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                     <tbody>
                         {contacts.length === 0 ? (
                             <tr>
-                                <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                                <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                     No contacts found matching your criteria.
                                 </td>
                             </tr>

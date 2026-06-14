@@ -5,8 +5,10 @@ import { LeadSourceBadge } from './lead-source-badge';
 import { LeadScoreBadge } from './lead-score-badge';
 import { Building2, MessageCircle, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { EditContactDialog } from './edit-contact-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType } from './contact-types';
 
 interface PipelineCardProps {
     contact: any;
@@ -17,6 +19,8 @@ interface PipelineCardProps {
 
 export function PipelineCard({ contact, leadSources, isGoogleConnected, isGhlConnected }: PipelineCardProps) {
     const unreadCount = contact.conversations?.[0]?.unreadCount || 0;
+    const contactType = isKnownContactType(contact.contactType) ? contact.contactType : DEFAULT_CONTACT_TYPE;
+    const contactTypeLabel = CONTACT_TYPE_CONFIG[contactType].label;
 
     return (
         <div className="bg-white dark:bg-gray-950 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow hover:border-gray-300 dark:hover:border-gray-700 p-3 group">
@@ -65,6 +69,9 @@ export function PipelineCard({ contact, leadSources, isGoogleConnected, isGhlCon
 
             <div className="flex justify-between items-end mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
                 <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                        {contactTypeLabel}
+                    </Badge>
                     {contact.leadSource && <LeadSourceBadge source={contact.leadSource} size="xs" />}
                     
                     {unreadCount > 0 && (

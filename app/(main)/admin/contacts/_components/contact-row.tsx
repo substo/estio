@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertTriangle, Link as LinkIcon, Link2, MessageCircle, MessageCirclePlus, RefreshCw } from "lucide-react";
 import { GoogleSyncManager } from "./google-sync-manager";
@@ -14,6 +15,7 @@ import { openOrStartConversationForContact } from "../actions";
 import { LeadSourceBadge } from "./lead-source-badge";
 import { LeadScoreBadge } from "./lead-score-badge";
 import { canStartContactConversation } from "@/lib/contacts/conversation-start";
+import { CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType } from "./contact-types";
 
 interface ContactRowProps {
     contact: ContactData & {
@@ -63,6 +65,8 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
     const conversation = contact.conversations?.[0];
     const hasConversation = !!conversation?.id;
     const canStartConversation = canStartContactConversation(contact);
+    const contactType = isKnownContactType(contact.contactType) ? contact.contactType : DEFAULT_CONTACT_TYPE;
+    const contactTypeLabel = CONTACT_TYPE_CONFIG[contactType].label;
     const getConversationHref = (conversationId: string) => {
         const params = new URLSearchParams({
             id: conversationId,
@@ -125,6 +129,11 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         <span className="truncate" title={contact.email || undefined}>{contact.email || "-"}</span>
                         <span className="truncate text-xs text-gray-500" title={contact.phone || undefined}>{contact.phone || "-"}</span>
                     </div>
+                </td>
+                <td className="w-[112px] p-4 align-top">
+                    <Badge variant="outline" className="whitespace-nowrap">
+                        {contactTypeLabel}
+                    </Badge>
                 </td>
                 <td className="w-[320px] p-4 align-top">
                     <div className="flex max-w-[320px] flex-col gap-1">
