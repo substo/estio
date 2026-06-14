@@ -61,6 +61,8 @@ const VIEWING_DURATION_DEFAULT = 30;
 const VIEWING_DURATION_STEP = 15;
 const VIEWING_DURATION_MIN = 15;
 const VIEWING_DURATION_MAX = 480;
+const VIEWING_PRIMARY_ACTION_CLASS = "h-8 min-w-0 justify-center px-2 text-[11px] [&>svg]:mr-1.5 [&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg]:shrink-0";
+const VIEWING_ICON_ACTION_CLASS = "h-8 w-8 text-muted-foreground";
 const VIEWING_STATUS_OPTIONS = [
     { value: 'scheduled', label: 'Scheduled' },
     { value: 'confirmed', label: 'Confirmed' },
@@ -813,27 +815,27 @@ export function ContactViewingManager({
                         const reminderBadges = buildReminderBadges(viewing.reminders);
 
                         return (
-                            <div key={viewing.id} className="rounded-md border bg-card p-2.5 text-xs space-y-1.5">
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="font-medium text-sm text-foreground">{viewing.title || propertyName}</span>
+                            <div key={viewing.id} className="space-y-2 overflow-hidden rounded-md border bg-card p-2.5 text-xs">
+                                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="flex min-w-0 flex-col gap-0.5">
+                                        <span className="break-words text-sm font-medium text-foreground">{viewing.title || propertyName}</span>
                                         <span className="text-muted-foreground">{viewing.user.name}</span>
                                     </div>
 
                                     {isEditing && (
-                                        <div className="flex items-center gap-1">
+                                        <div className="grid w-full min-w-0 grid-cols-2 gap-1.5 sm:w-auto sm:max-w-[420px] sm:grid-cols-3 lg:flex lg:flex-wrap lg:justify-end">
                                             <Button
                                                 type="button"
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-6 px-2 text-[10px]"
+                                                className={VIEWING_PRIMARY_ACTION_CLASS}
                                                 onClick={() => handleStartLiveSession(viewing.id)}
                                                 disabled={startingLiveViewingId === viewing.id}
                                             >
                                                 {startingLiveViewingId === viewing.id ? (
-                                                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                    <Loader2 className="animate-spin" />
                                                 ) : (
-                                                    <Radio className="mr-1 h-3 w-3" />
+                                                    <Radio />
                                                 )}
                                                 Live
                                             </Button>
@@ -844,124 +846,126 @@ export function ContactViewingManager({
                                                 quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.viewing}
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-6 px-2 text-[10px]"
+                                                className={VIEWING_PRIMARY_ACTION_CLASS}
                                                 icon="mic"
                                             />
                                             <Button
                                                 type="button"
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-6 px-2 text-[10px]"
+                                                className={VIEWING_PRIMARY_ACTION_CLASS}
                                                 onClick={() => handleGenerateReminderDraft(viewing.id, 'lead')}
                                                 disabled={draftingViewingKey === `${viewing.id}:lead`}
                                             >
                                                 {draftingViewingKey === `${viewing.id}:lead`
-                                                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                                    : <MessageSquareText className="mr-1 h-3 w-3" />}
+                                                    ? <Loader2 className="animate-spin" />
+                                                    : <MessageSquareText />}
                                                 Lead Draft
                                             </Button>
                                             <Button
                                                 type="button"
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-6 px-2 text-[10px]"
+                                                className={VIEWING_PRIMARY_ACTION_CLASS}
                                                 onClick={() => handleGenerateReminderDraft(viewing.id, 'owner')}
                                                 disabled={draftingViewingKey === `${viewing.id}:owner`}
                                             >
                                                 {draftingViewingKey === `${viewing.id}:owner`
-                                                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                                    : <Navigation className="mr-1 h-3 w-3" />}
+                                                    ? <Loader2 className="animate-spin" />
+                                                    : <Navigation />}
                                                 Owner Draft
                                             </Button>
                                             <Button
                                                 type="button"
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-6 px-2 text-[10px]"
+                                                className={VIEWING_PRIMARY_ACTION_CLASS}
                                                 onClick={() => handleQueueLeadReminders(viewing.id)}
                                                 disabled={queueingViewingId === viewing.id}
                                             >
                                                 {queueingViewingId === viewing.id
-                                                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                                    : <Clock3 className="mr-1 h-3 w-3" />}
+                                                    ? <Loader2 className="animate-spin" />
+                                                    : <Clock3 />}
                                                 Queue Lead
                                             </Button>
-                                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary" onClick={() => void handleEdit(viewing)}>
-                                                <Pencil className="h-3.5 w-3.5" />
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-6 w-6 text-muted-foreground hover:text-primary"
-                                                onClick={() => void handleEdit(viewing)}
-                                                title="Reschedule"
-                                            >
-                                                <Clock3 className="h-3.5 w-3.5" />
-                                            </Button>
-                                            {!isCompleted && !isCancelled && !isNoShow ? (
+                                            <div className="col-span-2 flex min-w-0 items-center justify-end gap-1 sm:col-span-1">
+                                                <Button type="button" variant="ghost" size="icon" className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-primary")} onClick={() => void handleEdit(viewing)} title="Edit details">
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </Button>
                                                 <Button
                                                     type="button"
                                                     variant="ghost"
                                                     size="icon"
-                                                    className="h-6 w-6 text-muted-foreground hover:text-emerald-600"
-                                                    onClick={() => void applyViewingStatus(viewing.id, 'completed')}
-                                                    disabled={isStatusUpdating}
-                                                    title="Mark completed"
+                                                    className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-primary")}
+                                                    onClick={() => void handleEdit(viewing)}
+                                                    title="Reschedule"
                                                 >
-                                                    {isStatusUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                                    <Clock3 className="h-3.5 w-3.5" />
                                                 </Button>
-                                            ) : null}
-                                            {!isCancelled && !isCompleted ? (
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                                                    onClick={() => requestViewingStatusChange(viewing.id, 'cancelled')}
-                                                    disabled={isStatusUpdating}
-                                                    title="Cancel viewing"
-                                                >
-                                                    <Ban className="h-3.5 w-3.5" />
+                                                {!isCompleted && !isCancelled && !isNoShow ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-emerald-600")}
+                                                        onClick={() => void applyViewingStatus(viewing.id, 'completed')}
+                                                        disabled={isStatusUpdating}
+                                                        title="Mark completed"
+                                                    >
+                                                        {isStatusUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                                    </Button>
+                                                ) : null}
+                                                {!isCancelled && !isCompleted ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-destructive")}
+                                                        onClick={() => requestViewingStatusChange(viewing.id, 'cancelled')}
+                                                        disabled={isStatusUpdating}
+                                                        title="Cancel viewing"
+                                                    >
+                                                        <Ban className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                ) : null}
+                                                {!isNoShow && !isCancelled && !isCompleted ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-amber-600")}
+                                                        onClick={() => requestViewingStatusChange(viewing.id, 'no_show')}
+                                                        disabled={isStatusUpdating}
+                                                        title="Mark no-show"
+                                                    >
+                                                        <Minus className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                ) : null}
+                                                {isCompleted ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-primary")}
+                                                        onClick={() => openFeedbackDialog(viewing)}
+                                                        title={hasFeedback ? 'Edit feedback' : 'Add feedback'}
+                                                    >
+                                                        <MessageSquareText className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                ) : null}
+                                                <Button type="button" variant="ghost" size="icon" className={cn(VIEWING_ICON_ACTION_CLASS, "hover:text-destructive")} onClick={() => handleDelete(viewing.id)} title="Delete viewing">
+                                                    <Trash2 className="h-3.5 w-3.5" />
                                                 </Button>
-                                            ) : null}
-                                            {!isNoShow && !isCancelled && !isCompleted ? (
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 text-muted-foreground hover:text-amber-600"
-                                                    onClick={() => requestViewingStatusChange(viewing.id, 'no_show')}
-                                                    disabled={isStatusUpdating}
-                                                    title="Mark no-show"
-                                                >
-                                                    <Minus className="h-3.5 w-3.5" />
-                                                </Button>
-                                            ) : null}
-                                            {isCompleted ? (
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 text-muted-foreground hover:text-primary"
-                                                    onClick={() => openFeedbackDialog(viewing)}
-                                                    title={hasFeedback ? 'Edit feedback' : 'Add feedback'}
-                                                >
-                                                    <MessageSquareText className="h-3.5 w-3.5" />
-                                                </Button>
-                                            ) : null}
-                                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(viewing.id)}>
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                            </Button>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
 
                                 {viewing.description && (
-                                    <div className="text-muted-foreground whitespace-pre-wrap text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded p-1.5 pt-0 mt-0">{viewing.description}</div>
+                                    <div className="break-words whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 p-1.5 pt-0 text-[11px] text-muted-foreground dark:border-slate-800 dark:bg-slate-900">{viewing.description}</div>
                                 )}
                                 {!viewing.description && viewing.notes && (
-                                    <div className="text-muted-foreground whitespace-pre-wrap text-[11px] bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded p-1.5 pt-0 mt-0">{viewing.notes}</div>
+                                    <div className="break-words whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 p-1.5 pt-0 text-[11px] text-muted-foreground dark:border-slate-800 dark:bg-slate-900">{viewing.notes}</div>
                                 )}
 
                                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
