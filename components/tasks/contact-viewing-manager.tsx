@@ -100,8 +100,12 @@ type ReminderBadge = {
     tone: string;
     title?: string;
 };
+type ContactViewingsResult = Awaited<ReturnType<typeof getContactViewings>>;
 type ViewingFormOptions = Awaited<ReturnType<typeof getViewingFormOptions>>;
 type ViewingFormUser = ViewingFormOptions['users'][number];
+
+const contactViewingsCache = new Map<string, ContactViewingsResult>();
+const contactViewingsRequestCache = new Map<string, Promise<ContactViewingsResult>>();
 
 function formatDueLabel(input?: Date | string | null) {
     if (!input) return null;
@@ -220,6 +224,20 @@ function getViewingUserTimeZone(users: ViewingFormUser[], userId?: string | null
     return user?.effectiveTimeZone || user?.timeZone || null;
 }
 
+function applyContactViewingsResult(
+    result: ContactViewingsResult,
+    setters: {
+        setViewings: (viewings: any[]) => void;
+        setDefaultUserId: (userId: string) => void;
+        setInterestedProps: (propertyIds: string[]) => void;
+    }
+) {
+    const res = result || { viewings: [], currentUserId: null, interestedProperties: [] };
+    setters.setViewings((res.viewings || []).map(normalizeViewing));
+    if (res.currentUserId) setters.setDefaultUserId(res.currentUserId);
+    if (res.interestedProperties) setters.setInterestedProps(res.interestedProperties);
+}
+
 export function ContactViewingManager({
     contactId,
     locationId,
@@ -295,26 +313,47 @@ export function ContactViewingManager({
     const formOptionsRequestRef = useRef<Promise<ViewingFormOptions | null> | null>(null);
     const browserTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
 
-    const loadData = useCallback(async (options?: { silent?: boolean }) => {
+    const loadData = useCallback(async (options?: { silent?: boolean; force?: boolean }) => {
         const silent = options?.silent ?? false;
+        const force = options?.force ?? false;
         const requestId = ++loadRequestIdRef.current;
 
-        if (!silent) setLoading(true);
+        if (force && contactId) {
+            contactViewingsCache.delete(contactId);
+        }
+
+        const cached = contactId && !force ? contactViewingsCache.get(contactId) : null;
+        if (cached) {
+            applyContactViewingsResult(cached, { setViewings, setDefaultUserId, setInterestedProps });
+            setError(null);
+            setLoading(false);
+        } else if (!silent) {
+            setLoading(true);
+        }
 
         try {
             const viewingsRes = contactId
-                ? await getContactViewings(contactId)
+                ? await (() => {
+                    const existingRequest = force ? null : contactViewingsRequestCache.get(contactId);
+                    if (existingRequest) return existingRequest;
+
+                    const request = getContactViewings(contactId)
+                        .then((result) => {
+                            contactViewingsCache.set(contactId, result);
+                            return result;
+                        })
+                        .finally(() => {
+                            contactViewingsRequestCache.delete(contactId);
+                        });
+                    contactViewingsRequestCache.set(contactId, request);
+                    return request;
+                })()
                 : { viewings: [], currentUserId: null, interestedProperties: [] };
 
             if (requestId !== loadRequestIdRef.current) return;
 
-            const res = viewingsRes || { viewings: [], currentUserId: null, interestedProperties: [] };
-            setViewings((res.viewings || []).map(normalizeViewing));
+            applyContactViewingsResult(viewingsRes, { setViewings, setDefaultUserId, setInterestedProps });
             setError(null);
-
-            // Set Defaults
-            if (res.currentUserId) setDefaultUserId(res.currentUserId);
-            if (res.interestedProperties) setInterestedProps(res.interestedProperties);
         } catch (e: any) {
             if (requestId !== loadRequestIdRef.current) return;
             setError(e?.message || 'Failed to load viewings');
@@ -456,7 +495,7 @@ export function ContactViewingManager({
 
             if (result.success) {
                 setModalOpen(false);
-                void loadData({ silent: true });
+                void loadData({ silent: true, force: true });
                 // Don't fully reset form — let onOpen logic handle defaults next time
             } else {
                 setError(result.message || 'Operation failed');
@@ -514,7 +553,7 @@ export function ContactViewingManager({
             const result = await updateViewingStatus(viewingId, status, reason || null);
             if (result.success) {
                 toast.success(result.message || 'Viewing status updated');
-                void loadData({ silent: true });
+                void loadData({ silent: true, force: true });
             } else {
                 setError(result.message || 'Failed to update viewing status.');
             }
@@ -572,7 +611,7 @@ export function ContactViewingManager({
             if (result.success) {
                 toast.success(result.message || 'Viewing feedback saved');
                 setFeedbackDraft(null);
-                void loadData({ silent: true });
+                void loadData({ silent: true, force: true });
             } else {
                 setError(result.message || 'Failed to save viewing feedback.');
             }
@@ -589,7 +628,7 @@ export function ContactViewingManager({
         try {
             const result = await deleteViewing(viewingToDeleteId);
             if (result.success) {
-                void loadData({ silent: true });
+                void loadData({ silent: true, force: true });
             } else {
                 setError(result.message || 'Failed to delete viewing.');
             }
@@ -740,7 +779,7 @@ export function ContactViewingManager({
             } else if (skippedCount > 0) {
                 toast.message('Lead reminders were already past due for this viewing');
             }
-            void loadData({ silent: true });
+            void loadData({ silent: true, force: true });
         } catch (queueError: any) {
             setError(queueError?.message || 'Failed to queue lead reminders.');
         } finally {

@@ -155,14 +155,25 @@ export async function getContactViewings(contactId: string) {
         const { userId } = await auth();
         if (!userId) return { viewings: [], currentUserId: null, interestedProperties: [] };
 
-        const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+        const [dbUser, contact] = await Promise.all([
+            db.user.findUnique({
+                where: { clerkId: userId },
+                select: {
+                    id: true,
+                    locations: { select: { id: true } },
+                },
+            }),
+            db.contact.findUnique({
+                where: { id: contactId },
+                select: { locationId: true, propertiesInterested: true }
+            }),
+        ]);
         const internalUserId = dbUser?.id || null;
+        const hasLocationAccess = Boolean(
+            contact?.locationId && dbUser?.locations?.some((location) => location.id === contact.locationId)
+        );
 
-        const contact = await db.contact.findUnique({
-            where: { id: contactId },
-            select: { locationId: true, propertiesInterested: true }
-        });
-        if (!contact?.locationId || !(await verifyUserHasAccessToLocation(userId, contact.locationId))) {
+        if (!hasLocationAccess) {
             return { viewings: [], currentUserId: internalUserId, interestedProperties: [] };
         }
 

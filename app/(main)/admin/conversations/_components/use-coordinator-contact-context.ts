@@ -41,7 +41,7 @@ export function useCoordinatorContactContext({
     const [loadedSidebarTabs, setLoadedSidebarTabs] = useState<LoadedSidebarTabs>({
         overview: true,
         tasks: !lazySidebarDataEnabled,
-        viewings: !lazySidebarDataEnabled,
+        viewings: true,
     });
     const conversationIdRef = useRef(conversationId);
 
@@ -54,7 +54,7 @@ export function useCoordinatorContactContext({
             setLoadedSidebarTabs({ overview: true, tasks: true, viewings: true });
             return;
         }
-        setLoadedSidebarTabs((prev) => ({ ...prev, [sidebarTab]: true }));
+        setLoadedSidebarTabs((prev) => ({ ...prev, viewings: true, [sidebarTab]: true }));
     }, [sidebarTab, lazySidebarDataEnabled]);
 
     useEffect(() => {

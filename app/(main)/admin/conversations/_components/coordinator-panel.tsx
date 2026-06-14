@@ -125,6 +125,7 @@ export function CoordinatorPanel({
     });
     const taskOpenCount = Number(initialTaskSummary?.open || 0);
     const upcomingViewingCount = Number(initialViewingSummary?.upcoming || 0);
+    const sidebarContactId = contactContext?.contact?.id || conversation.contactId || '';
     const planProgressLabel = initialAgentSummary?.hasPlan
         ? `${Number(initialAgentSummary?.completedPlanSteps || 0)}/${Number(initialAgentSummary?.totalPlanSteps || 0)}`
         : null;
@@ -314,7 +315,7 @@ export function CoordinatorPanel({
                     <Card className="shadow-none border-border/50">
                         <CardContent className="p-3">
                             <ContactTaskManager
-                                contactId={contactContext?.contact?.id || ''}
+                                contactId={sidebarContactId}
                                 conversationId={conversation.id}
                                 compact
                                 title="Contact Tasks"
@@ -329,7 +330,7 @@ export function CoordinatorPanel({
                     <Card className="shadow-none border-border/50">
                         <CardContent className="p-3">
                             <ContactViewingManager
-                                contactId={contactContext?.contact?.id || ''}
+                                contactId={sidebarContactId}
                                 locationId={locationId}
                                 compact
                                 title="Property Viewings"
