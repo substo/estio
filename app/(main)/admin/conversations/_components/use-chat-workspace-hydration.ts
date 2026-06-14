@@ -20,7 +20,6 @@ import {
     fetchMessages,
     getConversationWorkspaceCore,
     getConversationWorkspaceSidebar,
-    getContactContext,
     refreshConversation,
     refreshConversationOnDemand,
 } from '../actions';
@@ -28,6 +27,7 @@ import { toast } from '@/components/ui/use-toast';
 import { buildContactContextShell, isShellContactContext } from './conversation-workspace-ui-actions';
 import { getMessageSignature } from './conversation-transcript-actions';
 import { fetchConversationMessageWindow } from './conversation-message-window-client';
+import { loadContactContext } from './contact-context-client';
 
 export type WorkspaceSidebarSnapshot = {
     contactContext: any;
@@ -595,7 +595,7 @@ export function useChatWorkspaceHydration({
                 contactContextInFlightRef.current.add(contactIdForFastPath);
                 const contactStartedAtMs = Date.now();
                 try {
-                    const contactContext = await getContactContext(contactIdForFastPath, { refreshExternal: false });
+                    const contactContext = await loadContactContext(contactIdForFastPath, { refreshExternal: false });
                     if (cancelled || activeIdRef.current !== selectedConversationId || !contactContext?.contact) return;
                     setWorkspaceContactContext((current: any) => (
                         !current || isShellContactContext(current) ? contactContext : current

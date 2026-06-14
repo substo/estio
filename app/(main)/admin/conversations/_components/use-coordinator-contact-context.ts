@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
-import { getContactContext } from "../actions";
+import { loadContactContext } from "./contact-context-client";
 import { hasFullContactContext, isShellContactContext } from "./conversation-workspace-ui-actions";
 
 export type CoordinatorSidebarTab = "overview" | "tasks" | "viewings";
@@ -81,11 +81,11 @@ export function useCoordinatorContactContext({
         }
 
         let cancelled = false;
-        const fetchDelayMs = hasShellContext && lazySidebarDataEnabled ? 1200 : hasShellContext ? 0 : 150;
+        const fetchDelayMs = hasShellContext ? 0 : 150;
         const fetchTimer = setTimeout(() => {
             if (cancelled) return;
             setLoadingContext(true);
-            getContactContext(contactId, { refreshExternal: false })
+            loadContactContext(contactId, { refreshExternal: false })
                 .then(data => {
                     if (!cancelled) setContactContext(data);
                 })
@@ -122,7 +122,7 @@ export function useCoordinatorContactContext({
         if (!sourceContactId) return;
 
         try {
-            const refreshed = await getContactContext(sourceContactId);
+            const refreshed = await loadContactContext(sourceContactId);
             if (conversationIdRef.current !== sourceConversationId || !refreshed) return;
 
             setContactContext(refreshed);
