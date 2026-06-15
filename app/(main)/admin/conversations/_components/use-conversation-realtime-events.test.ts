@@ -229,6 +229,33 @@ test('message.inbound active conversation appends and refreshes', () => {
 
     assert.equal(harness.messages.length, 1);
     assert.equal(harness.messages[0].id, 'msg-in-1');
+    assert.equal(harness.messages[0].conversationId, 'conv-1');
+    assert.equal((harness.cachedSnapshot as any).messages.length, 1);
+    assert.deepEqual(harness.calls, ['cache:1', 'refresh:conv-1']);
+});
+
+test('message.inbound active conversation appends with provider id when local message id is absent', () => {
+    const harness = createHarness({
+        activeId: 'conv-1',
+        cachedSnapshot: { messages: [] },
+    });
+
+    harness.route({
+        id: 'evt-inbound-provider-only',
+        type: 'message.inbound',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:00.000Z',
+        payload: {
+            providerMessageId: 'wam-provider-only-1',
+            body: 'hello from whatsapp',
+            createdAt: '2026-05-24T10:00:00.000Z',
+        },
+    });
+
+    assert.equal(harness.messages.length, 1);
+    assert.equal(harness.messages[0].id, 'wam-provider-only-1');
+    assert.equal((harness.messages[0] as any).wamId, 'wam-provider-only-1');
+    assert.equal(harness.messages[0].conversationId, 'conv-1');
     assert.equal((harness.cachedSnapshot as any).messages.length, 1);
     assert.deepEqual(harness.calls, ['cache:1', 'refresh:conv-1']);
 });

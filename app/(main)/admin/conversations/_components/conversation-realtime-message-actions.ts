@@ -31,8 +31,9 @@ export type InboundRealtimePayload = {
 };
 
 export type InboundRealtimeCorrelation = {
-    messageId: string;
-    wamId: string;
+    messageId?: string | null;
+    wamId?: string | null;
+    clientMessageId?: string | null;
 };
 
 export function normalizeRealtimeMessagePatchPayload(payload: Record<string, unknown>): RealtimeMessagePatchPayload {
@@ -107,21 +108,44 @@ export function applyRealtimeMessagePatchToMessages(
 }
 
 export function normalizeInboundRealtimePayload(payload: Record<string, unknown>): InboundRealtimePayload {
+    const messageId = String(
+        payload?.messageId
+        || payload?.id
+        || payload?.message_id
+        || payload?.localMessageId
+        || ""
+    ).trim();
+    const wamId = String(
+        payload?.wamId
+        || payload?.wam_id
+        || payload?.providerMessageId
+        || payload?.provider_message_id
+        || payload?.externalMessageId
+        || ""
+    ).trim();
+    const clientMessageId = String(
+        payload?.clientMessageId
+        || payload?.client_message_id
+        || ""
+    ).trim();
+
     return {
-        messageId: String(payload?.messageId || "").trim(),
-        clientMessageId: String(payload?.clientMessageId || "").trim(),
-        wamId: String(payload?.wamId || "").trim(),
+        messageId,
+        clientMessageId,
+        wamId,
         body: String(payload?.body ?? ""),
         createdAt: String(payload?.createdAt || new Date().toISOString()),
     };
 }
 
-export function buildOptimisticInboundMessage(payload: InboundRealtimePayload): Message {
+export function buildOptimisticInboundMessage(payload: InboundRealtimePayload, conversationId = ""): Message {
+    const fallbackId = payload.messageId || payload.wamId || payload.clientMessageId;
+
     return {
-        id: payload.messageId,
+        id: fallbackId,
         wamId: payload.wamId || undefined,
         clientMessageId: payload.clientMessageId || undefined,
-        conversationId: "",
+        conversationId,
         contactId: "",
         body: payload.body,
         type: "WhatsApp",
@@ -138,10 +162,15 @@ export function appendInboundMessageIfMissing(
     optimisticMessage: Message,
     correlation: InboundRealtimeCorrelation
 ): Message[] {
-    if (!correlation.messageId) return messages;
+    const messageId = String(correlation.messageId || "").trim();
+    const wamId = String(correlation.wamId || "").trim();
+    const clientMessageId = String(correlation.clientMessageId || "").trim();
+    if (!messageId && !wamId && !clientMessageId) return messages;
+
     if (messages.some((message) => (
-        message.id === correlation.messageId
-        || (correlation.wamId && (message as any).wamId === correlation.wamId)
+        (messageId && message.id === messageId)
+        || (wamId && (message as any).wamId === wamId)
+        || (clientMessageId && (message as any).clientMessageId === clientMessageId)
     ))) {
         return messages;
     }

@@ -143,8 +143,8 @@ export function routeConversationRealtimeEnvelope({
     if (viewMode === "chats" && conversationId && eventType === "message.inbound") {
         const payload = normalizeInboundRealtimePayload(parseRealtimePayload(event));
 
-        if (conversationId === activeIdRef.current && payload.messageId) {
-            const optimisticMessage = buildOptimisticInboundMessage(payload);
+        if (conversationId === activeIdRef.current && (payload.messageId || payload.wamId || payload.clientMessageId)) {
+            const optimisticMessage = buildOptimisticInboundMessage(payload, conversationId);
 
             setMessages((prev) => {
                 return appendInboundMessageIfMissing(prev, optimisticMessage, payload);

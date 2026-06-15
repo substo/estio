@@ -167,13 +167,13 @@ test('buildOptimisticInboundMessage builds optimistic inbound WhatsApp message w
         createdAt: '2026-05-24T10:00:00.000Z',
     });
 
-    const optimistic = buildOptimisticInboundMessage(payload);
+    const optimistic = buildOptimisticInboundMessage(payload, 'conv-1');
 
     assert.deepEqual(optimistic, {
         id: 'msg-in-1',
         wamId: 'wam-in-1',
         clientMessageId: 'cmid-in-1',
-        conversationId: '',
+        conversationId: 'conv-1',
         contactId: '',
         body: 'hello inbound',
         type: 'WhatsApp',
@@ -183,6 +183,38 @@ test('buildOptimisticInboundMessage builds optimistic inbound WhatsApp message w
         dateAdded: '2026-05-24T10:00:00.000Z',
         attachments: [],
     } as Message);
+});
+
+test('normalizeInboundRealtimePayload accepts provider id aliases', () => {
+    const payload = normalizeInboundRealtimePayload({
+        id: 'msg-alias-1',
+        providerMessageId: 'wam-alias-1',
+        client_message_id: 'cmid-alias-1',
+        body: 'hello aliases',
+        createdAt: '2026-05-24T10:00:00.000Z',
+    });
+
+    assert.deepEqual(payload, {
+        messageId: 'msg-alias-1',
+        wamId: 'wam-alias-1',
+        clientMessageId: 'cmid-alias-1',
+        body: 'hello aliases',
+        createdAt: '2026-05-24T10:00:00.000Z',
+    });
+});
+
+test('buildOptimisticInboundMessage falls back to wamId when local messageId is absent', () => {
+    const payload = normalizeInboundRealtimePayload({
+        wamId: 'wam-only-1',
+        body: 'hello by provider id',
+        createdAt: '2026-05-24T10:00:00.000Z',
+    });
+
+    const optimistic = buildOptimisticInboundMessage(payload, 'conv-1');
+
+    assert.equal(optimistic.id, 'wam-only-1');
+    assert.equal((optimistic as any).wamId, 'wam-only-1');
+    assert.equal(optimistic.conversationId, 'conv-1');
 });
 
 test('appendInboundMessageIfMissing skips append when id exists', () => {
@@ -209,6 +241,17 @@ test('appendInboundMessageIfMissing skips append when wamId exists', () => {
     assert.deepEqual(result, [existing]);
 });
 
+test('appendInboundMessageIfMissing skips append when clientMessageId exists', () => {
+    const existing = message({ id: 'msg-existing', direction: 'inbound', clientMessageId: 'cmid-in-1' });
+    const optimistic = message({ id: 'msg-in-1', direction: 'inbound', clientMessageId: 'cmid-in-1' });
+
+    const result = appendInboundMessageIfMissing([existing], optimistic, {
+        clientMessageId: 'cmid-in-1',
+    });
+
+    assert.deepEqual(result, [existing]);
+});
+
 test('appendInboundMessageIfMissing appends when missing', () => {
     const existing = message({ id: 'msg-existing', direction: 'inbound', wamId: 'wam-existing' });
     const optimistic = message({ id: 'msg-in-1', direction: 'inbound', wamId: 'wam-in-1' });
@@ -221,13 +264,21 @@ test('appendInboundMessageIfMissing appends when missing', () => {
     assert.deepEqual(result, [existing, optimistic]);
 });
 
-test('appendInboundMessageIfMissing handles missing messageId as not appendable', () => {
-    const optimistic = message({ id: '', direction: 'inbound', wamId: 'wam-in-1' });
+test('appendInboundMessageIfMissing appends with wamId when messageId is missing', () => {
+    const optimistic = message({ id: 'wam-in-1', direction: 'inbound', wamId: 'wam-in-1' });
 
     const result = appendInboundMessageIfMissing([], optimistic, {
         messageId: '',
         wamId: 'wam-in-1',
     });
+
+    assert.deepEqual(result, [optimistic]);
+});
+
+test('appendInboundMessageIfMissing handles missing correlation as not appendable', () => {
+    const optimistic = message({ id: '', direction: 'inbound' });
+
+    const result = appendInboundMessageIfMissing([], optimistic, {});
 
     assert.deepEqual(result, []);
 });
