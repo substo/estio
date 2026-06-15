@@ -31,6 +31,7 @@ import {
 import { getConversationChannelInfo } from "./conversation-channel-info";
 import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
 import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
+import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -47,6 +48,7 @@ interface ChatWindowProps {
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
             translationDetectedSourceLanguage?: string | null;
+            agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
         }
     ) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
@@ -72,7 +74,7 @@ interface ChatWindowProps {
         draftLanguage?: string | null,
         baseDraft?: string | null,
         onChunk?: (chunk: string) => void
-    ) => Promise<string | null>;
+    ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{
         success: boolean;

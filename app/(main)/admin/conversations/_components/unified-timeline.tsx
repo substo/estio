@@ -18,6 +18,7 @@ import {
 } from './message-bubble-theme';
 import { cn } from '@/lib/utils';
 import type { ComposerChannel } from './use-conversation-composer-translation-preview';
+import type { ComposerAiDraftFeedback, GenerateDraftResult } from './conversation-draft-generation';
 import { getConversationChannelInfo } from './conversation-channel-info';
 import { MessageImageGroup } from "./message-image-group";
 import { groupAdjacentWhatsAppImageMessages } from "./message-image-grouping";
@@ -39,6 +40,7 @@ interface UnifiedTimelineProps {
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
             translationDetectedSourceLanguage?: string | null;
+            agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
         }
     ) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
@@ -48,7 +50,7 @@ interface UnifiedTimelineProps {
         draftLanguage?: string | null,
         baseDraft?: string | null,
         onChunk?: (chunk: string) => void
-    ) => Promise<string | null>;
+    ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onPreviewTranslatedReply?: (
         sourceText: string,

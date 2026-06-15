@@ -1,6 +1,7 @@
 import { type RefObject, useState } from "react";
 import { type ComposerChannel } from "./use-conversation-composer-translation-preview";
 import { languagesMatch } from "@/lib/conversations/language-context";
+import type { ComposerAiDraftFeedback } from "./conversation-draft-generation";
 
 type PreviewTranslatedReply = (
     sourceText: string,
@@ -19,6 +20,7 @@ type SendTranslationMeta = {
     translationSourceText?: string | null;
     translationTargetLanguage?: string | null;
     translationDetectedSourceLanguage?: string | null;
+    agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
 };
 
 export type ComposerSendPayload = {
@@ -73,6 +75,7 @@ interface UseConversationComposerSendArgs {
     translationPreviewText: string;
     translationPreviewLanguage: string | null;
     translationPreviewDetectedSource: string | null;
+    agentFeedback?: ComposerAiDraftFeedback | null;
     onPreviewTranslatedReply?: PreviewTranslatedReply;
     onSendMessage: (
         text: string,
@@ -96,6 +99,7 @@ export function useConversationComposerSend({
     translationPreviewText,
     translationPreviewLanguage,
     translationPreviewDetectedSource,
+    agentFeedback,
     onPreviewTranslatedReply,
     onSendMessage,
     onDraftClear,
@@ -162,7 +166,10 @@ export function useConversationComposerSend({
 
         setSending(true);
         try {
-            await Promise.resolve(onSendMessage(textToSend, selectedChannel, translationMeta));
+            await Promise.resolve(onSendMessage(textToSend, selectedChannel, {
+                ...translationMeta,
+                ...(agentFeedback ? { agentFeedback: { ...agentFeedback, humanOutput: sourceText } } : {}),
+            }));
             onDraftClear();
             clearTranslationPreview();
         } catch (err) {

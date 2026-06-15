@@ -98,6 +98,8 @@ import {
     runAiSkillDecision,
     simulateSkillDecision as simulateSkillDecisionRuntime,
 } from "@/lib/ai/runtime/engine";
+import { recordAgentFeedback } from "@/lib/ai/agent-feedback";
+import { createLearningSessionFromAgentFeedback } from "@/lib/ai/agent-learning";
 import {
     approveRequirementProposal,
     generateRequirementProposal,
@@ -4807,6 +4809,74 @@ export async function sendWhatsAppTemplateReply(
     }
 }
 
+type SendReplyAgentFeedbackPayload = {
+    sourceFeature?: string | null;
+    sourceAction?: string | null;
+    aiOutput?: string | null;
+    humanOutput?: string | null;
+    agentExecutionId?: string | null;
+    aiDecisionId?: string | null;
+    traceId?: string | null;
+    skillId?: string | null;
+    model?: string | null;
+    metadata?: Record<string, unknown> | null;
+} | null;
+
+async function recordSendAgentFeedback(args: {
+    locationId: string;
+    conversationId: string;
+    contactId: string;
+    sentBody: string;
+    channel: string;
+    agentFeedback?: SendReplyAgentFeedbackPayload;
+}) {
+    const feedback = args.agentFeedback;
+    if (!feedback?.aiOutput) return;
+
+    try {
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(args.locationId, args.conversationId),
+            select: { id: true, contactId: true },
+        });
+        if (!conversation?.id) return;
+
+        const contact = await db.contact.findFirst({
+            where: {
+                locationId: args.locationId,
+                OR: [
+                    { id: args.contactId },
+                    { ghlContactId: args.contactId },
+                    { id: conversation.contactId },
+                ],
+            },
+            select: { id: true },
+        });
+
+        await recordAgentFeedback({
+            locationId: args.locationId,
+            conversationId: conversation.id,
+            contactId: contact?.id || conversation.contactId || null,
+            sourceFeature: feedback.sourceFeature || "ai_draft",
+            sourceAction: feedback.sourceAction || "send",
+            agentExecutionId: feedback.agentExecutionId || null,
+            aiDecisionId: feedback.aiDecisionId || null,
+            traceId: feedback.traceId || null,
+            skillId: feedback.skillId || null,
+            model: feedback.model || null,
+            aiOutput: feedback.aiOutput,
+            humanOutput: feedback.humanOutput || args.sentBody,
+            outcome: "sent",
+            metadata: {
+                ...(feedback.metadata || {}),
+                channel: args.channel,
+                sentBody: args.sentBody,
+            },
+        });
+    } catch (error: any) {
+        console.warn("[sendReply] Failed to record agent feedback:", error?.message || error);
+    }
+}
+
 export async function sendReply(
     conversationId: string,
     contactId: string,
@@ -4818,6 +4888,7 @@ export async function sendReply(
         translationSourceText?: string | null;
         translationTargetLanguage?: string | null;
         translationDetectedSourceLanguage?: string | null;
+        agentFeedback?: SendReplyAgentFeedbackPayload;
     }
 ) {
     try {
@@ -4997,6 +5068,15 @@ export async function sendReply(
                 },
             });
 
+            await recordSendAgentFeedback({
+                locationId: location.id,
+                conversationId: conversation.id,
+                contactId: contact.id,
+                sentBody: normalizedBody,
+                channel: "WhatsApp",
+                agentFeedback: options?.agentFeedback || null,
+            });
+
             return {
                 success: true as const,
                 queued: true as const,
@@ -5030,6 +5110,14 @@ export async function sendReply(
             });
             if (result.success) {
                 invalidateConversationReadCaches(conversationId);
+                await recordSendAgentFeedback({
+                    locationId: location.id,
+                    conversationId,
+                    contactId,
+                    sentBody: messageBody,
+                    channel: "SMS_RELAY",
+                    agentFeedback: options?.agentFeedback || null,
+                });
             }
             return result;
         }
@@ -5264,6 +5352,14 @@ export async function sendReply(
             conversationId: localConversation.id,
             type: "message.outbound",
             payload: { channel: type.toLowerCase() },
+        });
+        await recordSendAgentFeedback({
+            locationId: location.id,
+            conversationId: localConversation.id,
+            contactId: localContact.id,
+            sentBody: messageBody,
+            channel: type,
+            agentFeedback: options?.agentFeedback || null,
         });
         return { success: true as const };
     } catch (error) {
@@ -14775,5 +14871,23 @@ export async function runAiSkillDecisionNow(input: {
         contextSummary: input.contextSummary,
         extraInstruction: input.extraInstruction,
         executeImmediately: input.executeImmediately ?? true,
+    });
+}
+
+export async function createAgentLearningSessionAction(input: {
+    locationId: string;
+    sourceFeature?: string | null;
+    limit?: number;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access required." };
+    }
+
+    return createLearningSessionFromAgentFeedback({
+        locationId: targetLocationId,
+        sourceFeature: input.sourceFeature || null,
+        limit: input.limit,
     });
 }

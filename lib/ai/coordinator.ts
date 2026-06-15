@@ -1272,9 +1272,10 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             select: { id: true }
         });
 
+        let agentExecutionId: string | null = null;
         if (dbConversation) {
             // Log Execution
-            await db.agentExecution.create({
+            const agentExecution = await db.agentExecution.create({
                 data: {
                     conversationId: dbConversation.id,
                     locationId: context.locationId,
@@ -1306,8 +1307,10 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                     totalTokens: promptTokens + completionTokens,
                     model: actualModelName,
                     cost
-                }
+                },
+                select: { id: true }
             });
+            agentExecutionId = agentExecution.id;
 
             // Update Conversation Totals
             await db.conversation.update({
@@ -1346,6 +1349,10 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 
         return {
             draft: text,
+            generationId: agentExecutionId,
+            agentExecutionId,
+            traceId: null,
+            model: actualModelName,
             reasoning: requestedModelName === actualModelName
                 ? `Generated based on conversation history and contact interest.${policySummary}`
                 : `Generated based on conversation history and contact interest. Fallback used: ${actualModelName} (requested ${requestedModelName}).${policySummary}`,

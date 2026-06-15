@@ -41,6 +41,9 @@ export async function POST(request: Request) {
             translationDetectedSourceLanguage: body?.translationDetectedSourceLanguage
                 ? String(body.translationDetectedSourceLanguage)
                 : null,
+            agentFeedback: body?.agentFeedback && typeof body.agentFeedback === "object"
+                ? body.agentFeedback
+                : null,
         });
 
         if (!result?.success) {

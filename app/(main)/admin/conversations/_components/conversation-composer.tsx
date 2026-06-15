@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -29,6 +29,7 @@ import {
     type ConversationSurfaceTheme,
 } from "./message-bubble-theme";
 import { PropertyMessageAssist } from "./property-message-assist";
+import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -42,6 +43,7 @@ interface ConversationComposerProps {
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
             translationDetectedSourceLanguage?: string | null;
+            agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
         }
     ) => void | Promise<void>;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
@@ -51,7 +53,7 @@ interface ConversationComposerProps {
         draftLanguage?: string | null,
         baseDraft?: string | null,
         onChunk?: (chunk: string) => void
-    ) => Promise<string | null>;
+    ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onPreviewTranslatedReply?: (
         sourceText: string,
@@ -262,6 +264,7 @@ export function ConversationComposer({
     const [requestingWhatsAppCall, setRequestingWhatsAppCall] = useState(false);
     const [whatsAppCallRequestError, setWhatsAppCallRequestError] = useState<string | null>(null);
     const [whatsAppCallState, setWhatsAppCallState] = useState<WhatsAppCallUiState | null>(null);
+    const [latestAiDraftFeedback, setLatestAiDraftFeedback] = useState<ComposerAiDraftFeedback | null>(null);
     const {
         generatingDraft,
         selectedModel,
@@ -272,6 +275,9 @@ export function ConversationComposer({
         setReplyLanguageOpen,
         savingReplyLanguage,
         handleAiDraft,
+        canUndoAiDraft,
+        undoAiDraft,
+        clearAiDraftState,
         handleReplyLanguageSelect,
         selectedReplyLanguageLabel,
         agentWorkingLanguage,
@@ -287,6 +293,7 @@ export function ConversationComposer({
         insertDraftSeed,
         onDraftChange,
         onGenerateDraft,
+        onAiDraftFeedbackChange: setLatestAiDraftFeedback,
         onSetReplyLanguageOverride,
         onModelChange,
         translationTargetLanguageLabel,
@@ -342,9 +349,13 @@ export function ConversationComposer({
         translationPreviewText,
         translationPreviewLanguage,
         translationPreviewDetectedSource,
+        agentFeedback: latestAiDraftFeedback,
         onPreviewTranslatedReply,
         onSendMessage,
-        onDraftClear,
+        onDraftClear: () => {
+            onDraftClear();
+            clearAiDraftState();
+        },
         clearTranslationPreview,
     });
     const {
@@ -361,7 +372,10 @@ export function ConversationComposer({
         sending,
         setSending,
         onSendMedia,
-        onDraftClear,
+        onDraftClear: () => {
+            onDraftClear();
+            clearAiDraftState();
+        },
     });
     isRecordingRef.current = isRecording;
 
@@ -945,6 +959,22 @@ export function ConversationComposer({
                         </div>
                     </div>
                 </div>
+                {canUndoAiDraft && (
+                    <div className="px-1 pt-1">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 gap-1 px-1.5 text-[10px] text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                            onClick={undoAiDraft}
+                            disabled={isUnavailable || generatingDraft || sending}
+                            title="Restore the composer text from before the last AI draft"
+                        >
+                            <RotateCcw className="h-3 w-3" />
+                            Undo AI Draft
+                        </Button>
+                    </div>
+                )}
                 {onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
                         {willAutoTranslate

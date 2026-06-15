@@ -3,6 +3,24 @@ type DraftMode = "chat" | "deal";
 export type GenerateDraftResult = {
     draft?: string | null;
     reasoning?: string | null;
+    generationId?: string | null;
+    agentExecutionId?: string | null;
+    decisionId?: string | null;
+    traceId?: string | null;
+    selectedSkillId?: string | null;
+    model?: string | null;
+};
+
+export type ComposerAiDraftFeedback = {
+    sourceFeature: "ai_draft";
+    sourceAction: "draft" | "refine";
+    aiOutput: string;
+    agentExecutionId?: string | null;
+    aiDecisionId?: string | null;
+    traceId?: string | null;
+    skillId?: string | null;
+    model?: string | null;
+    metadata?: Record<string, unknown>;
 };
 
 type DraftStreamArgs = {

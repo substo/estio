@@ -49,6 +49,9 @@ model Location {
   aiSkillPolicies               AiSkillPolicy[]
   aiDecisions                   AiDecision[]
   aiRuntimeJobs                 AiRuntimeJob[]
+  agentFeedback                 AgentFeedback[]
+  learningSessions              LearningSession[]
+  learningProposals             LearningProposal[]
   contactClassificationRuns     ContactClassificationRun[]
   contactClassificationRunItems ContactClassificationRunItem[]
   aiSuggestedResponses          AiSuggestedResponse[]
@@ -640,6 +643,7 @@ model Contact {
   userNotifications          UserNotification[]
   aiAutomationJobs           AiAutomationJob[]
   aiDecisions                AiDecision[]
+  agentFeedback              AgentFeedback[]
   contactClassificationRunItems ContactClassificationRunItem[]
   aiSuggestedResponses       AiSuggestedResponse[]
   requirementProposals       ContactRequirementProposal[]
@@ -1698,6 +1702,7 @@ model Conversation {
   userNotifications          UserNotification[]
   aiAutomationJobs           AiAutomationJob[]
   aiDecisions                AiDecision[]
+  agentFeedback              AgentFeedback[]
   aiSuggestedResponses       AiSuggestedResponse[]
   requirementProposals       ContactRequirementProposal[]
   propertyMatchCandidates    PropertyMatchCandidate[]
@@ -2037,6 +2042,7 @@ model AgentExecution {
   // Relations
   location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  feedback     AgentFeedback[]
 
   @@index([locationId, sourceType, createdAt])
   @@index([conversationId])
@@ -2145,6 +2151,7 @@ model AiDecision {
   deal               DealContext?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
   runtimeJobs        AiRuntimeJob[]
   suggestedResponses AiSuggestedResponse[]
+  agentFeedback      AgentFeedback[]
 
   @@unique([locationId, dueKey])
   @@index([locationId, status, dueAt])
@@ -2285,6 +2292,103 @@ model AiSuggestedResponse {
   @@index([dealId, status, createdAt(sort: Desc)])
   @@index([contactId, status, createdAt(sort: Desc)])
   @@index([decisionId, status, createdAt(sort: Desc)])
+}
+
+model AgentFeedback {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId     String
+  conversationId String?
+  contactId      String?
+  sourceFeature  String // ai_draft | property_recommendation | browser_research | viewing_management | etc.
+  sourceAction   String?
+
+  agentExecutionId String?
+  aiDecisionId     String?
+  traceId          String?
+  skillId          String?
+  model            String?
+
+  aiOutput         String? @db.Text
+  humanOutput      String? @db.Text
+  outcome          String  @default("sent") // sent | rejected | restored | rated
+  rating           String?
+  feedbackReason   String? @db.Text
+  editDistance     Float?
+  materialEdit     Boolean @default(false)
+
+  toolTrace        Json?
+  metadata         Json?
+  analyzed         Boolean @default(false)
+  analyzedAt       DateTime?
+  learningSessionId String?
+
+  location        Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation    Conversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact         Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  agentExecution  AgentExecution?  @relation(fields: [agentExecutionId], references: [id], onDelete: SetNull)
+  aiDecision      AiDecision?      @relation(fields: [aiDecisionId], references: [id], onDelete: SetNull)
+  learningSession LearningSession? @relation(fields: [learningSessionId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, sourceFeature, createdAt(sort: Desc)])
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([contactId, createdAt(sort: Desc)])
+  @@index([agentExecutionId])
+  @@index([aiDecisionId])
+  @@index([analyzed, createdAt])
+  @@map("agent_feedback")
+}
+
+model LearningSession {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId    String
+  sourceFeature String?
+  inputType     String @default("feedback_batch") // feedback_batch | manual | cron
+  status        String @default("pending") // pending | reviewed | applied | dismissed
+  summary       String? @db.Text
+  analysis      Json?
+  proposalsCount Int @default(0)
+  appliedCount   Int @default(0)
+
+  location  Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  feedback  AgentFeedback[]
+  proposals LearningProposal[]
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([locationId, sourceFeature, createdAt(sort: Desc)])
+  @@map("learning_sessions")
+}
+
+model LearningProposal {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  sessionId  String?
+  type       String // style_policy | playbook_entry | skill_instruction | tool_policy | evaluation_rule
+  title      String
+  description String @db.Text
+  target     Json?
+  payload    Json
+  status     String @default("pending") // pending | approved | dismissed | applied
+  riskLevel  String @default("medium")
+  confidence Float?
+  appliedAt  DateTime?
+  dismissedAt DateTime?
+
+  location Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  session  LearningSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([sessionId, status])
+  @@index([locationId, type, status])
+  @@map("learning_proposals")
 }
 
 model ContactRequirementProposal {

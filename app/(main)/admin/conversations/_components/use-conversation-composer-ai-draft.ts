@@ -13,6 +13,7 @@ import {
     getConversationLanguageSourceLabel,
     resolveConversationLanguageContext,
 } from "@/lib/conversations/language-context";
+import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
 
 type GenerateDraft = (
     instruction?: string,
@@ -20,7 +21,7 @@ type GenerateDraft = (
     draftLanguage?: string | null,
     baseDraft?: string | null,
     onChunk?: (chunk: string) => void
-) => Promise<string | null>;
+) => Promise<GenerateDraftResult | null>;
 
 type SetReplyLanguageOverride = (
     replyLanguage: string | null
@@ -33,6 +34,7 @@ interface UseConversationComposerAiDraftArgs {
     insertDraftSeed?: { key: string; body: string } | null;
     onDraftChange: (draft: string) => void;
     onGenerateDraft?: GenerateDraft;
+    onAiDraftFeedbackChange?: (feedback: ComposerAiDraftFeedback | null) => void;
     onSetReplyLanguageOverride?: SetReplyLanguageOverride;
     onModelChange?: (model: string) => void;
     translationTargetLanguageLabel?: string | null;
@@ -60,6 +62,7 @@ export function useConversationComposerAiDraft({
     insertDraftSeed,
     onDraftChange,
     onGenerateDraft,
+    onAiDraftFeedbackChange,
     onSetReplyLanguageOverride,
     onModelChange,
     translationTargetLanguageLabel,
@@ -75,6 +78,9 @@ export function useConversationComposerAiDraft({
     setReplyLanguageOpen: Dispatch<SetStateAction<boolean>>;
     savingReplyLanguage: boolean;
     handleAiDraft: (instructionOverride?: string, baseDraftOverride?: string | null) => Promise<void>;
+    canUndoAiDraft: boolean;
+    undoAiDraft: () => void;
+    clearAiDraftState: () => void;
     handleReplyLanguageSelect: (value: string) => Promise<void>;
     selectedReplyLanguageLabel: string;
     agentWorkingLanguage: string;
@@ -95,9 +101,15 @@ export function useConversationComposerAiDraft({
     const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
     const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
     const [agentDraftLanguage, setAgentDraftLanguage] = useState<string>(DEFAULT_REPLY_LANGUAGE);
+    const [aiDraftRestorePoint, setAiDraftRestorePoint] = useState<{ conversationId: string; draft: string } | null>(null);
 
     const hasUserSelectedModelRef = useRef(false);
     const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
+
+    const clearAiDraftState = () => {
+        setAiDraftRestorePoint(null);
+        onAiDraftFeedbackChange?.(null);
+    };
 
     useEffect(() => {
         onModelChange?.(selectedModel);
@@ -120,10 +132,12 @@ export function useConversationComposerAiDraft({
         appliedInsertDraftSeedKeyRef.current = insertDraftSeed.key;
         const nextBody = String(insertDraftSeed.body || "");
         onDraftChange(nextBody);
+        clearAiDraftState();
     }, [insertDraftSeed?.key, insertDraftSeed?.body, onDraftChange]);
 
     useEffect(() => {
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
+        clearAiDraftState();
     }, [conversation?.id, conversation?.replyLanguageOverride]);
 
     const handleModelChange = (value: string) => {
@@ -140,16 +154,22 @@ export function useConversationComposerAiDraft({
         const baseDraft = typeof baseDraftOverride === "string" && baseDraftOverride.trim()
             ? baseDraftOverride.trim()
             : null;
+        const conversationId = String(conversation?.id || "").trim();
+        const previousComposerDraft = String(draft || "");
         logComposerDraftTiming("client_click_start", {
             conversationId: conversation?.id || null,
             hasInstructionOverride: !!instruction,
             hasBaseDraft: !!baseDraft,
         });
         setGeneratingDraft(true);
+        if (conversationId) {
+            setAiDraftRestorePoint({ conversationId, draft: previousComposerDraft });
+        }
+        onAiDraftFeedbackChange?.(null);
         try {
             const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
             let streamedBuffer = "";
-            const text = await onGenerateDraft(
+            const result = await onGenerateDraft(
                 instruction,
                 modelOverride,
                 agentDraftLanguage,
@@ -167,10 +187,30 @@ export function useConversationComposerAiDraft({
                     onDraftChange(streamedBuffer);
                 }
             );
+            const text = result?.draft || null;
             if (streamedBuffer) {
                 onDraftChange(streamedBuffer);
             } else if (text) {
                 onDraftChange(text);
+            }
+            const finalDraft = String(text || streamedBuffer || "").trim();
+            if (finalDraft) {
+                const feedback: ComposerAiDraftFeedback = {
+                    sourceFeature: "ai_draft",
+                    sourceAction: baseDraft ? "refine" : "draft",
+                    aiOutput: finalDraft,
+                    agentExecutionId: result?.agentExecutionId || result?.generationId || null,
+                    aiDecisionId: result?.decisionId || null,
+                    traceId: result?.traceId || null,
+                    skillId: result?.selectedSkillId || null,
+                    model: result?.model || modelOverride || selectedModel || null,
+                    metadata: {
+                        hasInstruction: !!instruction,
+                        hasBaseDraft: !!baseDraft,
+                        draftLanguage: agentDraftLanguage,
+                    },
+                };
+                onAiDraftFeedbackChange?.(feedback);
             }
             logComposerDraftTiming("client_click_end", {
                 conversationId: conversation?.id || null,
@@ -218,6 +258,13 @@ export function useConversationComposerAiDraft({
         }
     };
 
+    const undoAiDraft = () => {
+        if (!conversation?.id || !aiDraftRestorePoint) return;
+        if (aiDraftRestorePoint.conversationId !== conversation.id) return;
+        onDraftChange(aiDraftRestorePoint.draft);
+        clearAiDraftState();
+    };
+
     const languageContext = resolveConversationLanguageContext({
         manualOverrideLanguage: selectedReplyLanguage === REPLY_LANGUAGE_AUTO_VALUE ? null : selectedReplyLanguage,
         contactPreferredLanguage: conversation?.contactPreferredLanguage || null,
@@ -248,6 +295,9 @@ export function useConversationComposerAiDraft({
         setReplyLanguageOpen,
         savingReplyLanguage,
         handleAiDraft,
+        canUndoAiDraft: !!conversation?.id && aiDraftRestorePoint?.conversationId === conversation.id,
+        undoAiDraft,
+        clearAiDraftState,
         handleReplyLanguageSelect,
         selectedReplyLanguageLabel,
         agentWorkingLanguage: agentDraftLanguage,

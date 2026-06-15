@@ -93,7 +93,7 @@ import {
     normalizeConversationContactIdentityPatch,
     type DealContactOption,
 } from './conversation-contact-identity-actions';
-import { generateDraftWithStreamingFallback } from './conversation-draft-generation';
+import { generateDraftWithStreamingFallback, type ComposerAiDraftFeedback } from './conversation-draft-generation';
 import {
     getMessageSignature,
     getTranscriptActionModeLabel,
@@ -241,6 +241,7 @@ async function sendReplyViaApi(
         translationSourceText?: string | null;
         translationTargetLanguage?: string | null;
         translationDetectedSourceLanguage?: string | null;
+        agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
     }
 ) {
     const response = await fetch("/api/admin/conversations/send-reply", {
@@ -256,6 +257,7 @@ async function sendReplyViaApi(
             translationSourceText: options?.translationSourceText || null,
             translationTargetLanguage: options?.translationTargetLanguage || null,
             translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+            agentFeedback: options?.agentFeedback || null,
         }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -1792,6 +1794,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             translationSourceText?: string | null;
             translationTargetLanguage?: string | null;
             translationDetectedSourceLanguage?: string | null;
+            agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
         },
         targetConversation?: Conversation
     ) => {
@@ -1861,6 +1864,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         translationSourceText: options?.translationSourceText || null,
                         translationTargetLanguage: options?.translationTargetLanguage || null,
                         translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+                        agentFeedback: options?.agentFeedback || null,
                     }),
                 }).then(async (response) => {
                     const payload = await response.json().catch(() => ({}));
@@ -1880,6 +1884,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         translationSourceText: options?.translationSourceText || null,
                         translationTargetLanguage: options?.translationTargetLanguage || null,
                         translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+                        agentFeedback: options?.agentFeedback || null,
                     })
                     : await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
                     clientMessageId: optimisticClientMessageId,
@@ -1887,6 +1892,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     translationSourceText: options?.translationSourceText || null,
                     translationTargetLanguage: options?.translationTargetLanguage || null,
                     translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
+                    agentFeedback: options?.agentFeedback || null,
                 });
 
             if (!res.success) {
@@ -2831,7 +2837,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (res.reasoning) {
                 toast({ title: "Draft Generated", description: res.reasoning });
             }
-            return res.draft || null;
+            return res || null;
         } catch (e: any) {
             toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
             return null;
@@ -2920,7 +2926,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             if (res.reasoning) {
                 toast({ title: "Draft Generated", description: res.reasoning });
             }
-            return res.draft || null;
+            return res || null;
         } catch (error: any) {
             toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
             return null;
