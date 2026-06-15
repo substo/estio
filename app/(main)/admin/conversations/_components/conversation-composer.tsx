@@ -30,6 +30,7 @@ import {
 } from "./message-bubble-theme";
 import { PropertyMessageAssist } from "./property-message-assist";
 import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
+import { buildComposerSuggestionBubbles } from "./conversation-composer-suggestions";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -423,6 +424,7 @@ export function ConversationComposer({
         ? "Tell AI how to change this draft..."
         : "Tell AI what to write...";
     const aiQuickActions = composerHasDraft ? REFINE_DRAFT_ACTIONS : CREATE_DRAFT_ACTIONS;
+    const visibleSuggestionBubbles = buildComposerSuggestionBubbles(suggestions, aiQuickActions);
 
     const runAiDraftCommand = (instruction?: string) => {
         const trimmedInstruction = String(instruction || "").trim();
@@ -559,8 +561,8 @@ export function ConversationComposer({
     return (
         <div className={cn("w-full min-w-0 max-w-full overflow-x-hidden pb-[env(safe-area-inset-bottom)]", resolvedSurfaceTheme.composerContainerClassName)}>
             <SuggestionBubbles
-                suggestions={suggestions}
-                onSelect={(text) => handleAiDraft(text)}
+                suggestions={visibleSuggestionBubbles}
+                onSelect={(text) => handleAiDraft(text === "Best next reply" ? undefined : text)}
                 className={cn(composerContentClassName, "py-1")}
             />
 
