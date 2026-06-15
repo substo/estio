@@ -22,6 +22,7 @@ import {
     createPasteLeadStatusRecorder,
     type PasteLeadImportStatus,
 } from "@/lib/conversations/paste-lead-status";
+import { buildVisibleMessageSourceWhere } from "@/lib/conversations/internal-message-visibility";
 
 export type LeadImportParsedData = {
     contact?: {
@@ -157,6 +158,18 @@ function mergeConversationSuggestedActions(existing: string[] | null | undefined
         return current;
     }
     return [normalizedIncoming, ...current].slice(0, 3);
+}
+
+async function conversationHasVisibleMessages(conversationId: string): Promise<boolean> {
+    const message = await db.message.findFirst({
+        where: {
+            conversationId,
+            direction: { in: ["inbound", "outbound"] },
+            ...buildVisibleMessageSourceWhere(),
+        },
+        select: { id: true },
+    });
+    return !!message;
 }
 
 function parseNumericToken(token: string): number | null {
@@ -705,10 +718,13 @@ export async function createParsedLeadForLocation(
             ) {
                 conversationUpdateData.lastMessageType = preferredChannelType;
             }
-            conversationUpdateData.suggestedActions = mergeConversationSuggestedActions(
-                conversation.suggestedActions,
-                PASTE_LEAD_FIRST_OUTREACH_SUGGESTION
-            );
+            const hasVisibleMessages = await conversationHasVisibleMessages(conversation.id);
+            if (!hasVisibleMessages) {
+                conversationUpdateData.suggestedActions = mergeConversationSuggestedActions(
+                    conversation.suggestedActions,
+                    PASTE_LEAD_FIRST_OUTREACH_SUGGESTION
+                );
+            }
             if (Object.keys(conversationUpdateData).length > 0) {
                 conversation = await db.conversation.update({
                     where: { id: conversation.id },

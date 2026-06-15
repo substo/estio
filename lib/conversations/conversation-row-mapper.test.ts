@@ -26,6 +26,11 @@ const baseRow = {
     suggestedActions: [{ type: "reply" }],
 };
 
+const firstOutreachAction = [
+    "Draft a first outreach message for this pasted lead.",
+    "Use the lead note and conversation timeline as context.",
+].join(" ");
+
 test("mapConversationRowToUi preserves default reply language fallback", () => {
     const mapped = mapConversationRowToUi(
         { ...baseRow, contact: { ...baseRow.contact, preferredLang: null } },
@@ -100,6 +105,38 @@ test("mapConversationRowToUi includes latest message source metadata when availa
     assert.equal(mapped.lastMessageSource, "sms_relay");
     assert.equal(mapped.lastMessageDirection, "outbound");
     assert.equal(mapped.lastMessageChannel, "SMS_RELAY");
+});
+
+test("mapConversationRowToUi keeps first outreach suggestion for empty imported conversations", () => {
+    const mapped = mapConversationRowToUi(
+        { ...baseRow, suggestedActions: [firstOutreachAction, "Best next reply"] },
+        { id: "loc-internal" },
+    );
+
+    assert.deepEqual(mapped.suggestedActions, [firstOutreachAction, "Best next reply"]);
+});
+
+test("mapConversationRowToUi suppresses first outreach suggestion when visible messages exist", () => {
+    const latestMessageMap = new Map([
+        ["conversation-internal", {
+            id: "message-latest",
+            conversationId: "conversation-internal",
+            type: "TYPE_WHATSAPP",
+            source: null,
+            direction: "outbound",
+            createdAt: new Date("2026-05-26T10:01:00.000Z"),
+        }],
+    ]);
+
+    const mapped = mapConversationRowToUi(
+        { ...baseRow, suggestedActions: [firstOutreachAction, "Best next reply"] },
+        { id: "loc-internal" },
+        undefined,
+        undefined,
+        latestMessageMap,
+    );
+
+    assert.deepEqual(mapped.suggestedActions, ["Best next reply"]);
 });
 
 test("mapConversationRowToUi ignores stale latest message metadata", () => {

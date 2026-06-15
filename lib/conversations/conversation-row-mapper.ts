@@ -14,6 +14,17 @@ export type ConversationRowMapperLocation = {
 
 export type ConversationRowActiveDealMap = Map<string, { id: string; title: string }>;
 
+const PASTE_LEAD_FIRST_OUTREACH_ACTION_PREFIX = "Draft a first outreach message for this pasted lead.";
+
+function normalizeSuggestedActions(c: any, latestMessage: ConversationLatestMessageMetadata | null): string[] {
+    const current = Array.isArray(c.suggestedActions)
+        ? c.suggestedActions.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+    if (!latestMessage) return current;
+
+    return current.filter((item) => !item.trim().startsWith(PASTE_LEAD_FIRST_OUTREACH_ACTION_PREFIX));
+}
+
 export function mapConversationRowToUi(
     c: any,
     location: ConversationRowMapperLocation,
@@ -71,6 +82,6 @@ export function mapConversationRowToUi(
         locationId: location.id || location.ghlLocationId || "",
         activeDealId: dealMap?.get(c.id)?.id || dealMap?.get(c.ghlConversationId)?.id,
         activeDealTitle: dealMap?.get(c.id)?.title || dealMap?.get(c.ghlConversationId)?.title,
-        suggestedActions: c.suggestedActions || [],
+        suggestedActions: normalizeSuggestedActions(c, latestMessage),
     } satisfies Conversation;
 }
