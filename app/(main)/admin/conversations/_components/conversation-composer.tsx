@@ -696,8 +696,8 @@ export function ConversationComposer({
                         </div>
                     )}
 
-                    <div className="flex flex-col gap-1 px-2 pb-1.5 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex min-w-0 w-full flex-wrap items-center gap-1 lg:flex-1 lg:flex-nowrap">
+                    <div className="flex flex-col gap-1 px-2 pb-1.5">
+                        <div className="flex min-w-0 w-full flex-wrap items-center gap-1">
                             <Select
                                 value={selectedChannel}
                                 onValueChange={(v: ComposerChannel) => selectChannel(v)}
@@ -774,89 +774,94 @@ export function ConversationComposer({
                                             </Command>
                                         </PopoverContent>
                                     </Popover>
-                                    {canUseWriteTranslation && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => void handlePreviewTranslation()}
-                                            disabled={isUnavailable || previewingTranslation || !draft.trim()}
-                                            className={cn("h-7 text-[11px] font-medium gap-1 px-1.5 sm:px-2", resolvedSurfaceTheme.composerIconButtonClassName)}
-                                        >
-                                            {previewingTranslation ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                                            {previewingTranslation ? "..." : "Preview"}
-                                        </Button>
-                                    )}
-                                    <PropertyMessageAssist
-                                        disabled={isUnavailable}
-                                        generatingDraft={generatingDraft}
-                                        onGenerateInstruction={(instruction) => void handleAiDraft(instruction)}
-                                    />
-                                    <Popover open={aiDraftOpen} onOpenChange={setAiDraftOpen}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                disabled={isUnavailable || generatingDraft}
-                                                className="h-7 text-[11px] font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 px-1.5 sm:px-2"
-                                            >
-                                                {generatingDraft ? (
-                                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                                ) : (
-                                                    <Sparkles className="w-3 h-3" />
-                                                )}
-                                                {generatingDraft ? "..." : aiActionLabel}
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[280px] p-2" align="end">
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                                {aiQuickActions.map((action) => (
-                                                    <Button
-                                                        key={action}
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-8 justify-start px-2 text-[11px] text-slate-700"
-                                                        onClick={() => runAiDraftCommand(action === "Best next reply" ? undefined : action)}
-                                                        disabled={generatingDraft}
-                                                    >
-                                                        <Wand2 className="mr-1.5 h-3 w-3 text-purple-500" />
-                                                        <span className="truncate">{action}</span>
-                                                    </Button>
-                                                ))}
-                                            </div>
-                                            <div className="mt-2 flex gap-1.5">
-                                                <Textarea
-                                                    value={aiInstruction}
-                                                    onChange={(event) => setAiInstruction(event.target.value)}
-                                                    placeholder={aiCustomPlaceholder}
-                                                    rows={2}
-                                                    className="min-h-[56px] resize-none text-xs"
-                                                    disabled={generatingDraft}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                                                            event.preventDefault();
-                                                            runAiDraftCommand(aiInstruction);
-                                                        }
-                                                    }}
-                                                />
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    className="h-auto self-stretch px-2"
-                                                    onClick={() => runAiDraftCommand(aiInstruction)}
-                                                    disabled={generatingDraft || (!composerHasDraft && !aiInstruction.trim())}
-                                                    title={composerHasDraft ? "Apply AI instruction to current draft" : "Generate AI draft"}
-                                                >
-                                                    <Send className="h-3.5 w-3.5" />
-                                                </Button>
-                                            </div>
-                                        </PopoverContent>
-                                    </Popover>
                                 </>
                             )}
                         </div>
 
-                        <div className="ml-auto flex w-full min-w-0 flex-wrap items-center justify-end gap-1.5 lg:w-auto lg:flex-nowrap">
+                        {onGenerateDraft && (
+                            <div className="flex min-w-0 w-full flex-wrap items-center gap-1">
+                                {canUseWriteTranslation && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => void handlePreviewTranslation()}
+                                        disabled={isUnavailable || previewingTranslation || !draft.trim()}
+                                        className={cn("h-7 text-[11px] font-medium gap-1 px-1.5 sm:px-2", resolvedSurfaceTheme.composerIconButtonClassName)}
+                                    >
+                                        {previewingTranslation ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                        {previewingTranslation ? "..." : "Preview"}
+                                    </Button>
+                                )}
+                                <PropertyMessageAssist
+                                    disabled={isUnavailable}
+                                    generatingDraft={generatingDraft}
+                                    onGenerateInstruction={(instruction) => void handleAiDraft(instruction)}
+                                />
+                                <Popover open={aiDraftOpen} onOpenChange={setAiDraftOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            disabled={isUnavailable || generatingDraft}
+                                            className="h-7 text-[11px] font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 px-1.5 sm:px-2"
+                                        >
+                                            {generatingDraft ? (
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                                <Sparkles className="w-3 h-3" />
+                                            )}
+                                            {generatingDraft ? "..." : aiActionLabel}
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[280px] p-2" align="start">
+                                        <div className="grid grid-cols-2 gap-1.5">
+                                            {aiQuickActions.map((action) => (
+                                                <Button
+                                                    key={action}
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 justify-start px-2 text-[11px] text-slate-700"
+                                                    onClick={() => runAiDraftCommand(action === "Best next reply" ? undefined : action)}
+                                                    disabled={generatingDraft}
+                                                >
+                                                    <Wand2 className="mr-1.5 h-3 w-3 text-purple-500" />
+                                                    <span className="truncate">{action}</span>
+                                                </Button>
+                                            ))}
+                                        </div>
+                                        <div className="mt-2 flex gap-1.5">
+                                            <Textarea
+                                                value={aiInstruction}
+                                                onChange={(event) => setAiInstruction(event.target.value)}
+                                                placeholder={aiCustomPlaceholder}
+                                                rows={2}
+                                                className="min-h-[56px] resize-none text-xs"
+                                                disabled={generatingDraft}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                                                        event.preventDefault();
+                                                        runAiDraftCommand(aiInstruction);
+                                                    }
+                                                }}
+                                            />
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                className="h-auto self-stretch px-2"
+                                                onClick={() => runAiDraftCommand(aiInstruction)}
+                                                disabled={generatingDraft || (!composerHasDraft && !aiInstruction.trim())}
+                                                title={composerHasDraft ? "Apply AI instruction to current draft" : "Generate AI draft"}
+                                            >
+                                                <Send className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        )}
+
+                        <div className="ml-auto flex w-full min-w-0 flex-wrap items-center justify-end gap-1.5">
                             <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
                             {selectedChannel === "WhatsApp" && (
                                 <>
