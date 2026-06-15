@@ -3,18 +3,15 @@ package com.estio.simrelay
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.Telephony
 import android.util.Log
-import com.estio.simrelay.api.ApiClient
-import com.estio.simrelay.api.InboundSmsRequest
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class InboundSmsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
+            val queue = InboundSmsQueue(context)
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
             val groupedMessages = messages
                 .filter { it.displayOriginatingAddress != null && it.displayMessageBody != null }
@@ -25,28 +22,24 @@ class InboundSmsReceiver : BroadcastReceiver() {
                 val timestamp = parts.minOfOrNull { it.timestampMillis } ?: System.currentTimeMillis()
                 if (sender.isBlank() || body.isBlank()) continue
 
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        val prefs = context.getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
-                        val token = prefs.getString("device_token", null)
-                        val baseUrl = prefs.getString("base_url", "https://estio.co")
-                        if (token.isNullOrBlank()) {
-                            Log.w(TAG, "Skipping inbound SMS forward because device is not paired")
-                            return@launch
-                        }
-
-                        ApiClient.initBaseUrl(baseUrl ?: "https://estio.co")
-                        ApiClient.initToken(token)
-                        val req = InboundSmsRequest(from = sender, body = body, received_at_ms = timestamp)
-                        val response = ApiClient.api.reportInboundSms(req)
-                        if (!response.isSuccessful) {
-                            Log.w(TAG, "Inbound SMS forward failed: HTTP ${response.code()}")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Inbound SMS forward failed", e)
-                    }
-                }
+                queue.enqueue(from = sender, body = body, receivedAtMs = timestamp)
+                wakeRelayService(context)
             }
+        }
+    }
+
+    private fun wakeRelayService(context: Context) {
+        try {
+            val serviceIntent = Intent(context, RelayForegroundService::class.java).apply {
+                action = RelayForegroundService.ACTION_FLUSH_INBOUND
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to wake relay service for inbound SMS", e)
         }
     }
 

@@ -10,23 +10,29 @@ import android.os.IBinder
 import android.telephony.SmsManager
 import androidx.core.app.NotificationCompat
 import com.estio.simrelay.api.ApiClient
+import com.estio.simrelay.api.InboundSmsRequest
 import com.estio.simrelay.api.JobResultRequest
 import kotlinx.coroutines.*
 
 class RelayForegroundService : Service() {
 
     companion object {
+        const val ACTION_FLUSH_INBOUND = "com.estio.simrelay.FLUSH_INBOUND"
         var isRunning = false
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private val CHANNEL_ID = "SimRelayServiceChannel"
     private lateinit var sentSmsMirror: SentSmsMirror
+    private lateinit var inboundSmsQueue: InboundSmsQueue
+    private var pollingJob: Job? = null
+    private var inboundFlushJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         sentSmsMirror = SentSmsMirror(this)
+        inboundSmsQueue = InboundSmsQueue(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -51,6 +57,9 @@ class RelayForegroundService : Service() {
         if (token != null) {
             ApiClient.initBaseUrl(baseUrl!!)
             ApiClient.initToken(token)
+            if (intent?.action == ACTION_FLUSH_INBOUND) {
+                flushInboundSmsQueue()
+            }
             startPolling()
         } else {
             stopSelf()
@@ -62,7 +71,8 @@ class RelayForegroundService : Service() {
     private val activeJobIds = mutableSetOf<String>()
 
     private fun startPolling() {
-        serviceScope.launch {
+        if (pollingJob?.isActive == true) return
+        pollingJob = serviceScope.launch {
             while (isActive) {
                 try {
                     val response = ApiClient.api.getJobs()
@@ -84,6 +94,7 @@ class RelayForegroundService : Service() {
                     }
                     ApiClient.api.heartbeat()
                     sentSmsMirror.pollOnce()
+                    flushInboundSmsQueue()
                 } catch (e: Exception) {
                     // Ignored
                 }
@@ -110,6 +121,31 @@ class RelayForegroundService : Service() {
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "sent"))
             } catch (e: Exception) {
                 ApiClient.api.reportJobResult(JobResultRequest(jobId, "failed", e.message))
+            }
+        }
+    }
+
+    private fun flushInboundSmsQueue() {
+        if (inboundFlushJob?.isActive == true) return
+        inboundFlushJob = serviceScope.launch {
+            for (item in inboundSmsQueue.listDue()) {
+                try {
+                    val response = ApiClient.api.reportInboundSms(
+                        InboundSmsRequest(
+                            from = item.from,
+                            body = item.body,
+                            received_at_ms = item.receivedAtMs,
+                            to = item.to
+                        )
+                    )
+                    if (response.isSuccessful) {
+                        inboundSmsQueue.markSent(item.id)
+                    } else {
+                        inboundSmsQueue.markFailed(item.id, "HTTP ${response.code()}")
+                    }
+                } catch (e: Exception) {
+                    inboundSmsQueue.markFailed(item.id, e.message)
+                }
             }
         }
     }
