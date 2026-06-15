@@ -83,6 +83,7 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                 ) : data ? (
                     <div className="pt-4 flex-1 min-h-0 flex flex-col">
                         <EditContactForm
+                            key={`${data.contact.id}:${data.contact.contactType || 'unknown'}:${mode}`}
                             contact={data.contact}
                             leadSources={data.leadSources}
                             onSuccess={() => {

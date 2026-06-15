@@ -396,6 +396,10 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     // Contact Type State
     const [contactType, setContactType] = useState<ContactType>(initialContactType);
 
+    useEffect(() => {
+        setContactType(initialContactType);
+    }, [contact?.id, initialContactType]);
+
     // ...
 
     const currentConfig = CONTACT_TYPE_CONFIG[contactType];
