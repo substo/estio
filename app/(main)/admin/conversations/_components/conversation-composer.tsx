@@ -696,15 +696,15 @@ export function ConversationComposer({
                         </div>
                     )}
 
-                    <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5 sm:flex-nowrap sm:justify-between">
-                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:flex-nowrap">
+                    <div className="flex flex-col gap-1 px-2 pb-1.5 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex min-w-0 w-full flex-wrap items-center gap-1 lg:flex-1 lg:flex-nowrap">
                             <Select
                                 value={selectedChannel}
                                 onValueChange={(v: ComposerChannel) => selectChannel(v)}
                                 disabled={isUnavailable}
                             >
                                 <SelectTrigger
-                                    className={cn("h-7 w-[78px] sm:w-auto sm:min-w-[85px] text-[11px] border-0 px-2", resolvedSurfaceTheme.composerControlClassName)}
+                                    className={cn("h-7 w-[92px] text-[11px] border-0 px-2 sm:w-auto sm:min-w-[85px]", resolvedSurfaceTheme.composerControlClassName)}
                                     title={channelSelectorTitle}
                                 >
                                     <SelectValue />
@@ -721,12 +721,12 @@ export function ConversationComposer({
 
                             {onGenerateDraft && (
                                 <>
-                                    <div className="w-px h-4 bg-slate-200" />
+                                    <div className="hidden h-4 w-px bg-slate-200 sm:block" />
                                     <AiModelSelect
                                         value={selectedModel}
                                         onValueChange={handleModelChange}
                                         disabled={isUnavailable}
-                                        triggerClassName={cn("h-7 w-[94px] sm:w-[110px] text-[11px] border-0 px-2", resolvedSurfaceTheme.composerControlClassName)}
+                                        triggerClassName={cn("h-7 w-[112px] text-[11px] border-0 px-2 sm:w-[110px]", resolvedSurfaceTheme.composerControlClassName)}
                                         itemClassName="text-xs"
                                         models={availableModels}
                                     />
@@ -735,7 +735,7 @@ export function ConversationComposer({
                                             <Button
                                                 type="button"
                                                 variant="ghost"
-                                                className={cn("h-7 w-[118px] sm:w-[144px] justify-between text-[11px] border-0 px-2", resolvedSurfaceTheme.composerControlClassName)}
+                                                className={cn("h-7 w-[min(100%,172px)] min-w-[148px] justify-between text-[11px] border-0 px-2 sm:w-[144px] sm:min-w-0", resolvedSurfaceTheme.composerControlClassName)}
                                                 disabled={isUnavailable || !onSetReplyLanguageOverride || savingReplyLanguage}
                                             >
                                                 <span className="truncate">{selectedReplyLanguageLabel}</span>
@@ -856,7 +856,7 @@ export function ConversationComposer({
                             )}
                         </div>
 
-                        <div className="ml-auto flex w-full items-center justify-end gap-1.5 sm:w-auto">
+                        <div className="ml-auto flex w-full min-w-0 flex-wrap items-center justify-end gap-1.5 lg:w-auto lg:flex-nowrap">
                             <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
                             {selectedChannel === "WhatsApp" && (
                                 <>
