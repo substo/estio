@@ -101,6 +101,16 @@ import {
 import { recordAgentFeedback } from "@/lib/ai/agent-feedback";
 import { createLearningSessionFromAgentFeedback } from "@/lib/ai/agent-learning";
 import {
+    approveLearningProposal,
+    createCurrentPromptVersion,
+    dismissLearningProposal,
+    ensureLocationAiPromptVersion,
+    listLearningProposals,
+    listLocationAiPromptVersions,
+    revertLocationAiPrompt,
+    submitManualAgentLearningProposal,
+} from "@/lib/ai/location-learning";
+import {
     approveRequirementProposal,
     generateRequirementProposal,
     listPendingRequirementProposals,
@@ -5546,6 +5556,10 @@ export async function generateAIDraft(
                     draft: runtimeResult.draftBody,
                     reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || "skill"}).`,
                     requiresHumanApproval: true,
+                    generationId: runtimeResult.agentExecutionId || null,
+                    agentExecutionId: runtimeResult.agentExecutionId || null,
+                    decisionId: runtimeResult.decisionId || null,
+                    selectedSkillId: runtimeResult.selectedSkillId || null,
                     traceId: runtimeResult.traceId || null,
                 };
             }
@@ -14480,6 +14494,29 @@ export async function upsertSkillPolicy(locationId: string, skillId: string, pol
         };
     }
 
+    const existingPolicy = await db.aiSkillPolicy.findUnique({
+        where: {
+            locationId_skillId: {
+                locationId: targetLocationId,
+                skillId: targetSkillId,
+            },
+        },
+        select: {
+            stylePolicy: true,
+        },
+    });
+    const previousCustomInstructions = String((existingPolicy?.stylePolicy as any)?.customInstructions || "");
+    const nextCustomInstructions = String(parsed.data.stylePolicy?.customInstructions || "");
+    const promptChanged = previousCustomInstructions !== nextCustomInstructions;
+    if (promptChanged) {
+        await ensureLocationAiPromptVersion({
+            locationId: targetLocationId,
+            skillId: targetSkillId,
+            targetKind: "style_policy",
+            currentContent: previousCustomInstructions,
+        });
+    }
+
     const saved = await db.aiSkillPolicy.upsert({
         where: {
             locationId_skillId: {
@@ -14516,6 +14553,21 @@ export async function upsertSkillPolicy(locationId: string, skillId: string, pol
             metadata: (parsed.data.metadata || {}) as any,
         },
     });
+
+    if (promptChanged) {
+        await createCurrentPromptVersion({
+            locationId: targetLocationId,
+            skillId: targetSkillId,
+            targetKind: "style_policy",
+            content: nextCustomInstructions,
+            approvedByUserId: actor.userId,
+            source: "manual",
+            metadata: {
+                policyId: saved.id,
+                savedFrom: "settings",
+            },
+        });
+    }
 
     revalidatePath("/admin/settings/ai");
 
@@ -14872,6 +14924,125 @@ export async function runAiSkillDecisionNow(input: {
         extraInstruction: input.extraInstruction,
         executeImmediately: input.executeImmediately ?? true,
     });
+}
+
+export async function submitAgentLearningProposalAction(input: {
+    locationId: string;
+    skillId?: string | null;
+    type?: "style_policy" | "location_knowledge" | string | null;
+    title?: string | null;
+    description?: string | null;
+    proposedContent?: string | null;
+    category?: string | null;
+    key?: string | null;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess) {
+        return { success: false as const, error: "Unauthorized." };
+    }
+
+    const result = await submitManualAgentLearningProposal({
+        ...input,
+        locationId: targetLocationId,
+        actorUserId: actor.userId,
+        actorClerkUserId: actor.clerkUserId,
+    });
+    revalidatePath("/admin/settings/ai");
+    return result;
+}
+
+export async function listAgentLearningProposalsAction(input: {
+    locationId: string;
+    status?: string | null;
+    limit?: number;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) return [];
+
+    return listLearningProposals({
+        locationId: targetLocationId,
+        status: input.status,
+        limit: input.limit,
+    });
+}
+
+export async function listLocationAiPromptVersionsAction(input: {
+    locationId: string;
+    skillId?: string | null;
+    targetKind?: string | null;
+    limit?: number;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) return [];
+
+    return listLocationAiPromptVersions({
+        locationId: targetLocationId,
+        skillId: input.skillId,
+        targetKind: input.targetKind,
+        limit: input.limit,
+    });
+}
+
+export async function approveAgentLearningProposalAction(input: {
+    locationId: string;
+    proposalId: string;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access required." };
+    }
+
+    const result = await approveLearningProposal({
+        locationId: targetLocationId,
+        proposalId: input.proposalId,
+        actorUserId: actor.userId,
+    });
+    revalidatePath("/admin/settings/ai");
+    return result;
+}
+
+export async function dismissAgentLearningProposalAction(input: {
+    locationId: string;
+    proposalId: string;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access required." };
+    }
+
+    const result = await dismissLearningProposal({
+        locationId: targetLocationId,
+        proposalId: input.proposalId,
+    });
+    revalidatePath("/admin/settings/ai");
+    return result;
+}
+
+export async function revertLocationAiPromptAction(input: {
+    locationId: string;
+    skillId: string;
+    targetKind?: string | null;
+    versionId?: string | null;
+}) {
+    const targetLocationId = String(input.locationId || "").trim();
+    const actor = await resolveLocationActorContext(targetLocationId);
+    if (!actor.hasAccess || !actor.isAdmin) {
+        return { success: false as const, error: "Unauthorized: admin access required." };
+    }
+
+    const result = await revertLocationAiPrompt({
+        locationId: targetLocationId,
+        skillId: input.skillId,
+        actorUserId: actor.userId,
+        versionId: input.versionId || null,
+    });
+    revalidatePath("/admin/settings/ai");
+    return result;
 }
 
 export async function createAgentLearningSessionAction(input: {

@@ -20,6 +20,7 @@ import {
   buildDefaultSkillPolicy,
   parsePolicyJson,
 } from "@/lib/ai/runtime/config";
+import { formatLocationKnowledgeForPrompt, listActiveLocationKnowledge } from "@/lib/ai/location-learning";
 
 type RuntimeCandidate = {
   conversationId: string;
@@ -82,6 +83,7 @@ export type RunAiSkillDecisionResult = {
   success: boolean;
   decisionId?: string;
   jobId?: string;
+  agentExecutionId?: string | null;
   selectedSkillId?: string;
   objective?: SkillObjective;
   score?: number;
@@ -1076,6 +1078,7 @@ function buildRuntimePrompt(args: {
     selectedObjective: string | null;
   };
   contextSummary: string;
+  locationKnowledge?: string;
   extraInstruction?: string;
 }) {
   const decisionContext = (args.decision.decisionContext && typeof args.decision.decisionContext === "object" && !Array.isArray(args.decision.decisionContext))
@@ -1094,6 +1097,7 @@ function buildRuntimePrompt(args: {
       ? "If you reference external facts, mention source names briefly."
       : "Prefer concise drafts and avoid unnecessary citations.",
     styleInstructions ? `Custom style instructions:\n${styleInstructions}` : null,
+    args.locationKnowledge ? `Approved location knowledge:\n${args.locationKnowledge}` : null,
     `Decision context:\n${JSON.stringify(decisionContext, null, 2)}`,
     `Conversation context summary:\n${args.contextSummary}`,
     args.extraInstruction ? `Additional instruction:\n${args.extraInstruction}` : null,
@@ -1203,10 +1207,15 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
       ? job.payload as Record<string, unknown>
       : {};
     const contextSummary = String(payload.contextSummary || "").trim() || "No explicit context summary available.";
+    const locationKnowledge = formatLocationKnowledgeForPrompt(await listActiveLocationKnowledge({
+      locationId: decision.locationId,
+      limit: 8,
+    }));
     const templatePrompt = buildRuntimePrompt({
       policy,
       decision,
       contextSummary,
+      locationKnowledge,
     });
 
     await db.aiDecision.update({
@@ -1775,11 +1784,22 @@ export async function runAiSkillDecision(args: {
       },
     },
   });
+  const agentExecution = decision?.traceId
+    ? await db.agentExecution.findFirst({
+      where: {
+        traceId: decision.traceId,
+        spanId: decision.traceId,
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    })
+    : null;
 
   return {
     success: true,
     decisionId: queued.decisionId,
     jobId: queued.jobId,
+    agentExecutionId: agentExecution?.id || null,
     selectedSkillId: decision?.selectedSkillId || selected.policy.skillId,
     objective: (decision?.selectedObjective as SkillObjective) || selected.policy.objective,
     score: Number(decision?.selectedScore ?? selected.evaluation.score),

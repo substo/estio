@@ -49,6 +49,8 @@ model Location {
   aiSkillPolicies               AiSkillPolicy[]
   aiDecisions                   AiDecision[]
   aiRuntimeJobs                 AiRuntimeJob[]
+  locationAiPromptVersions      LocationAiPromptVersion[]
+  locationKnowledgeEntries      LocationKnowledgeEntry[]
   agentFeedback                 AgentFeedback[]
   learningSessions              LearningSession[]
   learningProposals             LearningProposal[]
@@ -2339,6 +2341,59 @@ model AgentFeedback {
   @@index([aiDecisionId])
   @@index([analyzed, createdAt])
   @@map("agent_feedback")
+}
+
+model LocationAiPromptVersion {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  skillId    String
+  targetKind String @default("style_policy") // style_policy | location_knowledge
+  content    String @db.Text
+
+  isDefault Boolean @default(false)
+  isCurrent Boolean @default(false)
+  source    String  @default("manual") // default_seed | learning_proposal | revert | manual
+
+  proposalId            String?
+  previousVersionId     String?
+  approvedByUserId      String?
+  revertedFromVersionId String?
+  metadata              Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, skillId, targetKind, isCurrent])
+  @@index([locationId, skillId, targetKind, createdAt(sort: Desc)])
+  @@index([proposalId])
+  @@map("location_ai_prompt_versions")
+}
+
+model LocationKnowledgeEntry {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  key        String
+  title      String
+  content    String @db.Text
+  category   String @default("ai_learning")
+  source     String @default("learning_proposal")
+
+  proposalId       String?
+  approvedByUserId String?
+  archivedAt       DateTime?
+  metadata         Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, key])
+  @@index([locationId, category, archivedAt])
+  @@index([proposalId])
+  @@map("location_knowledge_entries")
 }
 
 model LearningSession {

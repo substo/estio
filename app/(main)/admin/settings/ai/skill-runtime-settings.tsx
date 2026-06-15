@@ -1,17 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, PlayCircle, RefreshCw, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2, PlayCircle, RefreshCw, RotateCcw, Sparkles, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
+    approveAgentLearningProposalFromSettingsAction,
+    dismissAgentLearningProposalFromSettingsAction,
+    listAgentLearningProposalsFromSettingsAction,
     listAiRuntimeDecisionsFromSettingsAction,
     listAiRuntimeJobsFromSettingsAction,
+    listLocationAiPromptVersionsFromSettingsAction,
     listSkillPoliciesFromSettingsAction,
+    revertLocationAiPromptFromSettingsAction,
     runAiRuntimeNowAction,
     simulateSkillDecisionFromSettingsAction,
+    submitAgentLearningProposalFromSettingsAction,
     upsertSkillPolicyFromSettingsAction,
 } from "./actions";
 import { formatAiSettingsDateLabel } from "./date-format";
@@ -26,6 +33,28 @@ type RuntimeSummary = {
     policies: any[];
     recentDecisions: any[];
     recentJobs: any[];
+};
+
+type LearningProposal = {
+    id: string;
+    createdAt: string | null;
+    type: string;
+    title: string;
+    description: string;
+    target: any;
+    payload: any;
+    status: string;
+    riskLevel: string;
+};
+
+type PromptVersion = {
+    id: string;
+    createdAt: string | null;
+    skillId: string;
+    content: string;
+    isDefault: boolean;
+    isCurrent: boolean;
+    source: string;
 };
 
 interface SkillRuntimeSettingsProps {
@@ -109,6 +138,14 @@ function normalizePolicy(policy: any) {
     };
 }
 
+function getProposalSkillId(proposal: LearningProposal): string {
+    return String(proposal.target?.skillId || proposal.payload?.skillId || "general");
+}
+
+function getProposalContent(proposal: LearningProposal): string {
+    return String(proposal.payload?.proposedContent || proposal.payload?.content || "");
+}
+
 export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettingsProps) {
     const initialPolicies = useMemo(
         () => (summary?.policies || []).map((policy) => normalizePolicy(policy)),
@@ -122,6 +159,16 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
     const [running, setRunning] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [simulating, setSimulating] = useState(false);
+    const [learningProposals, setLearningProposals] = useState<LearningProposal[]>([]);
+    const [promptVersions, setPromptVersions] = useState<PromptVersion[]>([]);
+    const [learningBusyId, setLearningBusyId] = useState<string | null>(null);
+    const [submittingLearning, setSubmittingLearning] = useState(false);
+    const [learningDraft, setLearningDraft] = useState({
+        type: "style_policy",
+        skillId: "",
+        title: "",
+        content: "",
+    });
     const [simulationInput, setSimulationInput] = useState({
         conversationId: "",
         dealId: "",
@@ -159,13 +206,16 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
     const refreshRuntimeData = useCallback(async () => {
         setRefreshing(true);
         try {
-            const [policyRows, decisionRows, jobRows] = await Promise.all([
+            const [policyRows, decisionRows, jobRows, proposalRows, versionRows] = await Promise.all([
                 listSkillPoliciesFromSettingsAction(locationId),
                 listAiRuntimeDecisionsFromSettingsAction(locationId, { limit: 40 }),
                 listAiRuntimeJobsFromSettingsAction(locationId, { limit: 30 }),
+                listAgentLearningProposalsFromSettingsAction(locationId, { status: "pending", limit: 30 }),
+                listLocationAiPromptVersionsFromSettingsAction(locationId, { limit: 80 }),
             ]);
 
-            setPolicies(Array.isArray(policyRows) ? policyRows.map((policy) => normalizePolicy(policy)) : []);
+            const normalizedPolicies = Array.isArray(policyRows) ? policyRows.map((policy) => normalizePolicy(policy)) : [];
+            setPolicies(normalizedPolicies);
             setDecisions(Array.isArray(decisionRows) ? decisionRows : []);
             setJobs(Array.isArray(jobRows)
                 ? jobRows.map((job: any) => ({
@@ -174,12 +224,22 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
                     selectedObjective: job?.selectedObjective || job?.decision?.selectedObjective || null,
                 }))
                 : []);
+            setLearningProposals(Array.isArray(proposalRows) ? proposalRows as LearningProposal[] : []);
+            setPromptVersions(Array.isArray(versionRows) ? versionRows as PromptVersion[] : []);
+            setLearningDraft((prev) => ({
+                ...prev,
+                skillId: prev.skillId || normalizedPolicies[0]?.skillId || "",
+            }));
         } catch (error: any) {
             toast.error(error?.message || "Failed to refresh runtime data.");
         } finally {
             setRefreshing(false);
         }
     }, [locationId]);
+
+    useEffect(() => {
+        void refreshRuntimeData();
+    }, [refreshRuntimeData]);
 
     const updatePolicy = (policyId: string, patch: Record<string, any>) => {
         setPolicies((prev) => prev.map((policy) => {
@@ -219,6 +279,88 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
             toast.error(error?.message || "Failed to save skill policy.");
         } finally {
             setBusyPolicyId(null);
+        }
+    };
+
+    const submitLearningProposal = async () => {
+        const content = learningDraft.content.trim();
+        if (!content) {
+            toast.error("Add learning content first.");
+            return;
+        }
+        setSubmittingLearning(true);
+        try {
+            const result = await submitAgentLearningProposalFromSettingsAction(locationId, {
+                type: learningDraft.type,
+                skillId: learningDraft.skillId || policies[0]?.skillId || "general",
+                title: learningDraft.title || undefined,
+                proposedContent: content,
+            });
+            if (!result?.success) {
+                toast.error(String(result?.error || "Failed to submit learning proposal."));
+                return;
+            }
+            toast.success("Learning proposal submitted.");
+            setLearningDraft((prev) => ({ ...prev, title: "", content: "" }));
+            await refreshRuntimeData();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to submit learning proposal.");
+        } finally {
+            setSubmittingLearning(false);
+        }
+    };
+
+    const approveLearningProposal = async (proposalId: string) => {
+        setLearningBusyId(proposalId);
+        try {
+            const result = await approveAgentLearningProposalFromSettingsAction(locationId, proposalId);
+            if (!result?.success) {
+                toast.error(String(result?.error || "Failed to approve learning proposal."));
+                return;
+            }
+            toast.success("Learning proposal approved.");
+            await refreshRuntimeData();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to approve learning proposal.");
+        } finally {
+            setLearningBusyId(null);
+        }
+    };
+
+    const dismissLearningProposal = async (proposalId: string) => {
+        setLearningBusyId(proposalId);
+        try {
+            const result = await dismissAgentLearningProposalFromSettingsAction(locationId, proposalId);
+            if (!result?.success) {
+                toast.error(String(result?.error || "Failed to dismiss learning proposal."));
+                return;
+            }
+            toast.success("Learning proposal dismissed.");
+            await refreshRuntimeData();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to dismiss learning proposal.");
+        } finally {
+            setLearningBusyId(null);
+        }
+    };
+
+    const revertPrompt = async (skillId: string, versionId?: string | null) => {
+        setLearningBusyId(`revert:${skillId}:${versionId || "default"}`);
+        try {
+            const result = await revertLocationAiPromptFromSettingsAction(locationId, {
+                skillId,
+                versionId: versionId || null,
+            });
+            if (!result?.success) {
+                toast.error(String(result?.error || "Failed to revert prompt."));
+                return;
+            }
+            toast.success("Prompt reverted.");
+            await refreshRuntimeData();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to revert prompt.");
+        } finally {
+            setLearningBusyId(null);
         }
     };
 
@@ -306,6 +448,114 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
                     {refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                     Refresh
                 </Button>
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <p className="text-sm font-medium">AI Learning</p>
+                        <p className="text-[11px] text-muted-foreground">Location-scoped prompt and knowledge proposals</p>
+                    </div>
+                    <p className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+                        {learningProposals.length} pending
+                    </p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                    <div className="grid gap-2">
+                        <div className="grid gap-1">
+                            <Label className="text-[11px] text-muted-foreground">Target</Label>
+                            <select
+                                className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+                                value={learningDraft.type}
+                                onChange={(event) => setLearningDraft((prev) => ({ ...prev, type: event.target.value }))}
+                            >
+                                <option value="style_policy">Prompt</option>
+                                <option value="location_knowledge">Knowledge</option>
+                            </select>
+                        </div>
+                        <div className="grid gap-1">
+                            <Label className="text-[11px] text-muted-foreground">Skill</Label>
+                            <select
+                                className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+                                value={learningDraft.skillId || policies[0]?.skillId || "general"}
+                                onChange={(event) => setLearningDraft((prev) => ({ ...prev, skillId: event.target.value }))}
+                                disabled={learningDraft.type === "location_knowledge"}
+                            >
+                                {policies.length === 0 ? (
+                                    <option value="general">General</option>
+                                ) : policies.map((policy) => (
+                                    <option key={policy.skillId} value={policy.skillId}>{policy.skillId}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="grid gap-1">
+                            <Label className="text-[11px] text-muted-foreground">Title</Label>
+                            <Input
+                                value={learningDraft.title}
+                                onChange={(event) => setLearningDraft((prev) => ({ ...prev, title: event.target.value }))}
+                                placeholder="Short label"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid gap-2">
+                        <Label className="text-[11px] text-muted-foreground">Learning Content</Label>
+                        <Textarea
+                            className="min-h-28 text-xs"
+                            value={learningDraft.content}
+                            onChange={(event) => setLearningDraft((prev) => ({ ...prev, content: event.target.value }))}
+                            placeholder="Example: For Limassol leads, keep the draft concise, mention exact viewing windows, and avoid saying inventory is exclusive unless the listing says so."
+                        />
+                        <div className="flex justify-end">
+                            <Button type="button" onClick={submitLearningProposal} disabled={submittingLearning}>
+                                {submittingLearning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                                Submit Learning
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+
+                {learningProposals.length > 0 && (
+                    <div className="space-y-2">
+                        {learningProposals.map((proposal) => {
+                            const content = getProposalContent(proposal);
+                            return (
+                                <div key={proposal.id} className="rounded-md border bg-white p-3">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium text-slate-900">{proposal.title}</p>
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {proposal.type} · {getProposalSkillId(proposal)} · {formatDateLabel(proposal.createdAt)}
+                                            </p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                onClick={() => approveLearningProposal(proposal.id)}
+                                                disabled={learningBusyId === proposal.id}
+                                            >
+                                                {learningBusyId === proposal.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                                                Approve
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => dismissLearningProposal(proposal.id)}
+                                                disabled={learningBusyId === proposal.id}
+                                            >
+                                                <XCircle className="mr-2 h-4 w-4" />
+                                                Dismiss
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-slate-700">{content || proposal.description}</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             <div className="space-y-3 rounded-lg border p-4">
@@ -439,6 +689,45 @@ export function SkillRuntimeSettings({ locationId, summary }: SkillRuntimeSettin
                                             })}
                                         />
                                     </div>
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <Label className="text-[11px] text-muted-foreground">Custom Prompt</Label>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {promptVersions
+                                                .filter((version) => version.skillId === policy.skillId)
+                                                .slice(0, 1)
+                                                .map((version) => (
+                                                    <span key={version.id} className="text-[11px] text-muted-foreground">
+                                                        current: {version.source}
+                                                    </span>
+                                                ))}
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => revertPrompt(policy.skillId)}
+                                                disabled={learningBusyId === `revert:${policy.skillId}:default`}
+                                            >
+                                                {learningBusyId === `revert:${policy.skillId}:default`
+                                                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    : <RotateCcw className="mr-2 h-4 w-4" />}
+                                                Revert Default
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <Textarea
+                                        className="min-h-24 text-xs"
+                                        value={policy.stylePolicy.customInstructions}
+                                        onChange={(event) => updatePolicy(policy.id, {
+                                            stylePolicy: {
+                                                ...policy.stylePolicy,
+                                                customInstructions: event.target.value,
+                                            },
+                                        })}
+                                        placeholder="Location-specific draft guidance for this skill"
+                                    />
                                 </div>
 
                                 <div className="flex items-center justify-end">

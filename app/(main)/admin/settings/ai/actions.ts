@@ -9,9 +9,15 @@ import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH
 import {
     listAiDecisions,
     listAiRuntimeJobs,
+    listAgentLearningProposalsAction,
+    listLocationAiPromptVersionsAction,
     listSkillPolicies,
+    approveAgentLearningProposalAction,
+    dismissAgentLearningProposalAction,
+    revertLocationAiPromptAction,
     runAiRuntimeNow,
     simulateSkillDecision,
+    submitAgentLearningProposalAction,
     updateAiAutomationConfig,
     upsertSkillPolicy,
 } from "@/app/(main)/admin/conversations/actions";
@@ -454,6 +460,80 @@ export async function upsertSkillPolicyFromSettingsAction(locationId: string, sk
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
     return upsertSkillPolicy(authorization.locationId, skillId, policy);
+}
+
+export async function submitAgentLearningProposalFromSettingsAction(locationId: string, input: {
+    skillId?: string | null;
+    type?: "style_policy" | "location_knowledge" | string | null;
+    title?: string | null;
+    description?: string | null;
+    proposedContent?: string | null;
+    category?: string | null;
+    key?: string | null;
+}) {
+    return submitAgentLearningProposalAction({
+        ...input,
+        locationId,
+    });
+}
+
+export async function listAgentLearningProposalsFromSettingsAction(locationId: string, input?: {
+    status?: string | null;
+    limit?: number;
+}) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return [];
+    return listAgentLearningProposalsAction({
+        locationId: authorization.locationId,
+        status: input?.status ?? null,
+        limit: input?.limit,
+    });
+}
+
+export async function approveAgentLearningProposalFromSettingsAction(locationId: string, proposalId: string) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false as const, error: authorization.error };
+    return approveAgentLearningProposalAction({
+        locationId: authorization.locationId,
+        proposalId,
+    });
+}
+
+export async function dismissAgentLearningProposalFromSettingsAction(locationId: string, proposalId: string) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false as const, error: authorization.error };
+    return dismissAgentLearningProposalAction({
+        locationId: authorization.locationId,
+        proposalId,
+    });
+}
+
+export async function revertLocationAiPromptFromSettingsAction(locationId: string, input: {
+    skillId: string;
+    versionId?: string | null;
+}) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return { success: false as const, error: authorization.error };
+    return revertLocationAiPromptAction({
+        locationId: authorization.locationId,
+        skillId: input.skillId,
+        versionId: input.versionId || null,
+        targetKind: "style_policy",
+    });
+}
+
+export async function listLocationAiPromptVersionsFromSettingsAction(locationId: string, input?: {
+    skillId?: string | null;
+    limit?: number;
+}) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) return [];
+    return listLocationAiPromptVersionsAction({
+        locationId: authorization.locationId,
+        skillId: input?.skillId || null,
+        targetKind: "style_policy",
+        limit: input?.limit,
+    });
 }
 
 export async function listAiRuntimeDecisionsFromSettingsAction(locationId: string, input?: {

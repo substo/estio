@@ -18,6 +18,7 @@ import {
 } from "@/lib/conversations/timeline-events";
 import { getDraftModelWithCachedContext } from "@/lib/ai/draft-context-cache";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
+import { formatLocationKnowledgeForPrompt, listActiveLocationKnowledge } from "@/lib/ai/location-learning";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import {
     buildConversationalMessagingContract,
@@ -619,6 +620,10 @@ export async function generateDraft(context: CoordinationContext) {
         const websiteDomain = typeof configAny?.domain === "string" && configAny.domain.trim()
             ? configAny.domain.trim()
             : null;
+        const locationKnowledge = formatLocationKnowledgeForPrompt(await listActiveLocationKnowledge({
+            locationId: context.locationId,
+            limit: 8,
+        }));
 
         // Model preference order: explicit request -> location-configured default -> draft fast default.
         const explicitRequestedModel = typeof context.model === "string" && context.model.trim()
@@ -938,6 +943,7 @@ export async function generateDraft(context: CoordinationContext) {
         - Business Name: ${businessName}
         ${websiteDomain ? `- Website: https://${websiteDomain}` : "- Website: Unknown"}
         ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
+        ${locationKnowledge ? `- Approved Location Knowledge:\n${locationKnowledge}` : "- Approved Location Knowledge: None"}
         - Role: Intermediary connecting leads, owners, and agents.
         - Tone: ${isEmail ? "Professional, clear, polite, human." : "Natural, concise, friendly, human."}
         - Channel: ${channelName}
