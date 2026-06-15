@@ -1081,17 +1081,20 @@ export async function updateContactAction(contactId: string, data: Partial<Valid
   // Fetch existing validation requirements (locationId is required for core logic)
   const existing = await db.contact.findUnique({
     where: { id: contactId },
-    select: { locationId: true, name: true }
+    select: { locationId: true, name: true, contactType: true }
   });
 
   if (!existing) return { success: false, error: "Contact not found" };
+
+  const { contactType: _ignoredContactType, ...safeData } = data;
 
   // Construct full data object
   const fullData: any = {
     contactId,
     locationId: existing.locationId,
     name: existing.name, // Fallback
-    ...data
+    contactType: existing.contactType || 'Lead',
+    ...safeData
   };
 
   const res = await updateContactCore(fullData, userId);

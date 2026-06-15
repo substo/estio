@@ -302,3 +302,19 @@ test("verification auto-apply policy keeps low confidence decisions for review",
     confidence: 0.9,
   }), true);
 });
+
+test("verification auto-apply policy keeps generic lead to contact changes for review", () => {
+  assert.equal(shouldAutoApplyContactVerificationAssessment({
+    status: "not_a_lead",
+    confidence: 1,
+    snapshot: { contactType: "Lead" },
+    proposedPatch: { contactType: "Contact" },
+  }), false);
+
+  assert.equal(shouldAutoApplyContactVerificationAssessment({
+    status: "likely_agent",
+    confidence: 0.9,
+    snapshot: { contactType: "Lead" },
+    proposedPatch: { contactType: "Agent" },
+  }), true);
+});

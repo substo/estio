@@ -658,8 +658,16 @@ function profileVerificationDataForAssessment(args: {
 export function shouldAutoApplyContactVerificationAssessment(assessment: {
   status?: string | null;
   confidence?: number | null;
+  snapshot?: AnyRecord | null;
+  proposedPatch?: ContactVerificationPatch | null;
 }) {
   const status = normalizeContactVerificationStatus(assessment.status);
+  const currentContactType = normalizeContactType(assessment.snapshot?.contactType);
+  const proposedContactType = normalizeContactType(assessment.proposedPatch?.contactType);
+  if (currentContactType === "Lead" && proposedContactType === "Contact") {
+    return false;
+  }
+
   return Boolean(status)
     && status !== "needs_review"
     && Number(assessment.confidence || 0) >= AUTO_APPLY_CONFIDENCE_THRESHOLD;
