@@ -87,7 +87,7 @@ export function ConversationListHeader({
         const hasActiveSearch = !!searchQuery.trim();
 
         return (
-            <div className="border-b bg-indigo-50/50 p-2 min-w-0 space-y-2">
+            <div className="border-b bg-indigo-50/50 p-2 min-w-0 space-y-2 dark:border-slate-800 dark:bg-indigo-950/30">
                 <div className="flex items-center justify-between gap-2 min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
                         <Checkbox
@@ -96,11 +96,11 @@ export function ConversationListHeader({
                             onCheckedChange={(checked) => onSelectAll?.(checked === true, visibleConversationIds)}
                         />
                         <div className="min-w-0">
-                            <div className="truncate text-xs font-medium text-indigo-900">
+                            <div className="truncate text-xs font-medium text-indigo-900 dark:text-indigo-100">
                                 {selectedIds?.size || 0} selected
                             </div>
                             {hasActiveSearch && (
-                                <div className="truncate text-[10px] text-indigo-700/70">
+                                <div className="truncate text-[10px] text-indigo-700/70 dark:text-indigo-200/70">
                                     Showing {conversations.length} search result{conversations.length === 1 ? "" : "s"}
                                 </div>
                             )}
@@ -231,7 +231,7 @@ export function ConversationListHeader({
                         <input
                             type="text"
                             placeholder="Search contacts to add..."
-                            className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                            className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors dark:border-indigo-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500"
                             value={localQuery}
                             onChange={(e) => setLocalQuery(e.target.value)}
                             onKeyDown={(e) => {
@@ -261,7 +261,7 @@ export function ConversationListHeader({
     }
 
     return (
-        <div className="border-b bg-slate-50 p-2 min-w-0 flex flex-col gap-2">
+        <div className="border-b bg-slate-50 p-2 min-w-0 flex flex-col gap-2 dark:border-slate-800 dark:bg-slate-950">
             <TooltipProvider delayDuration={200}>
                 {onViewModeChange && (
                     <Tabs
@@ -324,7 +324,7 @@ export function ConversationListHeader({
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-8 w-8 text-slate-600 hover:text-slate-900 shrink-0"
+                                        className="h-8 w-8 text-slate-600 hover:text-slate-900 shrink-0 dark:text-slate-300 dark:hover:text-white"
                                         onClick={() => setIsSearchExpanded(true)}
                                     >
                                         <Search className="w-4 h-4" />
@@ -345,7 +345,7 @@ export function ConversationListHeader({
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-8 min-w-0 max-w-[8rem] justify-start gap-1.5 px-2 text-xs text-slate-700"
+                                            className="h-8 min-w-0 max-w-[8rem] justify-start gap-1.5 px-2 text-xs text-slate-700 dark:text-slate-200"
                                         >
                                             {viewFilter === 'active' && <Inbox className="w-4 h-4 shrink-0" />}
                                             {viewFilter === 'archived' && <Archive className="w-4 h-4 shrink-0" />}
@@ -486,7 +486,7 @@ export function ConversationListHeader({
                         type="text"
                         placeholder="Search contacts..."
                         autoFocus
-                        className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                        className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors dark:border-indigo-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500"
                         value={localQuery}
                         onChange={(e) => setLocalQuery(e.target.value)}
                         onKeyDown={(e) => {

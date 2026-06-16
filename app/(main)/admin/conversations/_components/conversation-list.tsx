@@ -148,7 +148,7 @@ export function ConversationList({
     if (effectiveViewMode === 'deals' && deals && deals.length > 0) {
         // RENDER DEALS LIST
         return (
-            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
                 {/* Status Bar */}
                 <WhatsAppStatus />
 
@@ -162,15 +162,15 @@ export function ConversationList({
                             key={d.id}
                             data-deal-id={d.id}
                             className={cn(
-                                "border-b transition-colors p-2 cursor-pointer hover:bg-slate-50",
-                                "bg-slate-50", // Placeholder for logic
-                                selectedId === d.id ? "bg-indigo-50 border-l-4 border-l-indigo-500" : "border-l-4 border-l-transparent"
+                                "border-b transition-colors p-2 cursor-pointer hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900",
+                                "bg-slate-50 dark:bg-slate-950", // Placeholder for logic
+                                selectedId === d.id ? "bg-indigo-50 border-l-4 border-l-indigo-500 dark:bg-indigo-950/40" : "border-l-4 border-l-transparent"
                             )}
                             onClick={() => onSelectDeal?.(d.id)}
                             onMouseEnter={() => onHoverDeal?.(d.id)}
                         >
                             <div className="flex justify-between items-start">
-                                <h4 className="font-semibold text-sm truncate text-indigo-900">{d.title}</h4>
+                                <h4 className="font-semibold text-sm truncate text-indigo-900 dark:text-indigo-100">{d.title}</h4>
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${d.stage === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                                     {d.stage}
                                 </span>
@@ -192,7 +192,7 @@ export function ConversationList({
 
     if (isSearching) {
         return (
-            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
                 <WhatsAppStatus />
                 {header}
                 <div className="p-8 flex flex-col items-center justify-center text-slate-500">
@@ -205,7 +205,7 @@ export function ConversationList({
 
     if (viewFilter === 'tasks') {
         return (
-            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
                 <WhatsAppStatus />
                 {header}
                 <GlobalTaskList
@@ -220,16 +220,16 @@ export function ConversationList({
 
     if (conversations.length === 0 && effectiveViewMode === 'chats') {
         return (
-            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
                 <WhatsAppStatus />
                 {header}
-                <div className="p-4 text-center text-gray-500">No conversations found.</div>
+                <div className="p-4 text-center text-gray-500 dark:text-slate-400">No conversations found.</div>
             </div>
         );
     }
 
     return (
-        <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden">
+        <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
             {/* Status Bar */}
             <WhatsAppStatus />
 
@@ -257,7 +257,7 @@ export function ConversationList({
                 })}
 
                 {(hasMore || isLoadingMore) && !searchQuery.trim() && (
-                    <div className="px-3 py-3 border-t bg-white/80">
+                    <div className="px-3 py-3 border-t bg-white/80 dark:border-slate-800 dark:bg-slate-950/80">
                         <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden="true" />
                         <div className="mt-2 flex items-center justify-center">
                             {isLoadingMore ? (

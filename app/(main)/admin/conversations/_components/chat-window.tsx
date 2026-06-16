@@ -331,7 +331,7 @@ export function ChatWindow({
             className={cn("h-full min-h-0 flex flex-col min-w-0 overflow-hidden", surfaceTheme.rootClassName)}
         >
             {/* Header */}
-            <div className="h-12 border-b flex items-center px-3 sm:h-16 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2">
+            <div className="h-12 border-b flex items-center px-3 sm:h-16 sm:px-6 shrink-0 justify-between bg-white z-10 shadow-sm gap-2 dark:border-slate-800 dark:bg-slate-950">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                     {onBack && (
                         <Button
@@ -341,14 +341,14 @@ export function ChatWindow({
                             onClick={onBack}
                             title="Back to conversations"
                         >
-                            <ArrowLeft className="h-4 w-4 text-gray-500" />
+                            <ArrowLeft className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                         </Button>
                     )}
                     <div className="w-0 flex-1 min-w-0 overflow-hidden">
-                        <h3 className="block w-full truncate font-bold text-gray-900">{conversation.contactName || "Unknown Contact"}</h3>
+                        <h3 className="block w-full truncate font-bold text-gray-900 dark:text-slate-100">{conversation.contactName || "Unknown Contact"}</h3>
                         <div className="flex items-center gap-2 mt-0.5 min-w-0">
                             <span className={cn("flex h-2 w-2 rounded-full shrink-0", conversationLifecycle.dotClassName)} />
-                            <p className="text-xs text-gray-500 font-medium truncate min-w-0 flex-1">
+                            <p className="text-xs text-gray-500 font-medium truncate min-w-0 flex-1 dark:text-slate-400">
                                 {conversationChannelLabel} • {conversationLifecycle.label}
                             </p>
                         </div>
@@ -363,7 +363,7 @@ export function ChatWindow({
                             onClick={onOpenMissionControl}
                             title="Open AI Coordinator"
                         >
-                            <ListTodo className="h-4 w-4 text-gray-500" />
+                            <ListTodo className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                         </Button>
                     )}
                     {selectionBatch.length > 0 && (
@@ -401,13 +401,13 @@ export function ChatWindow({
                                 onClick={handleClearSelectionBatch}
                                 title="Clear queued summary snippets"
                             >
-                                <Trash2 className="h-3.5 w-3.5 text-gray-500" />
+                                <Trash2 className="h-3.5 w-3.5 text-gray-500 dark:text-slate-400" />
                             </Button>
                         </>
                     )}
                     {isWhatsAppConversation && onSync && (
                         <Button variant="ghost" size="icon" className="hidden sm:inline-flex" onClick={onSync} title="Sync WhatsApp History">
-                            <RefreshCw className="h-4 w-4 text-gray-500" />
+                            <RefreshCw className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                         </Button>
                     )}
                     {isWhatsAppConversation
@@ -423,9 +423,9 @@ export function ChatWindow({
                                         title="Transcribe unprocessed audio"
                                     >
                                         {isBulkTranscribingAudio ? (
-                                            <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+                                            <Loader2 className="h-4 w-4 animate-spin text-gray-500 dark:text-slate-400" />
                                         ) : (
-                                            <AudioLines className="h-4 w-4 text-gray-500" />
+                                            <AudioLines className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                                         )}
                                     </Button>
                                 </DropdownMenuTrigger>
@@ -450,11 +450,11 @@ export function ChatWindow({
                         onClick={() => setShowTranscriptSearch((prev) => !prev)}
                         title="Search conversation"
                     >
-                        <Search className="h-4 w-4 text-gray-500" />
+                        <Search className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                     </Button>
                     {isEmailConversation && onFetchHistory && (
                         <Button variant="ghost" size="icon" className="hidden sm:inline-flex" onClick={onFetchHistory} title="Fetch Gmail History">
-                            <RefreshCw className="h-4 w-4 text-gray-500" />
+                            <RefreshCw className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                         </Button>
                     )}
 
@@ -462,7 +462,7 @@ export function ChatWindow({
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden" title="More actions">
-                                    <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                                    <MoreHorizontal className="h-4 w-4 text-gray-500 dark:text-slate-400" />
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-52">
@@ -504,12 +504,12 @@ export function ChatWindow({
             </div>
 
             {showTranscriptSearch && (
-                <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3">
+                <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3 dark:border-slate-800 dark:bg-slate-950/90">
                     {showTranscriptSearch && (
-                        <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
+                        <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2 dark:border-slate-800 dark:bg-slate-900">
                             <div className="flex items-center gap-2">
-                                <Search className="h-4 w-4 text-slate-600" />
-                                <p className="text-xs font-semibold text-slate-800">Search</p>
+                                <Search className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Search</p>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Input
@@ -543,7 +543,7 @@ export function ChatWindow({
                                             "rounded border px-2 py-0.5 text-[10px] transition-colors",
                                             transcriptSearchQuery.trim().toLowerCase() === keyword.toLowerCase()
                                                 ? surfaceTheme.searchActiveChipClassName
-                                                : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                                : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                                         )}
                                         onClick={() => handleTranscriptKeyword(keyword)}
                                         disabled={isTranscriptSearching}
@@ -558,27 +558,27 @@ export function ChatWindow({
                                 </div>
                             )}
                             {!transcriptSearchError && transcriptSearchQuery.trim() && !isTranscriptSearching && (
-                                <div className="text-[11px] text-slate-500">
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400">
                                     {transcriptSearchTotal > 0
                                         ? `Showing ${transcriptSearchResults.length} of ${transcriptSearchTotal} matches.`
                                         : "No matches found for this query."}
                                 </div>
                             )}
                             {transcriptSearchResults.length > 0 && (
-                                <div className="max-h-52 space-y-1 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-1.5">
+                                <div className="max-h-52 space-y-1 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-1.5 dark:border-slate-800 dark:bg-slate-950">
                                     {transcriptSearchResults.map((match) => (
                                         <button
                                             key={`${match.transcriptId}:${match.messageId}`}
                                             type="button"
                                             onClick={() => jumpToMessage(match.messageId)}
-                                            className={cn("w-full rounded border border-transparent bg-white px-2 py-1.5 text-left text-[11px]", surfaceTheme.searchResultHoverClassName)}
+                                            className={cn("w-full rounded border border-transparent bg-white px-2 py-1.5 text-left text-[11px] dark:bg-slate-900", surfaceTheme.searchResultHoverClassName)}
                                         >
-                                            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                            <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
                                                 <span>{new Date(match.messageDate).toLocaleString()}</span>
                                                 <span className="uppercase">{match.direction}</span>
                                                 {match.source === "transcript" && <span className="text-purple-500">transcript</span>}
                                             </div>
-                                            <p className="mt-0.5 text-slate-700 line-clamp-2">{match.snippet || "(empty snippet)"}</p>
+                                            <p className="mt-0.5 text-slate-700 line-clamp-2 dark:text-slate-200">{match.snippet || "(empty snippet)"}</p>
                                         </button>
                                     ))}
                                 </div>
@@ -589,8 +589,8 @@ export function ChatWindow({
             )}
 
             {shouldShowTranslationBanner && (
-                <div className="border-b bg-amber-50/70 px-3 py-1.5 sm:px-4 sm:py-2.5">
-                    <div className="flex items-center justify-between gap-2 text-xs text-amber-900 sm:hidden">
+                <div className="border-b bg-amber-50/70 px-3 py-1.5 sm:px-4 sm:py-2.5 dark:border-amber-900 dark:bg-amber-950/30">
+                    <div className="flex items-center justify-between gap-2 text-xs text-amber-900 sm:hidden dark:text-amber-100">
                         <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
                             <Languages className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">Translate thread?</span>
@@ -616,7 +616,7 @@ export function ChatWindow({
                             </Button>
                         </div>
                     </div>
-                    <div className="hidden flex-wrap items-center gap-2 text-xs text-amber-900 sm:flex">
+                    <div className="hidden flex-wrap items-center gap-2 text-xs text-amber-900 sm:flex dark:text-amber-100">
                         <Languages className="h-3.5 w-3.5" />
                         <span className="font-medium">Some inbound messages appear to be in another language.</span>
                         <Button
@@ -642,8 +642,8 @@ export function ChatWindow({
             )}
 
             {translationReadEnabled && inboundForeignCandidates.length >= 2 && (
-                <div className="border-b bg-slate-50 px-3 py-1.5 sm:px-4 sm:py-2">
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600 sm:hidden">
+                <div className="border-b bg-slate-50 px-3 py-1.5 sm:px-4 sm:py-2 dark:border-slate-800 dark:bg-slate-950">
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600 sm:hidden dark:text-slate-300">
                         <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
                             <Languages className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">
@@ -654,7 +654,7 @@ export function ChatWindow({
                         </span>
                         <div className="flex shrink-0 items-center gap-1">
                             {(translatingVisibleThread || autoTranslatingThread) && (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500 dark:text-slate-400" />
                             )}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -681,7 +681,7 @@ export function ChatWindow({
                             </DropdownMenu>
                         </div>
                     </div>
-                    <div className="hidden flex-wrap items-center gap-2 text-[11px] text-slate-600 sm:flex">
+                    <div className="hidden flex-wrap items-center gap-2 text-[11px] text-slate-600 sm:flex dark:text-slate-300">
                         <Languages className="h-3.5 w-3.5" />
                         <span className="font-medium">
                             {threadTranslationMode === "translated"
@@ -689,7 +689,7 @@ export function ChatWindow({
                                 : "Viewing original customer text."}
                         </span>
                         {(translatingVisibleThread || autoTranslatingThread) && (
-                            <span className="inline-flex items-center gap-1 text-slate-500">
+                            <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
                                 <Loader2 className="h-3 w-3 animate-spin" />
                                 Preparing translation
                             </span>
@@ -739,9 +739,9 @@ export function ChatWindow({
                     )}
 
                     {!loading && messages.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 space-y-4">
-                            <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
-                                <MessageSquare className="h-6 w-6 text-gray-300" />
+                        <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 space-y-4 dark:text-slate-500">
+                            <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center dark:bg-slate-900">
+                                <MessageSquare className="h-6 w-6 text-gray-300 dark:text-slate-600" />
                             </div>
                             <p>No messages yet. Start the conversation!</p>
                         </div>

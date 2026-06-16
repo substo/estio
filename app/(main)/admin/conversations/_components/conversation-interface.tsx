@@ -181,7 +181,7 @@ import type { ConversationFeatureFlags } from '@/lib/feature-flags';
 const CoordinatorPanel = dynamic(
     () => import('./coordinator-panel').then((mod) => mod.CoordinatorPanel),
     {
-        loading: () => <div className="h-full animate-pulse bg-slate-50" />,
+        loading: () => <div className="h-full animate-pulse bg-slate-50 dark:bg-slate-950" />,
     }
 );
 
@@ -3114,7 +3114,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
                 onContactMerged={(targetId, targetConvId) => handleContactMerged(activeConversation.id, targetId, targetConvId)}
             />
-        ) : <div className="h-full bg-slate-50" />
+        ) : <div className="h-full bg-slate-50 dark:bg-slate-950" />
     ) : (
         dealMissionConversation ? (
             <CoordinatorPanel
@@ -3139,7 +3139,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onSelectDealConversation={(conversationId) => setActiveId(conversationId)}
             />
         ) : (
-            <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center">
+            <div className="h-full bg-slate-50 p-4 text-center text-gray-400 text-xs flex flex-col items-center justify-center dark:bg-slate-950 dark:text-slate-500">
                 {loadingDealContext
                     ? 'Loading deal context...'
                     : !dealTimelineInitialPainted

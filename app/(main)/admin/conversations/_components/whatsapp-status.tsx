@@ -75,7 +75,7 @@ function EmailProviderBadge({ provider }: { provider: EmailProviderStatus }) {
             <HoverCardTrigger asChild>
                 <Link
                     href={provider.settingsPath}
-                    className="relative inline-flex h-6 w-6 items-center justify-center rounded border bg-white text-gray-600 hover:bg-slate-50 hover:text-gray-900 shrink-0"
+                    className="relative inline-flex h-6 w-6 items-center justify-center rounded border bg-white text-gray-600 hover:bg-slate-50 hover:text-gray-900 shrink-0 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
                     aria-label={`${provider.provider} sync status`}
                 >
                     {provider.provider === 'gmail' ? (
@@ -297,10 +297,10 @@ export function WhatsAppStatus() {
     const visibleEmailProviders = emailProviders.filter((provider) => provider.connected || provider.configured);
 
     return (
-        <div className="flex items-center gap-2 text-xs px-2 py-1 bg-slate-50 border-b">
+        <div className="flex items-center gap-2 text-xs px-2 py-1 bg-slate-50 border-b dark:border-slate-800 dark:bg-slate-950">
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : isError ? 'bg-red-500' : 'bg-yellow-500 animate-pulse'}`} />
 
-            <span className="text-gray-500 font-medium truncate min-w-0">
+            <span className="text-gray-500 font-medium truncate min-w-0 dark:text-slate-400">
                 {statusLabel}
             </span>
             {visibleEmailProviders.length > 0 && (
@@ -312,7 +312,7 @@ export function WhatsAppStatus() {
             )}
 
             {/* Refresh Button */}
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-gray-600 shrink-0" onClick={handleRefresh} disabled={loading}>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-400 hover:text-gray-600 shrink-0 dark:text-slate-500 dark:hover:text-slate-300" onClick={handleRefresh} disabled={loading}>
                 <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
             </Button>
 

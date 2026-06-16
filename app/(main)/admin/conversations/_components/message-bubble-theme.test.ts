@@ -80,3 +80,25 @@ test("conversation surface theme follows selected messaging platform", () => {
     assert.equal(email.channel, "Email");
     assert.match(email.composerPrimaryButtonClassName, /violet/);
 });
+
+test("conversation themes include dark-mode readable surfaces", () => {
+    const inbound = getMessageBubbleTheme({
+        isWhatsApp: false,
+        isSMS: false,
+        isEmail: false,
+        isOutbound: false,
+    });
+    const whatsAppOutbound = getMessageBubbleTheme({
+        isWhatsApp: true,
+        isSMS: false,
+        isEmail: false,
+        isOutbound: true,
+    });
+    const surface = getConversationSurfaceTheme("WhatsApp");
+
+    assert.match(inbound.bubbleClassName, /dark:bg-slate-900/);
+    assert.match(inbound.sharedContactNameClassName, /dark:text-slate-100/);
+    assert.match(whatsAppOutbound.bubbleClassName, /dark:bg-emerald-950/);
+    assert.match(surface.timelineClassName, /dark:bg-slate-950/);
+    assert.match(surface.composerShellClassName, /dark:bg-slate-900/);
+});

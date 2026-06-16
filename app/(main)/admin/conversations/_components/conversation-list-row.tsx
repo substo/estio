@@ -43,7 +43,7 @@ function formatContactTypeLabel(contactType?: string | null) {
 
 function getContactTypeTone(contactType?: string | null) {
     const key = String(contactType || "Contact").trim().toLowerCase().replace(/\s+/g, "");
-    return CONTACT_TYPE_TONES[key] || "border-slate-200 bg-white text-slate-700";
+    return CONTACT_TYPE_TONES[key] || "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300";
 }
 
 export function ConversationListRow({
@@ -63,9 +63,9 @@ export function ConversationListRow({
         <div
             data-conversation-id={conversation.id}
             className={cn(
-                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0",
-                selectedId === conversation.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500" : "border-l-transparent",
-                isSelectionMode && isChecked ? "bg-indigo-50" : "hover:bg-slate-50",
+                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0 dark:border-slate-800",
+                selectedId === conversation.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500 dark:bg-slate-900" : "border-l-transparent",
+                isSelectionMode && isChecked ? "bg-indigo-50 dark:bg-indigo-950/30" : "hover:bg-slate-50 dark:hover:bg-slate-900",
                 selectedId === conversation.id ? "border-l-4" : "border-l-4"
             )}
             // In Selection Mode, clicking the row toggles selection (UX choice)
@@ -114,7 +114,7 @@ export function ConversationListRow({
                 </div>
                 {/* Channel icon */}
                 <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                    <div className="flex min-w-0 items-center gap-1 text-gray-500">
+                    <div className="flex min-w-0 items-center gap-1 text-gray-500 dark:text-slate-400">
                         {channel.icon}
                         <span className="truncate text-[10px]">{channel.name}</span>
                     </div>

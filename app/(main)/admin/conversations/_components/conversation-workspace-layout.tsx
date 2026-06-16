@@ -49,7 +49,7 @@ export function ConversationWorkspaceLayout({
             </Panel>
 
             <PanelResizeHandle
-                className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 flex flex-col justify-center"
+                className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 flex flex-col justify-center dark:bg-slate-800 dark:hover:bg-blue-500"
                 style={{ width: '2px', cursor: 'col-resize' }}
             />
 
@@ -59,7 +59,7 @@ export function ConversationWorkspaceLayout({
             </Panel>
 
             <PanelResizeHandle
-                className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50"
+                className="w-1 bg-gray-200 hover:bg-blue-400 transition-colors z-50 dark:bg-slate-800 dark:hover:bg-blue-500"
                 style={{ width: '1px', cursor: 'col-resize' }}
             />
 

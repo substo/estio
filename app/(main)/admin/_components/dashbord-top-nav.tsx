@@ -41,6 +41,10 @@ export default function DashboardTopNav({ children, appSurface = false }: { chil
             </SheetHeader>
             
             <div className="flex-1 overflow-y-auto overflow-x-hidden p-4">
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-md border bg-muted/40 p-2">
+                <span className="text-sm font-medium text-foreground">Theme</span>
+                <ModeToggle />
+              </div>
               <div className="space-y-1">
                 <QuickAssistStartButton label="Start Quick Assist" variant="default" size="sm" className="w-full justify-start gap-2 h-10 mb-2 font-medium" />
               </div>
@@ -48,12 +52,14 @@ export default function DashboardTopNav({ children, appSurface = false }: { chil
             </div>
           </SheetContent>
         </Sheet>
-        <div className="flex justify-center items-center gap-2 ml-auto">
+        <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
           <div className="hidden sm:flex">
             <QuickAssistStartButton label="Quick Assist" variant="outline" size="sm" />
           </div>
           <AdminNotificationBell />
-          <AICostBadge />
+          <div className="hidden sm:block">
+            <AICostBadge />
+          </div>
           {config?.auth?.enabled && <UserProfile />}
           <ModeToggle />
         </div>

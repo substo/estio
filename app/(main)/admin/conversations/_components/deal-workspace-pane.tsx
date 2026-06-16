@@ -72,7 +72,7 @@ export function DealWorkspacePane({
 }: DealWorkspacePaneProps) {
     if (!activeDealId) {
         return (
-            <div className="h-full min-h-0 flex items-center justify-center text-gray-400 bg-slate-50">
+            <div className="h-full min-h-0 flex items-center justify-center text-gray-400 bg-slate-50 dark:bg-slate-950 dark:text-slate-500">
                 Select a deal to view timeline
             </div>
         );
