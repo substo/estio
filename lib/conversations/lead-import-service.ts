@@ -160,11 +160,11 @@ function mergeConversationSuggestedActions(existing: string[] | null | undefined
     return [normalizedIncoming, ...current].slice(0, 3);
 }
 
-async function conversationHasVisibleMessages(conversationId: string): Promise<boolean> {
+async function conversationHasVisibleOutboundMessages(conversationId: string): Promise<boolean> {
     const message = await db.message.findFirst({
         where: {
             conversationId,
-            direction: { in: ["inbound", "outbound"] },
+            direction: "outbound",
             ...buildVisibleMessageSourceWhere(),
         },
         select: { id: true },
@@ -718,8 +718,8 @@ export async function createParsedLeadForLocation(
             ) {
                 conversationUpdateData.lastMessageType = preferredChannelType;
             }
-            const hasVisibleMessages = await conversationHasVisibleMessages(conversation.id);
-            if (!hasVisibleMessages) {
+            const hasVisibleOutboundMessages = await conversationHasVisibleOutboundMessages(conversation.id);
+            if (!hasVisibleOutboundMessages) {
                 conversationUpdateData.suggestedActions = mergeConversationSuggestedActions(
                     conversation.suggestedActions,
                     PASTE_LEAD_FIRST_OUTREACH_SUGGESTION

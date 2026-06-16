@@ -20,7 +20,8 @@ function normalizeSuggestedActions(c: any, latestMessage: ConversationLatestMess
     const current = Array.isArray(c.suggestedActions)
         ? c.suggestedActions.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
         : [];
-    if (!latestMessage) return current;
+    const hasOutboundMessage = Boolean(c.hasOutboundMessage) || latestMessage?.direction === "outbound";
+    if (!hasOutboundMessage) return current;
 
     return current.filter((item) => !item.trim().startsWith(PASTE_LEAD_FIRST_OUTREACH_ACTION_PREFIX));
 }

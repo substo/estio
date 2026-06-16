@@ -139,6 +139,52 @@ test("mapConversationRowToUi suppresses first outreach suggestion when visible m
     assert.deepEqual(mapped.suggestedActions, ["Best next reply"]);
 });
 
+test("mapConversationRowToUi keeps first outreach suggestion for imported inbound lead context", () => {
+    const latestMessageMap = new Map([
+        ["conversation-internal", {
+            id: "message-latest",
+            conversationId: "conversation-internal",
+            type: "TYPE_WHATSAPP",
+            source: "paste_import",
+            direction: "inbound",
+            createdAt: new Date("2026-05-26T10:01:00.000Z"),
+        }],
+    ]);
+
+    const mapped = mapConversationRowToUi(
+        { ...baseRow, suggestedActions: [firstOutreachAction, "Best next reply"] },
+        { id: "loc-internal" },
+        undefined,
+        undefined,
+        latestMessageMap,
+    );
+
+    assert.deepEqual(mapped.suggestedActions, [firstOutreachAction, "Best next reply"]);
+});
+
+test("mapConversationRowToUi suppresses first outreach suggestion when outbound history exists", () => {
+    const latestMessageMap = new Map([
+        ["conversation-internal", {
+            id: "message-latest",
+            conversationId: "conversation-internal",
+            type: "TYPE_WHATSAPP",
+            source: "paste_import",
+            direction: "inbound",
+            createdAt: new Date("2026-05-26T10:01:00.000Z"),
+        }],
+    ]);
+
+    const mapped = mapConversationRowToUi(
+        { ...baseRow, hasOutboundMessage: true, suggestedActions: [firstOutreachAction, "Best next reply"] },
+        { id: "loc-internal" },
+        undefined,
+        undefined,
+        latestMessageMap,
+    );
+
+    assert.deepEqual(mapped.suggestedActions, ["Best next reply"]);
+});
+
 test("mapConversationRowToUi ignores stale latest message metadata", () => {
     const latestMessageMap = new Map([
         ["conversation-internal", {

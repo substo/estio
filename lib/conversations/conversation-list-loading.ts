@@ -163,6 +163,22 @@ async function fetchLatestMessageMetadataByConversationId(
     return buildLatestMessageMetadataMap(latestMessages);
 }
 
+async function fetchHasOutboundMessageByConversationId(conversationIds: string[]): Promise<Map<string, boolean>> {
+    const uniqueIds = Array.from(new Set(conversationIds.map((id) => String(id || "").trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return new Map();
+
+    const internalMessageSources = getInternalTimelineMessageSources();
+    const rows = await db.$queryRaw<Array<{ conversationId: string }>>(Prisma.sql`
+        SELECT DISTINCT "conversationId"
+        FROM "Message"
+        WHERE "conversationId" IN (${Prisma.join(uniqueIds)})
+          AND direction = 'outbound'
+          AND (source IS NULL OR source NOT IN (${Prisma.join(internalMessageSources)}))
+    `);
+
+    return new Map(rows.map((row) => [row.conversationId, true]));
+}
+
 export async function queryConversationListSnapshot(args: {
     locationId: string;
     status: ConversationListStatus;
@@ -247,8 +263,18 @@ export async function mapConversationListSnapshotRows(args: {
 }) {
     const dealMap = new Map<string, { id: string; title: string }>(args.dealMapEntries);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id || "");
-    const latestMessageMap = await fetchLatestMessageMetadataByConversationId(args.rows.map((row: any) => row.id));
-    return args.rows.map((row: any) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage, latestMessageMap));
+    const conversationIds = args.rows.map((row: any) => row.id);
+    const [latestMessageMap, outboundMessageMap] = await Promise.all([
+        fetchLatestMessageMetadataByConversationId(conversationIds),
+        fetchHasOutboundMessageByConversationId(conversationIds),
+    ]);
+    return args.rows.map((row: any) => mapConversationRowToUi(
+        { ...row, hasOutboundMessage: outboundMessageMap.get(row.id) || false },
+        args.location,
+        dealMap,
+        locationDefaultReplyLanguage,
+        latestMessageMap,
+    ));
 }
 
 export async function hydrateRankedConversationRows(args: {
@@ -266,7 +292,11 @@ export async function hydrateRankedConversationRows(args: {
 
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, fetchedRows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
-    const latestMessageMap = await fetchLatestMessageMetadataByConversationId(fetchedRows.map((row) => row.id));
+    const conversationIds = fetchedRows.map((row) => row.id);
+    const [latestMessageMap, outboundMessageMap] = await Promise.all([
+        fetchLatestMessageMetadataByConversationId(conversationIds),
+        fetchHasOutboundMessageByConversationId(conversationIds),
+    ]);
 
     const rankIndex = new Map<string, number>();
     args.rankedConversationIds.forEach((id, idx) => rankIndex.set(id, idx));
@@ -278,7 +308,13 @@ export async function hydrateRankedConversationRows(args: {
         return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
     });
 
-    return sortedRows.map((row) => mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage, latestMessageMap));
+    return sortedRows.map((row) => mapConversationRowToUi(
+        { ...row, hasOutboundMessage: outboundMessageMap.get(row.id) || false },
+        args.location,
+        dealMap,
+        locationDefaultReplyLanguage,
+        latestMessageMap,
+    ));
 }
 
 export async function queryConversationListDelta(args: {
@@ -319,7 +355,11 @@ export async function queryConversationListDelta(args: {
 
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, rows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
-    const latestMessageMap = await fetchLatestMessageMetadataByConversationId(rows.map((row) => row.id));
+    const conversationIds = rows.map((row) => row.id);
+    const [latestMessageMap, outboundMessageMap] = await Promise.all([
+        fetchLatestMessageMetadataByConversationId(conversationIds),
+        fetchHasOutboundMessageByConversationId(conversationIds),
+    ]);
 
     const deltas = rows.map((row) => {
         const matchesFilter = doesConversationMatchStatus(args.status, row);
@@ -330,7 +370,13 @@ export async function queryConversationListDelta(args: {
             unreadCount: row.unreadCount,
             lastMessageBody: row.lastMessageBody || "",
             lastMessageDate: Math.floor(new Date(row.lastMessageAt).getTime() / 1000),
-            conversation: matchesFilter ? mapConversationRowToUi(row, args.location, dealMap, locationDefaultReplyLanguage, latestMessageMap) : null,
+            conversation: matchesFilter ? mapConversationRowToUi(
+                { ...row, hasOutboundMessage: outboundMessageMap.get(row.id) || false },
+                args.location,
+                dealMap,
+                locationDefaultReplyLanguage,
+                latestMessageMap,
+            ) : null,
         };
     });
 

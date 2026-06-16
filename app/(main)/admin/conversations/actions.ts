@@ -78,6 +78,7 @@ import {
 } from "@/lib/conversations/identity";
 import { mapConversationRowToUi } from "@/lib/conversations/conversation-row-mapper";
 import { LATEST_MESSAGE_METADATA_SELECT } from "@/lib/conversations/latest-message-metadata";
+import { buildVisibleMessageSourceWhere } from "@/lib/conversations/internal-message-visibility";
 import { collectDealConversationReferences, syncDealConversationLinks } from "@/lib/deals/conversation-links";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
@@ -9217,16 +9218,32 @@ export async function refreshConversation(conversationId: string) {
 
     if (!conversation) return null;
 
-    const [locationDefaultReplyLanguage, latestMessage] = await Promise.all([
+    const [locationDefaultReplyLanguage, latestMessage, hasOutboundMessage] = await Promise.all([
         getLocationDefaultReplyLanguage(location.id),
         db.message.findFirst({
-            where: { conversationId: conversation.id },
+            where: {
+                conversationId: conversation.id,
+                ...buildVisibleMessageSourceWhere(),
+            },
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
+        db.message.findFirst({
+            where: {
+                conversationId: conversation.id,
+                direction: "outbound",
+                ...buildVisibleMessageSourceWhere(),
+            },
+            select: { id: true },
+        }),
     ]);
 
-    return mapConversationRowToUi({ ...conversation, latestMessage }, location, undefined, locationDefaultReplyLanguage);
+    return mapConversationRowToUi(
+        { ...conversation, latestMessage, hasOutboundMessage: !!hasOutboundMessage },
+        location,
+        undefined,
+        locationDefaultReplyLanguage,
+    );
 }
 
 export async function markConversationAsRead(conversationId: string) {

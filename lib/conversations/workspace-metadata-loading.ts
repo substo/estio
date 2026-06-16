@@ -326,7 +326,7 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
     if (!conversation) return null;
     const conversationRefs = [conversation.id, conversation.ghlConversationId].filter(Boolean) as string[];
 
-    const [activeDealRows, latestMessage, latestActivity] = await Promise.all([
+    const [activeDealRows, latestMessage, hasOutboundMessage, latestActivity] = await Promise.all([
         db.dealContext.findMany({
             where: {
                 locationId: args.locationId,
@@ -346,6 +346,14 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
             },
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        }),
+        db.message.findFirst({
+            where: {
+                conversationId: conversation.id,
+                direction: "outbound",
+                ...buildVisibleMessageSourceWhere(),
+            },
+            select: { id: true },
         }),
         db.contactHistory.findFirst({
             where: { contactId: conversation.contactId },
@@ -370,7 +378,7 @@ export async function queryConversationWorkspaceCoreMetadata(args: {
 
     return {
         conversationHeader: mapConversationRowToUi(
-            { ...conversation, latestMessage },
+            { ...conversation, latestMessage, hasOutboundMessage: !!hasOutboundMessage },
             { ghlLocationId: args.locationGhlId || null },
             dealMap,
             locationDefaultReplyLanguage,
@@ -419,7 +427,7 @@ export async function queryConversationWorkspaceMetadata(args: {
     if (!conversation) return null;
     const conversationRefs = [conversation.id, conversation.ghlConversationId].filter(Boolean) as string[];
 
-    const [activeDealRows, contactContext, taskMetrics, viewingMetrics, latestExecution, latestMessage, latestActivity] = await Promise.all([
+    const [activeDealRows, contactContext, taskMetrics, viewingMetrics, latestExecution, latestMessage, hasOutboundMessage, latestActivity] = await Promise.all([
         db.dealContext.findMany({
             where: {
                 locationId: args.locationId,
@@ -556,6 +564,14 @@ export async function queryConversationWorkspaceMetadata(args: {
             select: LATEST_MESSAGE_METADATA_SELECT,
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),
+        db.message.findFirst({
+            where: {
+                conversationId: conversation.id,
+                direction: "outbound",
+                ...buildVisibleMessageSourceWhere(),
+            },
+            select: { id: true },
+        }),
         db.contactHistory.findFirst({
             where: { contactId: conversation.contactId },
             select: { createdAt: true },
@@ -580,7 +596,7 @@ export async function queryConversationWorkspaceMetadata(args: {
 
     return {
         conversationHeader: mapConversationRowToUi(
-            { ...conversation, latestMessage },
+            { ...conversation, latestMessage, hasOutboundMessage: !!hasOutboundMessage },
             { ghlLocationId: args.locationGhlId || null },
             dealMap,
             locationDefaultReplyLanguage,
