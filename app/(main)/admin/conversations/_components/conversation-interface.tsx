@@ -2762,19 +2762,44 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const clientMutationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
             ? crypto.randomUUID()
             : `activity-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        const result = await addConversationActivityEntry(
-            activeConversation.id,
-            entryText,
-            dateIso,
-            clientMutationId
-        );
-        if (result?.activityEntry) {
-            upsertActivityEntryInWorkspace(
-                activeConversation.id,
-                result.activityEntry as ActivityTimelineItem
+
+        const conversationId = activeConversation.id;
+        const optimisticActivityEntry: ActivityTimelineItem = {
+            id: `activity:pending:${clientMutationId}`,
+            type: "activity",
+            createdAt: new Date().toISOString(),
+            action: "MANUAL_ENTRY",
+            changes: {
+                date: dateIso,
+                entry: entryText,
+            },
+            user: { name: "You", email: null },
+            clientMutationId,
+            pending: true,
+        };
+
+        upsertActivityEntryInWorkspace(conversationId, optimisticActivityEntry);
+
+        try {
+            const result = await addConversationActivityEntry(
+                conversationId,
+                entryText,
+                dateIso,
+                clientMutationId
             );
+            if (result?.activityEntry) {
+                upsertActivityEntryInWorkspace(
+                    conversationId,
+                    result.activityEntry as ActivityTimelineItem
+                );
+            } else {
+                removeActivityEntryFromWorkspace(conversationId, optimisticActivityEntry.id);
+            }
+        } catch (error) {
+            removeActivityEntryFromWorkspace(conversationId, optimisticActivityEntry.id);
+            throw error;
         }
-    }, [activeConversation, upsertActivityEntryInWorkspace]);
+    }, [activeConversation, removeActivityEntryFromWorkspace, upsertActivityEntryInWorkspace]);
 
     const handleChatActivityEntryUpdated = useCallback((activityEntry: ActivityTimelineItem) => {
         if (!activeConversation) return;

@@ -38,6 +38,7 @@ interface ActivityLogEntryProps {
         action: string;
         changes?: any;
         user?: { name: string | null; email: string | null } | null;
+        pending?: boolean;
     };
     contactName?: string;
     surfaceTheme?: ConversationSurfaceTheme;
@@ -431,6 +432,7 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme, onActivity
 
     const hasChanges = changes.length > 0 && item.action !== 'MANUAL_ENTRY';
     const isManualEntry = item.action === 'MANUAL_ENTRY';
+    const isPendingManualEntry = isManualEntry && item.pending === true;
 
     const openEditDialog = () => {
         setEditText(manualEntryText);
@@ -553,31 +555,38 @@ function ActivityLogEntryComponent({ item, contactName, surfaceTheme, onActivity
                                     </div>
                                 )}
                                 <LinkifiedText text={description} />
+                                {isPendingManualEntry && (
+                                    <div className="mt-1 text-[10px] text-slate-400">
+                                        Saving...
+                                    </div>
+                                )}
                             </div>
-                            <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6"
-                                    onClick={openEditDialog}
-                                    disabled={isMutating}
-                                    title="Edit note"
-                                >
-                                    <Pencil className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 text-red-600 hover:text-red-700"
-                                    onClick={handleDelete}
-                                    disabled={isMutating}
-                                    title="Delete note"
-                                >
-                                    <Trash2 className="h-3 w-3" />
-                                </Button>
-                            </div>
+                            {!isPendingManualEntry && (
+                                <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6"
+                                        onClick={openEditDialog}
+                                        disabled={isMutating}
+                                        title="Edit note"
+                                    >
+                                        <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 text-red-600 hover:text-red-700"
+                                        onClick={handleDelete}
+                                        disabled={isMutating}
+                                        title="Delete note"
+                                    >
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            )}
                         </div>
                     )}
                     

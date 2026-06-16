@@ -8,6 +8,8 @@ export type ActivityTimelineItem = {
     action: string;
     changes?: any;
     user?: { name: string | null; email: string | null } | null;
+    clientMutationId?: string | null;
+    pending?: boolean;
 };
 
 function resolveActivitySortTimestampMs(entry: Pick<ActivityTimelineItem, "createdAt"> | null | undefined): number {
@@ -80,7 +82,14 @@ export function mergeActivityTimelineEntries(
     incomingEntry: ActivityTimelineItem
 ): ActivityTimelineItem[] {
     const nextEntries = [...(Array.isArray(currentEntries) ? currentEntries : [])];
-    const existingIndex = nextEntries.findIndex((item) => item?.id === incomingEntry.id);
+    const incomingClientMutationId = String(incomingEntry.clientMutationId || "").trim();
+    const existingIndex = nextEntries.findIndex((item) => (
+        item?.id === incomingEntry.id
+        || (
+            !!incomingClientMutationId
+            && String(item?.clientMutationId || "").trim() === incomingClientMutationId
+        )
+    ));
     const mergedEntry = existingIndex >= 0
         ? {
             ...nextEntries[existingIndex],

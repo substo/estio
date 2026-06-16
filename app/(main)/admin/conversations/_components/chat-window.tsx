@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, NotebookPen, ArrowLeft, ListTodo, MoreHorizontal, Wand2, Languages } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, ArrowLeft, ListTodo, MoreHorizontal, Languages } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -13,7 +12,6 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
 import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
@@ -21,7 +19,6 @@ import { useChatWindowTimelineScroll, type ActivityLogItem } from "./use-chat-wi
 import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-search";
 import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
 import { useChatWindowThreadTranslation } from "./use-chat-window-thread-translation";
-import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 import {
     getConversationTimelineContentClassName,
     getConversationTimelineScrollClassName,
@@ -241,23 +238,6 @@ export function ChatWindow({
     } = useChatWindowTranscriptSearch({ conversationId: conversation.id });
     const canUseTranscriptOnDemand = transcriptOnDemandEnabled !== false;
     const {
-        addNoteOpen,
-        setAddNoteOpen,
-        addNoteText,
-        setAddNoteText,
-        addNoteDate,
-        setAddNoteDate,
-        addingNote,
-        improvingNote,
-        handleAddNote,
-        handleImproveNote,
-    } = useChatWindowActivityNote({
-        conversationId: conversation.id,
-        contactId: conversation.contactId,
-        selectedModel,
-        onAddActivityEntry,
-    });
-    const {
         translatingVisibleThread,
         autoTranslatingThread,
         dismissTranslationBanner,
@@ -463,57 +443,6 @@ export function ChatWindow({
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         )}
-                    {onAddActivityEntry && (
-                        <Popover open={addNoteOpen} onOpenChange={setAddNoteOpen}>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant={addNoteOpen ? "secondary" : "ghost"}
-                                    size="icon"
-                                    className="h-8 w-8"
-                                    title="Add activity note"
-                                >
-                                    <NotebookPen className="h-4 w-4 text-gray-500" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="end" className="w-80 p-3">
-                                <div className="space-y-2">
-                                    <p className="text-xs font-semibold text-slate-700">Add Activity Note</p>
-                                    <Textarea
-                                        value={addNoteText}
-                                        onChange={(e) => setAddNoteText(e.target.value)}
-                                        placeholder="What happened?"
-                                        className="min-h-[60px] text-xs resize-none"
-                                    />
-                                    <Input
-                                        type="datetime-local"
-                                        step={300}
-                                        value={addNoteDate}
-                                        onChange={(e) => setAddNoteDate(e.target.value)}
-                                        className="text-xs h-8"
-                                    />
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="w-full h-7 text-xs"
-                                        onClick={handleImproveNote}
-                                        disabled={improvingNote || addingNote || !addNoteText.trim()}
-                                    >
-                                        {improvingNote ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Wand2 className="h-3 w-3 mr-1" />}
-                                        {improvingNote ? "Improving..." : "Improve"}
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        className="w-full h-7 text-xs"
-                                        onClick={handleAddNote}
-                                        disabled={addingNote || improvingNote || !addNoteText.trim()}
-                                    >
-                                        {addingNote ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                                        {addingNote ? "Saving..." : "Save Note"}
-                                    </Button>
-                                </div>
-                            </PopoverContent>
-                        </Popover>
-                    )}
                     <Button
                         variant={showTranscriptSearch ? "secondary" : "ghost"}
                         size="icon"
@@ -932,6 +861,7 @@ export function ChatWindow({
                 smsRelayEnabled={smsRelayEnabled}
                 surfaceTheme={surfaceTheme}
                 onSelectedChannelChange={(channel) => setActiveSurfaceChannel(channel)}
+                onAddActivityEntry={onAddActivityEntry}
             />
         </div>
     );

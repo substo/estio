@@ -13867,6 +13867,8 @@ export async function addConversationActivityEntry(
             name: user.name || null,
             email: user.email || null,
         },
+        clientMutationId: normalizedClientMutationId,
+        pending: false,
     };
     emitConversationRealtimeEvent({
         locationId: location.id,

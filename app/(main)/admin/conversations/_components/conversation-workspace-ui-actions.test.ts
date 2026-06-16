@@ -113,6 +113,39 @@ test('mergeActivityTimelineEntries replaces existing entries by id with a shallo
     });
 });
 
+test('mergeActivityTimelineEntries reconciles optimistic entries by clientMutationId', () => {
+    const merged = mergeActivityTimelineEntries(
+        [
+            {
+                ...activityEntry('activity:pending:mutation-1', '2026-01-01T00:00:00.000Z'),
+                changes: { entry: 'Pending note' },
+                user: { name: 'You', email: null },
+                clientMutationId: 'mutation-1',
+                pending: true,
+            },
+        ],
+        {
+            ...activityEntry('history:entry-1', '2026-01-01T00:00:01.000Z'),
+            changes: { entry: 'Saved note' },
+            user: { name: 'Agent', email: 'agent@example.com' },
+            clientMutationId: 'mutation-1',
+            pending: false,
+        }
+    );
+
+    assert.equal(merged.length, 1);
+    assert.deepEqual(merged[0], {
+        id: 'history:entry-1',
+        type: 'activity',
+        createdAt: '2026-01-01T00:00:01.000Z',
+        action: 'updated',
+        changes: { entry: 'Saved note' },
+        user: { name: 'Agent', email: 'agent@example.com' },
+        clientMutationId: 'mutation-1',
+        pending: false,
+    });
+});
+
 test('mergeActivityTimelineEntries sorts matching timestamps by id', () => {
     const merged = mergeActivityTimelineEntries(
         [

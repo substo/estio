@@ -26,20 +26,30 @@ export function useChatWindowActivityNote({
     const [addingNote, setAddingNote] = useState(false);
     const [improvingNote, setImprovingNote] = useState(false);
 
-    const handleAddNote = useCallback(async () => {
-        if (!addNoteText.trim() || !onAddActivityEntry) return;
+    const handleAddNote = useCallback(() => {
+        const trimmedNote = addNoteText.trim();
+        if (!trimmedNote || !onAddActivityEntry) return;
+        const submittedDate = addNoteDate;
+        const submittedDateIso = new Date(submittedDate).toISOString();
+
         setAddingNote(true);
-        try {
-            await onAddActivityEntry(addNoteText.trim(), new Date(addNoteDate).toISOString());
-            setAddNoteText("");
-            setAddNoteDate(getDefaultActivityNoteDate());
-            setAddNoteOpen(false);
-            toast.success("Note added to activity log");
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to add note");
-        } finally {
-            setAddingNote(false);
-        }
+        setAddNoteText("");
+        setAddNoteDate(getDefaultActivityNoteDate());
+        setAddNoteOpen(false);
+
+        void onAddActivityEntry(trimmedNote, submittedDateIso)
+            .then(() => {
+                toast.success("Note added to activity log");
+            })
+            .catch((e: any) => {
+                setAddNoteText(trimmedNote);
+                setAddNoteDate(submittedDate);
+                setAddNoteOpen(true);
+                toast.error(e?.message || "Failed to add note");
+            })
+            .finally(() => {
+                setAddingNote(false);
+            });
     }, [addNoteDate, addNoteText, onAddActivityEntry]);
 
     const handleImproveNote = useCallback(async () => {

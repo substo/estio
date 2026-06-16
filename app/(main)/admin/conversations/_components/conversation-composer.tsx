@@ -6,11 +6,12 @@ import {
 } from "@/lib/ai/reply-language-options";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw, MessageSquare, NotebookPen } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -31,6 +32,7 @@ import {
 import { PropertyMessageAssist } from "./property-message-assist";
 import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
 import { buildComposerSuggestionBubbles } from "./conversation-composer-suggestions";
+import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -80,6 +82,7 @@ interface ConversationComposerProps {
     smsRelayEnabled?: boolean;
     surfaceTheme?: ConversationSurfaceTheme;
     onSelectedChannelChange?: (channel: ComposerChannel) => void;
+    onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
 }
 
 function getPlaceholderText(channel: ComposerChannel): string {
@@ -255,11 +258,13 @@ export function ConversationComposer({
     smsRelayEnabled = false,
     surfaceTheme,
     onSelectedChannelChange,
+    onAddActivityEntry,
 }: ConversationComposerProps) {
     const isUnavailable = disabled || !conversation;
     const isRecordingRef = useRef(false);
     const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
     const composerHasDraft = draft.trim().length > 0;
+    const [composerMode, setComposerMode] = useState<"reply" | "note">("reply");
     const [aiDraftOpen, setAiDraftOpen] = useState(false);
     const [aiInstruction, setAiInstruction] = useState(EMPTY_AI_INSTRUCTION);
     const [requestingWhatsAppCall, setRequestingWhatsAppCall] = useState(false);
@@ -299,6 +304,21 @@ export function ConversationComposer({
         onModelChange,
         translationTargetLanguageLabel,
         viewingLanguageLabel,
+    });
+    const {
+        addNoteText,
+        setAddNoteText,
+        addNoteDate,
+        setAddNoteDate,
+        addingNote,
+        improvingNote,
+        handleAddNote,
+        handleImproveNote,
+    } = useChatWindowActivityNote({
+        conversationId: conversation?.id || "",
+        contactId: conversation?.contactId,
+        selectedModel,
+        onAddActivityEntry,
     });
     const {
         selectedChannel,
@@ -379,6 +399,11 @@ export function ConversationComposer({
         },
     });
     isRecordingRef.current = isRecording;
+    const isNoteMode = composerMode === "note" && !!onAddActivityEntry;
+    const noteHasDraft = addNoteText.trim().length > 0;
+    const textareaValue = isNoteMode ? addNoteText : draft;
+    const textareaHasDraft = isNoteMode ? noteHasDraft : composerHasDraft;
+    const noteModeShellClassName = "border border-amber-200 bg-amber-50/80 focus-within:ring-2 focus-within:ring-amber-500/20 focus-within:border-amber-300";
 
     useEffect(() => {
         setIsRecording(false);
@@ -388,17 +413,17 @@ export function ConversationComposer({
     }, [clearTranslationPreview, conversation?.id, setIsRecording]);
 
     useEffect(() => {
-        resizeComposerTextarea(composerTextareaRef.current, composerHasDraft);
-    }, [composerHasDraft, draft]);
+        resizeComposerTextarea(composerTextareaRef.current, textareaHasDraft);
+    }, [textareaHasDraft, textareaValue]);
 
     useEffect(() => {
         const handleResize = () => {
-            resizeComposerTextarea(composerTextareaRef.current, composerHasDraft);
+            resizeComposerTextarea(composerTextareaRef.current, textareaHasDraft);
         };
 
         window.addEventListener("resize", handleResize);
         return () => window.removeEventListener("resize", handleResize);
-    }, [composerHasDraft]);
+    }, [textareaHasDraft]);
 
     const willAutoTranslate = canUseWriteTranslation
         && !!onPreviewTranslatedReply
@@ -560,14 +585,47 @@ export function ConversationComposer({
 
     return (
         <div className={cn("w-full min-w-0 max-w-full overflow-x-hidden pb-[env(safe-area-inset-bottom)]", resolvedSurfaceTheme.composerContainerClassName)}>
-            <SuggestionBubbles
-                suggestions={visibleSuggestionBubbles}
-                onSelect={(text) => handleAiDraft(text === "Best next reply" ? undefined : text)}
-                className={cn(composerContentClassName, "py-1")}
-            />
+            {!isNoteMode && (
+                <SuggestionBubbles
+                    suggestions={visibleSuggestionBubbles}
+                    onSelect={(text) => handleAiDraft(text === "Best next reply" ? undefined : text)}
+                    className={cn(composerContentClassName, "py-1")}
+                />
+            )}
 
             <div className={composerContentClassName}>
-                {replyingToLabel ? (
+                {onAddActivityEntry && (
+                    <div className="flex items-center gap-1 px-1 pb-1">
+                        <Button
+                            type="button"
+                            variant={isNoteMode ? "ghost" : "secondary"}
+                            size="sm"
+                            className="h-7 gap-1.5 px-2 text-[11px]"
+                            onClick={() => setComposerMode("reply")}
+                        >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            Reply
+                        </Button>
+                        <Button
+                            type="button"
+                            variant={isNoteMode ? "secondary" : "ghost"}
+                            size="sm"
+                            className={cn(
+                                "h-7 gap-1.5 px-2 text-[11px]",
+                                isNoteMode && "border-amber-200 bg-amber-100 text-amber-900 hover:bg-amber-100"
+                            )}
+                            onClick={() => {
+                                setComposerMode("note");
+                                window.requestAnimationFrame(() => composerTextareaRef.current?.focus());
+                            }}
+                        >
+                            <NotebookPen className="h-3.5 w-3.5" />
+                            Note
+                        </Button>
+                    </div>
+                )}
+
+                {replyingToLabel && !isNoteMode ? (
                     <div className="px-1 pb-1 text-[11px] text-slate-500">
                         Replying to <span className="font-medium text-slate-700">{replyingToLabel}</span>
                     </div>
@@ -656,26 +714,33 @@ export function ConversationComposer({
                     onChange={handleMediaSelected}
                 />
 
-                <div className={cn("relative rounded-xl shadow-sm transition-all min-w-0", resolvedSurfaceTheme.composerShellClassName)}>
+                <div className={cn("relative rounded-xl shadow-sm transition-all min-w-0", isNoteMode ? noteModeShellClassName : resolvedSurfaceTheme.composerShellClassName)}>
                     <Textarea
                         ref={composerTextareaRef}
-                        value={draft}
-                        onChange={(e) => onDraftChange(e.target.value)}
-                        placeholder={getPlaceholderText(selectedChannel)}
+                        value={textareaValue}
+                        onChange={(e) => {
+                            if (isNoteMode) setAddNoteText(e.target.value);
+                            else onDraftChange(e.target.value);
+                        }}
+                        placeholder={isNoteMode ? "Add an internal activity note..." : getPlaceholderText(selectedChannel)}
                         rows={DRAFT_COMPOSER_MIN_ROWS}
                         className={cn(
                             "max-h-[188px] min-h-[36px] w-full resize-none overflow-hidden border-0 bg-transparent px-3 py-2.5 text-base focus-visible:ring-0 sm:max-h-[320px] sm:text-sm"
                         )}
-                        style={composerHasDraft ? undefined : { height: `${EMPTY_COMPOSER_HEIGHT_PX}px` }}
-                        disabled={isUnavailable || sending || isRecording}
+                        style={textareaHasDraft ? undefined : { height: `${EMPTY_COMPOSER_HEIGHT_PX}px` }}
+                        disabled={isNoteMode ? addingNote || improvingNote : isUnavailable || sending || isRecording}
                         onKeyDown={(e) => {
                             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                                handleSend("original");
+                                if (isNoteMode) {
+                                    handleAddNote();
+                                } else {
+                                    handleSend("original");
+                                }
                             }
                         }}
                     />
 
-                    {canUseWriteTranslation && hasTranslationPreview && (
+                    {!isNoteMode && canUseWriteTranslation && hasTranslationPreview && (
                         <div className="mx-3 mb-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs">
                             <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                                 <span>
@@ -697,6 +762,42 @@ export function ConversationComposer({
                     )}
 
                     <div className="flex flex-col gap-1 px-2 pb-1.5">
+                        {isNoteMode ? (
+                            <div className="flex min-w-0 w-full flex-wrap items-center justify-end gap-1.5">
+                                <Input
+                                    type="datetime-local"
+                                    step={300}
+                                    value={addNoteDate}
+                                    onChange={(event) => setAddNoteDate(event.target.value)}
+                                    className="h-7 w-[190px] border-amber-200 bg-white/80 px-2 text-[11px]"
+                                    disabled={addingNote || improvingNote}
+                                />
+                                {onGenerateDraft && (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 gap-1 px-2 text-[11px] text-amber-800 hover:bg-amber-100 hover:text-amber-900"
+                                        onClick={handleImproveNote}
+                                        disabled={improvingNote || addingNote || !noteHasDraft}
+                                    >
+                                        {improvingNote ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                                        {improvingNote ? "Improving..." : "Improve"}
+                                    </Button>
+                                )}
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-7 gap-1 rounded-lg bg-amber-700 px-3 text-[11px] text-white hover:bg-amber-800"
+                                    onClick={handleAddNote}
+                                    disabled={addingNote || improvingNote || !noteHasDraft}
+                                >
+                                    {addingNote ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <NotebookPen className="h-3.5 w-3.5" />}
+                                    {addingNote ? "Saving..." : "Save Note"}
+                                </Button>
+                            </div>
+                        ) : (
+                            <>
                         <div className="flex min-w-0 w-full flex-wrap items-center gap-1">
                             <Select
                                 value={selectedChannel}
@@ -964,9 +1065,11 @@ export function ConversationComposer({
                                 </Button>
                             )}
                         </div>
+                            </>
+                        )}
                     </div>
                 </div>
-                {canUndoAiDraft && (
+                {!isNoteMode && canUndoAiDraft && (
                     <div className="px-1 pt-1">
                         <Button
                             type="button"
@@ -982,7 +1085,7 @@ export function ConversationComposer({
                         </Button>
                     </div>
                 )}
-                {onGenerateDraft && (
+                {!isNoteMode && onGenerateDraft && (
                     <div className="px-1 pt-1 text-[10px] text-slate-500">
                         {willAutoTranslate
                             ? `View messages in: ${resolvedViewingLanguageLabel} · Working draft: ${resolvedDraftLanguageLabel} · Will send in: ${autoTranslateTargetLabel} · ${replyLanguageSourceHint}`
