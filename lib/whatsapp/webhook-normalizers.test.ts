@@ -9,6 +9,7 @@ import {
     parseWhatsAppWebhookTimestamp,
 } from "@/lib/whatsapp/webhook-normalizers";
 import {
+    selectPreferredWhatsAppLidContact,
     shouldRejectWebBridgeOutboundLidForOwnContact,
     shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
 } from "@/lib/whatsapp/sync";
@@ -67,6 +68,36 @@ test("normalizeWhatsAppWebBridgeAckStatus maps bridge ack values", () => {
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(1), "SERVER_ACK");
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(-1), "FAILED");
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(0), "");
+});
+
+test("selectPreferredWhatsAppLidContact prefers mapped phone contact over LID placeholder", () => {
+    const placeholder = {
+        id: "placeholder",
+        name: "WhatsApp Contact",
+        phone: null,
+        contactType: "Lead",
+    };
+    const reconciled = {
+        id: "real",
+        name: "Moshe",
+        phone: "+972526145279",
+        contactType: "Lead",
+    };
+
+    assert.equal(
+        selectPreferredWhatsAppLidContact([placeholder, reconciled], { mappedContactId: "real" })?.id,
+        "real"
+    );
+});
+
+test("selectPreferredWhatsAppLidContact prefers phone contact for outbound duplicate LID matches without a map", () => {
+    assert.equal(
+        selectPreferredWhatsAppLidContact([
+            { id: "placeholder", phone: null, contactType: "Lead" },
+            { id: "real", phone: "+972526145279", contactType: "Lead" },
+        ])?.id,
+        "real"
+    );
 });
 
 test("getWebBridgeDuplicateBodyReconciliation only repairs non-empty Web Bridge body changes", () => {

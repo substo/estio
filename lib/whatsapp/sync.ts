@@ -60,6 +60,40 @@ export function shouldRejectWebBridgeOutboundLidForOwnContact(args: {
     return !!contactDigits && !!ownDigits && contactDigits === ownDigits;
 }
 
+type WhatsAppLidContactCandidate = {
+    id: string;
+    contactType?: string | null;
+    phone?: string | null;
+};
+
+function isRefGroupMemberContact(candidate: WhatsAppLidContactCandidate) {
+    return candidate.contactType === "Ref-GroupMember";
+}
+
+function hasHighConfidenceContactPhone(candidate: WhatsAppLidContactCandidate) {
+    return isHighConfidenceResolvedPhone(normalizeDigits(candidate.phone));
+}
+
+export function selectPreferredWhatsAppLidContact<T extends WhatsAppLidContactCandidate>(
+    matches: T[],
+    options: { mappedContactId?: string | null } = {}
+): T | undefined {
+    if (matches.length === 0) return undefined;
+
+    const mapped = options.mappedContactId
+        ? matches.filter((candidate) => candidate.id === options.mappedContactId)
+        : [];
+
+    return mapped.find((candidate) => !isRefGroupMemberContact(candidate) && hasHighConfidenceContactPhone(candidate))
+        || mapped.find((candidate) => !isRefGroupMemberContact(candidate))
+        || mapped.find(hasHighConfidenceContactPhone)
+        || mapped[0]
+        || matches.find((candidate) => !isRefGroupMemberContact(candidate) && hasHighConfidenceContactPhone(candidate))
+        || matches.find(hasHighConfidenceContactPhone)
+        || matches.find((candidate) => !isRefGroupMemberContact(candidate))
+        || matches[0];
+}
+
 export interface NormalizedMessage {
     locationId: string;
     from: string; // E.164 phone number (Sender)
@@ -749,6 +783,24 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     // Normalize LID for DB lookup (strip @lid suffix for contains search)
     const lidRaw = normalizeLidRaw(msg.lid) || undefined;
     const normalizedMsgLid = normalizeLidJid(msg.lid) || undefined;
+    const mappedLidIdentity = source === "whatsapp_web_bridge" && normalizedMsgLid
+        ? await (db as any).whatsAppIdentityMap.findFirst({
+            where: {
+                locationId,
+                provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                identityType: "lid",
+                identityValue: normalizedMsgLid,
+                contactId: { not: null },
+                phone: { not: null },
+            },
+            include: { contact: true },
+            orderBy: [{ updatedAt: "desc" }],
+        }).catch(() => null)
+        : null;
+    const mappedLidContact = mappedLidIdentity?.contact
+        && isHighConfidenceResolvedPhone(normalizeDigits(mappedLidIdentity.phone || mappedLidIdentity.contact.phone))
+        ? mappedLidIdentity.contact
+        : null;
     const phoneCandidates = rawInputPhone
         ? await findContactsByPhoneDigitsWithFallback(db, locationId, rawInputPhone, { take: 12 })
         : [];
@@ -762,7 +814,11 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             ],
         } as any,
     }) : [];
-    const candidates = [...phoneCandidates, ...lidCandidates].filter((candidate, index, list) =>
+    const candidates = [
+        ...phoneCandidates,
+        ...(mappedLidContact ? [mappedLidContact] : []),
+        ...lidCandidates,
+    ].filter((candidate, index, list) =>
         list.findIndex((row) => row.id === candidate.id) === index
     );
 
@@ -777,7 +833,8 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     let matchedByLid = false;
     const lidMatches = candidates.filter((c: any) => {
-        if (!msg.lid || !c.lid) return false;
+        if (!msg.lid) return false;
+        if (mappedLidContact?.id && c.id === mappedLidContact.id) return true;
         if (isUnsafeWebBridgeInboundLidOnly && c.phone) return false;
         if (shouldRejectWebBridgeOutboundLidForOwnContact({
             source,
@@ -787,12 +844,13 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             contactPhone: c.phone,
             ownPhone,
         })) return false;
+        if (!c.lid) return false;
         // Normalize both for comparison (strip @lid if present)
         return normalizeLidJid(c.lid) === normalizedMsgLid;
     });
-    let contact =
-        lidMatches.find((candidate: any) => candidate.contactType !== "Ref-GroupMember")
-        || lidMatches[0];
+    let contact = selectPreferredWhatsAppLidContact(lidMatches, {
+        mappedContactId: mappedLidContact?.id,
+    });
     if (contact) matchedByLid = true;
 
     let isNewContact = false;
