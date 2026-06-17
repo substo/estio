@@ -90,17 +90,7 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
                 developersData={developersData}
                 managementCompaniesData={managementCompaniesData}
                 projectsData={projectsData}
-                onSuccess={async (savedProperty: any) => {
-                    "use server";
-                    const { redirect } = await import("next/navigation");
-                    const targetId = savedProperty?.id || property?.id;
-
-                    if (targetId && targetId !== "new") {
-                        redirect(`/admin/properties/${targetId}/view`);
-                    } else {
-                        redirect(`/admin/properties`);
-                    }
-                }}
+                navigateOnSuccess
             />
         </div>
     );

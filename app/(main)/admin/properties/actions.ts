@@ -145,7 +145,7 @@ const emptyToNull = (val: FormDataEntryValue | null) => {
     return val as string;
 };
 
-export async function upsertProperty(formData: FormData) {
+export async function upsertProperty(formData: FormData, options?: { redirectOnCreate?: boolean }) {
     try {
         const locationId = formData.get("locationId") as string;
         const id = formData.get("id") as string;
@@ -370,10 +370,11 @@ export async function upsertProperty(formData: FormData) {
         revalidatePath("/admin/properties");
         revalidatePath(`/admin/properties/${property.id}`);
 
-        if (id === "new") {
+        const redirectUrl = `/admin/properties/${property.id}/view`;
+        if (id === "new" && options?.redirectOnCreate !== false) {
             redirect(`/admin/properties/${property.id}/view`);
         }
-        return { success: true, data: property };
+        return { success: true, data: property, redirectUrl: id === "new" ? redirectUrl : undefined };
     } catch (error: any) {
         const isRedirectError = error?.message === "NEXT_REDIRECT" || error?.digest?.startsWith("NEXT_REDIRECT");
         if (isRedirectError) {

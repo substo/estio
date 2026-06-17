@@ -7,9 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { upsertProperty, pushToOldCrm, linkPropertyCreator } from "../actions";
+import { pushToOldCrm, linkPropertyCreator } from "../actions";
 import { useEffect, useMemo, useState } from "react";
-import { useFormStatus } from "react-dom";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PROPERTY_TYPES } from "@/lib/properties/constants";
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
@@ -127,6 +126,7 @@ export default function PropertyForm({
     property: initialProperty,
     locationId,
     precisionRemoveEnabled = false,
+    navigateOnSuccess = false,
     onSuccess,
     accountHash,
     contactsData,
@@ -137,6 +137,7 @@ export default function PropertyForm({
     property?: any,
     locationId: string,
     precisionRemoveEnabled?: boolean,
+    navigateOnSuccess?: boolean,
     onSuccess?: (savedProperty?: any) => void,
     accountHash?: string;
     // New props for dropdown data
@@ -356,7 +357,14 @@ export default function PropertyForm({
     async function handleSubmit(formData: FormData) {
         setIsSubmitting(true);
         try {
-            const result = await upsertProperty(formData);
+            const response = await fetch("/api/admin/properties/upsert", {
+                method: "POST",
+                body: formData,
+            });
+            const result = await response.json().catch(() => ({
+                success: false,
+                error: `Save request failed (${response.status})`,
+            }));
 
             if (result && result.success === false) {
                 const message = result.error || "Unknown error";
@@ -382,6 +390,16 @@ export default function PropertyForm({
                     });
                 }
                 setIsSubmitting(false);
+                return;
+            }
+
+            const redirectUrl = result?.redirectUrl || (
+                navigateOnSuccess && result?.data?.id
+                    ? `/admin/properties/${result.data.id}/view`
+                    : null
+            );
+            if (redirectUrl) {
+                window.location.assign(redirectUrl);
                 return;
             }
 
@@ -431,7 +449,9 @@ export default function PropertyForm({
             return;
         }
 
+        e.preventDefault();
         console.log('[FORM_SUBMIT_ALLOWED] Submitting via Save Property button');
+        void handleSubmit(new FormData(e.currentTarget));
     };
 
     const [isPushing, setIsPushing] = useState(false);
@@ -652,7 +672,7 @@ export default function PropertyForm({
     };
 
     return (
-        <form key={formVersion} action={handleSubmit} onSubmit={onFormSubmit} className="h-full flex flex-col overflow-hidden">
+        <form key={formVersion} onSubmit={onFormSubmit} className="h-full flex flex-col overflow-hidden">
             <input type="hidden" name="id" value={property?.id || "new"} />
             <input type="hidden" name="locationId" value={locationId} />
 
