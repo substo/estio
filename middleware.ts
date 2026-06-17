@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { SYSTEM_DOMAINS } from "@/lib/app-config";
+import { isRetiredPublicDomain, SYSTEM_DOMAINS } from "@/lib/app-config";
 
 const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)"]);
 
@@ -10,6 +10,16 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   // Remove port if present (robust regex)
   hostname = hostname ? hostname.replace(/:\d+$/, "") : "";
   const url = req.nextUrl;
+
+  if (isRetiredPublicDomain(hostname)) {
+    return new NextResponse("Gone", {
+      status: 410,
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+        "X-Robots-Tag": "noindex, nofollow, noarchive",
+      },
+    });
+  }
 
   // LOOP PROTECTION
   if (url.searchParams.has("_internal_rewrite")) {

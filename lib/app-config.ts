@@ -24,6 +24,14 @@ export const SYSTEM_DOMAINS = [
   process.env.NEXT_PUBLIC_CLERK_DOMAIN || "" // Include the Clerk domain as a system domain
 ].filter(Boolean);
 
+export const RETIRED_PUBLIC_DOMAINS = [
+  "downtowncyprus.site",
+  ...(process.env.RETIRED_PUBLIC_DOMAINS || "")
+    .split(",")
+    .map((domain) => domain.trim())
+    .filter(Boolean),
+];
+
 /**
  * Checks if a given hostname is a System Domain.
  * Handles port stripping for localhost comparisons.
@@ -33,4 +41,11 @@ export const isSystemDomain = (hostname: string | null | undefined): boolean => 
   
   const cleanHost = hostname.replace(/:\d+$/, ""); // Remove port
   return SYSTEM_DOMAINS.some(d => d.replace(/:\d+$/, "") === cleanHost);
+};
+
+export const isRetiredPublicDomain = (hostname: string | null | undefined): boolean => {
+  if (!hostname) return false;
+
+  const cleanHost = hostname.replace(/:\d+$/, "").replace(/^www\./, "");
+  return RETIRED_PUBLIC_DOMAINS.some((domain) => domain.replace(/^www\./, "") === cleanHost);
 };
