@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, ArrowLeft, ArrowRight, Link2, AlertTriangle, Link as LinkIcon, Unlink, CheckCircle, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
-import { searchGoogleContactsAction, resolveSyncConflict, unlinkGoogleContact, getGoogleContactAction } from "../actions";
+import { searchGoogleContactsAction, resolveSyncConflict, unlinkGoogleContact, getGoogleContactAction, warmupGoogleContactsSearchAction } from "../actions";
 import { useToast } from "@/components/ui/use-toast";
 import { ContactData } from "./contact-form";
 
@@ -55,6 +55,7 @@ export function GoogleSyncManager({
     const [googleData, setGoogleData] = useState<any>(null);
     const [searchQuery, setSearchQuery] = useState(contact?.email || contact?.name || "");
     const [searchResults, setSearchResults] = useState<any[]>([]);
+    const warmedSearchRef = useRef(false);
 
     const isLinked = !!contact?.googleContactId;
     const hasError = !!contact?.error;
@@ -99,6 +100,14 @@ export function GoogleSyncManager({
     }, [open, isMultiMode, goToPrevious, goToNext]);
 
     // Initial Fetch logic
+    useEffect(() => {
+        if (!open || warmedSearchRef.current) return;
+        warmedSearchRef.current = true;
+        warmupGoogleContactsSearchAction().catch(() => {
+            // Warmup is best-effort; visible search actions handle auth/errors.
+        });
+    }, [open]);
+
     useEffect(() => {
         if (!open) return;
 
@@ -154,7 +163,7 @@ export function GoogleSyncManager({
     const handleSearch = async (
         query: string,
         isAutoFetch = false,
-        options?: { phoneFallback?: boolean }
+        options?: { phoneFallback?: boolean; includeMetadata?: boolean; pageSize?: number }
     ) => {
         setLoading(true);
         setNotConnected(false);
@@ -197,7 +206,19 @@ export function GoogleSyncManager({
             if (action === 'unlink') {
                 res = await unlinkGoogleContact(contact.id, { skipRevalidate: skipRevalidateOnSuccess });
             } else {
-                res = await resolveSyncConflict(contact.id, action, googleData, { skipRevalidate: skipRevalidateOnSuccess });
+                let actionGoogleData = googleData;
+                if (googleData?.resourceName && !googleData.updateTime) {
+                    const detailRes = await getGoogleContactAction(googleData.resourceName);
+                    if (detailRes.success && detailRes.data) {
+                        actionGoogleData = detailRes.data;
+                        setGoogleData(detailRes.data);
+                    } else if (detailRes.message === 'GOOGLE_AUTH_EXPIRED') {
+                        setAuthExpired(true);
+                        toast({ title: "Google Session Expired", description: "Reconnect Google and try again.", variant: "destructive" });
+                        return;
+                    }
+                }
+                res = await resolveSyncConflict(contact.id, action, actionGoogleData, { skipRevalidate: skipRevalidateOnSuccess });
             }
 
             if (res.success) {

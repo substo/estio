@@ -745,10 +745,36 @@ async function findMatchingGoogleContact(
     return null;
 }
 
+const GOOGLE_CONTACT_SEARCH_LIST_FIELDS = 'names,emailAddresses,phoneNumbers';
+const GOOGLE_CONTACT_SEARCH_DETAIL_FIELDS = 'names,emailAddresses,phoneNumbers,photos,metadata';
+const GOOGLE_CONTACT_SEARCH_SOURCES = ['READ_SOURCE_TYPE_CONTACT', 'READ_SOURCE_TYPE_PROFILE'] as const;
+
+export async function warmupGoogleContactsSearch(userId: string) {
+    try {
+        const auth = await getValidAccessToken(userId);
+        const people = google.people({ version: 'v1', auth });
+
+        await people.people.searchContacts({
+            query: '',
+            readMask: GOOGLE_CONTACT_SEARCH_LIST_FIELDS,
+            pageSize: 1,
+            sources: [...GOOGLE_CONTACT_SEARCH_SOURCES]
+        });
+
+        return true;
+    } catch (e: any) {
+        if (e.code === 401 || (e.code === 400 && e.message?.includes('invalid_grant'))) {
+            throw new Error('GOOGLE_AUTH_EXPIRED');
+        }
+        console.error('[warmupGoogleContactsSearch] Failed:', e);
+        return false;
+    }
+}
+
 export async function searchGoogleContacts(
     userId: string,
     query: string,
-    options: { phoneFallback?: boolean } = {}
+    options: { phoneFallback?: boolean; includeMetadata?: boolean; pageSize?: number } = {}
 ) {
     try {
         const auth = await getValidAccessToken(userId);
@@ -756,12 +782,16 @@ export async function searchGoogleContacts(
 
         const phoneQuery = isPhoneQuery(query);
         const allowPhoneFallback = options.phoneFallback ?? true;
+        const includeMetadata = options.includeMetadata ?? false;
+        const readMask = includeMetadata ? GOOGLE_CONTACT_SEARCH_DETAIL_FIELDS : GOOGLE_CONTACT_SEARCH_LIST_FIELDS;
+        const pageSize = Math.max(1, Math.min(Math.floor(options.pageSize || 10), 30));
 
         // Try searchContacts first (works for names/emails, unreliable for phones)
         const response = await people.people.searchContacts({
             query: query,
-            readMask: 'names,emailAddresses,phoneNumbers,photos,metadata',
-            sources: ['READ_SOURCE_TYPE_CONTACT', 'READ_SOURCE_TYPE_PROFILE']
+            readMask,
+            pageSize,
+            sources: [...GOOGLE_CONTACT_SEARCH_SOURCES]
         });
 
         let results = (response.data.results || []).map(r => {
@@ -788,7 +818,7 @@ export async function searchGoogleContacts(
             const phoneDigits = query.replace(/\D/g, '');
             const fallbackMatches = await searchByPhoneFallback(
                 people, phoneDigits,
-                'names,emailAddresses,phoneNumbers,photos,metadata'
+                readMask
             );
 
             const fallbackResults = fallbackMatches.map(p => ({

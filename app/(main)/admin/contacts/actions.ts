@@ -1456,7 +1456,36 @@ export async function getGoogleContactAction(resourceName: string) {
   }
 }
 
-export async function searchGoogleContactsAction(query: string, options?: { phoneFallback?: boolean }) {
+export async function warmupGoogleContactsSearchAction() {
+  const { userId } = await auth();
+  if (!userId) return { success: false, message: 'Unauthorized' };
+
+  try {
+    const user = await db.user.findUnique({
+      where: { clerkId: userId },
+      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    });
+
+    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+      return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
+    }
+
+    const { warmupGoogleContactsSearch } = await import('@/lib/google/people');
+    await warmupGoogleContactsSearch(user.id);
+    return { success: true };
+  } catch (error: any) {
+    if (error.message === 'GOOGLE_AUTH_EXPIRED') {
+      return { success: false, message: 'GOOGLE_AUTH_EXPIRED' };
+    }
+    console.error('[warmupGoogleContactsSearchAction] Error:', error);
+    return { success: false, message: 'Failed to warm up Google contacts search' };
+  }
+}
+
+export async function searchGoogleContactsAction(
+  query: string,
+  options?: { phoneFallback?: boolean; includeMetadata?: boolean; pageSize?: number }
+) {
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 

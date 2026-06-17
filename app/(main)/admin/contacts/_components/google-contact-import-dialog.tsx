@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, ArrowRight, MessageCircle, AlertTriangle } from "lucide-react";
-import { searchGoogleContactsAction, importNewGoogleContactAction } from "../actions";
+import { searchGoogleContactsAction, importNewGoogleContactAction, warmupGoogleContactsSearchAction } from "../actions";
 import { useToast } from "@/components/ui/use-toast";
 import { openOrStartConversationForContact } from "@/app/(main)/admin/contacts/actions";
 import { canStartContactConversation } from "@/lib/contacts/conversation-start";
@@ -32,6 +32,7 @@ export function GoogleContactImportDialog({
 
     const [notConnected, setNotConnected] = useState(false);
     const [authExpired, setAuthExpired] = useState(false);
+    const warmedSearchRef = useRef(false);
 
     // Reset when opened
     useEffect(() => {
@@ -40,6 +41,12 @@ export function GoogleContactImportDialog({
             setSearchResults([]);
             setNotConnected(false);
             setAuthExpired(false);
+            if (!warmedSearchRef.current) {
+                warmedSearchRef.current = true;
+                warmupGoogleContactsSearchAction().catch(() => {
+                    // Warmup is best-effort; visible search handles auth/errors.
+                });
+            }
         }
     }, [open]);
 
