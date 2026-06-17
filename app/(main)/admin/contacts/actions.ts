@@ -210,6 +210,33 @@ function getEntityRequirementError(
   return null;
 }
 
+function hasStrongLeadIntentSignal(value: { leadGoal?: unknown } | null | undefined): boolean {
+  return LEAD_GOALS.includes(String(value?.leadGoal || '') as any);
+}
+
+function shouldPreserveLeadTypeAgainstGenericContactDowngrade(
+  currentContact: { contactType?: string | null; leadGoal?: unknown } | null | undefined,
+  nextContactInput: { contactType?: string | null; leadGoal?: unknown }
+): boolean {
+  return currentContact?.contactType === 'Lead'
+    && nextContactInput.contactType === 'Contact'
+    && (hasStrongLeadIntentSignal(currentContact) || hasStrongLeadIntentSignal(nextContactInput));
+}
+
+function preserveLeadTypeAgainstGenericContactDowngrade<T extends { contactType?: string | null; leadGoal?: unknown }>(
+  currentContact: { contactType?: string | null; leadGoal?: unknown } | null | undefined,
+  nextContactInput: T
+): T {
+  if (!shouldPreserveLeadTypeAgainstGenericContactDowngrade(currentContact, nextContactInput)) {
+    return nextContactInput;
+  }
+
+  return {
+    ...nextContactInput,
+    contactType: 'Lead',
+  };
+}
+
 async function enrichChangesWithReadableValues(changes: { field: string; old: any; new: any }[]) {
   const propertyIds = new Set<string>();
   const userIds = new Set<string>();
@@ -972,7 +999,10 @@ async function updateContactCore(
       const currentContact = await tx.contact.findUnique({ where: { id: data.contactId } });
       log('5_txFetchCurrent');
 
-      const contactInput = prepareContactInput(data);
+      const contactInput = preserveLeadTypeAgainstGenericContactDowngrade(
+        currentContact,
+        prepareContactInput(data)
+      );
       const updatedContact = await tx.contact.update({
         where: { id: data.contactId },
         data: withChangedProfileVerificationInvalidation(contactInput, currentContact),
@@ -1129,6 +1159,7 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
       phone: true,
       preferredLang: true,
       message: true,
+      leadGoal: true,
     },
   });
 
@@ -1136,6 +1167,13 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
 
   const hasAccess = await verifyUserHasAccessToLocation(userId, existing.locationId);
   if (!hasAccess) return { success: false as const, error: 'Unauthorized' };
+
+  if (shouldPreserveLeadTypeAgainstGenericContactDowngrade(existing, { contactType })) {
+    return {
+      success: false as const,
+      error: 'This contact has an active lead goal. Clear the lead goal before changing it from Lead to Contact.',
+    };
+  }
 
   if (existing.contactType === contactType) {
     return {
