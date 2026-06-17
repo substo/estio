@@ -52,8 +52,9 @@ export async function getLocationContext(): Promise<Location | null> {
 
     const metadata = clerkUser.publicMetadata as any;
 
-    // Check if Clerk metadata has a location ID we haven't synced to DB yet
-    const internalLocationId = metadata.ghlLocationId || metadata.ghlTenantId || metadata.locationId;
+    // Only `locationId` is treated as an internal Location.id. `ghlLocationId`
+    // is often the external GoHighLevel location id and must not grant tenant access.
+    const internalLocationId = typeof metadata.locationId === "string" ? metadata.locationId : null;
 
     if (internalLocationId) {
         const location = await db.location.findUnique({

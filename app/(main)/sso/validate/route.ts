@@ -1,10 +1,9 @@
-import { verifySSOToken } from '@/lib/jwt-utils';
+import { generateClerkSignInHandoffToken, verifySSOToken } from '@/lib/jwt-utils';
 import { getGHLUser } from '@/lib/ghl/client';
 import { getAccessToken } from '@/lib/ghl/token';
 import { syncGHLUserToClerk } from '@/lib/clerk-sync';
 import db from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
-import jwt from 'jsonwebtoken';
 
 /**
  * SSO Validation Endpoint
@@ -357,7 +356,7 @@ export async function GET(request: NextRequest) {
         // Clerk will handle the session creation via their signIn endpoint
         const baseUrl = process.env.APP_BASE_URL || 'https://estio.co';
         const signInUrl = new URL('/api/clerk/sign-in-with-token', baseUrl);
-        signInUrl.searchParams.set('clerk_user_id', clerkUserId);
+        signInUrl.searchParams.set('token', generateClerkSignInHandoffToken(clerkUserId));
 
         // Use custom redirect URL if provided (e.g. for popup callback), otherwise default to /admin
         const redirectUrl = searchParams.get('redirect_url') || '/admin';

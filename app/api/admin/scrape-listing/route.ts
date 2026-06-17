@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import {
     buildListingRelevanceRawAttributes,
     classifyListingRelevance,
@@ -98,6 +99,10 @@ export async function POST(req: Request) {
                         where: { id: listingId },
                         select: { locationId: true },
                     });
+                    if (!existingListing) {
+                        sendEvent({ status: 'error', error: 'Listing not found.' });
+                        return;
+                    }
                     locationId = existingListing?.locationId || null;
                 }
 
@@ -112,6 +117,12 @@ export async function POST(req: Request) {
 
                 if (!locationId) {
                     sendEvent({ status: 'error', error: 'Could not determine locationId for this listing.' });
+                    return;
+                }
+
+                const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
+                if (!hasAccess) {
+                    sendEvent({ status: 'error', error: 'Forbidden.' });
                     return;
                 }
 
@@ -835,6 +846,10 @@ async function upsertListingData(
         existingScrapedListing = await db.scrapedListing.findUnique({
             where: { platform_externalId: { platform, externalId: data.externalId } }
         });
+    }
+
+    if (existingScrapedListing && existingScrapedListing.locationId !== locationId) {
+        throw new Error('Listing already belongs to another location');
     }
 
     const existingRawAttributes = (

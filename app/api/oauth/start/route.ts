@@ -1,4 +1,7 @@
 import { GHL_CONFIG } from "@/config/ghl";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import { generateOAuthState } from "@/lib/jwt-utils";
+import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -10,6 +13,18 @@ export async function GET(request: NextRequest) {
 
     // If user clicked "Continue", redirect to OAuth
     if (proceed === "true") {
+        if (internalLocationId) {
+            const { userId } = await auth();
+            if (!userId) {
+                return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            }
+
+            const isAdmin = await verifyUserIsLocationAdmin(userId, internalLocationId);
+            if (!isAdmin) {
+                return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+            }
+        }
+
         const params = new URLSearchParams();
         params.append("client_id", process.env.GHL_CLIENT_ID!);
         params.append("redirect_uri", process.env.GHL_REDIRECT_URI!);
@@ -21,7 +36,7 @@ export async function GET(request: NextRequest) {
         console.log("----------------------------------------------------------------");
         params.append("scope", scopeString);
 
-        const state = JSON.stringify({ locationId, agencyId, internalLocationId });
+        const state = generateOAuthState({ locationId, agencyId, internalLocationId });
         params.append("state", state);
 
         const authUrl = `https://marketplace.leadconnectorhq.com/oauth/chooselocation?${params.toString()}`;

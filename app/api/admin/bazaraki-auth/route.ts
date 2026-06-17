@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { chromium } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 import db from '@/lib/db';
+import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 
 export const maxDuration = 120; // Allow Vercel to run up to 2 mins for WhatsApp approval
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,25 @@ export async function POST(req: Request) {
 
     if (!phone || !credentialId) {
         return new NextResponse('Missing phone or credentialId', { status: 400 });
+    }
+
+    const credential = await db.scrapingCredential.findUnique({
+        where: { id: credentialId },
+        select: {
+            id: true,
+            connection: {
+                select: { locationId: true },
+            },
+        },
+    });
+
+    if (!credential?.connection?.locationId) {
+        return new NextResponse('Credential not found', { status: 404 });
+    }
+
+    const hasAccess = await verifyUserHasAccessToLocation(userId, credential.connection.locationId);
+    if (!hasAccess) {
+        return new NextResponse('Forbidden', { status: 403 });
     }
 
     const encoder = new TextEncoder();

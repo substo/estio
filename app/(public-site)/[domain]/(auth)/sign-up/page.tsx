@@ -1,4 +1,5 @@
 import { getSiteConfig } from "@/lib/public-data";
+import { generatePublicSignupLocationToken } from "@/lib/jwt-utils";
 import { notFound } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
 
@@ -17,6 +18,8 @@ export default async function TenantSignUpPage(props: Props) {
         notFound();
     }
 
+    const locationToken = generatePublicSignupLocationToken(config.location.id);
+
     return (
         <div className="flex flex-col items-center justify-center py-20">
             <SignUp
@@ -25,7 +28,8 @@ export default async function TenantSignUpPage(props: Props) {
                     emailAddress: emailAddress
                 }}
                 unsafeMetadata={{
-                    locationId: config.location.id
+                    locationId: config.location.id,
+                    locationToken,
                 }}
             />
         </div>

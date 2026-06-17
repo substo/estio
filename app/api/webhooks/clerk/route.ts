@@ -4,6 +4,7 @@ import { WebhookEvent } from '@clerk/nextjs/server'
 import db from '@/lib/db'
 import { NextResponse } from 'next/server'
 import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate'
+import { verifyPublicSignupLocationToken } from '@/lib/jwt-utils'
 
 export async function POST(req: Request) {
     // You can find this in the Clerk Dashboard -> Webhooks -> choose the webhook
@@ -65,12 +66,32 @@ export async function POST(req: Request) {
         // 2. Public Sign-Up Flow (Tenant Domain)
         // Metadata injected by client-side SignUp component (unsafe)
         const publicLocationId = unsafe_metadata?.locationId as string | undefined;
+        const publicLocationToken = unsafe_metadata?.locationToken as string | undefined;
 
         if (email) {
             try {
                 // BRANCH 1: Public Lead (Contact Only)
                 // If signed up on tenant domain (unsafe_metadata), they are a Lead/Contact.
                 if (publicLocationId && !isTeamInvite) {
+                    if (!publicLocationToken) {
+                        console.warn(`[Webhook] Public sign-up for ${id} missing signed location token. Skipping contact creation.`);
+                        return new Response('Skipped (Invalid Public Signup Metadata)', { status: 200 });
+                    }
+
+                    let verifiedLocationId: string;
+                    try {
+                        const verified = verifyPublicSignupLocationToken(publicLocationToken);
+                        verifiedLocationId = verified.locationId;
+                    } catch (err) {
+                        console.warn(`[Webhook] Public sign-up for ${id} had invalid signed location token. Skipping contact creation.`, err);
+                        return new Response('Skipped (Invalid Public Signup Metadata)', { status: 200 });
+                    }
+
+                    if (verifiedLocationId !== publicLocationId) {
+                        console.warn(`[Webhook] Public sign-up for ${id} location metadata mismatch. Skipping contact creation.`);
+                        return new Response('Skipped (Invalid Public Signup Metadata)', { status: 200 });
+                    }
+
                     console.log(`[Webhook] Public Sign-Up on Location ${publicLocationId}. Creating Contact ONLY.`);
 
                     await db.contact.create({

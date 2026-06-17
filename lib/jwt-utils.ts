@@ -52,6 +52,137 @@ export function verifySSOToken(token: string): SSOTokenPayload {
     }) as SSOTokenPayload;
 }
 
+export interface ClerkSignInHandoffTokenPayload {
+    clerkUserId: string;
+    purpose: 'clerk_sign_in_handoff';
+    iat: number;
+    exp: number;
+}
+
+export function generateClerkSignInHandoffToken(clerkUserId: string): string {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    return jwt.sign(
+        {
+            clerkUserId,
+            purpose: 'clerk_sign_in_handoff',
+        },
+        JWT_SECRET,
+        {
+            algorithm: 'HS256',
+            expiresIn: '2m',
+        }
+    );
+}
+
+export function verifyClerkSignInHandoffToken(token: string): ClerkSignInHandoffTokenPayload {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET, {
+        algorithms: ['HS256'],
+    }) as ClerkSignInHandoffTokenPayload;
+
+    if (payload.purpose !== 'clerk_sign_in_handoff' || !payload.clerkUserId) {
+        throw new Error('Invalid Clerk sign-in handoff token');
+    }
+
+    return payload;
+}
+
+export interface OAuthStatePayload {
+    locationId?: string | null;
+    agencyId?: string | null;
+    internalLocationId?: string | null;
+    purpose: 'ghl_oauth_state';
+    iat: number;
+    exp: number;
+}
+
+export function generateOAuthState(input: {
+    locationId?: string | null;
+    agencyId?: string | null;
+    internalLocationId?: string | null;
+}): string {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    return jwt.sign(
+        {
+            locationId: input.locationId || null,
+            agencyId: input.agencyId || null,
+            internalLocationId: input.internalLocationId || null,
+            purpose: 'ghl_oauth_state',
+        },
+        JWT_SECRET,
+        {
+            algorithm: 'HS256',
+            expiresIn: '15m',
+        }
+    );
+}
+
+export function verifyOAuthState(token: string): OAuthStatePayload {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET, {
+        algorithms: ['HS256'],
+    }) as OAuthStatePayload;
+
+    if (payload.purpose !== 'ghl_oauth_state') {
+        throw new Error('Invalid OAuth state token');
+    }
+
+    return payload;
+}
+
+export interface PublicSignupLocationTokenPayload {
+    locationId: string;
+    purpose: 'public_signup_location';
+    iat: number;
+    exp: number;
+}
+
+export function generatePublicSignupLocationToken(locationId: string): string {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    return jwt.sign(
+        {
+            locationId,
+            purpose: 'public_signup_location',
+        },
+        JWT_SECRET,
+        {
+            algorithm: 'HS256',
+            expiresIn: '30m',
+        }
+    );
+}
+
+export function verifyPublicSignupLocationToken(token: string): PublicSignupLocationTokenPayload {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET environment variable is not set');
+    }
+
+    const payload = jwt.verify(token, JWT_SECRET, {
+        algorithms: ['HS256'],
+    }) as PublicSignupLocationTokenPayload;
+
+    if (payload.purpose !== 'public_signup_location' || !payload.locationId) {
+        throw new Error('Invalid public signup location token');
+    }
+
+    return payload;
+}
+
 export interface PreviewTokenPayload {
     locationId: string;
     purpose: 'property_preview';

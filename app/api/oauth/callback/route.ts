@@ -1,5 +1,6 @@
 import { GHL_CONFIG } from "@/config/ghl";
 import db from "@/lib/db";
+import { verifyOAuthState } from "@/lib/jwt-utils";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -41,10 +42,11 @@ export async function GET(request: NextRequest) {
         let context: any = {};
         if (stateStr) {
             try {
-                context = JSON.parse(stateStr);
+                context = verifyOAuthState(stateStr);
                 console.log("[OAuth] Parsed state context:", JSON.stringify(context));
             } catch (e) {
-                console.error("Failed to parse state", e);
+                console.error("Failed to verify OAuth state", e);
+                return NextResponse.json({ error: "Invalid OAuth state" }, { status: 400 });
             }
         } else {
             console.log("[OAuth] No state string provided");

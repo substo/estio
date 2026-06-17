@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,13 +20,21 @@ export async function POST(req: Request) {
 
     // Resolve locationId
     let locationId = providedLocationId || null;
+    let existingListingLocationId: string | null = null;
 
-    if (!locationId && listingId) {
+    if (listingId) {
         const existingListing = await db.scrapedListing.findUnique({
             where: { id: listingId },
             select: { locationId: true },
         });
-        locationId = existingListing?.locationId || null;
+        existingListingLocationId = existingListing?.locationId || null;
+        if (!existingListingLocationId) {
+            return new NextResponse('Listing not found', { status: 404 });
+        }
+        if (locationId && locationId !== existingListingLocationId) {
+            return new NextResponse('Listing does not belong to the requested location', { status: 403 });
+        }
+        locationId = existingListingLocationId;
     }
 
     if (!locationId) {
@@ -40,6 +49,11 @@ export async function POST(req: Request) {
         return new NextResponse('Could not determine locationId', { status: 400 });
     }
 
+    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
+    if (!hasAccess) {
+        return new NextResponse('Forbidden', { status: 403 });
+    }
+
     try {
         // Reuse the same upsert logic from scrape-listing route
         // 0. Locate existing listing if any
@@ -50,6 +64,9 @@ export async function POST(req: Request) {
             existingScrapedListing = await db.scrapedListing.findUnique({
                 where: { platform_externalId: { platform, externalId: data.externalId } }
             });
+            if (existingScrapedListing && existingScrapedListing.locationId !== locationId) {
+                return new NextResponse('Listing already belongs to another location', { status: 403 });
+            }
         }
 
         // 1. Upsert ProspectLead

@@ -2,9 +2,16 @@ import { NextResponse } from 'next/server';
 import { AiFeedMapper } from '@/lib/feed/ai-mapper';
 import { GenericXmlParser } from '@/lib/feed/parsers/generic-xml-parser';
 import db from '@/lib/db';
+import { auth } from '@clerk/nextjs/server';
+import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 
 export async function POST(req: Request) {
     try {
+        const { userId } = await auth();
+        if (!userId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const { url, companyId } = await req.json();
 
         if (!url || !companyId) {
@@ -16,6 +23,15 @@ export async function POST(req: Request) {
             where: { id: companyId },
             include: { location: { include: { siteConfig: true } } }
         });
+
+        if (!company?.locationId) {
+            return NextResponse.json({ error: 'Company not found' }, { status: 404 });
+        }
+
+        const hasAccess = await verifyUserHasAccessToLocation(userId, company.locationId);
+        if (!hasAccess) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
 
         const apiKey = company?.location?.siteConfig?.googleAiApiKey;
         // Cast to any to safely access potentially new field
@@ -61,4 +77,3 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
-

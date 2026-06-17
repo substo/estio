@@ -1,4 +1,5 @@
 import { clerkClient } from '@clerk/nextjs/server';
+import { verifyClerkSignInHandoffToken } from '@/lib/jwt-utils';
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
@@ -7,14 +8,16 @@ import { NextRequest, NextResponse } from 'next/server';
  */
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
-    const clerkUserId = searchParams.get('clerk_user_id');
+    const handoffToken = searchParams.get('token');
     const redirectUrl = searchParams.get('redirect_url') || '/admin';
 
-    if (!clerkUserId) {
-        return NextResponse.json({ error: 'Missing clerk_user_id' }, { status: 400 });
+    if (!handoffToken) {
+        return NextResponse.json({ error: 'Missing sign-in handoff token' }, { status: 400 });
     }
 
     try {
+        const { clerkUserId } = verifyClerkSignInHandoffToken(handoffToken);
+
         // Create a sign-in token for the user
         const client = await clerkClient();
         const signInToken = await client.signInTokens.createSignInToken({
@@ -35,6 +38,14 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(signInUrl);
     } catch (error) {
         console.error('[Clerk] Failed to create sign-in token:', error);
+        if (
+            error instanceof Error &&
+            (error.message.includes('sign-in handoff token') ||
+                error.name === 'JsonWebTokenError' ||
+                error.name === 'TokenExpiredError')
+        ) {
+            return NextResponse.json({ error: 'Invalid sign-in handoff token' }, { status: 401 });
+        }
         try {
             const fs = require('fs');
             fs.appendFileSync('debug.log', `[${new Date().toISOString()}] [Clerk] Error: ${error instanceof Error ? error.message : String(error)}\nStack: ${error instanceof Error ? error.stack : ''}\n`);
