@@ -111,7 +111,7 @@ export async function getAnalyticsDashboard(rangeDays: AnalyticsDashboardRange):
     db.$queryRaw<CountRow[]>`
       SELECT
         e."propertyId" AS "propertyId",
-        COALESCE(p."title", e."entityId", 'Unknown property') AS title,
+        COALESCE(p."title", MAX(e."entityId"), 'Unknown property') AS title,
         COALESCE(p."slug", '') AS slug,
         COUNT(*) FILTER (WHERE e."eventName" = 'property_view') AS views,
         COUNT(*) FILTER (WHERE e."eventName" = 'lead_inquiry_success') AS inquiries
