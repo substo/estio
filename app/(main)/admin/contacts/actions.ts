@@ -935,19 +935,34 @@ async function updateContactCore(
   userId: string
 ): Promise<CreateContactState> {
   const t0 = performance.now();
-  const log = (label: string) => console.log(`[updateContact:perf] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
+  const timings: Record<string, number> = {};
+  let changedFields: string[] = [];
+  const mark = (label: string) => {
+    timings[label] = Math.round(performance.now() - t0);
+  };
+  const emitPerf = (outcome: string) => {
+    const totalMs = Math.round(performance.now() - t0);
+    console.log('[updateContact:perf]', JSON.stringify({
+      outcome,
+      total_ms: totalMs,
+      contactId: data.contactId,
+      locationId: data.locationId,
+      changedFields,
+      timings,
+    }));
+  };
 
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
-  log('1_resolveUser');
+  mark('1_resolveUser');
 
   // Also verify the contact actually belongs to this location
   const existingContactCheck = await db.contact.findUnique({
     where: { id: data.contactId },
-    select: { locationId: true, contactType: true, ghlContactId: true }
+    select: { locationId: true, contactType: true, ghlContactId: true, email: true, phone: true }
   });
-  log('2_existingCheck');
+  mark('2_existingCheck');
 
   if (!existingContactCheck || existingContactCheck.locationId !== data.locationId) {
     return { success: false, message: 'Contact not found or access denied.' };
@@ -964,7 +979,8 @@ async function updateContactCore(
 
   try {
     // Check for existing contact with same email (excluding current contact)
-    if (data.email) {
+    const emailChanged = data.email && !areValuesEqual(data.email, existingContactCheck.email);
+    if (emailChanged) {
       const existingContact = await db.contact.findFirst({
         where: {
           locationId: data.locationId,
@@ -974,6 +990,7 @@ async function updateContactCore(
       });
 
       if (existingContact) {
+        emitPerf('duplicate_email');
         return {
           errors: { email: ['A contact with this email already exists.'] },
           message: 'Contact with this email already exists.',
@@ -981,23 +998,25 @@ async function updateContactCore(
         };
       }
     }
-    log('3_emailDupCheck');
+    mark('3_emailDupCheck');
 
     // Check for existing contact with same phone (excluding current contact)
-    if (data.phone) {
+    const phoneChanged = data.phone && !areValuesEqual(data.phone, existingContactCheck.phone);
+    if (phoneChanged) {
       const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone, data.contactId);
       if (phoneDuplicate?.type === 'Exact') {
+        emitPerf('duplicate_phone');
         return buildDuplicatePhoneState(phoneDuplicate.contact);
       }
     }
-    log('4_phoneDupCheck');
+    mark('4_phoneDupCheck');
 
     let savedContactSummary: CreateContactState["contact"] = undefined;
 
     await db.$transaction(async (tx) => {
       // Fetch current state for diffing
       const currentContact = await tx.contact.findUnique({ where: { id: data.contactId } });
-      log('5_txFetchCurrent');
+      mark('5_txFetchCurrent');
 
       const contactInput = preserveLeadTypeAgainstGenericContactDowngrade(
         currentContact,
@@ -1019,7 +1038,7 @@ async function updateContactCore(
         message: updatedContact.message || null,
         contactType: updatedContact.contactType || null,
       };
-      log('6_txUpdate');
+      mark('6_txUpdate');
 
       // Calculate Changes
       const changes: { field: string; old: any; new: any }[] = [];
@@ -1040,9 +1059,10 @@ async function updateContactCore(
       }
 
       if (changes.length > 0) {
+        changedFields = changes.map((change) => change.field);
         // Resolve IDs to human readable values (Properties, Users)
         await enrichChangesWithReadableValues(changes);
-        log('7_txEnrichChanges');
+        mark('7_txEnrichChanges');
 
         const stageChangeIndex = changes.findIndex(c => c.field === 'leadStage');
         if (stageChangeIndex !== -1) {
@@ -1053,11 +1073,11 @@ async function updateContactCore(
         if (changes.length > 0) {
           await logContactHistory(tx, data.contactId, internalUserId, 'UPDATED', changes);
         }
-        log('8_txLogHistory');
+        mark('8_txLogHistory');
       }
 
       await handleContactRoles(tx, data.contactId, data);
-      log('9_txHandleRoles');
+      mark('9_txHandleRoles');
 
       await enqueueContactSync(tx as Prisma.TransactionClient, {
         contactId: data.contactId,
@@ -1066,7 +1086,7 @@ async function updateContactCore(
         payload: { preferredUserId: internalUserId }
       });
     });
-    log('10_txComplete');
+    mark('10_txComplete');
 
     enqueueProviderContactMirrorsAfterResponse({
       locationId: data.locationId,
@@ -1076,7 +1096,8 @@ async function updateContactCore(
       googleEvent: 'update',
     });
 
-    log('11_returning');
+    mark('11_returning');
+    emitPerf('success');
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
 
   } catch (error: any) {
@@ -1092,6 +1113,7 @@ async function updateContactCore(
     }
 
     console.error('[updateContact] Database Error:', error);
+    emitPerf('error');
     return {
       message: error.message || 'Database Error: Failed to Update Contact.',
       success: false,
@@ -1256,11 +1278,10 @@ export async function updateContact(
   formData: FormData
 ): Promise<CreateContactState> {
   const t0 = performance.now();
-  const log = (label: string) => console.log(`[updateContact:outer:perf] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
-
-  const rawData: Record<string, any> = {};
-  formData.forEach((value, key) => { rawData[key] = value; });
-  console.log('[updateContact] RAW FormData:', rawData);
+  const timings: Record<string, number> = {};
+  const mark = (label: string) => {
+    timings[label] = Math.round(performance.now() - t0);
+  };
 
   const validatedFields = updateContactSchema.safeParse({
     contactId: formData.get('contactId'),
@@ -1320,7 +1341,7 @@ export async function updateContact(
     propertyWonReference: formData.get('propertyWonReference') || undefined,
     propertyWonDate: formData.get('propertyWonDate') || undefined,
   });
-  log('validation');
+  mark('validation');
 
   if (!validatedFields.success) {
     console.log('[updateContact] Validation failed', validatedFields.error.flatten().fieldErrors);
@@ -1338,13 +1359,20 @@ export async function updateContact(
   }
 
   const hasAccess = await verifyUserHasAccessToLocation(userId, data.locationId);
-  log('auth');
+  mark('auth');
   if (!hasAccess) {
     return { success: false, message: 'Unauthorized: You do not have access to this location.' };
   }
 
   const result = await updateContactCore(data, userId);
-  log('core_complete');
+  mark('core_complete');
+  console.log('[updateContact:outer:perf]', JSON.stringify({
+    success: !!result.success,
+    total_ms: Math.round(performance.now() - t0),
+    contactId: data.contactId,
+    locationId: data.locationId,
+    timings,
+  }));
 
   return {
     message: result.message || (result.success ? 'Contact updated successfully.' : 'Update failed'),

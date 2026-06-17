@@ -2162,6 +2162,23 @@ export function ConversationInterface({ locationId, initialConversations, initia
         setDealContacts((prev) => prev.map((contact) => applyDealContactIdentityPatch(contact, normalizedPatch)));
         setWorkspaceContactContext((prev: any) => applyWorkspaceContactContextIdentityPatch(prev, normalizedPatch));
 
+        const cachedConversation = selectedConversationCacheRef.current.get(normalizedPatch.conversationId);
+        if (cachedConversation) {
+            const patchedConversation = applyConversationIdentityPatch(cachedConversation, normalizedPatch);
+            selectedConversationCacheRef.current.set(normalizedPatch.conversationId, patchedConversation);
+            if (patchedConversation.id) {
+                selectedConversationCacheRef.current.set(patchedConversation.id, patchedConversation);
+            }
+        }
+
+        const cachedWorkspace = getCachedWorkspaceCoreSnapshot(normalizedPatch.conversationId);
+        if (cachedWorkspace?.conversationHeader) {
+            cacheWorkspaceCoreSnapshot(normalizedPatch.conversationId, {
+                ...cachedWorkspace,
+                conversationHeader: applyConversationIdentityPatch(cachedWorkspace.conversationHeader, normalizedPatch),
+            });
+        }
+
         try {
             const fresh = await refreshConversation(normalizedPatch.conversationId);
             if (!fresh) return;
@@ -2175,7 +2192,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         } catch (error) {
             console.error("Failed to refresh conversation after contact save:", error);
         }
-    }, []);
+    }, [cacheWorkspaceCoreSnapshot, getCachedWorkspaceCoreSnapshot]);
 
     const handleSendMedia = async (
         file: File,
