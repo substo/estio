@@ -6,6 +6,7 @@ import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MediaKind } from "@prisma/client";
+import { recordAnalyticsEvent, recordPropertyAnalyticsEvent } from "@/lib/analytics/server";
 
 /**
  * Toggle favorite status for a property.
@@ -21,12 +22,17 @@ export async function toggleFavorite(propertyId: string): Promise<{ success: boo
         // Find contact linked to this Clerk user
         const contact = await db.contact.findUnique({
             where: { clerkUserId: userId },
-            select: { id: true, propertiesInterested: true }
+            select: { id: true, locationId: true, propertiesInterested: true }
         });
 
         if (!contact) {
             return { success: false, isFavorited: false, error: "User profile not found" };
         }
+
+        const property = await db.property.findUnique({
+            where: { id: propertyId },
+            select: { id: true, locationId: true, slug: true, title: true }
+        });
 
         const currentFavorites = contact.propertiesInterested || [];
         const isCurrentlyFavorited = currentFavorites.includes(propertyId);
@@ -39,6 +45,13 @@ export async function toggleFavorite(propertyId: string): Promise<{ success: boo
                     propertiesInterested: currentFavorites.filter(id => id !== propertyId)
                 }
             });
+            await recordPropertyAnalyticsEvent({
+                eventName: "favorite_remove",
+                locationId: property?.locationId || contact.locationId,
+                contactId: contact.id,
+                propertyId,
+                metadata: { slug: property?.slug || null, title: property?.title || null },
+            });
             revalidatePath(`/favorites`);
             return { success: true, isFavorited: false };
         } else {
@@ -48,6 +61,13 @@ export async function toggleFavorite(propertyId: string): Promise<{ success: boo
                 data: {
                     propertiesInterested: [...currentFavorites, propertyId]
                 }
+            });
+            await recordPropertyAnalyticsEvent({
+                eventName: "favorite_add",
+                locationId: property?.locationId || contact.locationId,
+                contactId: contact.id,
+                propertyId,
+                metadata: { slug: property?.slug || null, title: property?.title || null },
             });
             revalidatePath(`/favorites`);
             return { success: true, isFavorited: true };
@@ -168,7 +188,7 @@ export async function saveSearch(filters: SavedSearchFilters): Promise<{ success
 
         const contact = await db.contact.findUnique({
             where: { clerkUserId: userId },
-            select: { id: true }
+            select: { id: true, locationId: true }
         });
 
         if (!contact) {
@@ -187,6 +207,14 @@ export async function saveSearch(filters: SavedSearchFilters): Promise<{ success
                 requirementCondition: filters.condition || 'Any Condition',
                 requirementOtherDetails: filters.features?.length ? filters.features.join(',') : null,
             }
+        });
+
+        await recordAnalyticsEvent({
+            eventName: "saved_search_create",
+            locationId: contact.locationId,
+            contactId: contact.id,
+            entityType: "property_search",
+            metadata: { filters },
         });
 
         return { success: true };

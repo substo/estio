@@ -42,8 +42,10 @@ import { BedroomsFilter } from "@/components/properties/bedrooms-filter";
 import { FeaturesFilter } from "@/components/properties/features-filter";
 import { cn } from "@/lib/utils";
 import { saveSearch } from "@/app/actions/public-user";
+import { trackAnalyticsEvent } from "@/components/analytics/analytics-tracker";
 
 interface SearchFiltersProps {
+    domain: string;
     primaryColor?: string;
     resultsCount?: number;
 }
@@ -61,7 +63,7 @@ const RENT_PRICE_POINTS = [
     4000, 5000, 7500, 10000
 ];
 
-export function SearchFilters({ primaryColor, resultsCount }: SearchFiltersProps) {
+export function SearchFilters({ domain, primaryColor, resultsCount }: SearchFiltersProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -142,6 +144,16 @@ export function SearchFilters({ primaryColor, resultsCount }: SearchFiltersProps
                 params.set('max_price', active.maxPrice);
             }
         }
+
+        void trackAnalyticsEvent({
+            eventName: "search_apply",
+            domain,
+            entityType: "property_search",
+            metadata: {
+                filters: active,
+                resultsCount,
+            },
+        });
 
         router.push(`/properties/search?${params.toString()}`);
         setIsMobileOpen(false);

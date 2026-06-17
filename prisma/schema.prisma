@@ -81,6 +81,10 @@ model Location {
   viewingSessionUsages          ViewingSessionUsage[]
   aiUsages                      AiUsage[]
   messageTranslationCaches      MessageTranslationCache[]
+  analyticsVisitors             AnalyticsVisitor[]
+  analyticsSessions             AnalyticsSession[]
+  analyticsEvents               AnalyticsEvent[]
+  analyticsDailyRollups         AnalyticsDailyRollup[]
 
   // SIM Relay (Android SMS Gateway)
   smsRelayEnabled Boolean @default(false)
@@ -225,6 +229,8 @@ model User {
   reviewedPropertyMatchCandidates PropertyMatchCandidate[] @relation("PropertyMatchCandidateReviewedBy")
   updatedPropertyImagePromptProfiles PropertyImagePromptProfile[] @relation("PropertyImagePromptProfileUpdater")
   aiUsages                     AiUsage[]
+  analyticsVisitors            AnalyticsVisitor[]
+  analyticsEvents              AnalyticsEvent[]
 
   // Google Contact Sync Credentials
   googleAccessToken             String?         @db.Text
@@ -358,6 +364,7 @@ model Property {
   viewings               Viewing[]
   primaryViewingSessions ViewingSession[]      @relation("ViewingSessionPrimaryProperty")
   activeViewingSessions  ViewingSession[]      @relation("ViewingSessionCurrentProperty")
+  analyticsEvents        AnalyticsEvent[]
 
   createdById String?
   creator     User?   @relation("PropertyCreator", fields: [createdById], references: [id])
@@ -656,6 +663,8 @@ model Contact {
   syncRecords                ContactSync[]
   outboxJobs                 ContactOutbox[]
   providerOutboxJobs         ProviderOutbox[]
+  analyticsVisitors          AnalyticsVisitor[]
+  analyticsEvents            AnalyticsEvent[]
 
   @@unique([locationId, email])
   @@unique([locationId, legacyCrmOwnerId])
@@ -2089,6 +2098,162 @@ model AiUsage {
   @@index([locationId, recordedAt(sort: Desc)])
   @@index([resourceType, resourceId, recordedAt(sort: Desc)])
   @@index([locationId, featureArea, recordedAt(sort: Desc)])
+}
+
+model AnalyticsVisitor {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  firstSeenAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+
+  locationId         String
+  anonymousId        String
+  userId             String?
+  contactId          String?
+
+  firstSource        String?
+  firstMedium        String?
+  firstCampaign      String?
+  firstReferrer      String?  @db.Text
+  firstLandingPath   String?  @db.Text
+  lastSource         String?
+  lastMedium         String?
+  lastCampaign       String?
+  lastReferrer       String?  @db.Text
+  lastLandingPath    String?  @db.Text
+
+  ipHash             String?
+  country            String?
+  region             String?
+  city               String?
+  userAgent          String?  @db.Text
+  browser            String?
+  os                 String?
+  deviceType         String?
+
+  location           Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contact            Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  sessions           AnalyticsSession[]
+  events             AnalyticsEvent[]
+
+  @@unique([locationId, anonymousId])
+  @@index([locationId, lastSeenAt(sort: Desc)])
+  @@index([userId])
+  @@index([contactId])
+  @@index([ipHash])
+}
+
+model AnalyticsSession {
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  startedAt        DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+  endedAt          DateTime?
+
+  locationId       String
+  visitorId        String
+  externalSessionId String
+
+  landingPath      String   @db.Text
+  currentPath      String?  @db.Text
+  referrer         String?  @db.Text
+  source           String?
+  medium           String?
+  campaign         String?
+  term             String?
+  content          String?
+
+  ipHash           String?
+  country          String?
+  region           String?
+  city             String?
+  userAgent        String?  @db.Text
+  browser          String?
+  os               String?
+  deviceType       String?
+
+  eventCount       Int      @default(0)
+  pageViewCount    Int      @default(0)
+  durationSeconds  Int?
+  convertedAt      DateTime?
+
+  location         Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  visitor          AnalyticsVisitor @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  events           AnalyticsEvent[]
+
+  @@unique([locationId, externalSessionId])
+  @@index([locationId, startedAt(sort: Desc)])
+  @@index([visitorId, startedAt(sort: Desc)])
+  @@index([locationId, source, medium, startedAt(sort: Desc)])
+}
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  occurredAt  DateTime @default(now())
+
+  locationId  String
+  visitorId   String?
+  sessionId   String?
+  userId      String?
+  contactId   String?
+  propertyId  String?
+
+  eventName   String
+  path        String?  @db.Text
+  title       String?
+  referrer    String?  @db.Text
+  source      String?
+  medium      String?
+  campaign    String?
+  entityType  String?
+  entityId    String?
+  metadata    Json?
+
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  visitor     AnalyticsVisitor? @relation(fields: [visitorId], references: [id], onDelete: SetNull)
+  session     AnalyticsSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  user        User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  property    Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, occurredAt(sort: Desc)])
+  @@index([locationId, eventName, occurredAt(sort: Desc)])
+  @@index([locationId, entityType, entityId, occurredAt(sort: Desc)])
+  @@index([propertyId, occurredAt(sort: Desc)])
+  @@index([sessionId, occurredAt(sort: Desc)])
+  @@index([visitorId, occurredAt(sort: Desc)])
+  @@index([userId, occurredAt(sort: Desc)])
+  @@index([contactId, occurredAt(sort: Desc)])
+}
+
+model AnalyticsDailyRollup {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  locationId  String
+  date        DateTime
+  segment     String   @default("all")
+
+  visitors    Int      @default(0)
+  sessions    Int      @default(0)
+  pageViews   Int      @default(0)
+  propertyViews Int    @default(0)
+  searches    Int      @default(0)
+  favorites   Int      @default(0)
+  inquiries   Int      @default(0)
+  conversions Int      @default(0)
+  adminEvents Int      @default(0)
+  metadata    Json?
+
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, date, segment])
+  @@index([locationId, date(sort: Desc)])
 }
 
 model AiSkillPolicy {

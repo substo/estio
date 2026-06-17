@@ -2,6 +2,7 @@
 
 import db from "@/lib/db";
 import { getSiteConfig } from "@/lib/public-data";
+import { recordPropertyAnalyticsEvent } from "@/lib/analytics/server";
 
 export type ActionResponse = {
     success: boolean;
@@ -34,6 +35,16 @@ export async function submitLeadInquiry(
     if (Object.keys(errors).length > 0) {
         return { success: false, message: "Please correct the errors below.", errors };
     }
+
+    await recordPropertyAnalyticsEvent({
+        eventName: "lead_inquiry_submit",
+        locationId: config.locationId,
+        propertyId,
+        metadata: {
+            hasPhone: Boolean(phone),
+            hasMessage: Boolean(message),
+        },
+    });
 
     try {
         // 3. Database Operation: Upsert Contact
@@ -108,6 +119,17 @@ export async function submitLeadInquiry(
                 source: "Website",
                 notes: inquiryContent
             }
+        });
+
+        await recordPropertyAnalyticsEvent({
+            eventName: "lead_inquiry_success",
+            locationId: config.locationId,
+            contactId: contact.id,
+            propertyId,
+            metadata: {
+                hasPhone: Boolean(phone),
+                hasMessage: Boolean(message),
+            },
         });
 
         return { success: true, message: "Message sent! An agent will contact you soon." };

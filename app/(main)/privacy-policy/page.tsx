@@ -51,6 +51,14 @@ export default function PrivacyPolicyPage() {
                                     address, browser type, and pages visited.
                                 </li>
                                 <li>
+                                    <strong>Analytics and Attribution Data:</strong> We use first-party
+                                    analytics to understand visitors, sessions, property views,
+                                    searches, favorites, inquiries, traffic sources, campaign
+                                    parameters, referring pages, device information, and approximate
+                                    location derived from request metadata. This helps us measure
+                                    listing performance and improve the service.
+                                </li>
+                                <li>
                                     <strong>Property Data:</strong> If you are a real estate agent,
                                     we collect property listing information you provide.
                                 </li>

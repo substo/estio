@@ -4,6 +4,7 @@ import { SearchResultsGrid } from "./_components/search-results-grid";
 import { SearchFilters } from "./_components/search-filters";
 import { getSavedSearch } from "@/app/actions/public-user";
 import { SetHeaderStyle } from "../../_components/header-context";
+import { AnalyticsTracker } from "@/components/analytics/analytics-tracker";
 
 interface Props {
     params: Promise<{ domain: string }>;
@@ -71,6 +72,16 @@ export default async function SearchPage(props: Props) {
 
     return (
         <div className="min-h-screen bg-gray-50/30 pb-20">
+            <AnalyticsTracker
+                domain={params.domain}
+                eventName="search_view"
+                entityType="property_search"
+                metadata={{
+                    filters,
+                    resultsCount: properties.length,
+                }}
+                title={metaTitle}
+            />
             {/* Dynamic Header Style Injection */}
             <SetHeaderStyle style={headerStyle} />
 
@@ -96,6 +107,7 @@ export default async function SearchPage(props: Props) {
 
             {/* Search Filters Component (Sticky & Full Width) */}
             <SearchFilters
+                domain={params.domain}
                 primaryColor={config.primaryColor || undefined}
                 resultsCount={properties.length}
             />
@@ -131,4 +143,3 @@ export async function generateMetadata(props: Props) {
         description: searchConfig.metaDescription || "Find your dream property.",
     };
 }
-

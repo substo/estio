@@ -17,6 +17,7 @@ import { verifyPreviewToken } from "@/lib/jwt-utils";
 import { Edit } from "lucide-react";
 import { FavoriteButton } from "../../_components/favorite-button";
 import { isFavorited } from "@/app/actions/public-user";
+import { AnalyticsTracker } from "@/components/analytics/analytics-tracker";
 
 interface Props {
     params: Promise<{ domain: string; slug: string }>;
@@ -197,6 +198,22 @@ export default async function PropertyDetailPage(props: Props) {
 
     return (
         <div className="min-h-screen bg-background font-sans text-foreground">
+            <AnalyticsTracker
+                domain={params.domain}
+                eventName="property_view"
+                entityType="property"
+                entityId={property.id}
+                propertyId={property.id}
+                metadata={{
+                    slug: property.slug,
+                    reference: property.reference || property.agentRef || null,
+                    goal: property.goal,
+                    price: property.price,
+                    city: property.city,
+                    type: property.type,
+                }}
+                title={property.title}
+            />
             <script
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

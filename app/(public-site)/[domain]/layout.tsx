@@ -13,6 +13,8 @@ import { HeaderProvider } from "./_components/header-context";
 import { currentUser } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { CLERK_DEV_FAPI } from "@/lib/auth/clerk-config";
+import { AnalyticsTracker } from "@/components/analytics/analytics-tracker";
+import { Suspense } from "react";
 
 // Force dynamic rendering as domains vary
 export const dynamic = "force-dynamic";
@@ -205,6 +207,9 @@ export default async function PublicSiteLayout(props: Props) {
                             />
 
                             {/* Main Content */}
+                            <Suspense fallback={null}>
+                                <AnalyticsTracker domain={params.domain} eventName="page_view" />
+                            </Suspense>
                             <main className="flex-1">
                                 {children}
                             </main>

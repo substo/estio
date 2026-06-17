@@ -1,10 +1,11 @@
-import { ReactNode } from "react"
+import { ReactNode, Suspense } from "react"
 import { AdminShellLayout, AdminSidebarPreferenceScript } from "./_components/admin-shell-layout"
 import { AdminContentFrame } from "./_components/admin-content-frame"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { headers } from "next/headers"
 import { OnboardingWrapper } from "@/components/onboarding-wrapper"
+import { AnalyticsTracker } from "@/components/analytics/analytics-tracker"
 
 import db from "@/lib/db"
 
@@ -102,6 +103,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <AdminSidebarPreferenceScript />
       <AdminShellLayout logoUrl={logoUrl} lightUrl={lightUrl}>
         <AdminContentFrame>
+          <Suspense fallback={null}>
+            <AnalyticsTracker eventName="admin_page_view" />
+          </Suspense>
           {needsOnboarding ? (
             <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
               <div className="text-center">

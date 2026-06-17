@@ -86,6 +86,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
       url.pathname.startsWith("/sso") ||
       url.pathname.startsWith("/api/clerk") ||
       url.pathname.startsWith("/api/auth-proxy") ||
+      url.pathname.startsWith("/api/analytics") ||
       url.pathname.startsWith("/v1/oauth_callback") ||
       url.pathname.startsWith("/api/webhooks") ||
       url.pathname.startsWith("/api/google");
