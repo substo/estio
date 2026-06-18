@@ -340,14 +340,14 @@ export function buildCloudTextPayload(to: string, body: string) {
 export function buildCloudMediaPayload(
     to: string,
     input: {
-        mediaType: "image" | "audio" | "document";
+        mediaType: "image" | "audio" | "video" | "document";
         mediaUrl: string;
         caption?: string | null;
         mimetype?: string | null;
         fileName?: string | null;
     }
 ) {
-    const mediaType = input.mediaType === "audio" ? "audio" : input.mediaType === "document" ? "document" : "image";
+    const mediaType = input.mediaType === "audio" ? "audio" : input.mediaType === "video" ? "video" : input.mediaType === "document" ? "document" : "image";
     const media: Record<string, any> = {
         link: input.mediaUrl,
     };

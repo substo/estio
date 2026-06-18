@@ -27,8 +27,9 @@ function normalizePhoneDigits(phone: string | null | undefined): string {
     return String(phone || "").replace(/\D/g, "");
 }
 
-function toMediaType(kind: string): "image" | "audio" | "document" {
+function toMediaType(kind: string): "image" | "audio" | "video" | "document" {
     if (kind === "audio") return "audio";
+    if (kind === "video") return "video";
     if (kind === "document") return "document";
     return "image";
 }

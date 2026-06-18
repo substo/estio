@@ -85,6 +85,22 @@ test('classifyMessageAttachments detects audio by mime type and url or filename 
     assert.deepEqual(result.fileAttachments, []);
 });
 
+test('classifyMessageAttachments detects video by mime type and url or filename extension', () => {
+    const byMime = { url: 'https://example.test/media', mimeType: 'video/mp4' };
+    const byWebmMime = { url: 'https://example.test/download', mimeType: 'video/webm', fileName: 'clip.webm' };
+    const byUrl = { url: 'https://example.test/video.MOV?token=1' };
+    const byName = { url: 'https://example.test/download', fileName: 'clip.m4v' };
+
+    const result = classifyMessageAttachments([byMime, byWebmMime, byUrl, byName]);
+
+    assert.deepEqual(result.videoAttachments, [byMime, byWebmMime, byUrl, byName]);
+    assert.deepEqual(result.imageAttachments, []);
+    assert.deepEqual(result.audioAttachments, []);
+    assert.deepEqual(result.contactAttachments, []);
+    assert.deepEqual(result.fileAttachments, []);
+});
+
+
 test('classifyMessageAttachments detects contact cards by mime, url, and sharedContacts', () => {
     const bySharedContacts: NormalizedMessageAttachment = {
         url: 'https://example.test/shared',

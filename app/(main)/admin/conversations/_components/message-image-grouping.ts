@@ -34,8 +34,8 @@ function isImageOnlyWhatsAppMessage(message: Message): MessageImageGroupItem | n
     if (!String(message.type || "").toUpperCase().includes("WHATSAPP")) return null;
 
     const attachments = normalizeMessageAttachments(message.attachments);
-    const { imageAttachments, audioAttachments, contactAttachments, fileAttachments } = classifyMessageAttachments(attachments);
-    if (imageAttachments.length !== 1 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0) {
+    const { imageAttachments, audioAttachments, videoAttachments, contactAttachments, fileAttachments } = classifyMessageAttachments(attachments);
+    if (imageAttachments.length !== 1 || audioAttachments.length > 0 || videoAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0) {
         return null;
     }
 

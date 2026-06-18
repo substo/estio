@@ -53,6 +53,21 @@ test("buildCloudMediaPayload supports document metadata", () => {
     });
 });
 
+test("buildCloudMediaPayload supports video media", () => {
+    const payload = buildCloudMediaPayload("+357 99 000000", {
+        mediaType: "video",
+        mediaUrl: "https://example.com/clip.mp4",
+        caption: "Walkthrough",
+    });
+
+    assert.equal(payload.to, "35799000000");
+    assert.equal(payload.type, "video");
+    assert.deepEqual(payload.video, {
+        link: "https://example.com/clip.mp4",
+        caption: "Walkthrough",
+    });
+});
+
 test("buildCloudTemplatePayload emits Meta template message shape", () => {
     const payload = buildCloudTemplatePayload("+35799000000", {
         name: "viewing_confirmation",

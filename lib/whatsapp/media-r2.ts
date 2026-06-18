@@ -96,6 +96,11 @@ function inferExtension(fileName?: string, contentType?: string) {
     if (type === "audio/webm") return ".webm";
     if (type === "audio/wav" || type === "audio/x-wav") return ".wav";
     if (type === "audio/aac") return ".aac";
+    if (type === "video/mp4") return ".mp4";
+    if (type === "video/webm") return ".webm";
+    if (type === "video/quicktime") return ".mov";
+    if (type === "video/x-matroska") return ".mkv";
+    if (type === "video/3gpp") return ".3gp";
     if (type === "application/pdf") return ".pdf";
     if (type === "application/msword") return ".doc";
     if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return ".docx";

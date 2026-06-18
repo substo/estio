@@ -120,6 +120,44 @@ test("upload content length uses decoded bytes instead of bridge estimate", asyn
     assert.equal(db.createdAttachments[0].size, body.length);
 });
 
+test("video media is stored without queuing audio transcription", async () => {
+    const db = createDbMock();
+    const queued: any[] = [];
+    const body = Buffer.from("video-bytes");
+
+    const result = await ingestWhatsAppWebBridgeMediaAttachment({
+        wamId: "wam_video",
+        media: {
+            data: body.toString("base64"),
+            mimetype: "video/mp4",
+            filename: "clip.mp4",
+            size: body.length,
+        },
+        messageType: "video",
+        transientBackoffMs: 0,
+        dependencies: {
+            dbClient: db.dbClient as any,
+            sleep: async () => undefined,
+            putMediaObject: async (input) => {
+                assert.equal(input.contentType, "video/mp4");
+                assert.equal(input.contentLength, body.length);
+                return { key: "media/key.mp4", r2Uri: "r2://bucket/media/key.mp4" };
+            },
+            initAudioTranscriptionWorker: async () => undefined,
+            enqueueAudioTranscription: async (input) => {
+                queued.push(input);
+            },
+        },
+    });
+    await nextTick();
+
+    assert.equal(result.status, "stored");
+    assert.equal(db.createdAttachments.length, 1);
+    assert.equal(db.createdAttachments[0].contentType, "video/mp4");
+    assert.equal(db.createdAttachments[0].fileName, "clip.mp4");
+    assert.deepEqual(queued, []);
+});
+
 test("ambiguous transient upload failure verifies existing object and creates attachment", async () => {
     const db = createDbMock();
     const queued: any[] = [];

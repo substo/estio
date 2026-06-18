@@ -25,10 +25,11 @@ type WebBridgeMediaIngestDependencies = {
     sleep?: (ms: number) => Promise<void>;
 };
 
-export function normalizeBridgeMediaType(type: string | null | undefined): "image" | "audio" | "document" | null {
+export function normalizeBridgeMediaType(type: string | null | undefined): "image" | "audio" | "video" | "document" | null {
     const value = String(type || "").toLowerCase();
     if (value === "image" || value.startsWith("image/")) return "image";
     if (value === "audio" || value === "ptt" || value.startsWith("audio/")) return "audio";
+    if (value === "video" || value.startsWith("video/")) return "video";
     if (
         value === "document" ||
         value === "pdf" ||
@@ -49,9 +50,10 @@ export function normalizeBridgeMediaType(type: string | null | undefined): "imag
     return null;
 }
 
-function fallbackContentType(kind: "image" | "audio" | "document") {
+function fallbackContentType(kind: "image" | "audio" | "video" | "document") {
     if (kind === "image") return "image/jpeg";
     if (kind === "audio") return "audio/ogg";
+    if (kind === "video") return "video/mp4";
     return "application/octet-stream";
 }
 

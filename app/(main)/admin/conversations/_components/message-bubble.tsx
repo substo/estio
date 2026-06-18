@@ -26,6 +26,7 @@ import {
 import { MessageAudioAttachment } from "./message-audio-attachment";
 import { MessageBubbleMediaStatus } from "./message-bubble-media-status";
 import { MessageImageAttachments } from "./message-image-attachments";
+import { MessageVideoAttachments } from "./message-video-attachments";
 import { MessageSharedContactCards } from "./message-shared-contact-cards";
 import { MessageBubbleActionsMenu, useMessageBubbleActions } from "./message-bubble-actions-menu";
 import { MessageBubbleBody, MessageBubbleTranslationActions } from "./message-bubble-body";
@@ -236,6 +237,7 @@ export function MessageBubble({
     const {
         imageAttachments,
         audioAttachments,
+        videoAttachments,
         contactAttachments,
         fileAttachments,
     } = useMemo(() => classifyMessageAttachments(attachments), [attachments]);
@@ -247,7 +249,7 @@ export function MessageBubble({
         webBridgeMedia,
         attachments,
     });
-    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
+    const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || videoAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
     const linkPreviewCandidate = useMemo(() => getMessageLinkPreviewCandidate({
         body: message.body,
         isEmail,
@@ -490,6 +492,11 @@ export function MessageBubble({
                                 onExtractViewingNotes={onExtractViewingNotes}
                             />
                         ))}
+                        <MessageVideoAttachments
+                            videoAttachments={videoAttachments}
+                            getDownloadUrl={getDownloadUrl}
+                            theme={theme}
+                        />
                         <MessageBubbleMediaStatus
                             contactAttachments={contactAttachments}
                             fileAttachments={fileAttachments}

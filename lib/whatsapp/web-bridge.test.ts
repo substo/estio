@@ -72,6 +72,8 @@ test("normalizeBridgeMediaType accepts common media and document mimetypes", () 
     assert.equal(normalizeBridgeMediaType("image/jpeg"), "image");
     assert.equal(normalizeBridgeMediaType("audio/ogg"), "audio");
     assert.equal(normalizeBridgeMediaType("ptt"), "audio");
+    assert.equal(normalizeBridgeMediaType("video/mp4"), "video");
+    assert.equal(normalizeBridgeMediaType("video"), "video");
     assert.equal(normalizeBridgeMediaType("application/pdf"), "document");
     assert.equal(normalizeBridgeMediaType("text/plain"), "document");
     assert.equal(normalizeBridgeMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), "document");

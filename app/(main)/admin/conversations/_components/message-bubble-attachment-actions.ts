@@ -42,6 +42,7 @@ export type NormalizedMessageAttachment = {
 export type ClassifiedMessageAttachments = {
     imageAttachments: NormalizedMessageAttachment[];
     audioAttachments: NormalizedMessageAttachment[];
+    videoAttachments: NormalizedMessageAttachment[];
     contactAttachments: NormalizedMessageAttachment[];
     fileAttachments: NormalizedMessageAttachment[];
 };
@@ -78,14 +79,24 @@ export type MediaUnavailableInput = {
     attachments: NormalizedMessageAttachment[];
 };
 
-const MEDIA_PLACEHOLDER_BODIES = new Set(["[Audio]", "[Image]", "[Media]", "[Document]", "[Contact]"]);
+const MEDIA_PLACEHOLDER_BODIES = new Set(["[Audio]", "[Image]", "[Video]", "[Media]", "[Document]", "[Contact]"]);
 
 function isAudioAttachment(attachment: NormalizedMessageAttachment): boolean {
-    const mimeType = (attachment.mimeType || "").toLowerCase();
+    const mimeType = (attachment.mimeType || "").split(";")[0].trim().toLowerCase();
     if (mimeType.startsWith("audio/")) return true;
+    if (mimeType) return false;
 
     const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
     return [".ogg", ".opus", ".mp3", ".m4a", ".webm", ".wav", ".aac"].some((ext) => target.endsWith(ext));
+}
+
+function isVideoAttachment(attachment: NormalizedMessageAttachment): boolean {
+    const mimeType = (attachment.mimeType || "").split(";")[0].trim().toLowerCase();
+    if (mimeType.startsWith("video/")) return true;
+    if (mimeType) return false;
+
+    const target = (attachment.fileName || attachment.url || "").toLowerCase().split("?")[0];
+    return [".mp4", ".mov", ".m4v", ".webm", ".mkv", ".3gp"].some((ext) => target.endsWith(ext));
 }
 
 function audioAttachmentDedupeKey(attachment: NormalizedMessageAttachment): string | null {
@@ -186,6 +197,10 @@ export function classifyMessageAttachments(attachments: NormalizedMessageAttachm
         return isAudioAttachment(attachment);
     });
 
+    const videoAttachments = attachments.filter((attachment) => {
+        return isVideoAttachment(attachment);
+    });
+
     const contactAttachments = attachments.filter((attachment) => {
         if ((attachment.sharedContacts || []).length > 0) return true;
         const mimeType = (attachment.mimeType || "").split(";")[0].trim().toLowerCase();
@@ -195,12 +210,16 @@ export function classifyMessageAttachments(attachments: NormalizedMessageAttachm
     });
 
     const fileAttachments = attachments.filter((attachment) =>
-        !imageAttachments.includes(attachment) && !audioAttachments.includes(attachment) && !contactAttachments.includes(attachment)
+        !imageAttachments.includes(attachment)
+        && !audioAttachments.includes(attachment)
+        && !videoAttachments.includes(attachment)
+        && !contactAttachments.includes(attachment)
     );
 
     return {
         imageAttachments,
         audioAttachments,
+        videoAttachments,
         contactAttachments,
         fileAttachments,
     };
