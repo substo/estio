@@ -264,6 +264,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const [formRenderKey, setFormRenderKey] = useState(0);
     const [activeTab, setActiveTab] = useState<string>('details');
     const contact = baseContact ? ({ ...baseContact, ...contactPatch } as ContactData) : undefined;
+    const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const [preferredLangSelection, setPreferredLangSelection] = useState<string>(
         contact?.preferredLang || REPLY_LANGUAGE_AUTO_VALUE
     );
@@ -291,13 +292,13 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         setContactPatch({});
         setFormRenderKey(0);
         setActiveTab('details');
-    }, [initialContact?.id]);
+        setIsEditing(initialMode !== 'view');
+    }, [initialContact?.id, initialMode]);
 
     useEffect(() => {
         setPreferredLangSelection(contact?.preferredLang || REPLY_LANGUAGE_AUTO_VALUE);
     }, [contact?.id, contact?.preferredLang, formRenderKey]);
 
-    const [isEditing, setIsEditing] = useState(initialMode !== 'view');
     const isCreating = initialMode === 'create';
     const latestConversation = contact?.conversations?.[0];
     const hasConversation = !!latestConversation?.id;
@@ -402,7 +403,8 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
     // ...
 
-    const currentConfig = CONTACT_TYPE_CONFIG[contactType];
+    const effectiveContactType = isEditing ? contactType : initialContactType;
+    const currentConfig = CONTACT_TYPE_CONFIG[effectiveContactType];
     const entityError = state.errors?.entityIds?.[0] || state.errors?.entityId?.[0];
 
     // Entity Assignment State
@@ -754,7 +756,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         <form action={formAction} onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <input type="hidden" name="locationId" value={locationId} />
             {contact && <input type="hidden" name="contactId" value={contact.id} />}
-            <input type="hidden" name="contactType" value={contactType} />
+            <input type="hidden" name="contactType" value={effectiveContactType} />
 
             <div className={`min-h-0 flex-1 overflow-y-auto px-1 py-2 ${!isEditing ? 'bg-muted/10' : ''}`}>
 
@@ -770,7 +772,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 {/* AI Analyzer moved to Conversations > AI Coordinator Panel */}
 
                 {/* Contact Type Selector */}
-                <RenderField label="Contact Type" value={CONTACT_TYPE_CONFIG[contactType]?.label} isEditing={isEditing} className="mb-4">
+                <RenderField label="Contact Type" value={CONTACT_TYPE_CONFIG[effectiveContactType]?.label} isEditing={isEditing} className="mb-4">
                     <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
                         <Select value={contactType} onValueChange={(v) => setContactType(v as ContactType)}>
                             <SelectTrigger className="w-full">

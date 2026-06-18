@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 
 import { EditContactForm } from './edit-contact-dialog';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getContactDetails } from '../actions';
 import { Loader2 } from 'lucide-react';
 
@@ -22,6 +22,7 @@ interface ContactModalProps {
 
 export default function ContactModal({ contactId, mode }: ContactModalProps) {
     const router = useRouter();
+    const requestSeqRef = useRef(0);
     const [open, setOpen] = useState(true);
     const [data, setData] = useState<{
         contact: any,
@@ -35,10 +36,18 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        const requestSeq = requestSeqRef.current + 1;
+        requestSeqRef.current = requestSeq;
+        let cancelled = false;
+
         const fetch = async () => {
             setLoading(true);
+            setData(null);
             try {
                 const res = await getContactDetails(contactId);
+                if (cancelled || requestSeqRef.current !== requestSeq) {
+                    return;
+                }
                 if (res) {
                     setData(res);
                 } else {
@@ -46,12 +55,21 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                     setOpen(false);
                 }
             } catch (error) {
+                if (cancelled || requestSeqRef.current !== requestSeq) {
+                    return;
+                }
                 console.error("Failed to load contact details", error);
             } finally {
-                setLoading(false);
+                if (!cancelled && requestSeqRef.current === requestSeq) {
+                    setLoading(false);
+                }
             }
         };
         fetch();
+
+        return () => {
+            cancelled = true;
+        };
     }, [contactId]);
 
     const handleOpenChange = (val: boolean) => {
