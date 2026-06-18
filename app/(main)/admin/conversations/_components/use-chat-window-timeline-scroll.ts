@@ -9,6 +9,8 @@ export interface ActivityLogItem {
     action: string;
     changes?: any;
     user?: { name: string | null; email: string | null } | null;
+    clientMutationId?: string | null;
+    pending?: boolean;
 }
 
 export type ChatWindowTimelineItem =
@@ -52,6 +54,7 @@ export function useChatWindowTimelineScroll({
     const previousScrollTopRef = useRef(0);
     const knownMessageIdsRef = useRef<Set<string>>(new Set());
     const previousTailMessageIdRef = useRef<string | null>(null);
+    const previousPendingActivityIdsRef = useRef<Set<string>>(new Set());
     const hasInitializedKnownMessagesRef = useRef(false);
     const hasReportedInitialPaintRef = useRef(false);
     const [isTimelineReady, setIsTimelineReady] = useState(false);
@@ -114,6 +117,7 @@ export function useChatWindowTimelineScroll({
         previousScrollTopRef.current = 0;
         knownMessageIdsRef.current = new Set();
         previousTailMessageIdRef.current = null;
+        previousPendingActivityIdsRef.current = new Set();
         hasInitializedKnownMessagesRef.current = false;
         hasReportedInitialPaintRef.current = false;
         setIsTimelineReady(false);
@@ -225,6 +229,26 @@ export function useChatWindowTimelineScroll({
         if (!shouldStickToBottomRef.current) return;
         snapToBottom();
     }, [conversationId, messages, activityLog, loading, snapToBottom]);
+
+    useLayoutEffect(() => {
+        if (loading) return;
+
+        const pendingActivityIds = new Set(
+            activityLog
+                .filter((activity) => activity?.pending === true)
+                .map((activity) => String(activity.id || ""))
+                .filter(Boolean)
+        );
+        const hasNewPendingActivity = Array.from(pendingActivityIds)
+            .some((activityId) => !previousPendingActivityIdsRef.current.has(activityId));
+
+        previousPendingActivityIdsRef.current = pendingActivityIds;
+        if (!hasNewPendingActivity) return;
+
+        shouldStickToBottomRef.current = true;
+        snapToBottom();
+        requestAnimationFrame(() => snapToBottom());
+    }, [activityLog, loading, snapToBottom]);
 
     useEffect(() => {
         const container = scrollRef.current;

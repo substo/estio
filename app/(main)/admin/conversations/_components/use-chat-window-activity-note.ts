@@ -37,18 +37,29 @@ export function useChatWindowActivityNote({
         setAddNoteDate(getDefaultActivityNoteDate());
         setAddNoteOpen(false);
 
-        void onAddActivityEntry(trimmedNote, submittedDateIso)
+        let savePromise: Promise<void>;
+        try {
+            savePromise = onAddActivityEntry(trimmedNote, submittedDateIso);
+        } catch (e: any) {
+            setAddingNote(false);
+            setAddNoteText(trimmedNote);
+            setAddNoteDate(submittedDate);
+            setAddNoteOpen(true);
+            toast.error(e?.message || "Failed to add note");
+            return;
+        }
+
+        setAddingNote(false);
+
+        void savePromise
             .then(() => {
                 toast.success("Note added to activity log");
             })
             .catch((e: any) => {
-                setAddNoteText(trimmedNote);
+                setAddNoteText((current) => current.trim() ? current : trimmedNote);
                 setAddNoteDate(submittedDate);
                 setAddNoteOpen(true);
                 toast.error(e?.message || "Failed to add note");
-            })
-            .finally(() => {
-                setAddingNote(false);
             });
     }, [addNoteDate, addNoteText, onAddActivityEntry]);
 
