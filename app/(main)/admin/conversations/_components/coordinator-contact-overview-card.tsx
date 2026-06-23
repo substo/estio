@@ -228,11 +228,11 @@ export function CoordinatorContactOverviewCard({
                                     } else if (isOwnerOrTenant) {
                                         showPropertyAssociations = propertyRoles.length > 0;
                                     } else if (isLeadLike) {
+                                        showCompanyRelations = companyRoles.length > 0;
                                         showInterested = interestedProperties.length > 0;
                                         showInspected = inspectedProperties.length > 0;
                                         showSearchCriteria = true;
                                         if (normalizedType === "contact") {
-                                            showCompanyRelations = companyRoles.length > 0;
                                             showPropertyAssociations = propertyRoles.length > 0;
                                         }
                                     } else if (!isWhatsAppGroup) {

@@ -23,6 +23,12 @@ import {
     type PasteLeadImportStatus,
 } from "@/lib/conversations/paste-lead-status";
 import { buildVisibleMessageSourceWhere } from "@/lib/conversations/internal-message-visibility";
+import {
+    buildCompanyLinkCandidates,
+    normalizeWebsiteHost,
+    normalizePhoneForMatch,
+    type ScrapedAgencyProfile,
+} from "@/lib/leads/agency-company-linker";
 
 export type LeadImportParsedData = {
     contact?: {
@@ -34,6 +40,13 @@ export type LeadImportParsedData = {
         countryCode?: string | null;
         email?: string | null;
     };
+    company?: {
+        name?: string | null;
+        email?: string | null;
+        phone?: string | null;
+        website?: string | null;
+        type?: string | null;
+    } | null;
     requirements?: {
         budget?: string | null;
         location?: string | null;
@@ -97,6 +110,7 @@ export type CreateParsedLeadImportResult =
     };
 
 const REQUIREMENT_DISTRICTS = ["Paphos", "Nicosia", "Famagusta", "Limassol", "Larnaca"] as const;
+const PASTE_LEAD_COMPANY_NAME_KEYWORDS = /agency|real estate|properties|property|developer|developers|development|management|group|holdings|ltd|limited|company|homes|estates|realty/i;
 
 const PASTE_LEAD_FIRST_OUTREACH_SUGGESTION = [
     "Draft a first outreach message for this pasted lead.",
@@ -158,6 +172,178 @@ function mergeConversationSuggestedActions(existing: string[] | null | undefined
         return current;
     }
     return [normalizedIncoming, ...current].slice(0, 3);
+}
+
+function normalizePasteLeadCompanyValue(value?: string | null): string | null {
+    const raw = String(value || "").replace(/\s+/g, " ").trim();
+    return raw || null;
+}
+
+export function buildPasteLeadCompanyProfile(data: LeadImportParsedData): ScrapedAgencyProfile | null {
+    const company = data.company || null;
+    const companyName = normalizePasteLeadCompanyValue(company?.name);
+    if (!companyName) return null;
+
+    const email = normalizePasteLeadCompanyValue(company?.email) || normalizePasteLeadCompanyValue(data.contact?.email);
+    const phone = normalizePasteLeadCompanyValue(company?.phone) || normalizePasteLeadCompanyValue(data.contact?.phone);
+    const website = normalizePasteLeadCompanyValue(company?.website);
+    const hasStrongBusinessEvidence = Boolean(
+        website ||
+        email ||
+        phone ||
+        PASTE_LEAD_COMPANY_NAME_KEYWORDS.test(companyName)
+    );
+
+    if (!hasStrongBusinessEvidence) return null;
+
+    return {
+        name: companyName,
+        email,
+        phone,
+        website,
+    };
+}
+
+export function resolvePasteLeadCompanyRole(data: LeadImportParsedData): string {
+    const role = String(data.contact?.role || "").trim().toLowerCase();
+    if (role === "agent" || role === "partner" || role === "associate") return "associate";
+    return "associate";
+}
+
+export function buildPasteLeadCompanyPatch(
+    existing: { email?: string | null; phone?: string | null; website?: string | null; type?: string | null },
+    profile: ScrapedAgencyProfile,
+    companyType?: string | null
+): Prisma.CompanyUpdateInput {
+    const patch: Prisma.CompanyUpdateInput = {};
+    if (!existing.email && profile.email) patch.email = profile.email;
+    if (!existing.phone && profile.phone) patch.phone = profile.phone;
+    if (!existing.website && profile.website) patch.website = profile.website;
+    if (!existing.type && companyType) patch.type = companyType;
+    return patch;
+}
+
+async function ensurePasteLeadCompanyLinked(args: {
+    locationId: string;
+    contactId: string;
+    data: LeadImportParsedData;
+    emitStatus: ReturnType<typeof createPasteLeadStatusRecorder>;
+}) {
+    const profile = buildPasteLeadCompanyProfile(args.data);
+    if (!profile) {
+        args.emitStatus("company_link_skipped", "skipped", "no company profile");
+        return null;
+    }
+
+    const parsedCompanyType = normalizePasteLeadCompanyValue(args.data.company?.type) || "Agency";
+    const existingCompanies = await db.company.findMany({
+        where: { locationId: args.locationId },
+        select: { id: true, name: true, website: true, phone: true, email: true, type: true },
+    });
+
+    const candidates = buildCompanyLinkCandidates(profile, existingCompanies, {
+        plausibleThreshold: 0.6,
+        maxCandidates: 5,
+    });
+    const deterministicCandidate = candidates.find((candidate) => candidate.matchType !== "similar_name");
+    const highConfidenceCandidate = candidates.find((candidate) => candidate.confidence >= 0.9);
+    const selectedCandidate = deterministicCandidate || highConfidenceCandidate || null;
+
+    const company = await db.$transaction(async (tx) => {
+        if (selectedCandidate) {
+            let existing = await tx.company.findFirst({
+                where: { id: selectedCandidate.companyId, locationId: args.locationId },
+                select: { id: true, name: true, email: true, phone: true, website: true, type: true },
+            });
+            if (!existing) return null;
+
+            const patch = buildPasteLeadCompanyPatch(existing, profile, parsedCompanyType);
+            if (Object.keys(patch).length > 0) {
+                existing = await tx.company.update({
+                    where: { id: existing.id },
+                    data: patch,
+                    select: { id: true, name: true, email: true, phone: true, website: true, type: true },
+                });
+            }
+
+            await tx.contactCompanyRole.upsert({
+                where: {
+                    contactId_companyId_role: {
+                        contactId: args.contactId,
+                        companyId: existing.id,
+                        role: resolvePasteLeadCompanyRole(args.data),
+                    },
+                },
+                update: {},
+                create: {
+                    contactId: args.contactId,
+                    companyId: existing.id,
+                    role: resolvePasteLeadCompanyRole(args.data),
+                    notes: selectedCandidate.evidence.join("; ") || null,
+                },
+            });
+            return { ...existing, created: false };
+        }
+
+        const exactExisting = await tx.company.findFirst({
+            where: {
+                locationId: args.locationId,
+                OR: [
+                    ...(profile.website ? [{ website: { contains: normalizeWebsiteHost(profile.website) || profile.website, mode: "insensitive" as const } }] : []),
+                    ...(profile.email ? [{ email: { equals: profile.email, mode: "insensitive" as const } }] : []),
+                    ...(profile.phone ? [{ phone: { contains: normalizePhoneForMatch(profile.phone)?.replace(/\D/g, "").slice(-8) || profile.phone, mode: "insensitive" as const } }] : []),
+                    { name: { equals: profile.name, mode: "insensitive" as const } },
+                ],
+            },
+            select: { id: true, name: true, email: true, phone: true, website: true, type: true },
+        });
+
+        const target = exactExisting || await tx.company.create({
+            data: {
+                locationId: args.locationId,
+                name: profile.name,
+                email: profile.email || null,
+                phone: profile.phone || null,
+                website: profile.website || null,
+                type: parsedCompanyType,
+            },
+            select: { id: true, name: true, email: true, phone: true, website: true, type: true },
+        });
+
+        if (exactExisting) {
+            const patch = buildPasteLeadCompanyPatch(target, profile, parsedCompanyType);
+            if (Object.keys(patch).length > 0) {
+                await tx.company.update({ where: { id: target.id }, data: patch });
+            }
+        }
+
+        await tx.contactCompanyRole.upsert({
+            where: {
+                contactId_companyId_role: {
+                    contactId: args.contactId,
+                    companyId: target.id,
+                    role: resolvePasteLeadCompanyRole(args.data),
+                },
+            },
+            update: {},
+            create: {
+                contactId: args.contactId,
+                companyId: target.id,
+                role: resolvePasteLeadCompanyRole(args.data),
+            },
+        });
+
+        return { ...target, created: !exactExisting };
+    });
+
+    if (company) {
+        args.emitStatus(
+            company.created ? "company_created" : "company_linked",
+            "completed",
+            company.name
+        );
+    }
+    return company;
 }
 
 async function conversationHasVisibleOutboundMessages(conversationId: string): Promise<boolean> {
@@ -659,18 +845,36 @@ export async function createParsedLeadForLocation(
 
                 contactId = duplicateContact.id;
                 isNewContact = false;
-                await updateExistingContact(contactId);
-                emitStatus("contact_updated", "completed", contactId);
+                await updateExistingContact(duplicateContact.id);
+                emitStatus("contact_updated", "completed", duplicateContact.id);
             }
         }
 
         if (contactId) {
+            const savedContactId = contactId;
+            try {
+                await ensurePasteLeadCompanyLinked({
+                    locationId: location.id,
+                    contactId: savedContactId,
+                    data,
+                    emitStatus,
+                });
+            } catch (companyLinkError: any) {
+                backgroundJobsSkipped.push("companyLinking:failed");
+                emitStatus("company_link_failed", "failed", companyLinkError?.message || String(companyLinkError));
+                console.warn("[PasteLeadFastPath] Company link failed", {
+                    pasteLeadTraceId,
+                    contactId: savedContactId,
+                    error: companyLinkError?.message || String(companyLinkError),
+                });
+            }
+
             backgroundJobsQueued.push("googleAutoSync");
-            emitStatus("google_autosync_queued", "running", contactId);
-            runDetachedTask(`paste_lead_google_autosync:${contactId}`, async () => {
+            emitStatus("google_autosync_queued", "running", savedContactId);
+            runDetachedTask(`paste_lead_google_autosync:${savedContactId}`, async () => {
                 await runGoogleAutoSyncForContact({
                     locationId: location.id,
-                    contactId,
+                    contactId: savedContactId,
                     source: 'LEAD_CAPTURE',
                     event: isNewContact ? 'create' : 'update',
                     preferredUserId

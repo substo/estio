@@ -9,6 +9,10 @@ export type PasteLeadImportStatusEvent =
     | "contact_create_failed"
     | "contact_created"
     | "contact_updated"
+    | "company_link_skipped"
+    | "company_created"
+    | "company_linked"
+    | "company_link_failed"
     | "conversation_lookup_started"
     | "conversation_created"
     | "conversation_updated"
@@ -71,6 +75,10 @@ const EVENT_LABELS: Record<PasteLeadImportStatusEvent, string> = {
     contact_create_failed: "Contact create failed",
     contact_created: "Contact created",
     contact_updated: "Contact updated",
+    company_link_skipped: "Company link skipped",
+    company_created: "Company created",
+    company_linked: "Company linked",
+    company_link_failed: "Company link failed",
     conversation_lookup_started: "Opening conversation",
     conversation_created: "Conversation created",
     conversation_updated: "Conversation updated",

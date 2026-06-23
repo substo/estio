@@ -1,0 +1,67 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+    buildPasteLeadCompanyPatch,
+    buildPasteLeadCompanyProfile,
+    resolvePasteLeadCompanyRole,
+    type LeadImportParsedData,
+} from "./lead-import-service";
+
+test("buildPasteLeadCompanyProfile separates agency details from the person contact", () => {
+    const parsed: LeadImportParsedData = {
+        contact: {
+            name: "Christina",
+            role: "Agent",
+            phone: "+35799421718",
+            email: "christina@chrissaf.com",
+        },
+        company: {
+            name: "Chrissaf Real Estate Agency",
+            website: "https://www.chrissaf.com",
+            type: "Agency",
+        },
+    };
+
+    assert.deepEqual(buildPasteLeadCompanyProfile(parsed), {
+        name: "Chrissaf Real Estate Agency",
+        email: "christina@chrissaf.com",
+        phone: "+35799421718",
+        website: "https://www.chrissaf.com",
+    });
+    assert.equal(resolvePasteLeadCompanyRole(parsed), "associate");
+});
+
+test("buildPasteLeadCompanyProfile ignores weak organization guesses", () => {
+    assert.equal(
+        buildPasteLeadCompanyProfile({
+            contact: { name: "Jane Lead", role: "Lead" },
+            company: { name: "Jane" },
+        }),
+        null
+    );
+});
+
+test("buildPasteLeadCompanyPatch only fills missing company fields", () => {
+    const patch = buildPasteLeadCompanyPatch(
+        {
+            email: "existing@example.com",
+            phone: null,
+            website: null,
+            type: null,
+        },
+        {
+            name: "Existing Agency",
+            email: "incoming@example.com",
+            phone: "+35799111222",
+            website: "https://agency.example",
+        },
+        "Agency"
+    );
+
+    assert.deepEqual(patch, {
+        phone: "+35799111222",
+        website: "https://agency.example",
+        type: "Agency",
+    });
+});
