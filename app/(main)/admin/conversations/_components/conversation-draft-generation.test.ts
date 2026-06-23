@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { appendAiStreamText } from '@/lib/ai/stream-text';
+import { appendAiStreamText, selectAiStreamFinalText } from '@/lib/ai/stream-text';
 import { generateDraftWithStreamingFallback, streamDraftViaApi } from './conversation-draft-generation';
 
 test('appendAiStreamText preserves exact streamed text chunks', () => {
@@ -9,6 +9,14 @@ test('appendAiStreamText preserves exact streamed text chunks', () => {
     const text = chunks.reduce((buffer, chunk) => appendAiStreamText(buffer, chunk), '');
 
     assert.equal(text, 'Hi Tony.\n\nNew listing alert in Peyia.');
+});
+
+test('selectAiStreamFinalText keeps streamed paragraph spacing over flattened response text', () => {
+    const streamed = 'Hi Tony,\n\nThis is the first paragraph.\n\nThis is the second paragraph.';
+    const flattened = 'Hi Tony, This is the first paragraph. This is the second paragraph.';
+
+    assert.equal(selectAiStreamFinalText(streamed, flattened), streamed);
+    assert.equal(selectAiStreamFinalText('', flattened), flattened);
 });
 
 test('appendAiStreamText does not insert spaces inside streamed subword chunks', () => {

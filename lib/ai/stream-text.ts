@@ -3,3 +3,7 @@ export function appendAiStreamText(current: string, chunk: string) {
     if (!next) return current;
     return current + next;
 }
+
+export function selectAiStreamFinalText(streamText: string, responseText: string) {
+    return streamText || responseText;
+}

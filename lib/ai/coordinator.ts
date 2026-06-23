@@ -6,7 +6,7 @@ import {
     GEMINI_FLASH_STABLE_FALLBACK,
 } from "@/lib/ai/models";
 import { validateAction } from "@/lib/ai/policy";
-import { appendAiStreamText } from "@/lib/ai/stream-text";
+import { appendAiStreamText, selectAiStreamFinalText } from "@/lib/ai/stream-text";
 import { 
     assembleTimelineEvents, 
     type TimelineEvent, 
@@ -1156,7 +1156,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                         const response = await streamResult.response;
                         const responseText = response.text();
 
-                        return { response, rawText: responseText || rawText };
+                        return { response, rawText: selectAiStreamFinalText(rawText, responseText) };
                     }
 
                     const result = await cacheModel.model.generateContent(finalPrompt);
