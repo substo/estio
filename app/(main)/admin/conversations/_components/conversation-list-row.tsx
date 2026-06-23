@@ -23,6 +23,7 @@ const CONTACT_TYPE_TONES: Record<string, string> = {
     partner: "border-cyan-200 bg-cyan-50 text-cyan-700",
     associate: "border-slate-200 bg-slate-50 text-slate-700",
     maintenance: "border-rose-200 bg-rose-50 text-rose-700",
+    company: "border-emerald-200 bg-emerald-50 text-emerald-800",
     whatsappgroup: "border-indigo-200 bg-indigo-50 text-indigo-700",
     "ref-groupmember": "border-indigo-200 bg-indigo-50 text-indigo-700",
 };

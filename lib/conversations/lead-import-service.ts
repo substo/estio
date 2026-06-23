@@ -35,7 +35,7 @@ export type LeadImportParsedData = {
         name?: string | null;
         firstName?: string | null;
         lastName?: string | null;
-        role?: "Lead" | "Owner" | "Agent" | "Tenant" | null;
+        role?: "Lead" | "Owner" | "Agent" | "Tenant" | "Company" | null;
         phone?: string | null;
         countryCode?: string | null;
         email?: string | null;
@@ -179,6 +179,51 @@ function normalizePasteLeadCompanyValue(value?: string | null): string | null {
     return raw || null;
 }
 
+function normalizeCompanyNameForComparison(value?: string | null): string {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\b(real estate|agency|properties|property|estates|estate|developers?|development|management|group|holdings?|ltd|limited|company|co|realty)\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function hasPersonNameForCompanyCard(data: LeadImportParsedData): boolean {
+    const companyName = normalizePasteLeadCompanyValue(data.company?.name);
+    const contactName = normalizePasteLeadCompanyValue(data.contact?.name);
+    const firstName = normalizePasteLeadCompanyValue(data.contact?.firstName);
+    const lastName = normalizePasteLeadCompanyValue(data.contact?.lastName);
+
+    if (firstName || lastName) return true;
+    if (!contactName) return false;
+    if (!companyName) return true;
+
+    const normalizedContact = normalizeCompanyNameForComparison(contactName);
+    const normalizedCompany = normalizeCompanyNameForComparison(companyName);
+    if (!normalizedContact || !normalizedCompany) return false;
+    if (normalizedContact === normalizedCompany) return false;
+    if (normalizedContact === `${normalizedCompany} agent`) return false;
+    if (normalizedContact === `${normalizedCompany} company contact`) return false;
+    if (normalizedContact === `${normalizedCompany} main office`) return false;
+    if (normalizedContact.includes(normalizedCompany) && /\b(agent|agency|office|contact|company)\b/i.test(contactName)) return false;
+    return true;
+}
+
+export function isGenericPasteLeadCompanyContact(data: LeadImportParsedData): boolean {
+    const profile = buildPasteLeadCompanyProfile(data);
+    if (!profile) return false;
+    const role = String(data.contact?.role || "").trim().toLowerCase();
+    return role === "company" || !hasPersonNameForCompanyCard(data);
+}
+
+export function buildPasteLeadCompanyContactName(data: LeadImportParsedData): string | null {
+    if (!isGenericPasteLeadCompanyContact(data)) return null;
+    const companyName = normalizePasteLeadCompanyValue(data.company?.name);
+    if (!companyName) return null;
+    return `${companyName} Main Office`;
+}
+
 export function buildPasteLeadCompanyProfile(data: LeadImportParsedData): ScrapedAgencyProfile | null {
     const company = data.company || null;
     const companyName = normalizePasteLeadCompanyValue(company?.name);
@@ -205,6 +250,7 @@ export function buildPasteLeadCompanyProfile(data: LeadImportParsedData): Scrape
 }
 
 export function resolvePasteLeadCompanyRole(data: LeadImportParsedData): string {
+    if (isGenericPasteLeadCompanyContact(data)) return "company_contact";
     const role = String(data.contact?.role || "").trim().toLowerCase();
     if (role === "agent" || role === "partner" || role === "associate") return "associate";
     return "associate";
@@ -742,7 +788,9 @@ export async function createParsedLeadForLocation(
         const matchedPropertyForName = await resolveLeadPropertyMatch(location.id, leadResolutionText);
         const parsedPersonName = splitLeadPersonName(data.contact);
         const inferredRole = inferLeadContactRole(leadResolutionText, data.contact?.role);
-        const structuredDisplayName = data.structuredContactName || buildStructuredLeadDisplayName({
+        const genericCompanyContact = isGenericPasteLeadCompanyContact(data);
+        const companyContactName = buildPasteLeadCompanyContactName(data);
+        const structuredDisplayName = companyContactName || data.structuredContactName || buildStructuredLeadDisplayName({
             contact: data.contact,
             rawLeadText: leadResolutionText,
             inferredStatus,
@@ -757,9 +805,9 @@ export async function createParsedLeadForLocation(
             if (data.requirements.type) contactData.requirementPropertyTypes = [data.requirements.type];
         }
         if (structuredDisplayName) contactData.name = structuredDisplayName;
-        if (parsedPersonName.firstName) contactData.firstName = parsedPersonName.firstName;
-        if (parsedPersonName.lastName) contactData.lastName = parsedPersonName.lastName;
-        contactData.contactType = inferredRole;
+        if (!genericCompanyContact && parsedPersonName.firstName) contactData.firstName = parsedPersonName.firstName;
+        if (!genericCompanyContact && parsedPersonName.lastName) contactData.lastName = parsedPersonName.lastName;
+        contactData.contactType = genericCompanyContact ? "Company" : inferredRole;
         if (normalizedDistrict) contactData.requirementPropertyLocations = [normalizedDistrict];
         if (inferredStatus) contactData.requirementStatus = inferredStatus;
         if (data.goal) contactData.leadGoal = data.goal;

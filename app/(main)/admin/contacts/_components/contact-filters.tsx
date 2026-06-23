@@ -31,7 +31,7 @@ import { CONTACT_TYPES, LEAD_GOALS, LEAD_STAGES } from './contact-types';
 // --- Constants ---
 
 const REAL_ESTATE_TYPES = ['Lead', 'Contact', 'Tenant'] as const;
-const BUSINESS_TYPES = ['Agent', 'Partner', 'Owner', 'Associate', 'Maintenance'] as const;
+const BUSINESS_TYPES = ['Agent', 'Partner', 'Owner', 'Associate', 'Maintenance', 'Company'] as const;
 
 const PRIORITIES = ['Low', 'Medium', 'High'] as const;
 

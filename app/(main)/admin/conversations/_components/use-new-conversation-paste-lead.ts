@@ -101,7 +101,10 @@ export function useNewConversationPasteLead(args: {
         if (cached.key === key) {
             const parsed = cached.result || (cached.promise ? await cached.promise : null);
             if (parsed?.success && parsed.data) {
-                return createParsedLead(parsed.data, key, { pasteLeadTraceId });
+                return createParsedLead(parsed.data, key, {
+                    pasteLeadTraceId,
+                    parseTrace: parsed.trace,
+                });
             }
         }
 

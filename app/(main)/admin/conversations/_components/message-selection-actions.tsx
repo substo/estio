@@ -395,7 +395,9 @@ export function MessageSelectionActions({
         if (cached.key === key) {
             const parsed = cached.result || (cached.promise ? await cached.promise : null);
             if (parsed?.success && parsed.data) {
-                return createParsedLead(parsed.data, key);
+                return createParsedLead(parsed.data, key, {
+                    parseTrace: parsed.trace,
+                });
             }
         }
 

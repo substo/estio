@@ -13,6 +13,7 @@ export const CONTACT_TYPES = [
     'Owner',
     'Associate',
     'Maintenance',
+    'Company',
     'Contact',
     'Tenant',
     'WhatsAppGroup',
@@ -174,6 +175,7 @@ export interface ContactTypeConfig {
  * - Owner: Property owners - can optionally be assigned to properties
  * - Associate: Business associates - can be assigned to property or company
  * - Maintenance: Handyman / property maintenance - assigned to properties
+ * - Company: Generic company/agency communication endpoint - assigned to a company
  * - Contact: Converted customer (renting/bought) - optional property, no lead fields
  */
 export const CONTACT_TYPE_CONFIG: Record<ContactType, ContactTypeConfig> = {
@@ -237,6 +239,16 @@ export const CONTACT_TYPE_CONFIG: Record<ContactType, ContactTypeConfig> = {
         entityRequired: true,
         entityLabel: 'Maintains Properties',
         multiEntity: true,
+    },
+    Company: {
+        label: 'Company',
+        description: 'Generic company or agency communication endpoint',
+        visibleTabs: ['details'],
+        showLeadFields: false,
+        impliedRole: 'company_contact',
+        entityType: 'company',
+        entityRequired: false,
+        entityLabel: 'Company',
     },
     Contact: {
         label: 'Contact',
