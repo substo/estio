@@ -1139,9 +1139,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                         for await (const chunk of streamResult.stream) {
                             const delta = chunk.text();
                             if (!delta) continue;
-                            const nextRawText = appendAiStreamText(rawText, delta);
-                            const tokenForClient = nextRawText.slice(rawText.length);
-                            rawText = nextRawText;
+                            rawText = appendAiStreamText(rawText, delta);
                             if (!firstTokenSeen) {
                                 firstTokenSeen = true;
                                 telemetry.stageMs.firstTokenMs = Date.now() - streamStartedAt;
@@ -1152,15 +1150,13 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                                     firstTokenMs: telemetry.stageMs.firstTokenMs,
                                 }));
                             }
-                            context.onToken(tokenForClient);
+                            context.onToken(delta);
                         }
 
                         const response = await streamResult.response;
-                        if (!rawText) {
-                            rawText = response.text();
-                        }
+                        const responseText = response.text();
 
-                        return { response, rawText };
+                        return { response, rawText: responseText || rawText };
                     }
 
                     const result = await cacheModel.model.generateContent(finalPrompt);

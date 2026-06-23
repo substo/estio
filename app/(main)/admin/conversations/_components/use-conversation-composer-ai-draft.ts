@@ -188,10 +188,10 @@ export function useConversationComposerAiDraft({
                 }
             );
             const text = result?.draft || null;
-            if (streamedBuffer) {
-                onDraftChange(streamedBuffer);
-            } else if (text) {
+            if (text) {
                 onDraftChange(text);
+            } else if (streamedBuffer) {
+                onDraftChange(streamedBuffer);
             }
             const finalDraft = String(text || streamedBuffer || "").trim();
             if (finalDraft) {

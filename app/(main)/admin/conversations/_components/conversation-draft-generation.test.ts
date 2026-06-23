@@ -4,11 +4,18 @@ import test from 'node:test';
 import { appendAiStreamText } from '@/lib/ai/stream-text';
 import { generateDraftWithStreamingFallback, streamDraftViaApi } from './conversation-draft-generation';
 
-test('appendAiStreamText repairs missing spaces between streamed word chunks', () => {
-    const chunks = ['Hi', 'Tony', '.', '\n\n', 'New', 'listing', 'alert', 'in', 'Peyia', '.'];
+test('appendAiStreamText preserves exact streamed text chunks', () => {
+    const chunks = ['Hi ', 'Tony', '.', '\n\n', 'New ', 'listing ', 'alert ', 'in ', 'Peyia', '.'];
     const text = chunks.reduce((buffer, chunk) => appendAiStreamText(buffer, chunk), '');
 
     assert.equal(text, 'Hi Tony.\n\nNew listing alert in Peyia.');
+});
+
+test('appendAiStreamText does not insert spaces inside streamed subword chunks', () => {
+    assert.equal(appendAiStreamText('An', 'tonia'), 'Antonia');
+    assert.equal(appendAiStreamText('DT49', '98'), 'DT4998');
+    assert.equal(appendAiStreamText('sprzed', 'ających'), 'sprzedających');
+    assert.equal(appendAiStreamText('realiz', 'ację'), 'realizację');
 });
 
 test('appendAiStreamText preserves intentional joins for punctuation, currency, hyphens, and URLs', () => {
