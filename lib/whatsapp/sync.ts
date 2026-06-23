@@ -203,6 +203,17 @@ function isRefGroupMemberPlaceholder(contact: {
         || (contact.name || "").startsWith("Group Member ");
 }
 
+function isWebBridgeLidPlaceholderContact(contact: {
+    phone?: string | null;
+    name?: string | null;
+}) {
+    const name = String(contact.name || "");
+    return !contact.phone && (
+        name === "WhatsApp Contact"
+        || name.startsWith("WhatsApp User")
+    );
+}
+
 function buildContactLidLookup(locationId: string, lidValue: string | null | undefined) {
     const normalizedLid = normalizeLidJid(lidValue);
     const lidRaw = normalizeLidRaw(lidValue);
@@ -441,6 +452,381 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     };
 }
 
+async function persistWebBridgeConversationSync(args: {
+    locationId: string;
+    conversationId: string;
+    providerAccountId: string;
+    providerThreadId: string;
+    source: NormalizedMessage["source"];
+}) {
+    const providerThreadId = String(args.providerThreadId || "").trim();
+    if (!providerThreadId) return;
+
+    await (db as any).conversationSync.upsert({
+        where: {
+            conversationId_provider_providerAccountId: {
+                conversationId: args.conversationId,
+                provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                providerAccountId: args.providerAccountId,
+            },
+        },
+        create: {
+            conversationId: args.conversationId,
+            locationId: args.locationId,
+            provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+            providerAccountId: args.providerAccountId,
+            providerConversationId: providerThreadId,
+            status: "synced",
+            lastSyncedAt: new Date(),
+            metadata: { source: args.source },
+        },
+        update: {
+            providerConversationId: providerThreadId,
+            status: "synced",
+            lastSyncedAt: new Date(),
+            lastError: null,
+            metadata: { source: args.source },
+        },
+    }).catch(async (error: any) => {
+        if (error?.code === "P2002") {
+            const reused = await (db as any).conversationSync.updateMany({
+                where: {
+                    provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                    providerAccountId: args.providerAccountId,
+                    providerConversationId: providerThreadId,
+                },
+                data: {
+                    conversationId: args.conversationId,
+                    locationId: args.locationId,
+                    status: "synced",
+                    lastSyncedAt: new Date(),
+                    lastError: null,
+                    metadata: { source: args.source, reusedAfterUniqueConflict: true },
+                },
+            }).catch(() => null);
+            if (reused?.count) {
+                console.warn(`[WhatsApp Sync] Reused ${WHATSAPP_WEB_BRIDGE_PROVIDER} conversation sync after providerConversationId conflict: ${providerThreadId}`);
+                return;
+            }
+        }
+        console.warn(`[WhatsApp Sync] Failed to persist ${WHATSAPP_WEB_BRIDGE_PROVIDER} conversation sync:`, error?.message || error);
+    });
+}
+
+async function attachWebBridgeLidToExistingOutboundMessage(args: {
+    locationId: string;
+    message: any;
+    lid?: string | null;
+    timestamp: Date;
+    source: NormalizedMessage["source"];
+    webBridgeIdentity?: any;
+    providerThreadId?: string | null;
+    providerAccountId?: string | null;
+    ownPhone?: string | null;
+}) {
+    const normalizedLid = normalizeLidJid(args.lid);
+    if (!normalizedLid || !args.message?.conversation?.contact?.id) return;
+
+    const realContact = args.message.conversation.contact;
+    if (shouldRejectWebBridgeOutboundLidForOwnContact({
+        source: args.source,
+        direction: "outbound",
+        isGroup: false,
+        messageLid: normalizedLid,
+        contactPhone: realContact.phone,
+        ownPhone: args.ownPhone,
+    })) {
+        console.warn(`[LID Capture] Refusing to attach outbound Web Bridge LID ${normalizedLid} to connected account contact ${realContact.id}`);
+        return;
+    }
+
+    const currentLid = normalizeLidJid(realContact.lid);
+    if (!currentLid || currentLid === normalizedLid) {
+        if (currentLid !== normalizedLid) {
+            await db.contact.update({
+                where: { id: realContact.id },
+                data: { lid: normalizedLid },
+            }).catch((error) => console.error("Failed to save LID:", error));
+            console.log(`[LID Capture] Saved outbound LID mapping: ${normalizedLid} -> ${realContact.phone}`);
+        }
+
+        await upsertWebBridgeIdentityMap({
+            locationId: args.locationId,
+            contactId: realContact.id,
+            identityType: "lid",
+            identityValue: normalizedLid,
+            lid: normalizedLid,
+            phone: realContact.phone || null,
+            displayName: realContact.name || null,
+            confidence: realContact.phone ? "high" : "unresolved",
+            source: "outbound_message_lid_capture",
+            lastSeenAt: args.timestamp,
+            metadata: args.webBridgeIdentity || undefined,
+        });
+        if (args.providerThreadId) {
+            await upsertWebBridgeIdentityMap({
+                locationId: args.locationId,
+                contactId: realContact.id,
+                identityType: "chat",
+                identityValue: String(args.providerThreadId),
+                lid: normalizedLid,
+                phone: realContact.phone || null,
+                displayName: realContact.name || null,
+                confidence: realContact.phone ? "high" : "unresolved",
+                source: "outbound_message_lid_capture",
+                lastSeenAt: args.timestamp,
+                metadata: args.webBridgeIdentity || undefined,
+            });
+        }
+    } else {
+        console.warn(`[LID Capture] Refusing to overwrite existing LID ${realContact.lid} on contact ${realContact.id} with outbound LID ${normalizedLid}`);
+    }
+
+    const placeholderWhere = buildContactLidLookup(args.locationId, normalizedLid);
+    const placeholder = placeholderWhere
+        ? await db.contact.findFirst({
+            where: {
+                AND: [
+                    placeholderWhere,
+                    { id: { not: realContact.id } },
+                ],
+            } as any,
+        })
+        : null;
+
+    if (placeholder && isWebBridgeLidPlaceholderContact(placeholder)) {
+        const placeholderConvos = await db.conversation.findMany({ where: { contactId: placeholder.id } });
+        let totalPlaceholderMessages = 0;
+        for (const convo of placeholderConvos) {
+            totalPlaceholderMessages += await db.message.count({ where: { conversationId: convo.id } });
+        }
+
+        if (totalPlaceholderMessages > 50) {
+            console.warn(`[LID Merge Guard] Blocking outbound LID placeholder merge: placeholder ${placeholder.id} has ${totalPlaceholderMessages} messages. LID=${normalizedLid}, realContact=${realContact.id}`);
+        } else {
+            for (const convo of placeholderConvos) {
+                const targetConvo = await db.conversation.findUnique({
+                    where: { locationId_contactId: { locationId: args.locationId, contactId: realContact.id } },
+                });
+
+                if (targetConvo) {
+                    await db.message.updateMany({
+                        where: { conversationId: convo.id },
+                        data: { conversationId: targetConvo.id },
+                    });
+                    await db.conversation.delete({ where: { id: convo.id } });
+                    console.log(`[LID Capture] Merged placeholder conversation ${convo.id} -> ${targetConvo.id}`);
+                } else {
+                    await db.conversation.update({
+                        where: { id: convo.id },
+                        data: { contactId: realContact.id },
+                    });
+                    console.log(`[LID Capture] Reassigned placeholder conversation ${convo.id} to ${realContact.id}`);
+                }
+            }
+            await db.contact.delete({ where: { id: placeholder.id } });
+            console.log(`[LID Capture] Deleted outbound LID placeholder contact ${placeholder.id}`);
+        }
+    } else if (placeholder) {
+        console.warn(`[LID Merge Guard] Skipping outbound LID placeholder merge: contact ${placeholder.id} ("${placeholder.name}", phone=${placeholder.phone}) is not a placeholder. LID=${normalizedLid}`);
+    }
+
+    if (args.providerThreadId && args.providerAccountId && args.message.conversation?.id) {
+        await persistWebBridgeConversationSync({
+            locationId: args.locationId,
+            conversationId: args.message.conversation.id,
+            providerAccountId: args.providerAccountId,
+            providerThreadId: args.providerThreadId,
+            source: args.source,
+        });
+    }
+}
+
+async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
+    locationId: string;
+    wamId: string;
+    body: string;
+    timestamp: Date;
+    lid?: string | null;
+    providerThreadId?: string | null;
+    webBridgeIdentity?: any;
+    ownPhone?: string | null;
+}) {
+    const normalizedLid = normalizeLidJid(args.lid);
+    if (!normalizedLid || !args.wamId) return null;
+
+    const providerAccountId = args.locationId;
+    const existingByWam = await db.message.findUnique({
+        where: { wamId: args.wamId },
+        include: { conversation: { include: { contact: true } } },
+    }).catch(() => null);
+    if (existingByWam?.id) {
+        await attachWebBridgeLidToExistingOutboundMessage({
+            locationId: args.locationId,
+            message: existingByWam,
+            lid: normalizedLid,
+            timestamp: args.timestamp,
+            source: "whatsapp_web_bridge",
+            webBridgeIdentity: args.webBridgeIdentity,
+            providerThreadId: args.providerThreadId,
+            providerAccountId,
+            ownPhone: args.ownPhone,
+        });
+        return { id: String(existingByWam.id), clientMessageId: existingByWam.clientMessageId ? String(existingByWam.clientMessageId) : null };
+    }
+
+    const windowStart = new Date(args.timestamp.getTime() - 5 * 60 * 1000);
+    const windowEnd = new Date(args.timestamp.getTime() + 60 * 1000);
+    const body = String(args.body || "").trim();
+    const candidates = await (db as any).message.findMany({
+        where: {
+            direction: "outbound",
+            source: "app_user",
+            wamId: null,
+            createdAt: { gte: windowStart, lte: windowEnd },
+            ...(body ? { body } : {}),
+            conversation: { locationId: args.locationId },
+            outboundWhatsAppOutbox: {
+                is: {
+                    transport: "web_bridge",
+                    status: { in: ["pending", "processing", "completed", "failed"] },
+                },
+            },
+        },
+        include: {
+            conversation: { include: { contact: true } },
+            outboundWhatsAppOutbox: true,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 12,
+    });
+
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+
+    const ranked = candidates
+        .map((row: any) => ({
+            ...row,
+            diffMs: Math.abs(new Date(row.createdAt).getTime() - args.timestamp.getTime()),
+        }))
+        .sort((left: any, right: any) => left.diffMs - right.diffMs);
+
+    const best = ranked[0];
+    const second = ranked[1];
+    if (second && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < 10_000) {
+        console.warn(`[WhatsApp Sync] Outbound LID webhook adopt ambiguous for wamId=${args.wamId}; skipping heuristic adopt.`);
+        return null;
+    }
+
+    try {
+        await (db as any).message.update({
+            where: { id: best.id },
+            data: {
+                wamId: args.wamId,
+                ghlMessageId: args.wamId,
+                status: "sent",
+                updatedAt: new Date(),
+            },
+        });
+    } catch (error: any) {
+        if (error?.code !== "P2002") throw error;
+        const existing = await db.message.findUnique({
+            where: { wamId: args.wamId },
+            include: { conversation: { include: { contact: true } } },
+        });
+        if (!existing?.id) throw error;
+        await attachWebBridgeLidToExistingOutboundMessage({
+            locationId: args.locationId,
+            message: existing,
+            lid: normalizedLid,
+            timestamp: args.timestamp,
+            source: "whatsapp_web_bridge",
+            webBridgeIdentity: args.webBridgeIdentity,
+            providerThreadId: args.providerThreadId,
+            providerAccountId,
+            ownPhone: args.ownPhone,
+        });
+        return { id: String(existing.id), clientMessageId: existing.clientMessageId ? String(existing.clientMessageId) : null };
+    }
+
+    await (db as any).whatsAppOutboundOutbox.updateMany({
+        where: {
+            messageId: best.id,
+            status: { in: ["pending", "processing", "failed"] },
+        },
+        data: {
+            status: "completed",
+            processedAt: new Date(),
+            lockedAt: null,
+            lockedBy: null,
+            lastError: null,
+        },
+    }).catch(() => undefined);
+
+    await (db as any).messageSync.upsert({
+        where: {
+            messageId_provider_providerAccountId: {
+                messageId: best.id,
+                provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                providerAccountId,
+            },
+        },
+        create: {
+            messageId: best.id,
+            conversationId: best.conversationId,
+            locationId: args.locationId,
+            provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+            providerAccountId,
+            providerMessageId: args.wamId,
+            providerThreadId: args.providerThreadId || normalizedLid,
+            status: "synced",
+            remoteUpdatedAt: args.timestamp,
+            lastSyncedAt: new Date(),
+            metadata: { source: "whatsapp_web_bridge", adoptedOutboundLidWebhook: true },
+        },
+        update: {
+            providerMessageId: args.wamId,
+            providerThreadId: args.providerThreadId || normalizedLid,
+            status: "synced",
+            remoteUpdatedAt: args.timestamp,
+            lastSyncedAt: new Date(),
+            lastError: null,
+            metadata: { source: "whatsapp_web_bridge", adoptedOutboundLidWebhook: true },
+        },
+    }).catch((error: any) => {
+        console.warn(`[WhatsApp Sync] Failed to persist adopted Web Bridge outbound message sync:`, error?.message || error);
+    });
+
+    await attachWebBridgeLidToExistingOutboundMessage({
+        locationId: args.locationId,
+        message: best,
+        lid: normalizedLid,
+        timestamp: args.timestamp,
+        source: "whatsapp_web_bridge",
+        webBridgeIdentity: args.webBridgeIdentity,
+        providerThreadId: args.providerThreadId,
+        providerAccountId,
+        ownPhone: args.ownPhone,
+    });
+
+    void publishConversationRealtimeEvent({
+        locationId: args.locationId,
+        conversationId: best.conversation?.ghlConversationId || best.conversationId,
+        type: "message.outbound",
+        payload: {
+            channel: "whatsapp",
+            mode: "text",
+            messageId: best.id,
+            clientMessageId: best.clientMessageId || null,
+            wamId: args.wamId,
+            status: "sent",
+            adoptedOutboundLidWebhook: true,
+        },
+    });
+
+    console.log(`[WhatsApp Sync] Adopted outbound Web Bridge LID webhook ${args.wamId} to app message ${best.id}`);
+    return { id: String(best.id), clientMessageId: best.clientMessageId ? String(best.clientMessageId) : null };
+}
+
 async function upsertGroupParticipantShadow(params: {
     conversationId: string;
     timestamp: Date;
@@ -539,15 +925,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         if (msg.lid && existing.conversation?.contact) {
             const realContact = existing.conversation.contact;
             const existingOwnPhone = msg.direction === "outbound" ? msg.from : msg.to;
-            if (shouldRejectWebBridgeOutboundLidForOwnContact({
-                source: msg.source,
-                direction: msg.direction,
-                isGroup: msg.isGroup,
-                messageLid: msg.lid,
-                contactPhone: realContact.phone,
-                ownPhone: existingOwnPhone,
-            })) {
-                console.warn(`[LID Capture] Refusing to attach outbound Web Bridge LID ${msg.lid} to connected account contact ${realContact.id}`);
+
+            if (msg.source === "whatsapp_web_bridge" && msg.direction === "outbound") {
+                await attachWebBridgeLidToExistingOutboundMessage({
+                    locationId,
+                    message: existing,
+                    lid: msg.lid,
+                    timestamp,
+                    source: msg.source,
+                    webBridgeIdentity: msg.webBridgeIdentity,
+                    providerThreadId: msg.remoteJid || msg.chatId || null,
+                    providerAccountId: locationId,
+                    ownPhone: existingOwnPhone,
+                });
                 return { status: 'skipped', id: existing.id };
             }
 
@@ -594,7 +984,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
                 if (placeholder) {
                     // --- SAFETY GUARD: Verify placeholder is truly a placeholder ---
-                    const isPlaceholder = !placeholder.phone && (placeholder.name || '').startsWith('WhatsApp User');
+                    const isPlaceholder = isWebBridgeLidPlaceholderContact(placeholder);
                     if (!isPlaceholder) {
                         console.warn(`[LID Merge Guard] Skipping merge: contact ${placeholder.id} ("${placeholder.name}", phone=${placeholder.phone}) is not a placeholder. LID=${lidRaw}`);
                     } else {
@@ -704,6 +1094,26 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         && !isGroup
         && contactIdentityIsLid
         && !isHighConfidenceResolvedPhone(normalizeDigits(msg.resolvedPhone));
+
+    if (source === "whatsapp_web_bridge"
+        && direction === "outbound"
+        && !isGroup
+        && contactIdentityIsLid
+        && !isHighConfidenceResolvedPhone(normalizeDigits(msg.resolvedPhone))) {
+        const adopted = await tryAdoptOutboundWebBridgeLidWebhookToAppMessage({
+            locationId,
+            wamId,
+            body,
+            timestamp,
+            lid: msg.lid || contactPhone,
+            providerThreadId: msg.remoteJid || msg.chatId || contactPhone,
+            webBridgeIdentity: msg.webBridgeIdentity,
+            ownPhone,
+        });
+        if (adopted?.id) {
+            return { status: "processed", id: adopted.id };
+        }
+    }
 
     // If inbound is unresolved LID-only, defer message until mapping is known.
     // This prevents creating a second placeholder contact/conversation immediately.
@@ -921,7 +1331,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 console.error(`[WhatsApp Sync] Failed to backfill phone on LID contact ${contact.id}:`, err?.message || err);
             } else {
                 // --- SAFETY GUARD: Verify source contact is truly a placeholder ---
-                const isSourcePlaceholder = !contact.phone && (contact.name || '').startsWith('WhatsApp User');
+                const isSourcePlaceholder = isWebBridgeLidPlaceholderContact(contact);
                 if (!isSourcePlaceholder) {
                     console.warn(`[LID Merge Guard] Skipping backfill merge: source contact ${contact.id} ("${contact.name}", phone=${contact.phone}) is not a placeholder`);
                 } else {
@@ -1167,7 +1577,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                         locationId,
                         OR: [
                             ...(contactCreateData.phone ? [{ phone: contactCreateData.phone }] : []),
-                            ...(rawInputPhone ? [{ phone: { contains: searchSuffix } }] : []),
+                            ...(rawInputPhone ? [{ phone: { contains: rawInputPhone.slice(-8) } }] : []),
                             ...(normalizedMsgLid ? [
                                 { lid: normalizedMsgLid },
                                 { lid: normalizeLidRaw(normalizedMsgLid) || normalizedMsgLid },
@@ -1420,6 +1830,19 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             include: { conversation: { include: { contact: true } } },
         });
         if (existingByWam?.id) {
+            if (source === "whatsapp_web_bridge" && direction === "outbound" && msg.lid) {
+                await attachWebBridgeLidToExistingOutboundMessage({
+                    locationId,
+                    message: existingByWam,
+                    lid: msg.lid,
+                    timestamp,
+                    source,
+                    webBridgeIdentity: msg.webBridgeIdentity,
+                    providerThreadId: msg.remoteJid || msg.chatId || null,
+                    providerAccountId: syncProviderAccountId,
+                    ownPhone,
+                });
+            }
             await reconcileExistingWebBridgeMessageBodySafely({
                 message: existingByWam,
                 incomingBody: body,
