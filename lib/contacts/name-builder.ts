@@ -9,8 +9,13 @@ export interface BuilderContactData {
 
 export interface BuilderRequirementsData {
     bedrooms?: string | null;
+    budget?: string | null;
+    minPrice?: string | null;
+    maxPrice?: string | null;
     type?: string | null;
+    propertyTypes?: string[] | null;
     location?: string | null;
+    locations?: string[] | null;
 }
 
 export interface BuilderPropertyMatchData {
@@ -304,6 +309,67 @@ export function buildStructuredLeadPropertySummary(args: {
     return [bedrooms, propertyType, location].filter(Boolean).join(" ").trim();
 }
 
+function uniqueNormalizedValues(values: Array<string | null | undefined>): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values) {
+        const text = normalizeWhitespace(value);
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(text);
+    }
+    return result;
+}
+
+function compactList(values: string[], singularOverflowLabel: string, pluralOverflowLabel = `${singularOverflowLabel}s`): string | null {
+    if (values.length === 0) return null;
+    if (values.length <= 2) return values.join(", ");
+    const overflowCount = values.length - 2;
+    const overflowLabel = overflowCount === 1 ? singularOverflowLabel : pluralOverflowLabel;
+    return `${values.slice(0, 2).join(", ")} +${overflowCount} ${overflowLabel}`;
+}
+
+function formatBudgetSummary(requirements?: BuilderRequirementsData | null): string | null {
+    const minPrice = normalizeWhitespace(requirements?.minPrice);
+    const maxPrice = normalizeWhitespace(requirements?.maxPrice);
+    const min = minPrice && minPrice.toLowerCase() !== "any" ? minPrice : "";
+    const max = maxPrice && maxPrice.toLowerCase() !== "any" ? maxPrice : "";
+
+    if (min && max) return min === max ? max : `${min}-${max}`;
+    if (max) return `${max} max`;
+    if (min) return `${min} min`;
+
+    const budget = normalizeWhitespace(requirements?.budget);
+    return budget || null;
+}
+
+export function buildStructuredLeadRequirementSummary(args: {
+    requirements?: BuilderRequirementsData | null;
+}): string {
+    const requirements = args.requirements || null;
+    const propertyTypes = uniqueNormalizedValues([
+        ...(requirements?.propertyTypes || []),
+        requirements?.type,
+    ])
+        .map((value) => abbreviatePropertyType(value))
+        .filter((value): value is string => Boolean(value));
+    const locations = uniqueNormalizedValues([
+        ...(requirements?.locations || []),
+        requirements?.location,
+    ]);
+    const bedrooms = extractBedroomSummary(requirements?.bedrooms);
+    const budget = formatBudgetSummary(requirements);
+
+    return [
+        compactList(propertyTypes, "type"),
+        bedrooms,
+        compactList(locations, "area"),
+        budget,
+    ].filter(Boolean).join(" ").trim();
+}
+
 export function buildLeadRequirementNameParts(args: {
     rawLeadText?: string | null;
     inferredStatus?: "For Rent" | "For Sale" | null | string;
@@ -313,6 +379,11 @@ export function buildLeadRequirementNameParts(args: {
     const refs = extractPropertyRefsFromLeadText(args.rawLeadText || "");
     const goal = formatLeadGoalLabel(args.inferredStatus);
     const singleRef = refs[0] || normalizeWhitespace(args.matchedProperty?.reference);
+    const requirementSummary = buildStructuredLeadRequirementSummary({
+        requirements: args.requirements,
+    });
+
+    if (requirementSummary) return [goal, requirementSummary].filter(Boolean);
 
     if (refs.length > 1) return [goal, refs.join(", ")].filter(Boolean);
 

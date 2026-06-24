@@ -795,7 +795,16 @@ export async function createParsedLeadForLocation(
             rawLeadText: leadResolutionText,
             inferredStatus,
             matchedProperty: matchedPropertyForName,
-            requirements: data.requirements,
+            requirements: data.requirements
+                ? {
+                    ...data.requirements,
+                    bedrooms: normalizedBedrooms || data.requirements.bedrooms,
+                    minPrice: normalizedMinPrice,
+                    maxPrice: normalizedMaxPrice,
+                    propertyTypes: data.requirements.type ? [data.requirements.type] : [],
+                    locations: [normalizedDistrict || data.requirements.location].filter((value): value is string => Boolean(value)),
+                }
+                : null,
         });
         if (data.requirements) {
             if (normalizedMinPrice) contactData.requirementMinPrice = normalizedMinPrice;

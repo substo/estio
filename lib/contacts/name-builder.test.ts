@@ -48,6 +48,65 @@ test("buildStructuredLeadDisplayName includes role and goal when multiple proper
         },
     });
 
+    assert.equal(result, "John Doe Lead Sale Apt 2Bdr Limassol");
+});
+
+test("buildStructuredLeadDisplayName uses compact requirement details before inquired property", () => {
+    const result = buildStructuredLeadDisplayName({
+        contact: {
+            name: "Andrea",
+            role: "Lead",
+        },
+        rawLeadText: "Andrea enquired about DT4686, but wants a ground floor apartment in Paphos up to 50,000.",
+        inferredStatus: "For Sale",
+        matchedProperty: {
+            title: "1 Bedroom Apartment in Peyia",
+            reference: "DT4686",
+            propertyLocation: "Peyia",
+            city: "Paphos",
+        },
+        requirements: {
+            bedrooms: "1+ Bedrooms",
+            type: "Ground Floor Apartment",
+            location: "Paphos",
+            maxPrice: "€50,000",
+        },
+    });
+
+    assert.equal(result, "Andrea Lead Sale GF Apt 1+Bdr Paphos €50,000 max");
+});
+
+test("buildStructuredLeadDisplayName compacts multiple requirement types and locations", () => {
+    const result = buildStructuredLeadDisplayName({
+        contact: {
+            name: "Maria",
+            role: "Lead",
+        },
+        rawLeadText: "Maria is looking for options.",
+        inferredStatus: "For Sale",
+        requirements: {
+            bedrooms: "3+ Bedrooms",
+            propertyTypes: ["Ground Floor Apartment", "Detached Villa", "Town House", "Penthouse"],
+            locations: ["Paphos", "Peyia", "Tala"],
+            minPrice: "€150,000",
+            maxPrice: "€300,000",
+        },
+    });
+
+    assert.equal(result, "Maria Lead Sale GF Apt, Villa +2 types 3+Bdr Paphos, Peyia +1 area €150,000-€300,000");
+});
+
+test("buildStructuredLeadDisplayName falls back to refs when requirements are missing", () => {
+    const result = buildStructuredLeadDisplayName({
+        contact: {
+            name: "John Doe",
+            role: "Lead",
+        },
+        rawLeadText: "John Doe is interested in REF123 and DT456 for purchase.",
+        inferredStatus: "For Sale",
+        matchedProperty: null,
+    });
+
     assert.equal(result, "John Doe Lead Sale REF123, DT456");
 });
 

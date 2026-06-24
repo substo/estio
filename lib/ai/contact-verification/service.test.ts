@@ -176,7 +176,7 @@ test("verification preserves paste lead structured display name while filling pe
       id: "contact_structured_name",
       contactType: "Lead",
       leadGoal: "To Buy",
-      name: "Kristina Grüße Lead Sale DT2937 2Bdr Town House Peyia",
+      name: "Kristina Grüße Lead Sale GF Apt 1+Bdr Paphos €50,000 max",
       qualificationStage: "unqualified",
     },
     recentMessages: [{ body: "Interested in buying a 1-bedroom apartment in Kato Paphos or Chloraka." }],
@@ -192,7 +192,7 @@ test("verification sanitizer ignores AI attempt to strip paste lead structured d
   const patch = preserveStructuredLeadDisplayNamePatch({
     contact: {
       contactType: "Lead",
-      name: "Kristina Grüße Lead Sale DT2937 2Bdr Town House Peyia",
+      name: "Kristina Grüße Lead Sale GF Apt 1+Bdr Paphos €50,000 max",
     },
     inferredRole: "Lead",
     patch: {
