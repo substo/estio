@@ -63,7 +63,7 @@ const relaySchema = z.discriminatedUnion("eventType", [
         translatedText: z.string().trim().max(20_000).optional(),
         targetLanguage: z.string().trim().max(24).optional(),
         timestamp: z.string().datetime().optional(),
-        supersedesMessageId: z.string().trim().min(1).max(120).optional(),
+        supersedesMessageId: z.string().trim().min(1).max(120).nullable().optional(),
         origin: z.enum([
             VIEWING_SESSION_MESSAGE_ORIGINS.relayLiveTranscript,
             VIEWING_SESSION_MESSAGE_ORIGINS.browserStt,

@@ -7,6 +7,7 @@ test("transport state machine allows required transitions", () => {
     const S = VIEWING_SESSION_TRANSPORT_STATUSES;
 
     assert.equal(canTransitionViewingSessionTransportStatus(S.disconnected, S.connecting), true);
+    assert.equal(canTransitionViewingSessionTransportStatus(S.disconnected, S.reconnecting), true);
 
     assert.equal(canTransitionViewingSessionTransportStatus(S.connecting, S.connected), true);
     assert.equal(canTransitionViewingSessionTransportStatus(S.connecting, S.degraded), true);
@@ -23,6 +24,7 @@ test("transport state machine allows required transitions", () => {
     assert.equal(canTransitionViewingSessionTransportStatus(S.reconnecting, S.chained), true);
 
     assert.equal(canTransitionViewingSessionTransportStatus(S.degraded, S.reconnecting), true);
+    assert.equal(canTransitionViewingSessionTransportStatus(S.degraded, S.connecting), true);
     assert.equal(canTransitionViewingSessionTransportStatus(S.degraded, S.connected), true);
     assert.equal(canTransitionViewingSessionTransportStatus(S.degraded, S.disconnected), true);
     assert.equal(canTransitionViewingSessionTransportStatus(S.degraded, S.chained), true);
@@ -32,7 +34,6 @@ test("transport state machine rejects illegal transitions", () => {
     const S = VIEWING_SESSION_TRANSPORT_STATUSES;
 
     assert.equal(canTransitionViewingSessionTransportStatus(S.disconnected, S.connected), false);
-    assert.equal(canTransitionViewingSessionTransportStatus(S.disconnected, S.reconnecting), false);
     assert.equal(canTransitionViewingSessionTransportStatus(S.connecting, S.reconnecting), false);
     assert.equal(canTransitionViewingSessionTransportStatus(S.connecting, S.chained), false);
     assert.equal(canTransitionViewingSessionTransportStatus(S.connected, S.connecting), false);

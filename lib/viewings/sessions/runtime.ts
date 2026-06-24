@@ -20,6 +20,7 @@ export const VIEWING_SESSION_LIVE_LIMIT_MINUTES = 15;
 const TRANSPORT_TRANSITIONS: Record<ViewingSessionTransportStatus, Set<ViewingSessionTransportStatus>> = {
     [VIEWING_SESSION_TRANSPORT_STATUSES.disconnected]: new Set([
         VIEWING_SESSION_TRANSPORT_STATUSES.connecting,
+        VIEWING_SESSION_TRANSPORT_STATUSES.reconnecting,
     ]),
     [VIEWING_SESSION_TRANSPORT_STATUSES.connecting]: new Set([
         VIEWING_SESSION_TRANSPORT_STATUSES.connected,
@@ -42,6 +43,7 @@ const TRANSPORT_TRANSITIONS: Record<ViewingSessionTransportStatus, Set<ViewingSe
         VIEWING_SESSION_TRANSPORT_STATUSES.failed,
     ]),
     [VIEWING_SESSION_TRANSPORT_STATUSES.degraded]: new Set([
+        VIEWING_SESSION_TRANSPORT_STATUSES.connecting,
         VIEWING_SESSION_TRANSPORT_STATUSES.reconnecting,
         VIEWING_SESSION_TRANSPORT_STATUSES.connected,
         VIEWING_SESSION_TRANSPORT_STATUSES.disconnected,

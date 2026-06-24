@@ -249,6 +249,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const liveInfoRef = useRef<any>(null);
+    const audioPlaybackEnabledRef = useRef(audioPlaybackEnabled);
 
     const renderedMessages = useMemo(
         () => selectEffectiveViewingTranscriptMessages(sortViewingTranscriptMessages(messages)),
@@ -258,6 +259,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const sessionTitle = session.primaryProperty?.title || session.viewing?.property.title || "Quick Field Assist";
     const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
+    const sameInterpreterLanguage = isInterpreterMode
+        && String(session.agentLanguage || "en").toLowerCase() === String(session.clientLanguage || "en").toLowerCase();
+
+    useEffect(() => {
+        audioPlaybackEnabledRef.current = audioPlaybackEnabled;
+    }, [audioPlaybackEnabled]);
 
     useEffect(() => {
         recognizerRef.current = createSpeechRecognizer();
@@ -412,7 +419,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         socket.onmessage = (event) => {
             try {
                 const payload = JSON.parse(event.data || "{}");
-                if (payload?.type === "relay.audio.chunk" && audioPlaybackEnabled && payload?.mimeType && payload?.data) {
+                if (payload?.type === "relay.audio.chunk" && audioPlaybackEnabledRef.current && payload?.mimeType && payload?.data) {
                     const audio = new Audio(`data:${payload.mimeType};base64,${payload.data}`);
                     void audio.play().catch(() => undefined);
                 }
@@ -611,6 +618,19 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }, 5000);
     };
 
+    const startInterpreterNow = () => {
+        startLiveTransition(async () => {
+            setError(null);
+            setAudioPlaybackEnabled(true);
+            audioPlaybackEnabledRef.current = true;
+            try {
+                await toggleFallbackRecorder();
+            } catch (liveError: any) {
+                setError(liveError?.message || "Failed to start live interpreter.");
+            }
+        });
+    };
+
     const applyContextUpdate = async () => {
         setError(null);
         try {
@@ -782,19 +802,27 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 <div className="flex flex-wrap gap-2">
                     <Button
                         type="button"
-                        variant="outline"
+                        variant={isInterpreterMode ? "default" : "outline"}
                         onClick={() => startLiveTransition(async () => {
                             setError(null);
                             try {
-                                await connectLiveTransport();
+                                if (isInterpreterMode) {
+                                    await toggleFallbackRecorder();
+                                } else {
+                                    await connectLiveTransport();
+                                }
                             } catch (liveError: any) {
-                                setError(liveError?.message || "Failed to connect live transport.");
+                                setError(liveError?.message || (isInterpreterMode ? "Failed to start live interpreter." : "Failed to connect live transport."));
                             }
                         })}
-                        disabled={livePending}
+                        disabled={livePending || (isInterpreterMode && micStreaming)}
                     >
-                        {livePending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Radio className="mr-1.5 h-4 w-4" />}
-                        Connect Live
+                        {livePending
+                            ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                            : isInterpreterMode
+                                ? <Mic className="mr-1.5 h-4 w-4" />
+                                : <Radio className="mr-1.5 h-4 w-4" />}
+                        {isInterpreterMode ? (micStreaming ? "Interpreter On" : "Start Interpreter") : "Connect Live"}
                     </Button>
                     <Button type="button" onClick={enableShareMode} disabled={modePending || session.participantMode === "shared_client"}>
                         <Share2 className="mr-1.5 h-4 w-4" />
@@ -806,6 +834,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             {session.participantMode === "agent_only" && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                     Internal quick mode is active. Client disclosure is only required after you switch to shared mode.
+                </div>
+            )}
+
+            {sameInterpreterLanguage && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Interpreter is set to English to English. Use Attach Context to set the customer language before starting if you need translated speech.
                 </div>
             )}
 
@@ -980,9 +1014,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} />
                             </div>
                             <div className="flex gap-2">
-                                <Button type="button" size="lg" className="flex-1" onClick={toggleFallbackRecorder}>
+                                <Button type="button" size="lg" className="flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
-                                    {(micStreaming || speechOn) ? "Stop Mic" : "Start Mic"}
+                                    {(micStreaming || speechOn) ? "Stop Mic" : isInterpreterMode ? "Start Interpreter" : "Start Mic"}
                                 </Button>
                                 <Input
                                     placeholder="Type a translated note or utterance"
