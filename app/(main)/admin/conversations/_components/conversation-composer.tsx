@@ -643,10 +643,10 @@ export function ConversationComposer({
                                     suggestedResponsesCollapsed && "border-sky-200 bg-sky-100 text-sky-900 hover:bg-sky-100"
                                 )}
                                 onClick={onToggleSuggestedResponses}
-                                title={suggestedResponsesCollapsed ? "Open AI Bubo suggestions" : "Minimize AI Bubo suggestions"}
+                                title={suggestedResponsesCollapsed ? "Open AI suggestions" : "Minimize AI suggestions"}
                             >
                                 <Sparkles className="h-3.5 w-3.5" />
-                                Bubo ({suggestedResponseCount})
+                                AI ({suggestedResponseCount})
                             </Button>
                         )}
                     </div>

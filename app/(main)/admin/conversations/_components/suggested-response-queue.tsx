@@ -121,7 +121,7 @@ export function SuggestedResponseQueue({
         <div className={cn("px-3 py-2 space-y-2", resolvedSurfaceTheme.suggestedQueueClassName, className)}>
             <div className="flex items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-slate-700">
-                    AI Bubo Suggestions
+                    AI Suggestions
                     <span className="ml-1 font-normal text-slate-500">({visibleItems.length})</span>
                 </div>
                 {onCollapsedChange && (
@@ -131,7 +131,7 @@ export function SuggestedResponseQueue({
                         size="sm"
                         className="h-7 gap-1 px-2 text-[11px] text-slate-600 hover:bg-white/70"
                         onClick={() => onCollapsedChange(true)}
-                        title="Minimize AI Bubo suggestions"
+                        title="Minimize AI suggestions"
                     >
                         <ChevronDown className="h-3.5 w-3.5" />
                         Minimize
