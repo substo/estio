@@ -21,6 +21,7 @@ export const REPLY_LANGUAGE_OPTIONS: ReplyLanguageOption[] = [
     { value: "uk", label: "Ukrainian (uk)" },
     { value: "ro", label: "Romanian (ro)" },
     { value: "pl", label: "Polish (pl)" },
+    { value: "hu", label: "Hungarian (hu)" },
     { value: "bg", label: "Bulgarian (bg)" },
     { value: "zh", label: "Chinese (zh)" },
     { value: "zh-cn", label: "Chinese Simplified (zh-CN)" },

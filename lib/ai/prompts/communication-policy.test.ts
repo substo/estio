@@ -115,6 +115,10 @@ test("detectLanguageFromText identifies Chinese script", () => {
     assert.equal(detectLanguageFromText("我正在寻找一套豪华别墅。"), "zh");
 });
 
+test("detectLanguageFromText identifies Hungarian hints", () => {
+    assert.equal(detectLanguageFromText("Szia, koszonom, erdekel az ingatlan ara."), "hu");
+});
+
 test("communication contract includes core deal-protective constraints", () => {
     const contract = buildDealProtectiveCommunicationContract({
         expectedLanguage: "el",
@@ -129,6 +133,15 @@ test("communication contract includes core deal-protective constraints", () => {
     assert.match(contract, /only when the context actually contains uncertainty/i);
     assert.match(contract, /preserve that meaning and phrasing style/i);
     assert.match(contract, /Use these phrasing patterns only when the context genuinely requires them/i);
+});
+
+test("communication contract displays Hungarian language override", () => {
+    const contract = buildDealProtectiveCommunicationContract({
+        expectedLanguage: "hu",
+        contextLabel: "test",
+    });
+
+    assert.match(contract, /Reply in Hungarian/i);
 });
 
 test("conversational messaging contract constrains chat drafts to short readable replies", () => {

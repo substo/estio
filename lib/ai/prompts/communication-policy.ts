@@ -54,6 +54,7 @@ const LATIN_LANGUAGE_HINTS: Record<string, string[]> = {
     it: ["ciao", "grazie", "prezzo", "offerta", "prenotazione", "confermare", "per", "con", "e"],
     pt: ["ola", "obrigado", "preco", "oferta", "reserva", "confirmar", "para", "com", "e"],
     tr: ["merhaba", "tesekkur", "fiyat", "teklif", "rezervasyon", "onay", "icin", "ve", "ile"],
+    hu: ["szia", "koszonom", "ar", "ajanlat", "foglalas", "megerositeni", "ingatlan", "erdekel", "es"],
 };
 
 const GREEK_REGEX = /[\u0370-\u03ff\u1f00-\u1fff]/;
@@ -82,6 +83,7 @@ function toLanguageDisplayName(language: string | null): string {
         uk: "Ukrainian",
         ro: "Romanian",
         pl: "Polish",
+        hu: "Hungarian",
         bg: "Bulgarian",
         zh: "Chinese",
         ar: "Arabic",
