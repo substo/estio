@@ -150,17 +150,17 @@ export default async function ViewingSessionPage(
             id: session.viewing.id,
             date: session.viewing.date.toISOString(),
             property: {
-                id: session.viewing.property.id,
-                title: session.viewing.property.title,
-                reference: session.viewing.property.reference || null,
+                id: session.viewing.property?.id || "",
+                title: session.viewing.property?.title || "Property",
+                reference: session.viewing.property?.reference || null,
             },
             contact: {
-                id: session.viewing.contact.id,
-                name: session.viewing.contact.name || null,
+                id: session.viewing.contact?.id || "",
+                name: session.viewing.contact?.name || null,
             },
             user: {
-                id: session.viewing.user.id,
-                name: session.viewing.user.name || null,
+                id: session.viewing.user?.id || "",
+                name: session.viewing.user?.name || null,
             },
         } : null,
         contact: session.contact ? {
@@ -272,7 +272,7 @@ export default async function ViewingSessionPage(
                     })),
                     viewings: recentViewings.map((viewing) => ({
                         id: viewing.id,
-                        label: `${viewing.property.title} • ${viewing.contact.name || "Contact"} • ${viewing.date.toLocaleString()}`,
+                        label: `${viewing.property?.title || "Property"} • ${viewing.contact?.name || "Contact"} • ${viewing.date.toLocaleString()}`,
                     })),
                 }}
             />

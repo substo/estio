@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
