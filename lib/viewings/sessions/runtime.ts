@@ -99,6 +99,9 @@ export function appendJoinAuditEntry(
 }
 
 function normalizeMode(mode: string | null | undefined) {
+    if (mode === VIEWING_SESSION_MODES.assistantLiveTranslate) {
+        return VIEWING_SESSION_MODES.assistantLiveTranslate;
+    }
     if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium) {
         return VIEWING_SESSION_MODES.assistantLiveVoicePremium;
     }

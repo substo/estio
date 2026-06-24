@@ -1,6 +1,7 @@
 export const VIEWING_SESSION_MODES = {
     assistantLiveToolHeavy: "assistant_live_tool_heavy",
     assistantLiveVoicePremium: "assistant_live_voice_premium",
+    assistantLiveTranslate: "assistant_live_translate",
 } as const;
 
 export type ViewingSessionMode = typeof VIEWING_SESSION_MODES[keyof typeof VIEWING_SESSION_MODES];

@@ -48,4 +48,8 @@ test("live model resolution keeps mode-specific defaults separate", () => {
         resolveLiveModelForMode(VIEWING_SESSION_MODES.assistantLiveVoicePremium),
         GEMINI_LIVE_MODELS.voicePremiumDefault
     );
+    assert.equal(
+        resolveLiveModelForMode(VIEWING_SESSION_MODES.assistantLiveTranslate),
+        GEMINI_LIVE_MODELS.liveTranslateDefault
+    );
 });

@@ -1192,7 +1192,7 @@ model ViewingSession {
   contextAttachedAt DateTime?
   convertedFromSessionKind String?
 
-  mode   String @default("assistant_live_tool_heavy") // assistant_live_tool_heavy | assistant_live_voice_premium
+  mode   String @default("assistant_live_tool_heavy") // assistant_live_tool_heavy | assistant_live_voice_premium | assistant_live_translate
   status String @default("scheduled") // scheduled | active | paused | completed | expired
   transportStatus String @default("disconnected") // connecting | connected | degraded | reconnecting | disconnected | chained | failed
   liveProvider String @default("google_gemini_live")

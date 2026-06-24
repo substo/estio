@@ -12,6 +12,8 @@ const schema = z.object({
     primaryPropertyId: z.string().trim().optional(),
     relatedPropertyIds: z.array(z.string().trim().min(1)).max(12).optional(),
     viewingId: z.string().trim().optional(),
+    clientLanguage: z.string().trim().max(24).optional(),
+    agentLanguage: z.string().trim().max(24).optional(),
     notes: z.string().trim().max(8_000).optional(),
 });
 
@@ -59,6 +61,8 @@ export async function PATCH(
             primaryPropertyId: parsed.data.primaryPropertyId,
             relatedPropertyIds: parsed.data.relatedPropertyIds,
             viewingId: parsed.data.viewingId,
+            clientLanguage: parsed.data.clientLanguage,
+            agentLanguage: parsed.data.agentLanguage,
             notes: parsed.data.notes,
         });
 

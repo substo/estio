@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { getLiveModeCapabilities, resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
-import type { ViewingSessionMode } from "@/lib/viewings/sessions/types";
+import { VIEWING_SESSION_MODES, type ViewingSessionMode } from "@/lib/viewings/sessions/types";
 
 export type ViewingLiveAuthPayload = {
     provider: "google_gemini_live";
@@ -15,6 +15,11 @@ export type ViewingLiveAuthPayload = {
         protocol: "websocket";
         inputAudioMimeType: "audio/pcm;rate=16000";
         outputAudioRateHz: number;
+    };
+    translation?: {
+        enabled: boolean;
+        targetLanguageCode: string;
+        echoTargetLanguage: boolean;
     };
     relay: {
         useBackendRelay: boolean;
@@ -45,6 +50,14 @@ export type ViewingLiveRelayConfig = {
 
 function asString(value: unknown): string {
     return String(value || "").trim();
+}
+
+function normalizeLanguageCode(value: unknown, fallback: string): string {
+    const normalized = asString(value || fallback).replace("_", "-");
+    if (/^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$/.test(normalized)) {
+        return normalized;
+    }
+    return fallback;
 }
 
 function ensureLeadingSlash(path: string): string {
@@ -223,6 +236,9 @@ export async function validateViewingLiveRelayAvailability(args?: {
 export async function buildViewingLiveAuthPayload(args: {
     locationId: string;
     mode: ViewingSessionMode;
+    agentLanguage?: unknown;
+    clientLanguage?: unknown;
+    relayRole?: "agent" | "client";
     requestOrigin?: string | null;
 }): Promise<ViewingLiveAuthPayload> {
     const relayConfig = resolveViewingLiveRelayConfig({
@@ -230,6 +246,10 @@ export async function buildViewingLiveAuthPayload(args: {
     });
     const model = resolveLiveModelForMode(args.mode);
     const capabilities = getLiveModeCapabilities(args.mode);
+    const translationEnabled = args.mode === VIEWING_SESSION_MODES.assistantLiveTranslate;
+    const agentLanguage = normalizeLanguageCode(args.agentLanguage, "en");
+    const clientLanguage = normalizeLanguageCode(args.clientLanguage, "en");
+    const targetLanguageCode = args.relayRole === "client" ? agentLanguage : clientLanguage;
 
     return {
         provider: "google_gemini_live",
@@ -244,6 +264,13 @@ export async function buildViewingLiveAuthPayload(args: {
             inputAudioMimeType: "audio/pcm;rate=16000",
             outputAudioRateHz: 24000,
         },
+        ...(translationEnabled ? {
+            translation: {
+                enabled: true,
+                targetLanguageCode,
+                echoTargetLanguage: true,
+            },
+        } : {}),
         relay: {
             useBackendRelay: true,
             websocketUrl: relayConfig.websocketUrl,

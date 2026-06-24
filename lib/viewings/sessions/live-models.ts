@@ -3,6 +3,7 @@ import { VIEWING_SESSION_MODES, type ViewingSessionMode } from "@/lib/viewings/s
 export const GEMINI_LIVE_MODELS = {
     toolHeavyDefault: "gemini-2.5-flash-native-audio-preview-12-2025",
     voicePremiumDefault: "gemini-3.1-flash-live-preview",
+    liveTranslateDefault: "gemini-3.5-live-translate-preview",
 } as const;
 
 export const VIEWING_SESSION_STAGE_MODELS = {
@@ -23,6 +24,9 @@ function asString(value: unknown): string {
 }
 
 export function resolveLiveModelForMode(mode: ViewingSessionMode): string {
+    if (mode === VIEWING_SESSION_MODES.assistantLiveTranslate) {
+        return GEMINI_LIVE_MODELS.liveTranslateDefault;
+    }
     if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium) {
         return GEMINI_LIVE_MODELS.voicePremiumDefault;
     }
@@ -31,6 +35,20 @@ export function resolveLiveModelForMode(mode: ViewingSessionMode): string {
 
 export function getLiveModeCapabilities(mode: ViewingSessionMode) {
     const model = resolveLiveModelForMode(mode);
+    if (mode === VIEWING_SESSION_MODES.assistantLiveTranslate) {
+        return {
+            mode,
+            model,
+            asyncFunctionCalling: false,
+            supportsProactiveAudio: false,
+            supportsAffectiveDialogue: false,
+            supportsLiveTranslation: true,
+            supportsTools: false,
+            inputModalities: ["audio"],
+            responseModalities: ["audio"],
+            notes: "Gemini 3.5 Live Translate mode is a low-latency speech-to-speech interpreter path with translation-only configuration.",
+        };
+    }
     if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium) {
         return {
             mode,
@@ -38,6 +56,9 @@ export function getLiveModeCapabilities(mode: ViewingSessionMode) {
             asyncFunctionCalling: false,
             supportsProactiveAudio: false,
             supportsAffectiveDialogue: false,
+            supportsLiveTranslation: false,
+            supportsTools: true,
+            inputModalities: ["audio", "text"],
             responseModalities: ["audio", "text"],
             notes: "Gemini 3.1 Live mode prioritizes low-latency voice quality with synchronous tool calls.",
         };
@@ -49,6 +70,9 @@ export function getLiveModeCapabilities(mode: ViewingSessionMode) {
         asyncFunctionCalling: true,
         supportsProactiveAudio: true,
         supportsAffectiveDialogue: true,
+        supportsLiveTranslation: false,
+        supportsTools: true,
+        inputModalities: ["audio", "text"],
         responseModalities: ["audio", "text"],
         notes: "Gemini 2.5 Live mode supports async function calling and tool-heavy copilot flows.",
     };

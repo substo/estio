@@ -19,7 +19,11 @@ export const dynamic = "force-dynamic";
 
 const schema = z.object({
     locationId: z.string().trim().optional(),
-    mode: z.enum([VIEWING_SESSION_MODES.assistantLiveToolHeavy, VIEWING_SESSION_MODES.assistantLiveVoicePremium]).optional(),
+    mode: z.enum([
+        VIEWING_SESSION_MODES.assistantLiveToolHeavy,
+        VIEWING_SESSION_MODES.assistantLiveVoicePremium,
+        VIEWING_SESSION_MODES.assistantLiveTranslate,
+    ]).optional(),
     sessionKind: z.enum([
         VIEWING_SESSION_KINDS.structuredViewing,
         VIEWING_SESSION_KINDS.quickTranslate,

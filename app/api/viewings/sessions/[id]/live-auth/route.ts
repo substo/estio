@@ -29,12 +29,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const liveAuthSchema = z.object({
-    mode: z.enum([VIEWING_SESSION_MODES.assistantLiveToolHeavy, VIEWING_SESSION_MODES.assistantLiveVoicePremium]).optional(),
+    mode: z.enum([
+        VIEWING_SESSION_MODES.assistantLiveToolHeavy,
+        VIEWING_SESSION_MODES.assistantLiveVoicePremium,
+        VIEWING_SESSION_MODES.assistantLiveTranslate,
+    ]).optional(),
     audioPlaybackClientEnabled: z.boolean().optional(),
     audioPlaybackAgentEnabled: z.boolean().optional(),
 });
 
 function normalizeMode(mode: string | null | undefined): ViewingSessionMode {
+    if (mode === VIEWING_SESSION_MODES.assistantLiveTranslate) {
+        return VIEWING_SESSION_MODES.assistantLiveTranslate;
+    }
     if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium) {
         return VIEWING_SESSION_MODES.assistantLiveVoicePremium;
     }
@@ -120,6 +127,7 @@ export async function POST(
             consentSource: true,
             startedAt: true,
             clientLanguage: true,
+            agentLanguage: true,
             audioPlaybackClientEnabled: true,
             audioPlaybackAgentEnabled: true,
             liveModel: true,
@@ -156,6 +164,7 @@ export async function POST(
                 consentSource: true,
                 startedAt: true,
                 clientLanguage: true,
+                agentLanguage: true,
                 audioPlaybackClientEnabled: true,
                 audioPlaybackAgentEnabled: true,
                 liveModel: true,
@@ -234,6 +243,7 @@ export async function POST(
             consentSource: true,
             startedAt: true,
             clientLanguage: true,
+            agentLanguage: true,
             liveModel: true,
             translationModel: true,
             insightsModel: true,
@@ -286,6 +296,7 @@ export async function POST(
                 consentSource: true,
                 startedAt: true,
                 clientLanguage: true,
+                agentLanguage: true,
                 liveModel: true,
                 translationModel: true,
                 insightsModel: true,
@@ -362,13 +373,16 @@ export async function POST(
         );
     }
 
+    const relayRole = context.role === "client" ? "client" : "agent";
     const liveConfig = await buildViewingLiveAuthPayload({
         locationId: sessionUpdate.locationId,
         mode: normalizeMode(sessionUpdate.mode),
+        agentLanguage: sessionUpdate.agentLanguage,
+        clientLanguage: sessionUpdate.clientLanguage,
+        relayRole,
         requestOrigin,
     });
 
-    const relayRole = context.role === "client" ? "client" : "agent";
     const ttlSeconds = 15 * 60;
     const relaySessionToken = generateViewingSessionAccessToken({
         sessionId: sessionUpdate.id,

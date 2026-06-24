@@ -1,11 +1,9 @@
-import Link from "next/link";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { QuickAssistStartButton } from "./_components/quick-assist-start-button";
-import { VIEWING_SESSION_KINDS, VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
+import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES, VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
 
 export const dynamic = "force-dynamic";
 
@@ -121,15 +119,20 @@ export default async function ViewingSessionsIndexPage() {
 
                 <Card>
                     <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Structured Viewing Copilot</CardTitle>
-                        <CardDescription>Use the full viewing workflow when you already know the lead and property context.</CardDescription>
+                        <CardTitle className="text-base">Live Interpreter</CardTitle>
+                        <CardDescription>Fast speech-to-speech translation when both sides need to talk now.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <Button asChild variant="outline" className="w-full">
-                            <Link href="/admin/contacts">
-                                Open Contact Workflows
-                            </Link>
-                        </Button>
+                        <QuickAssistStartButton
+                            label="Start Interpreter"
+                            locationId={locationId}
+                            mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
+                            sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
+                            quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.global}
+                            size="default"
+                            className="w-full"
+                            icon="languages"
+                        />
                     </CardContent>
                 </Card>
             </div>

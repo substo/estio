@@ -9,6 +9,7 @@ import { assembleViewingSessionContext } from "@/lib/viewings/sessions/context-a
 import { sanitizeLiveToolOutputValue } from "@/lib/viewings/sessions/redaction";
 import { verifyViewingSessionAccessToken } from "@/lib/viewings/sessions/security";
 import { isViewingLiveToolAllowed } from "@/lib/viewings/sessions/tool-policy";
+import { VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types";
 
 const WebSocketLib = require("ws");
 const WebSocketServer = WebSocketLib.WebSocketServer;
@@ -27,11 +28,17 @@ type RelayDraftPointer = {
 };
 
 type RelayContext = {
+    contextKey: string;
     sessionId: string;
     locationId: string;
     role: "client" | "agent";
     relaySessionToken: string;
     modelName: string;
+    mode: string;
+    sessionKind: string;
+    agentLanguage: string;
+    clientLanguage: string;
+    translationTargetLanguage: string;
     sockets: Set<any>;
     vendorSession: any | null;
     vendorState: "idle" | "connecting" | "connected" | "reconnecting" | "degraded" | "failed" | "disconnected";
@@ -78,6 +85,18 @@ const TOOL_CACHE_TTL_MS = {
 
 function asString(value: unknown): string {
     return String(value || "").trim();
+}
+
+function normalizeLanguageCode(value: unknown, fallback: string): string {
+    const normalized = asString(value || fallback).replace("_", "-");
+    if (/^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$/.test(normalized)) {
+        return normalized;
+    }
+    return fallback;
+}
+
+function isLiveTranslateMode(mode: unknown): boolean {
+    return asString(mode) === VIEWING_SESSION_MODES.assistantLiveTranslate;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -201,19 +220,31 @@ function extractRelayToken(req: any, requestUrl: URL): string | null {
     ) || null;
 }
 
-async function resolveSessionModelName(sessionId: string) {
+async function resolveSessionRuntimeConfig(sessionId: string, role: "client" | "agent") {
     const session = await db.viewingSession.findUnique({
         where: { id: sessionId },
         select: {
             id: true,
             liveModel: true,
             mode: true,
+            sessionKind: true,
+            agentLanguage: true,
+            clientLanguage: true,
         },
     });
     if (!session) {
         throw new Error("Viewing session not found for relay connection.");
     }
-    return asString(session.liveModel) || "gemini-2.5-flash-native-audio-preview-12-2025";
+    const agentLanguage = normalizeLanguageCode(session.agentLanguage, "en");
+    const clientLanguage = normalizeLanguageCode(session.clientLanguage, "en");
+    return {
+        modelName: asString(session.liveModel) || "gemini-2.5-flash-native-audio-preview-12-2025",
+        mode: asString(session.mode) || VIEWING_SESSION_MODES.assistantLiveToolHeavy,
+        sessionKind: asString(session.sessionKind) || "structured_viewing",
+        agentLanguage,
+        clientLanguage,
+        translationTargetLanguage: role === "client" ? agentLanguage : clientLanguage,
+    };
 }
 
 function nextSourceMessageId(context: RelayContext, prefix: string): string {
@@ -671,7 +702,7 @@ function scheduleIdleClose(context: RelayContext) {
         void forwardTransportStatus(context, "disconnected", {
             reason: "no_active_clients",
         });
-        RELAY_CONTEXTS.delete(context.sessionId);
+        RELAY_CONTEXTS.delete(context.contextKey);
     }, IDLE_CLOSE_DELAY_MS);
 }
 
@@ -702,22 +733,33 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
         }
 
         const ai = new GoogleGenAI({ apiKey });
+        const liveTranslate = isLiveTranslateMode(context.mode);
         const session = await ai.live.connect({
             model: context.modelName,
-            config: {
-                responseModalities: [Modality.AUDIO, Modality.TEXT],
-                inputAudioTranscription: {},
-                outputAudioTranscription: {},
-                temperature: 0.2,
-                sessionResumption: context.sessionResumptionHandle
-                    ? { handle: context.sessionResumptionHandle, transparent: true }
-                    : { transparent: true },
-                tools: [
-                    {
-                        functionDeclarations: getLiveFunctionDeclarations(),
+            config: liveTranslate
+                ? {
+                    responseModalities: [Modality.AUDIO],
+                    inputAudioTranscription: {},
+                    outputAudioTranscription: {},
+                    translationConfig: {
+                        targetLanguageCode: context.translationTargetLanguage,
+                        echoTargetLanguage: true,
                     },
-                ],
-            },
+                }
+                : {
+                    responseModalities: [Modality.AUDIO, Modality.TEXT],
+                    inputAudioTranscription: {},
+                    outputAudioTranscription: {},
+                    temperature: 0.2,
+                    sessionResumption: context.sessionResumptionHandle
+                        ? { handle: context.sessionResumptionHandle, transparent: true }
+                        : { transparent: true },
+                    tools: [
+                        {
+                            functionDeclarations: getLiveFunctionDeclarations(),
+                        },
+                    ],
+                },
             callbacks: {
                 onopen: () => {
                     context.vendorState = "connected";
@@ -730,6 +772,8 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                     broadcast(context, {
                         type: "relay.vendor.connected",
                         model: context.modelName,
+                        mode: context.mode,
+                        translationTargetLanguage: liveTranslate ? context.translationTargetLanguage : null,
                         reconnecting,
                         ts: new Date().toISOString(),
                     });
@@ -798,7 +842,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                         const functionCalls = Array.isArray(message?.toolCall?.functionCalls)
                             ? message.toolCall.functionCalls
                             : [];
-                        if (functionCalls.length > 0) {
+                        if (!liveTranslate && functionCalls.length > 0) {
                             await handleToolCalls(context, functionCalls);
                         }
 
@@ -877,20 +921,32 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
 }
 
 async function ensureRelayContext(connectionState: RelayConnectionState): Promise<RelayContext> {
-    const existing = RELAY_CONTEXTS.get(connectionState.sessionId);
+    const runtimeConfig = await resolveSessionRuntimeConfig(connectionState.sessionId, connectionState.role);
+    const contextKey = isLiveTranslateMode(runtimeConfig.mode)
+        ? `${connectionState.sessionId}:${connectionState.role}`
+        : connectionState.sessionId;
+    const existing = RELAY_CONTEXTS.get(contextKey);
     if (existing) {
         existing.relaySessionToken = connectionState.relaySessionToken;
         existing.role = connectionState.role;
+        existing.translationTargetLanguage = connectionState.role === "client"
+            ? existing.agentLanguage
+            : existing.clientLanguage;
         return existing;
     }
 
-    const modelName = await resolveSessionModelName(connectionState.sessionId);
     const created: RelayContext = {
+        contextKey,
         sessionId: connectionState.sessionId,
         locationId: connectionState.locationId,
         role: connectionState.role,
         relaySessionToken: connectionState.relaySessionToken,
-        modelName,
+        modelName: runtimeConfig.modelName,
+        mode: runtimeConfig.mode,
+        sessionKind: runtimeConfig.sessionKind,
+        agentLanguage: runtimeConfig.agentLanguage,
+        clientLanguage: runtimeConfig.clientLanguage,
+        translationTargetLanguage: runtimeConfig.translationTargetLanguage,
         sockets: new Set(),
         vendorSession: null,
         vendorState: "idle",
@@ -908,12 +964,13 @@ async function ensureRelayContext(connectionState: RelayConnectionState): Promis
         queue: Promise.resolve(),
     };
 
-    RELAY_CONTEXTS.set(connectionState.sessionId, created);
+    RELAY_CONTEXTS.set(contextKey, created);
     return created;
 }
 
 function maybeSendTranscriptToVendor(context: RelayContext, payload: Record<string, unknown>) {
     if (!context.vendorSession) return;
+    if (isLiveTranslateMode(context.mode)) return;
     if (asString(payload.eventType) !== "transcript") return;
 
     const text = asString(payload.text);

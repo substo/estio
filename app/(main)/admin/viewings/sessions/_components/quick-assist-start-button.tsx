@@ -2,11 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { Loader2, Mic, Radio } from "lucide-react";
+import { Languages, Loader2, Mic, Radio } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
     VIEWING_SESSION_KINDS,
+    VIEWING_SESSION_MODES,
     VIEWING_SESSION_PARTICIPANT_MODES,
     VIEWING_SESSION_QUICK_START_SOURCES,
     VIEWING_SESSION_SPEECH_MODES,
@@ -19,18 +20,29 @@ type Props = {
     primaryPropertyId?: string | null;
     viewingId?: string | null;
     sessionKind?: string;
+    mode?: string;
     quickStartSource?: string;
     variant?: "default" | "outline" | "secondary" | "ghost";
     size?: "default" | "sm" | "lg" | "icon";
     className?: string;
-    icon?: "mic" | "radio";
+    icon?: "mic" | "radio" | "languages";
 };
 
 function getDefaultSpeechMode(sessionKind: string) {
     if (sessionKind === VIEWING_SESSION_KINDS.listenOnly) {
         return VIEWING_SESSION_SPEECH_MODES.listenOnly;
     }
+    if (sessionKind === VIEWING_SESSION_KINDS.twoWayInterpreter) {
+        return VIEWING_SESSION_SPEECH_MODES.continuous;
+    }
     return VIEWING_SESSION_SPEECH_MODES.pushToTalk;
+}
+
+function getDefaultLiveMode(sessionKind: string) {
+    if (sessionKind === VIEWING_SESSION_KINDS.twoWayInterpreter) {
+        return VIEWING_SESSION_MODES.assistantLiveTranslate;
+    }
+    return VIEWING_SESSION_MODES.assistantLiveToolHeavy;
 }
 
 export function QuickAssistStartButton({
@@ -40,6 +52,7 @@ export function QuickAssistStartButton({
     primaryPropertyId,
     viewingId,
     sessionKind = VIEWING_SESSION_KINDS.quickTranslate,
+    mode,
     quickStartSource = VIEWING_SESSION_QUICK_START_SOURCES.global,
     variant = "default",
     size = "sm",
@@ -57,6 +70,7 @@ export function QuickAssistStartButton({
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         locationId: locationId || undefined,
+                        mode: mode || getDefaultLiveMode(sessionKind),
                         sessionKind,
                         participantMode: VIEWING_SESSION_PARTICIPANT_MODES.agentOnly,
                         speechMode: getDefaultSpeechMode(sessionKind),
@@ -84,6 +98,8 @@ export function QuickAssistStartButton({
         <Button type="button" variant={variant} size={size} className={className} onClick={handleClick} disabled={pending}>
             {pending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : icon === "languages" ? (
+                <Languages className="mr-2 h-4 w-4" />
             ) : icon === "radio" ? (
                 <Radio className="mr-2 h-4 w-4" />
             ) : (

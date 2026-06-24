@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import {
     ArrowLeft,
+    Languages,
     Loader2,
     Mic,
     MicOff,
@@ -169,6 +170,11 @@ function getMessageSpeakerForSessionKind(sessionKind: string) {
     return "agent";
 }
 
+function getLiveModeForSessionKind(sessionKind: string) {
+    if (sessionKind === "two_way_interpreter") return "assistant_live_translate";
+    return "assistant_live_tool_heavy";
+}
+
 function floatTo16BitPCM(float32Array: Float32Array) {
     const buffer = new Int16Array(float32Array.length);
     for (let i = 0; i < float32Array.length; i += 1) {
@@ -223,12 +229,16 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [sending, setSending] = useState(false);
     const [speechOn, setSpeechOn] = useState(false);
     const [micStreaming, setMicStreaming] = useState(false);
-    const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(initialSession.audioPlaybackAgentEnabled);
+    const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(
+        initialSession.sessionKind === "two_way_interpreter" ? true : initialSession.audioPlaybackAgentEnabled
+    );
     const [shareInfo, setShareInfo] = useState<{ url: string | null; token: string; pinCode: string; expiresAt: string } | null>(null);
     const [contextDialogOpen, setContextDialogOpen] = useState(false);
     const [selectedContactId, setSelectedContactId] = useState(initialSession.contact?.id || "");
     const [selectedPropertyId, setSelectedPropertyId] = useState(initialSession.primaryProperty?.id || "");
     const [selectedViewingId, setSelectedViewingId] = useState(initialSession.viewing?.id || "");
+    const [agentLanguage, setAgentLanguage] = useState(initialSession.agentLanguage || "en");
+    const [clientLanguage, setClientLanguage] = useState(initialSession.clientLanguage || "en");
     const [contextNotes, setContextNotes] = useState("");
     const recognizerRef = useRef<SpeechRecognizerLike | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -247,6 +257,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const latestMessage = renderedMessages[renderedMessages.length - 1] || null;
     const sessionTitle = session.primaryProperty?.title || session.viewing?.property.title || "Quick Field Assist";
     const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
+    const isInterpreterMode = session.sessionKind === "two_way_interpreter";
 
     useEffect(() => {
         recognizerRef.current = createSpeechRecognizer();
@@ -350,8 +361,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                mode: "assistant_live_tool_heavy",
-                audioPlaybackAgentEnabled: audioPlaybackEnabled,
+                mode: getLiveModeForSessionKind(session.sessionKind),
+                audioPlaybackAgentEnabled: isInterpreterMode ? true : audioPlaybackEnabled,
             }),
         });
         const payload = await response.json().catch(() => null);
@@ -610,6 +621,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     contactId: selectedContactId || undefined,
                     primaryPropertyId: selectedPropertyId || undefined,
                     viewingId: selectedViewingId || undefined,
+                    agentLanguage: agentLanguage || undefined,
+                    clientLanguage: clientLanguage || undefined,
                     notes: contextNotes || undefined,
                 }),
             });
@@ -642,6 +655,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     }
                     : current.primaryProperty,
                 viewing: selectedViewingId ? { ...(current.viewing || { id: selectedViewingId, date: "", property: { id: "", title: "", reference: null }, contact: { id: "", name: null }, user: { id: "", name: null } }), id: selectedViewingId } : current.viewing,
+                agentLanguage: payload?.session?.agentLanguage || agentLanguage || current.agentLanguage,
+                clientLanguage: payload?.session?.clientLanguage || clientLanguage || current.clientLanguage,
                 assignmentStatus: payload?.session?.assignmentStatus || current.assignmentStatus,
             }));
             setContextDialogOpen(false);
@@ -650,7 +665,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     };
 
-    const switchMode = (sessionKind: "quick_translate" | "listen_only") => {
+    const switchMode = (sessionKind: "quick_translate" | "listen_only" | "two_way_interpreter") => {
         startModeTransition(async () => {
             setError(null);
             try {
@@ -659,7 +674,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         sessionKind,
-                        speechMode: sessionKind === "listen_only" ? "listen_only" : "push_to_talk",
+                        speechMode: sessionKind === "listen_only"
+                            ? "listen_only"
+                            : sessionKind === "two_way_interpreter"
+                                ? "continuous"
+                                : "push_to_talk",
                     }),
                 });
                 const payload = await response.json().catch(() => null);
@@ -671,7 +690,13 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     ...current,
                     sessionKind: payload?.session?.sessionKind || sessionKind,
                     speechMode: payload?.session?.speechMode || current.speechMode,
+                    audioPlaybackAgentEnabled: sessionKind === "two_way_interpreter"
+                        ? true
+                        : current.audioPlaybackAgentEnabled,
                 }));
+                if (sessionKind === "two_way_interpreter") {
+                    setAudioPlaybackEnabled(true);
+                }
             } catch (modeError: any) {
                 setError(modeError?.message || "Failed to update quick mode.");
             }
@@ -827,6 +852,15 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             >
                                 Listen
                             </Button>
+                            <Button
+                                type="button"
+                                variant={session.sessionKind === "two_way_interpreter" ? "default" : "outline"}
+                                onClick={() => switchMode("two_way_interpreter")}
+                                disabled={modePending}
+                            >
+                                <Languages className="mr-1.5 h-4 w-4" />
+                                Interpreter
+                            </Button>
                             <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
                                 <DialogTrigger asChild>
                                     <Button type="button" variant="outline">Attach Context</Button>
@@ -878,6 +912,16 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                                     ))}
                                                 </SelectContent>
                                             </Select>
+                                        </div>
+                                        <div className="grid gap-3 sm:grid-cols-2">
+                                            <div className="space-y-1.5">
+                                                <Label>Agent language</Label>
+                                                <Input value={agentLanguage} onChange={(event) => setAgentLanguage(event.target.value)} placeholder="en" />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label>Customer language</Label>
+                                                <Input value={clientLanguage} onChange={(event) => setClientLanguage(event.target.value)} placeholder="el" />
+                                            </div>
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label>Notes</Label>

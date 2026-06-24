@@ -13,6 +13,7 @@ import { APP_NAME } from "@/components/app-logo"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
 import { AdminNavigationGroups } from "./admin-navigation"
 import { cn } from "@/lib/utils"
+import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
 
 export default function DashboardTopNav({ children, appSurface = false }: { children: ReactNode; appSurface?: boolean }) {
   return (
@@ -46,7 +47,15 @@ export default function DashboardTopNav({ children, appSurface = false }: { chil
                 <ModeToggle />
               </div>
               <div className="space-y-1">
-                <QuickAssistStartButton label="Start Quick Assist" variant="default" size="sm" className="w-full justify-start gap-2 h-10 mb-2 font-medium" />
+                <QuickAssistStartButton
+                  label="Start Quick Assist"
+                  mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
+                  sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
+                  variant="default"
+                  size="sm"
+                  className="w-full justify-start gap-2 h-10 mb-2 font-medium"
+                  icon="languages"
+                />
               </div>
               <AdminNavigationGroups variant="mobile" />
             </div>
@@ -54,7 +63,14 @@ export default function DashboardTopNav({ children, appSurface = false }: { chil
         </Sheet>
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
           <div className="hidden sm:flex">
-            <QuickAssistStartButton label="Quick Assist" variant="outline" size="sm" />
+            <QuickAssistStartButton
+              label="Quick Assist"
+              mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
+              sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
+              variant="outline"
+              size="sm"
+              icon="languages"
+            />
           </div>
           <AdminNotificationBell />
           <div className="hidden sm:block">

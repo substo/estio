@@ -408,6 +408,8 @@ export async function attachViewingSessionContext(args: {
     primaryPropertyId?: string | null;
     relatedPropertyIds?: string[];
     viewingId?: string | null;
+    clientLanguage?: string | null;
+    agentLanguage?: string | null;
     notes?: string | null;
 }) {
     const sessionId = asString(args.sessionId);
@@ -423,6 +425,8 @@ export async function attachViewingSessionContext(args: {
             primaryPropertyId: true,
             viewingId: true,
             notes: true,
+            clientLanguage: true,
+            agentLanguage: true,
             contextVersion: true,
             sessionKind: true,
             participantMode: true,
@@ -452,6 +456,12 @@ export async function attachViewingSessionContext(args: {
     const nextAssignmentStatus = nextContactId
         ? VIEWING_SESSION_ASSIGNMENT_STATUSES.assigned
         : normalizeViewingSessionAssignmentStatus(session.assignmentStatus);
+    const nextClientLanguage = args.clientLanguage !== undefined
+        ? (asString(args.clientLanguage) || session.clientLanguage || "en")
+        : asString(validated.contact?.preferredLang) || session.clientLanguage || "en";
+    const nextAgentLanguage = args.agentLanguage !== undefined
+        ? (asString(args.agentLanguage) || session.agentLanguage || "en")
+        : session.agentLanguage || "en";
     const now = new Date();
 
     const updated = await db.viewingSession.update({
@@ -462,6 +472,8 @@ export async function attachViewingSessionContext(args: {
             currentActivePropertyId: nextPrimaryPropertyId,
             viewingId: asString(args.viewingId) || nextViewing?.id || session.viewingId || null,
             relatedPropertyIds: nextRelatedPropertyIds,
+            clientLanguage: nextClientLanguage,
+            agentLanguage: nextAgentLanguage,
             notes: args.notes !== undefined ? (asString(args.notes) || null) : session.notes,
             contextVersion: session.contextVersion + 1,
             assignmentStatus: nextAssignmentStatus,
@@ -477,6 +489,8 @@ export async function attachViewingSessionContext(args: {
             primaryPropertyId: true,
             viewingId: true,
             notes: true,
+            clientLanguage: true,
+            agentLanguage: true,
             contextVersion: true,
             sessionKind: true,
             participantMode: true,
@@ -498,6 +512,8 @@ export async function attachViewingSessionContext(args: {
             primaryPropertyId: updated.primaryPropertyId,
             viewingId: updated.viewingId,
             assignmentStatus: updated.assignmentStatus,
+            clientLanguage: updated.clientLanguage,
+            agentLanguage: updated.agentLanguage,
             contextAttachedAt: now.toISOString(),
             contextSnapshot,
         },
@@ -514,6 +530,8 @@ export async function attachViewingSessionContext(args: {
             primaryPropertyId: updated.primaryPropertyId,
             viewingId: updated.viewingId,
             assignmentStatus: updated.assignmentStatus,
+            clientLanguage: updated.clientLanguage,
+            agentLanguage: updated.agentLanguage,
         },
     });
 

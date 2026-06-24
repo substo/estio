@@ -23,7 +23,11 @@ import {
 } from "@/lib/viewings/sessions/types";
 
 const createViewingSessionSchema = z.object({
-    mode: z.enum([VIEWING_SESSION_MODES.assistantLiveToolHeavy, VIEWING_SESSION_MODES.assistantLiveVoicePremium]).optional(),
+    mode: z.enum([
+        VIEWING_SESSION_MODES.assistantLiveToolHeavy,
+        VIEWING_SESSION_MODES.assistantLiveVoicePremium,
+        VIEWING_SESSION_MODES.assistantLiveTranslate,
+    ]).optional(),
     clientName: z.string().trim().max(120).optional(),
     clientLanguage: z.string().trim().max(24).optional(),
     agentLanguage: z.string().trim().max(24).optional(),
@@ -37,6 +41,9 @@ function asString(value: unknown): string {
 }
 
 function sanitizeMode(mode: string | undefined): ViewingSessionMode {
+    if (mode === VIEWING_SESSION_MODES.assistantLiveTranslate) {
+        return VIEWING_SESSION_MODES.assistantLiveTranslate;
+    }
     if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium) {
         return VIEWING_SESSION_MODES.assistantLiveVoicePremium;
     }
