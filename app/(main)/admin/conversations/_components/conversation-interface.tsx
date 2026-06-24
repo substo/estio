@@ -1198,6 +1198,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
             });
     }, [rememberReadReset]);
 
+    useEffect(() => {
+        if (viewMode !== 'chats' || !activeId) return;
+        markConversationReadInUi(activeId);
+    }, [activeId, markConversationReadInUi, viewMode]);
+
     const handleBindClick = (ids: string[]) => {
         if (ids.length === 0) return;
         setCreateDealOpen(true);
