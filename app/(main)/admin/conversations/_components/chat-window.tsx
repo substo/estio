@@ -14,7 +14,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
-import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
+import {
+    SuggestedResponseQueue,
+    getPendingSuggestedResponseCount,
+    type SuggestedResponseQueueItem,
+} from "./suggested-response-queue";
 import { useChatWindowTimelineScroll, type ActivityLogItem } from "./use-chat-window-timeline-scroll";
 import { useChatWindowTranscriptSearch } from "./use-chat-window-transcript-search";
 import { useChatWindowSelectionBatch } from "./use-chat-window-selection-batch";
@@ -208,6 +212,9 @@ export function ChatWindow({
     });
     const [selectedModel, setSelectedModel] = useState("");
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(conversation));
+    const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = useState(
+        () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
+    );
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const {
         selectionBatch,
@@ -286,6 +293,7 @@ export function ChatWindow({
     useEffect(() => {
         setIsBulkTranscribingAudio(false);
         setActiveSurfaceChannel(getInitialSurfaceChannel(conversation));
+        setSuggestedResponsesCollapsed(typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches);
     }, [conversation.id]);
 
     const handleBulkTranscribeUnprocessedAudio = useCallback(async (window: "30d" | "all") => {
@@ -310,6 +318,10 @@ export function ChatWindow({
     const conversationChannelLabel = conversationChannelInfo.name;
     const conversationLifecycle = getConversationLifecycleUi(conversation.status);
     const surfaceTheme = getConversationSurfaceTheme(activeSurfaceChannel);
+    const pendingSuggestedResponseCount = useMemo(
+        () => getPendingSuggestedResponseCount(suggestedResponseQueue),
+        [suggestedResponseQueue]
+    );
     const groupedTimelineItems = useMemo(
         () => groupAdjacentWhatsAppImageMessages(timelineItems),
         [timelineItems]
@@ -841,6 +853,8 @@ export function ChatWindow({
                 }}
                 allowSendNow={true}
                 surfaceTheme={surfaceTheme}
+                collapsed={suggestedResponsesCollapsed}
+                onCollapsedChange={setSuggestedResponsesCollapsed}
             />
 
             <ConversationComposer
@@ -862,6 +876,9 @@ export function ChatWindow({
                 surfaceTheme={surfaceTheme}
                 onSelectedChannelChange={(channel) => setActiveSurfaceChannel(channel)}
                 onAddActivityEntry={onAddActivityEntry}
+                suggestedResponseCount={pendingSuggestedResponseCount}
+                suggestedResponsesCollapsed={suggestedResponsesCollapsed}
+                onToggleSuggestedResponses={() => setSuggestedResponsesCollapsed((collapsed) => !collapsed)}
             />
         </div>
     );

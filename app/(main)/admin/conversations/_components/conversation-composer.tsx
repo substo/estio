@@ -83,6 +83,9 @@ interface ConversationComposerProps {
     surfaceTheme?: ConversationSurfaceTheme;
     onSelectedChannelChange?: (channel: ComposerChannel) => void;
     onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
+    suggestedResponseCount?: number;
+    suggestedResponsesCollapsed?: boolean;
+    onToggleSuggestedResponses?: () => void;
 }
 
 function getPlaceholderText(channel: ComposerChannel): string {
@@ -259,6 +262,9 @@ export function ConversationComposer({
     surfaceTheme,
     onSelectedChannelChange,
     onAddActivityEntry,
+    suggestedResponseCount = 0,
+    suggestedResponsesCollapsed = false,
+    onToggleSuggestedResponses,
 }: ConversationComposerProps) {
     const isUnavailable = disabled || !conversation;
     const isRecordingRef = useRef(false);
@@ -450,6 +456,7 @@ export function ConversationComposer({
         : "Tell AI what to write...";
     const aiQuickActions = composerHasDraft ? REFINE_DRAFT_ACTIONS : CREATE_DRAFT_ACTIONS;
     const visibleSuggestionBubbles = buildComposerSuggestionBubbles(suggestions, aiQuickActions);
+    const showSuggestedResponseToggle = suggestedResponseCount > 0 && !!onToggleSuggestedResponses;
 
     const runAiDraftCommand = (instruction?: string) => {
         const trimmedInstruction = String(instruction || "").trim();
@@ -594,34 +601,54 @@ export function ConversationComposer({
             )}
 
             <div className={composerContentClassName}>
-                {onAddActivityEntry && (
+                {(onAddActivityEntry || showSuggestedResponseToggle) && (
                     <div className="flex items-center gap-1 px-1 pb-1">
-                        <Button
-                            type="button"
-                            variant={isNoteMode ? "ghost" : "secondary"}
-                            size="sm"
-                            className="h-7 gap-1.5 px-2 text-[11px]"
-                            onClick={() => setComposerMode("reply")}
-                        >
-                            <MessageSquare className="h-3.5 w-3.5" />
-                            Reply
-                        </Button>
-                        <Button
-                            type="button"
-                            variant={isNoteMode ? "secondary" : "ghost"}
-                            size="sm"
-                            className={cn(
-                                "h-7 gap-1.5 px-2 text-[11px]",
-                                isNoteMode && "border-amber-200 bg-amber-100 text-amber-900 hover:bg-amber-100"
-                            )}
-                            onClick={() => {
-                                setComposerMode("note");
-                                window.requestAnimationFrame(() => composerTextareaRef.current?.focus());
-                            }}
-                        >
-                            <NotebookPen className="h-3.5 w-3.5" />
-                            Note
-                        </Button>
+                        {onAddActivityEntry && (
+                            <>
+                                <Button
+                                    type="button"
+                                    variant={isNoteMode ? "ghost" : "secondary"}
+                                    size="sm"
+                                    className="h-7 gap-1.5 px-2 text-[11px]"
+                                    onClick={() => setComposerMode("reply")}
+                                >
+                                    <MessageSquare className="h-3.5 w-3.5" />
+                                    Reply
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant={isNoteMode ? "secondary" : "ghost"}
+                                    size="sm"
+                                    className={cn(
+                                        "h-7 gap-1.5 px-2 text-[11px]",
+                                        isNoteMode && "border-amber-200 bg-amber-100 text-amber-900 hover:bg-amber-100"
+                                    )}
+                                    onClick={() => {
+                                        setComposerMode("note");
+                                        window.requestAnimationFrame(() => composerTextareaRef.current?.focus());
+                                    }}
+                                >
+                                    <NotebookPen className="h-3.5 w-3.5" />
+                                    Note
+                                </Button>
+                            </>
+                        )}
+                        {showSuggestedResponseToggle && (
+                            <Button
+                                type="button"
+                                variant={suggestedResponsesCollapsed ? "secondary" : "ghost"}
+                                size="sm"
+                                className={cn(
+                                    "h-7 gap-1.5 px-2 text-[11px]",
+                                    suggestedResponsesCollapsed && "border-sky-200 bg-sky-100 text-sky-900 hover:bg-sky-100"
+                                )}
+                                onClick={onToggleSuggestedResponses}
+                                title={suggestedResponsesCollapsed ? "Open AI Bubo suggestions" : "Minimize AI Bubo suggestions"}
+                            >
+                                <Sparkles className="h-3.5 w-3.5" />
+                                Bubo ({suggestedResponseCount})
+                            </Button>
+                        )}
                     </div>
                 )}
 

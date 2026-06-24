@@ -8,7 +8,11 @@ import { MessageSquare, Sparkles, ArrowLeft, ListTodo } from "lucide-react";
 import { Button } from '@/components/ui/button';
 import { ConversationComposer } from './conversation-composer';
 import { ActivityLogEntry } from "./activity-log-entry";
-import { SuggestedResponseQueue, type SuggestedResponseQueueItem } from "./suggested-response-queue";
+import {
+    SuggestedResponseQueue,
+    getPendingSuggestedResponseCount,
+    type SuggestedResponseQueueItem,
+} from "./suggested-response-queue";
 import { useUnifiedTimelineScroll } from './use-unified-timeline-scroll';
 import {
     getConversationSurfaceTheme,
@@ -125,6 +129,9 @@ export function UnifiedTimeline({
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState("");
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(composerConversation));
+    const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = useState(
+        () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
+    );
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const events = useMemo(() => (Array.isArray(timelineEvents) ? timelineEvents : []), [timelineEvents]);
     const groupedEvents = useMemo(() => {
@@ -135,6 +142,10 @@ export function UnifiedTimeline({
         return groupAdjacentWhatsAppImageMessages(normalizedEvents);
     }, [events]);
     const surfaceTheme = getConversationSurfaceTheme(activeSurfaceChannel);
+    const pendingSuggestedResponseCount = useMemo(
+        () => getPendingSuggestedResponseCount(suggestedResponseQueue),
+        [suggestedResponseQueue]
+    );
     const {
         timelineRef,
         timelineContentRef,
@@ -148,6 +159,7 @@ export function UnifiedTimeline({
 
     useEffect(() => {
         setActiveSurfaceChannel(getInitialSurfaceChannel(composerConversation));
+        setSuggestedResponsesCollapsed(typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches);
     }, [composerConversation?.id]);
 
     useEffect(() => {
@@ -289,6 +301,8 @@ export function UnifiedTimeline({
                 }}
                 allowSendNow={true}
                 surfaceTheme={surfaceTheme}
+                collapsed={suggestedResponsesCollapsed}
+                onCollapsedChange={setSuggestedResponsesCollapsed}
             />
 
             <ConversationComposer
@@ -311,6 +325,9 @@ export function UnifiedTimeline({
                 smsRelayEnabled={smsRelayEnabled}
                 surfaceTheme={surfaceTheme}
                 onSelectedChannelChange={(channel) => setActiveSurfaceChannel(channel)}
+                suggestedResponseCount={pendingSuggestedResponseCount}
+                suggestedResponsesCollapsed={suggestedResponsesCollapsed}
+                onToggleSuggestedResponses={() => setSuggestedResponsesCollapsed((collapsed) => !collapsed)}
             />
         </div>
     );

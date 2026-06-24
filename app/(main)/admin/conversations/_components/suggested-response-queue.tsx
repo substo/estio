@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, Send, Check, X } from "lucide-react";
+import { ChevronDown, Loader2, Send, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getConversationSurfaceTheme, type ConversationSurfaceTheme } from "./message-bubble-theme";
 
@@ -40,6 +40,8 @@ interface SuggestedResponseQueueProps {
     className?: string;
     allowSendNow?: boolean;
     surfaceTheme?: ConversationSurfaceTheme;
+    collapsed?: boolean;
+    onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 function formatSourceLabel(source: string): string {
@@ -75,6 +77,10 @@ function formatCreatedLabel(createdAt: string): string {
     return date.toLocaleString();
 }
 
+export function getPendingSuggestedResponseCount(items: SuggestedResponseQueueItem[]): number {
+    return Array.isArray(items) ? items.filter((item) => item.status === "pending").length : 0;
+}
+
 export function SuggestedResponseQueue({
     items,
     onAccept,
@@ -82,6 +88,8 @@ export function SuggestedResponseQueue({
     className,
     allowSendNow = true,
     surfaceTheme,
+    collapsed = false,
+    onCollapsedChange,
 }: SuggestedResponseQueueProps) {
     const [busyId, setBusyId] = useState<string | null>(null);
     const resolvedSurfaceTheme = surfaceTheme || getConversationSurfaceTheme(null);
@@ -92,6 +100,10 @@ export function SuggestedResponseQueue({
     );
 
     if (visibleItems.length === 0) {
+        return null;
+    }
+
+    if (collapsed) {
         return null;
     }
 
@@ -107,7 +119,25 @@ export function SuggestedResponseQueue({
 
     return (
         <div className={cn("px-3 py-2 space-y-2", resolvedSurfaceTheme.suggestedQueueClassName, className)}>
-            <div className="text-xs font-semibold text-slate-700">Suggested Responses</div>
+            <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-slate-700">
+                    AI Bubo Suggestions
+                    <span className="ml-1 font-normal text-slate-500">({visibleItems.length})</span>
+                </div>
+                {onCollapsedChange && (
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1 px-2 text-[11px] text-slate-600 hover:bg-white/70"
+                        onClick={() => onCollapsedChange(true)}
+                        title="Minimize AI Bubo suggestions"
+                    >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                        Minimize
+                    </Button>
+                )}
+            </div>
 
             {visibleItems.map((item) => (
                 <div key={item.id} className="rounded-md border bg-white p-2.5 space-y-2 shadow-sm">
