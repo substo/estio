@@ -38,6 +38,7 @@ import {
 import {
     isUsableMessageTranslationText,
 } from "@/lib/conversations/translation-output";
+import { validateReplyTranslationCompleteness } from "@/lib/conversations/translation-completeness";
 import {
     resolveConversationLanguageContext,
     type ConversationLanguageContextInput,
@@ -493,6 +494,7 @@ function queueGhlConversationStatusSync(args: {
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
 const MESSAGE_TRANSLATION_MODEL = GEMINI_DRAFT_FAST_DEFAULT;
 const MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS = 2048;
+const REPLY_TRANSLATION_MAX_OUTPUT_TOKENS = 65536;
 const MESSAGE_TRANSLATION_STATUS = {
     completed: "completed",
     failed: "failed",
@@ -713,7 +715,7 @@ async function runReplyTranslationLLM(args: {
         modelId,
         systemPrompt,
         userPrompt,
-        { jsonMode: false, temperature: 0, maxOutputTokens: 2048, thinkingBudget: 0 }
+        { jsonMode: false, temperature: 0, maxOutputTokens: REPLY_TRANSLATION_MAX_OUTPUT_TOKENS, thinkingBudget: 0 }
     );
 
     return {
@@ -4938,6 +4940,27 @@ export async function sendReply(
             if (!normalizedBody) {
                 return { success: false, error: "Message body cannot be empty." };
             }
+            const requestedTranslationSourceText = String(options?.translationSourceText || "").trim();
+            if (requestedTranslationSourceText && requestedTranslationSourceText !== normalizedBody) {
+                const completeness = validateReplyTranslationCompleteness({
+                    sourceText: requestedTranslationSourceText,
+                    translatedText: normalizedBody,
+                });
+                if (!completeness.ok) {
+                    console.warn("[sendReply] Rejected incomplete WhatsApp translation:", {
+                        conversationId,
+                        clientMessageId: options?.clientMessageId || null,
+                        reason: completeness.reason || "incomplete_translation",
+                        sourceChars: requestedTranslationSourceText.length,
+                        translatedChars: normalizedBody.length,
+                    });
+                    return {
+                        success: false,
+                        error: "Translation looked incomplete. Please preview again before sending.",
+                        errorCode: "incomplete_translation",
+                    };
+                }
+            }
 
             const conversation = await db.conversation.findFirst({
                 where: buildConversationReferenceWhere(location.id, conversationId),
@@ -5038,7 +5061,7 @@ export async function sendReply(
                 }));
             }
 
-            const translationSourceText = String(options?.translationSourceText || "").trim();
+            const translationSourceText = requestedTranslationSourceText;
             const translationTargetLanguage = normalizeTranslationTargetLanguage(options?.translationTargetLanguage || null);
             const outboundTranslationPayload = buildManualOutboundTranslationPayload({
                 sourceText: translationSourceText,
@@ -5763,6 +5786,27 @@ export async function previewTranslatedReply(
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
         });
+        const completeness = validateReplyTranslationCompleteness({
+            sourceText: normalizedSourceText,
+            translatedText: translation.translatedText,
+        });
+        if (!completeness.ok) {
+            console.warn("[Conversation Translation Timing]", JSON.stringify({
+                event: "preview_translated_reply_rejected",
+                conversationId: conversation.id,
+                targetLanguage: resolvedTargetLanguage,
+                elapsedMs: Date.now() - startedAt,
+                reason: completeness.reason || "incomplete_translation",
+                sourceChars: normalizedSourceText.length,
+                translatedChars: translation.translatedText.length,
+                model: translation.model,
+            }));
+            return {
+                success: false as const,
+                error: "Translation looked incomplete. Please preview again before sending.",
+                targetLanguage: resolvedTargetLanguage,
+            };
+        }
         const elapsedMs = Date.now() - startedAt;
 
         await securelyRecordConversationAiUsage({
