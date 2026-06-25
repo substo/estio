@@ -25,6 +25,7 @@ type RelayConnectionState = {
 type RelayDraftPointer = {
     sourceMessageId: string;
     messageId: string | null;
+    text: string;
 };
 
 type RelayContext = {
@@ -85,6 +86,18 @@ const TOOL_CACHE_TTL_MS = {
 
 function asString(value: unknown): string {
     return String(value || "").trim();
+}
+
+function appendTranscriptText(previousText: unknown, nextText: unknown): string {
+    const previous = asString(previousText);
+    const next = asString(nextText);
+    if (!previous) return next;
+    if (!next) return previous;
+    if (next.startsWith(previous)) return next;
+    if (previous.endsWith(next)) return previous;
+
+    const needsSpace = !/\s$/.test(previous) && !/^[,.;:!?)]/.test(next);
+    return `${previous}${needsSpace ? " " : ""}${next}`.replace(/\s+/g, " ").trim();
 }
 
 function normalizeLanguageCode(value: unknown, fallback: string): string {
@@ -260,12 +273,12 @@ async function persistTranscript(args: {
     isFinal: boolean;
     metadata?: Record<string, unknown>;
 }) {
-    const text = asString(args.text);
-    if (!text) return;
-
     const context = args.context;
     const draftKey = args.channel === "input" ? "inputDraft" : "outputDraft";
     const previousDraft = context[draftKey];
+    const text = appendTranscriptText(previousDraft?.text || "", args.text);
+    if (!text) return;
+
     const sourceMessageId = nextSourceMessageId(
         context,
         `${args.channel}.${args.isFinal ? "final" : "provisional"}`
@@ -301,6 +314,7 @@ async function persistTranscript(args: {
             context[draftKey] = {
                 sourceMessageId,
                 messageId: persistedMessageId,
+                text,
             };
         }
     } catch (error) {
@@ -786,28 +800,30 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                             context.sessionResumptionHandle = newHandle;
                         }
 
-                        const inputTranscriptionText = asString(message?.serverContent?.inputTranscription?.text);
-                        if (inputTranscriptionText) {
+                        const inputTranscription = message?.serverContent?.inputTranscription;
+                        const inputTranscriptionText = asString(inputTranscription?.text);
+                        if (inputTranscriptionText || (inputTranscription?.finished && context.inputDraft?.text)) {
                             await persistTranscript({
                                 context,
                                 channel: "input",
                                 speaker: context.role === "agent" ? "agent" : "client",
                                 text: inputTranscriptionText,
-                                isFinal: !!message?.serverContent?.inputTranscription?.finished,
+                                isFinal: !!inputTranscription?.finished,
                                 metadata: {
                                     transcriptionKind: "input",
                                 },
                             });
                         }
 
-                        const outputTranscriptionText = asString(message?.serverContent?.outputTranscription?.text);
-                        if (outputTranscriptionText) {
+                        const outputTranscription = message?.serverContent?.outputTranscription;
+                        const outputTranscriptionText = asString(outputTranscription?.text);
+                        if (outputTranscriptionText || (outputTranscription?.finished && context.outputDraft?.text)) {
                             await persistTranscript({
                                 context,
                                 channel: "output",
                                 speaker: "system",
                                 text: outputTranscriptionText,
-                                isFinal: !!message?.serverContent?.outputTranscription?.finished,
+                                isFinal: !!outputTranscription?.finished,
                                 metadata: {
                                     transcriptionKind: "output",
                                 },

@@ -318,6 +318,31 @@ function int16ToBase64(buffer: Int16Array) {
     return window.btoa(binary);
 }
 
+function base64ToUint8Array(value: string) {
+    const binary = window.atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function audioSampleRateFromMimeType(mimeType: string, fallback = 24000) {
+    const match = mimeType.match(/rate=(\d+)/i);
+    const parsed = match ? Number(match[1]) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function pcm16ToFloat32(bytes: Uint8Array) {
+    const sampleCount = Math.floor(bytes.byteLength / 2);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const samples = new Float32Array(sampleCount);
+    for (let i = 0; i < sampleCount; i += 1) {
+        samples[i] = view.getInt16(i * 2, true) / 0x8000;
+    }
+    return samples;
+}
+
 export function QuickFieldAssist({ initialSession, initialMessages, initialSummary, quickContextOptions }: Props) {
     const [session, setSession] = useState(initialSession);
     const [messages, setMessages] = useState<SessionMessage[]>(initialMessages);
@@ -350,6 +375,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const audioContextRef = useRef<AudioContext | null>(null);
     const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+    const playbackAudioContextRef = useRef<AudioContext | null>(null);
+    const playbackCursorRef = useRef(0);
+    const playbackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const liveInfoRef = useRef<any>(null);
     const audioPlaybackEnabledRef = useRef(audioPlaybackEnabled);
 
@@ -368,8 +396,54 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const sameInterpreterLanguage = isInterpreterMode
         && languageCode(agentLanguage) === languageCode(clientLanguage);
 
+    const stopPlaybackAudio = () => {
+        playbackSourcesRef.current.forEach((source) => {
+            try {
+                source.stop();
+            } catch {
+                // no-op
+            }
+        });
+        playbackSourcesRef.current.clear();
+        playbackCursorRef.current = 0;
+    };
+
+    const playPcmAudioChunk = async (mimeType: string, data: string) => {
+        if (!audioPlaybackEnabledRef.current) return;
+        const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextCtor) return;
+
+        const sampleRate = audioSampleRateFromMimeType(mimeType);
+        const bytes = base64ToUint8Array(data);
+        const samples = pcm16ToFloat32(bytes);
+        if (samples.length === 0) return;
+
+        const audioContext = playbackAudioContextRef.current || new AudioContextCtor();
+        playbackAudioContextRef.current = audioContext;
+        if (audioContext.state === "suspended") {
+            await audioContext.resume().catch(() => undefined);
+        }
+
+        const buffer = audioContext.createBuffer(1, samples.length, sampleRate);
+        buffer.copyToChannel(samples, 0);
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioContext.destination);
+        source.onended = () => {
+            playbackSourcesRef.current.delete(source);
+        };
+
+        const startAt = Math.max(audioContext.currentTime + 0.02, playbackCursorRef.current || 0);
+        playbackCursorRef.current = startAt + buffer.duration;
+        playbackSourcesRef.current.add(source);
+        source.start(startAt);
+    };
+
     useEffect(() => {
         audioPlaybackEnabledRef.current = audioPlaybackEnabled;
+        if (!audioPlaybackEnabled) {
+            stopPlaybackAudio();
+        }
     }, [audioPlaybackEnabled]);
 
     useEffect(() => {
@@ -466,6 +540,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             audioProcessorRef.current?.disconnect();
             audioSourceRef.current?.disconnect();
             audioContextRef.current?.close().catch(() => undefined);
+            stopPlaybackAudio();
+            playbackAudioContextRef.current?.close().catch(() => undefined);
+            playbackAudioContextRef.current = null;
         };
     }, []);
 
@@ -526,8 +603,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             try {
                 const payload = JSON.parse(event.data || "{}");
                 if (payload?.type === "relay.audio.chunk" && audioPlaybackEnabledRef.current && payload?.mimeType && payload?.data) {
-                    const audio = new Audio(`data:${payload.mimeType};base64,${payload.data}`);
-                    void audio.play().catch(() => undefined);
+                    void playPcmAudioChunk(String(payload.mimeType), String(payload.data)).catch(() => undefined);
                 }
                 if (payload?.type === "relay.error") {
                     setError(String(payload?.error || "Relay transport error."));
