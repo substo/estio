@@ -1094,7 +1094,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 <Card className="overflow-hidden">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-base">Live Interpreter</CardTitle>
-                        <CardDescription>{session.transportStatus === "connected" ? "Connected" : "Choose languages, then start speaking."}</CardDescription>
+                        <CardDescription>
+                            {isInterpreterMode
+                                ? (session.transportStatus === "connected" ? "Speak either language." : "Choose two languages, then start the mic.")
+                                : (session.transportStatus === "connected" ? "Connected" : "Choose languages, then start speaking.")}
+                        </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
                         <div className="rounded-xl border bg-white p-2">
@@ -1128,26 +1132,30 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             )}
                         </div>
 
-                        <div className="rounded-xl border bg-white p-3">
-                            <Textarea
-                                value={draft}
-                                onChange={(event) => setDraft(event.target.value)}
-                                placeholder="Type to translate, or use the mic."
-                                className="min-h-[96px] resize-none border-0 p-0 text-base shadow-none focus-visible:ring-0"
-                                onKeyDown={(event) => {
-                                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                                        event.preventDefault();
-                                        void sendMessage();
-                                    }
-                                }}
-                            />
-                        </div>
+                        {!isInterpreterMode && (
+                            <div className="rounded-xl border bg-white p-3">
+                                <Textarea
+                                    value={draft}
+                                    onChange={(event) => setDraft(event.target.value)}
+                                    placeholder="Type to translate, or use the mic."
+                                    className="min-h-[96px] resize-none border-0 p-0 text-base shadow-none focus-visible:ring-0"
+                                    onKeyDown={(event) => {
+                                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                            event.preventDefault();
+                                            void sendMessage();
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
 
                         <ScrollArea className="h-[360px] rounded-xl border bg-slate-50 px-4 py-3">
                             <div className="space-y-3">
                                 {renderedMessages.length === 0 && (
                                     <div className="rounded-xl border border-dashed bg-white px-4 py-8 text-center text-sm text-muted-foreground">
-                                        Start speaking, listening, or typing to begin the session.
+                                        {isInterpreterMode
+                                            ? "Start the mic and speak either selected language."
+                                            : "Start speaking, listening, or typing to begin the session."}
                                     </div>
                                 )}
                                 {renderedMessages.map((message, index) => {
@@ -1183,15 +1191,17 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                                     {(micStreaming || speechOn) ? "Stop Mic" : isInterpreterMode ? "Start Interpreter" : "Start Mic"}
                                 </Button>
-                                <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending}>
-                                    {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    Send
-                                </Button>
+                                {!isInterpreterMode && (
+                                    <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending}>
+                                        {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                        Send
+                                    </Button>
+                                )}
                             </div>
                             <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                                <span>Live audio relay first, browser fallback last.</span>
+                                <span>{isInterpreterMode ? "Translates both directions from one mic." : "Live audio relay first, browser fallback last."}</span>
                                 <label className="flex items-center gap-2">
-                                    Audio
+                                    Speak
                                     <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} />
                                 </label>
                             </div>

@@ -42,6 +42,7 @@ type RelayContext = {
     translationTargetLanguage: string;
     sockets: Set<any>;
     vendorSession: any | null;
+    translationVendorSessions: Map<string, any>;
     vendorState: "idle" | "connecting" | "connected" | "reconnecting" | "degraded" | "failed" | "disconnected";
     reconnectAttempts: number;
     reconnectTimer: NodeJS.Timeout | null;
@@ -684,6 +685,25 @@ function scheduleReconnect(context: RelayContext) {
     }, delay);
 }
 
+function activeVendorSessions(context: RelayContext): any[] {
+    if (context.translationVendorSessions.size > 0) {
+        return Array.from(context.translationVendorSessions.values()).filter(Boolean);
+    }
+    return context.vendorSession ? [context.vendorSession] : [];
+}
+
+function closeVendorSessions(context: RelayContext) {
+    for (const session of activeVendorSessions(context)) {
+        try {
+            session.close();
+        } catch {
+            // no-op
+        }
+    }
+    context.translationVendorSessions.clear();
+    context.vendorSession = null;
+}
+
 function clearReconnectTimer(context: RelayContext) {
     if (!context.reconnectTimer) return;
     clearTimeout(context.reconnectTimer);
@@ -702,14 +722,7 @@ function scheduleIdleClose(context: RelayContext) {
         context.idleCloseTimer = null;
         if (context.sockets.size > 0) return;
 
-        if (context.vendorSession) {
-            try {
-                context.vendorSession.close();
-            } catch {
-                // no-op
-            }
-            context.vendorSession = null;
-        }
+        closeVendorSessions(context);
 
         context.vendorState = "disconnected";
         context.reconnectCycleStartedAt = null;
@@ -721,7 +734,7 @@ function scheduleIdleClose(context: RelayContext) {
 }
 
 async function connectVendorSession(context: RelayContext, reconnecting: boolean) {
-    if (context.vendorSession) return;
+    if (activeVendorSessions(context).length > 0) return;
 
     clearReconnectTimer(context);
     context.vendorState = reconnecting ? "reconnecting" : "connecting";
@@ -748,33 +761,11 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
 
         const ai = new GoogleGenAI({ apiKey });
         const liveTranslate = isLiveTranslateMode(context.mode);
-        const session = await ai.live.connect({
-            model: context.modelName,
-            config: liveTranslate
-                ? {
-                    responseModalities: [Modality.AUDIO],
-                    inputAudioTranscription: {},
-                    outputAudioTranscription: {},
-                    translationConfig: {
-                        targetLanguageCode: context.translationTargetLanguage,
-                        echoTargetLanguage: true,
-                    },
-                }
-                : {
-                    responseModalities: [Modality.AUDIO, Modality.TEXT],
-                    inputAudioTranscription: {},
-                    outputAudioTranscription: {},
-                    temperature: 0.2,
-                    sessionResumption: context.sessionResumptionHandle
-                        ? { handle: context.sessionResumptionHandle, transparent: true }
-                        : { transparent: true },
-                    tools: [
-                        {
-                            functionDeclarations: getLiveFunctionDeclarations(),
-                        },
-                    ],
-                },
-            callbacks: {
+        const targets = liveTranslate
+            ? Array.from(new Set([context.agentLanguage, context.clientLanguage].filter(Boolean)))
+            : [context.translationTargetLanguage];
+
+        const createCallbacks = (targetLanguage: string, persistInputTranscript: boolean) => ({
                 onopen: () => {
                     context.vendorState = "connected";
                     context.reconnectAttempts = 0;
@@ -787,7 +778,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                         type: "relay.vendor.connected",
                         model: context.modelName,
                         mode: context.mode,
-                        translationTargetLanguage: liveTranslate ? context.translationTargetLanguage : null,
+                        translationTargetLanguage: liveTranslate ? targetLanguage : null,
                         reconnecting,
                         ts: new Date().toISOString(),
                     });
@@ -802,7 +793,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
 
                         const inputTranscription = message?.serverContent?.inputTranscription;
                         const inputTranscriptionText = asString(inputTranscription?.text);
-                        if (inputTranscriptionText || (inputTranscription?.finished && context.inputDraft?.text)) {
+                        if (persistInputTranscript && (inputTranscriptionText || (inputTranscription?.finished && context.inputDraft?.text))) {
                             await persistTranscript({
                                 context,
                                 channel: "input",
@@ -811,6 +802,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                                 isFinal: !!inputTranscription?.finished,
                                 metadata: {
                                     transcriptionKind: "input",
+                                    targetLanguage,
                                 },
                             });
                         }
@@ -826,6 +818,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                                 isFinal: !!outputTranscription?.finished,
                                 metadata: {
                                     transcriptionKind: "output",
+                                    targetLanguage,
                                 },
                             });
                         }
@@ -842,6 +835,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                                 isFinal: turnComplete,
                                 metadata: {
                                     source: "model_turn",
+                                    targetLanguage,
                                 },
                             });
                         }
@@ -876,11 +870,7 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                                 reason: "vendor_go_away",
                                 goAway: message.goAway,
                             });
-                            try {
-                                context.vendorSession?.close();
-                            } catch {
-                                // no-op
-                            }
+                            closeVendorSessions(context);
                         }
                     });
                 },
@@ -897,8 +887,10 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                     });
                 },
                 onclose: () => {
-                    context.vendorSession = null;
+                    context.translationVendorSessions.delete(targetLanguage);
+                    context.vendorSession = activeVendorSessions(context)[0] || null;
                     if (context.sockets.size > 0) {
+                        closeVendorSessions(context);
                         context.vendorState = "reconnecting";
                         void forwardTransportStatus(context, "reconnecting", {
                             reason: "vendor_socket_closed",
@@ -913,12 +905,52 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                         reason: "vendor_socket_closed",
                     });
                 },
+            }
+        });
+
+        if (liveTranslate) {
+            for (const target of targets) {
+                const session = await ai.live.connect({
+                    model: context.modelName,
+                    config: {
+                        responseModalities: [Modality.AUDIO],
+                        inputAudioTranscription: {},
+                        outputAudioTranscription: {},
+                        translationConfig: {
+                            targetLanguageCode: target,
+                            echoTargetLanguage: false,
+                        },
+                    },
+                    callbacks: createCallbacks(target, target === targets[0]),
+                });
+                context.translationVendorSessions.set(target, session);
+                context.vendorSession = context.vendorSession || session;
+            }
+            return;
+        }
+
+        const session = await ai.live.connect({
+            model: context.modelName,
+            config: {
+                responseModalities: [Modality.AUDIO, Modality.TEXT],
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
+                temperature: 0.2,
+                sessionResumption: context.sessionResumptionHandle
+                    ? { handle: context.sessionResumptionHandle, transparent: true }
+                    : { transparent: true },
+                tools: [
+                    {
+                        functionDeclarations: getLiveFunctionDeclarations(),
+                    },
+                ],
             },
+            callbacks: createCallbacks(context.translationTargetLanguage, true),
         });
 
         context.vendorSession = session;
     } catch (error) {
-        context.vendorSession = null;
+        closeVendorSessions(context);
         context.vendorState = "reconnecting";
         if (!context.reconnectCycleStartedAt) {
             context.reconnectCycleStartedAt = Date.now();
@@ -943,11 +975,20 @@ async function ensureRelayContext(connectionState: RelayConnectionState): Promis
         : connectionState.sessionId;
     const existing = RELAY_CONTEXTS.get(contextKey);
     if (existing) {
+        const languagesChanged = existing.agentLanguage !== runtimeConfig.agentLanguage
+            || existing.clientLanguage !== runtimeConfig.clientLanguage;
         existing.relaySessionToken = connectionState.relaySessionToken;
         existing.role = connectionState.role;
-        existing.translationTargetLanguage = connectionState.role === "client"
-            ? existing.agentLanguage
-            : existing.clientLanguage;
+        existing.modelName = runtimeConfig.modelName;
+        existing.mode = runtimeConfig.mode;
+        existing.sessionKind = runtimeConfig.sessionKind;
+        existing.agentLanguage = runtimeConfig.agentLanguage;
+        existing.clientLanguage = runtimeConfig.clientLanguage;
+        existing.translationTargetLanguage = runtimeConfig.translationTargetLanguage;
+        if (languagesChanged) {
+            closeVendorSessions(existing);
+            existing.vendorState = "idle";
+        }
         return existing;
     }
 
@@ -965,6 +1006,7 @@ async function ensureRelayContext(connectionState: RelayConnectionState): Promis
         translationTargetLanguage: runtimeConfig.translationTargetLanguage,
         sockets: new Set(),
         vendorSession: null,
+        translationVendorSessions: new Map(),
         vendorState: "idle",
         reconnectAttempts: 0,
         reconnectTimer: null,
@@ -1005,7 +1047,8 @@ function maybeSendTranscriptToVendor(context: RelayContext, payload: Record<stri
 }
 
 function maybeSendRealtimeAudioToVendor(context: RelayContext, payload: Record<string, unknown>) {
-    if (!context.vendorSession) return;
+    const sessions = activeVendorSessions(context);
+    if (sessions.length === 0) return;
 
     const eventType = asString(payload.eventType);
     if (eventType !== "realtime_audio" && eventType !== "audio_input") return;
@@ -1015,10 +1058,12 @@ function maybeSendRealtimeAudioToVendor(context: RelayContext, payload: Record<s
     const audioStreamEnd = payload.audioStreamEnd === true;
 
     try {
-        context.vendorSession.sendRealtimeInput({
-            ...(base64 ? { audio: { mimeType, data: base64 } } : {}),
-            ...(audioStreamEnd ? { audioStreamEnd: true } : {}),
-        } as any);
+        for (const session of sessions) {
+            session.sendRealtimeInput({
+                ...(base64 ? { audio: { mimeType, data: base64 } } : {}),
+                ...(audioStreamEnd ? { audioStreamEnd: true } : {}),
+            } as any);
+        }
     } catch (error) {
         throw new Error(asString((error as any)?.message || error) || "Failed to forward realtime audio.");
     }
@@ -1057,7 +1102,7 @@ async function bootstrap() {
             ts: new Date().toISOString(),
         });
 
-        if (context.vendorSession) {
+        if (activeVendorSessions(context).length > 0) {
             if (context.vendorState === "degraded" || context.vendorState === "connected") {
                 context.vendorState = "connected";
                 void forwardTransportStatus(context, "connected", {
@@ -1083,7 +1128,7 @@ async function bootstrap() {
                 // Internal/native audio relay events are handled in-process.
                 const eventType = asString(payload.eventType);
                 if (eventType === "realtime_audio" || eventType === "audio_input") {
-                    if (!context.vendorSession) {
+                    if (activeVendorSessions(context).length === 0) {
                         await connectVendorSession(context, context.vendorState === "reconnecting");
                     }
                     maybeSendRealtimeAudioToVendor(context, payload);
@@ -1099,7 +1144,7 @@ async function bootstrap() {
 
                 // For transcript events, we persist first (source of truth) and also send to live vendor.
                 if (eventType === "transcript") {
-                    if (!context.vendorSession) {
+                    if (activeVendorSessions(context).length === 0) {
                         await connectVendorSession(context, context.vendorState === "reconnecting");
                     }
                     maybeSendTranscriptToVendor(context, payload);
