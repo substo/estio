@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import {
     ArrowLeft,
+    Check,
+    ChevronsUpDown,
     Languages,
     Loader2,
     Mic,
@@ -11,19 +13,24 @@ import {
     Radio,
     Save,
     Send,
+    Settings2,
     Share2,
+    Shuffle,
     Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { REPLY_LANGUAGE_OPTIONS, getReplyLanguageLabel, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import {
     sortViewingTranscriptMessages,
     selectEffectiveViewingTranscriptMessages,
@@ -113,12 +120,13 @@ type SessionState = {
         id: string;
         date: string;
         property: { id: string; title: string; reference: string | null };
-        contact: { id: string; name: string | null };
+        contact: { id: string; name: string | null; preferredLang?: string | null };
         user: { id: string; name: string | null };
     } | null;
     contact: {
         id: string;
         name: string | null;
+        preferredLang?: string | null;
     } | null;
     primaryProperty: {
         id: string;
@@ -128,7 +136,7 @@ type SessionState = {
 };
 
 type ContextOptions = {
-    contacts: Array<{ id: string; label: string }>;
+    contacts: Array<{ id: string; label: string; preferredLang?: string | null }>;
     properties: Array<{ id: string; label: string }>;
     viewings: Array<{ id: string; label: string }>;
 };
@@ -173,6 +181,99 @@ function getMessageSpeakerForSessionKind(sessionKind: string) {
 function getLiveModeForSessionKind(sessionKind: string) {
     if (sessionKind === "two_way_interpreter") return "assistant_live_translate";
     return "assistant_live_tool_heavy";
+}
+
+const EXTRA_LANGUAGE_OPTIONS = [
+    { value: "nl", label: "Dutch (nl)" },
+    { value: "sv", label: "Swedish (sv)" },
+    { value: "fi", label: "Finnish (fi)" },
+    { value: "da", label: "Danish (da)" },
+    { value: "no", label: "Norwegian (no)" },
+    { value: "cs", label: "Czech (cs)" },
+    { value: "sk", label: "Slovak (sk)" },
+    { value: "sr", label: "Serbian (sr)" },
+    { value: "hr", label: "Croatian (hr)" },
+    { value: "hi", label: "Hindi (hi)" },
+    { value: "ur", label: "Urdu (ur)" },
+    { value: "fa", label: "Persian (fa)" },
+];
+
+const LANGUAGE_OPTIONS = [...REPLY_LANGUAGE_OPTIONS, ...EXTRA_LANGUAGE_OPTIONS];
+
+function languageLabel(value: string | null | undefined) {
+    const normalized = normalizeReplyLanguage(value) || "en";
+    const fromKnown = getReplyLanguageLabel(normalized);
+    if (fromKnown) return fromKnown.replace(/\s*\([^)]+\)\s*$/, "");
+    const option = LANGUAGE_OPTIONS.find((item) => item.value.toLowerCase() === normalized.toLowerCase());
+    return (option?.label || normalized).replace(/\s*\([^)]+\)\s*$/, "");
+}
+
+function languageCode(value: string | null | undefined) {
+    return normalizeReplyLanguage(value) || "en";
+}
+
+function LanguagePicker({
+    value,
+    onChange,
+    label,
+    hint,
+}: {
+    value: string;
+    onChange: (value: string) => void;
+    label: string;
+    hint?: string | null;
+}) {
+    const [open, setOpen] = useState(false);
+    const resolved = languageCode(value);
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    role="combobox"
+                    aria-expanded={open}
+                    className="h-auto min-h-[64px] w-full justify-between rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                >
+                    <span className="min-w-0">
+                        <span className="block text-[11px] font-medium uppercase text-muted-foreground">{label}</span>
+                        <span className="block truncate text-base font-semibold text-slate-950">{languageLabel(resolved)}</span>
+                        {hint && <span className="block truncate text-[11px] text-muted-foreground">{hint}</span>}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[min(340px,calc(100vw-32px))] p-0" align="start">
+                <Command>
+                    <CommandInput placeholder="Search languages..." />
+                    <CommandList className="max-h-[320px]">
+                        <CommandEmpty>No language found.</CommandEmpty>
+                        <CommandGroup>
+                            {LANGUAGE_OPTIONS.map((option) => {
+                                const optionValue = languageCode(option.value);
+                                const selected = optionValue === resolved;
+                                return (
+                                    <CommandItem
+                                        key={option.value}
+                                        value={`${option.label} ${option.value}`}
+                                        onSelect={() => {
+                                            onChange(optionValue);
+                                            setOpen(false);
+                                        }}
+                                        className="cursor-pointer"
+                                    >
+                                        <Check className={cn("mr-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")} />
+                                        <span>{languageLabel(optionValue)}</span>
+                                        <span className="ml-auto text-xs text-muted-foreground">{optionValue}</span>
+                                    </CommandItem>
+                                );
+                            })}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
 }
 
 function floatTo16BitPCM(float32Array: Float32Array) {
@@ -234,11 +335,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     );
     const [shareInfo, setShareInfo] = useState<{ url: string | null; token: string; pinCode: string; expiresAt: string } | null>(null);
     const [contextDialogOpen, setContextDialogOpen] = useState(false);
+    const [advancedOpen, setAdvancedOpen] = useState(false);
     const [selectedContactId, setSelectedContactId] = useState(initialSession.contact?.id || "");
     const [selectedPropertyId, setSelectedPropertyId] = useState(initialSession.primaryProperty?.id || "");
     const [selectedViewingId, setSelectedViewingId] = useState(initialSession.viewing?.id || "");
-    const [agentLanguage, setAgentLanguage] = useState(initialSession.agentLanguage || "en");
-    const [clientLanguage, setClientLanguage] = useState(initialSession.clientLanguage || "en");
+    const [agentLanguage, setAgentLanguage] = useState(languageCode(initialSession.agentLanguage || "en"));
+    const [clientLanguage, setClientLanguage] = useState(languageCode(initialSession.clientLanguage || initialSession.contact?.preferredLang || "en"));
     const [contextNotes, setContextNotes] = useState("");
     const recognizerRef = useRef<SpeechRecognizerLike | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -259,8 +361,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const sessionTitle = session.primaryProperty?.title || session.viewing?.property.title || "Quick Field Assist";
     const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
+    const selectedContact = quickContextOptions.contacts.find((contact) => contact.id === selectedContactId) || null;
+    const contactLanguageHint = selectedContact?.preferredLang && languageCode(selectedContact.preferredLang) === languageCode(clientLanguage)
+        ? `${languageLabel(selectedContact.preferredLang)} from contact`
+        : null;
     const sameInterpreterLanguage = isInterpreterMode
-        && String(session.agentLanguage || "en").toLowerCase() === String(session.clientLanguage || "en").toLowerCase();
+        && languageCode(agentLanguage) === languageCode(clientLanguage);
 
     useEffect(() => {
         audioPlaybackEnabledRef.current = audioPlaybackEnabled;
@@ -631,6 +737,51 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         });
     };
 
+    const persistLanguagePair = async (nextAgentLanguage: string, nextClientLanguage: string) => {
+        const normalizedAgent = languageCode(nextAgentLanguage);
+        const normalizedClient = languageCode(nextClientLanguage);
+        setAgentLanguage(normalizedAgent);
+        setClientLanguage(normalizedClient);
+        setError(null);
+
+        try {
+            const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/context`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    agentLanguage: normalizedAgent,
+                    clientLanguage: normalizedClient,
+                }),
+            });
+            const payload = await response.json().catch(() => null);
+            if (!response.ok || !payload?.success) {
+                setError(payload?.error || "Failed to update languages.");
+                return;
+            }
+            setSession((current) => ({
+                ...current,
+                agentLanguage: payload?.session?.agentLanguage || normalizedAgent,
+                clientLanguage: payload?.session?.clientLanguage || normalizedClient,
+            }));
+        } catch (languageError: any) {
+            setError(languageError?.message || "Failed to update languages.");
+        }
+    };
+
+    const selectContactForContext = (value: string) => {
+        const contactId = value === "__none" ? "" : value;
+        setSelectedContactId(contactId);
+        const contact = quickContextOptions.contacts.find((item) => item.id === contactId);
+        const preferredLanguage = languageCode(contact?.preferredLang || "");
+        if (contact?.preferredLang && preferredLanguage !== languageCode(clientLanguage)) {
+            void persistLanguagePair(agentLanguage, preferredLanguage);
+        }
+    };
+
+    const swapLanguages = () => {
+        void persistLanguagePair(clientLanguage, agentLanguage);
+    };
+
     const applyContextUpdate = async () => {
         setError(null);
         try {
@@ -663,6 +814,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             || current.contact?.name
                             || "Contact"
                         ),
+                        preferredLang: selectedContact?.preferredLang || current.contact?.preferredLang || null,
                     }
                     : current.contact,
                 primaryProperty: payload?.contextSnapshot?.primaryProperty
@@ -839,7 +991,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
             {sameInterpreterLanguage && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Interpreter is set to English to English. Use Attach Context to set the customer language before starting if you need translated speech.
+                    Interpreter is set to {languageLabel(agentLanguage)} to {languageLabel(clientLanguage)}. Choose the customer language before starting if you need translated speech.
                 </div>
             )}
 
@@ -862,114 +1014,60 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 </Card>
             )}
 
-            <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+            <div className="space-y-4">
                 <Card className="overflow-hidden">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Live Translation</CardTitle>
-                        <CardDescription>Translated text is emphasized for fast field reading.</CardDescription>
+                        <CardTitle className="text-base">Live Interpreter</CardTitle>
+                        <CardDescription>{session.transportStatus === "connected" ? "Connected" : "Choose languages, then start speaking."}</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                        <div className="flex flex-wrap gap-2">
-                            <Button
-                                type="button"
-                                variant={session.sessionKind === "quick_translate" ? "default" : "outline"}
-                                onClick={() => switchMode("quick_translate")}
-                                disabled={modePending}
-                            >
-                                Speak
-                            </Button>
-                            <Button
-                                type="button"
-                                variant={session.sessionKind === "listen_only" ? "default" : "outline"}
-                                onClick={() => switchMode("listen_only")}
-                                disabled={modePending}
-                            >
-                                Listen
-                            </Button>
-                            <Button
-                                type="button"
-                                variant={session.sessionKind === "two_way_interpreter" ? "default" : "outline"}
-                                onClick={() => switchMode("two_way_interpreter")}
-                                disabled={modePending}
-                            >
-                                <Languages className="mr-1.5 h-4 w-4" />
-                                Interpreter
-                            </Button>
-                            <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
-                                <DialogTrigger asChild>
-                                    <Button type="button" variant="outline">Attach Context</Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                    <DialogHeader>
-                                        <DialogTitle>Attach Session Context</DialogTitle>
-                                        <DialogDescription>Add contact, property, or viewing context without restarting the session.</DialogDescription>
-                                    </DialogHeader>
-                                    <div className="space-y-3">
-                                        <div className="space-y-1.5">
-                                            <Label>Contact</Label>
-                                            <Select value={selectedContactId || "__none"} onValueChange={(value) => setSelectedContactId(value === "__none" ? "" : value)}>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select contact" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="__none">No contact</SelectItem>
-                                                    {quickContextOptions.contacts.map((contact) => (
-                                                        <SelectItem key={contact.id} value={contact.id}>{contact.label}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label>Property</Label>
-                                            <Select value={selectedPropertyId || "__none"} onValueChange={(value) => setSelectedPropertyId(value === "__none" ? "" : value)}>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select property" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="__none">No property</SelectItem>
-                                                    {quickContextOptions.properties.map((property) => (
-                                                        <SelectItem key={property.id} value={property.id}>{property.label}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label>Viewing</Label>
-                                            <Select value={selectedViewingId || "__none"} onValueChange={(value) => setSelectedViewingId(value === "__none" ? "" : value)}>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select viewing" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="__none">No viewing</SelectItem>
-                                                    {quickContextOptions.viewings.map((viewing) => (
-                                                        <SelectItem key={viewing.id} value={viewing.id}>{viewing.label}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="grid gap-3 sm:grid-cols-2">
-                                            <div className="space-y-1.5">
-                                                <Label>Agent language</Label>
-                                                <Input value={agentLanguage} onChange={(event) => setAgentLanguage(event.target.value)} placeholder="en" />
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <Label>Customer language</Label>
-                                                <Input value={clientLanguage} onChange={(event) => setClientLanguage(event.target.value)} placeholder="el" />
-                                            </div>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label>Notes</Label>
-                                            <Textarea value={contextNotes} onChange={(event) => setContextNotes(event.target.value)} placeholder="Optional session notes" />
-                                        </div>
-                                        <Button type="button" onClick={applyContextUpdate} className="w-full">
-                                            Save Context
-                                        </Button>
-                                    </div>
-                                </DialogContent>
-                            </Dialog>
+                        <div className="rounded-xl border bg-white p-2">
+                            <div className="grid grid-cols-[1fr,44px,1fr] items-center gap-1">
+                                <LanguagePicker
+                                    label="You speak"
+                                    value={agentLanguage}
+                                    onChange={(value) => void persistLanguagePair(value, clientLanguage)}
+                                />
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="mx-auto h-10 w-10 rounded-full"
+                                    onClick={swapLanguages}
+                                    aria-label="Swap languages"
+                                >
+                                    <Shuffle className="h-4 w-4" />
+                                </Button>
+                                <LanguagePicker
+                                    label="Customer"
+                                    value={clientLanguage}
+                                    hint={contactLanguageHint}
+                                    onChange={(value) => void persistLanguagePair(agentLanguage, value)}
+                                />
+                            </div>
+                            {sameInterpreterLanguage && (
+                                <div className="px-3 pb-2 text-xs text-amber-700">
+                                    Both sides are set to {languageLabel(clientLanguage)}.
+                                </div>
+                            )}
                         </div>
 
-                        <ScrollArea className="h-[480px] rounded-xl border bg-slate-50 px-4 py-3">
+                        <div className="rounded-xl border bg-white p-3">
+                            <Textarea
+                                value={draft}
+                                onChange={(event) => setDraft(event.target.value)}
+                                placeholder="Type to translate, or use the mic."
+                                className="min-h-[96px] resize-none border-0 p-0 text-base shadow-none focus-visible:ring-0"
+                                onKeyDown={(event) => {
+                                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                        event.preventDefault();
+                                        void sendMessage();
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        <ScrollArea className="h-[360px] rounded-xl border bg-slate-50 px-4 py-3">
                             <div className="space-y-3">
                                 {renderedMessages.length === 0 && (
                                     <div className="rounded-xl border border-dashed bg-white px-4 py-8 text-center text-sm text-muted-foreground">
@@ -1004,38 +1102,121 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         </ScrollArea>
 
                         <div className="rounded-2xl border bg-white p-3">
-                            <div className="mb-2 flex items-center justify-between">
-                                <div>
-                                    <div className="text-sm font-medium">Capture</div>
-                                    <div className="text-[11px] text-muted-foreground">
-                                        Live audio relay first, recorded-audio transcription fallback, browser speech fallback last.
-                                    </div>
-                                </div>
-                                <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} />
-                            </div>
-                            <div className="flex gap-2">
-                                <Button type="button" size="lg" className="flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder}>
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                                     {(micStreaming || speechOn) ? "Stop Mic" : isInterpreterMode ? "Start Interpreter" : "Start Mic"}
                                 </Button>
-                                <Input
-                                    placeholder="Type a translated note or utterance"
-                                    value={draft}
-                                    onChange={(event) => setDraft(event.target.value)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                            event.preventDefault();
-                                            void sendMessage();
-                                        }
-                                    }}
-                                />
-                                <Button type="button" onClick={() => sendMessage()} disabled={!draft.trim() || sending}>
-                                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending}>
+                                    {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                    Send
                                 </Button>
+                            </div>
+                            <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                                <span>Live audio relay first, browser fallback last.</span>
+                                <label className="flex items-center gap-2">
+                                    Audio
+                                    <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} />
+                                </label>
                             </div>
                         </div>
                     </CardContent>
                 </Card>
+
+                <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                    <CollapsibleTrigger asChild>
+                        <Button type="button" variant="outline" className="w-full justify-center">
+                            <Settings2 className="mr-2 h-4 w-4" />
+                            {advancedOpen ? "Hide Advanced" : "Advanced"}
+                        </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-4 space-y-4">
+                        <Card>
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-base">Mode & Context</CardTitle>
+                                <CardDescription>Use this when you need more than fast two-way interpreting.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                <div className="flex flex-wrap gap-2">
+                                    <Button type="button" variant={session.sessionKind === "quick_translate" ? "default" : "outline"} onClick={() => switchMode("quick_translate")} disabled={modePending}>
+                                        Speak
+                                    </Button>
+                                    <Button type="button" variant={session.sessionKind === "listen_only" ? "default" : "outline"} onClick={() => switchMode("listen_only")} disabled={modePending}>
+                                        Listen
+                                    </Button>
+                                    <Button type="button" variant={session.sessionKind === "two_way_interpreter" ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending}>
+                                        <Languages className="mr-1.5 h-4 w-4" />
+                                        Interpreter
+                                    </Button>
+                                </div>
+                                <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button type="button" variant="outline" className="w-full justify-start">Attach Context</Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                        <DialogHeader>
+                                            <DialogTitle>Attach Session Context</DialogTitle>
+                                            <DialogDescription>Add contact, property, or viewing context without restarting the session.</DialogDescription>
+                                        </DialogHeader>
+                                        <div className="space-y-3">
+                                            <div className="space-y-1.5">
+                                                <Label>Contact</Label>
+                                                <Select value={selectedContactId || "__none"} onValueChange={selectContactForContext}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select contact" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__none">No contact</SelectItem>
+                                                        {quickContextOptions.contacts.map((contact) => (
+                                                            <SelectItem key={contact.id} value={contact.id}>{contact.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label>Property</Label>
+                                                <Select value={selectedPropertyId || "__none"} onValueChange={(value) => setSelectedPropertyId(value === "__none" ? "" : value)}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select property" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__none">No property</SelectItem>
+                                                        {quickContextOptions.properties.map((property) => (
+                                                            <SelectItem key={property.id} value={property.id}>{property.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label>Viewing</Label>
+                                                <Select value={selectedViewingId || "__none"} onValueChange={(value) => setSelectedViewingId(value === "__none" ? "" : value)}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select viewing" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__none">No viewing</SelectItem>
+                                                        {quickContextOptions.viewings.map((viewing) => (
+                                                            <SelectItem key={viewing.id} value={viewing.id}>{viewing.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <LanguagePicker label="Agent language" value={agentLanguage} onChange={(value) => void persistLanguagePair(value, clientLanguage)} />
+                                                <LanguagePicker label="Customer language" value={clientLanguage} hint={contactLanguageHint} onChange={(value) => void persistLanguagePair(agentLanguage, value)} />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label>Notes</Label>
+                                                <Textarea value={contextNotes} onChange={(event) => setContextNotes(event.target.value)} placeholder="Optional session notes" />
+                                            </div>
+                                            <Button type="button" onClick={applyContextUpdate} className="w-full">
+                                                Save Context
+                                            </Button>
+                                        </div>
+                                    </DialogContent>
+                                </Dialog>
+                            </CardContent>
+                        </Card>
 
                 <div className="space-y-4">
                     <Card>
@@ -1047,7 +1228,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             <div><span className="font-medium">Contact:</span> {session.contact?.name || "Not attached"}</div>
                             <div><span className="font-medium">Property:</span> {session.primaryProperty?.title || "Not attached"}</div>
                             <div><span className="font-medium">Viewing:</span> {session.viewing?.id || "Not attached"}</div>
-                            <div><span className="font-medium">Languages:</span> {session.agentLanguage || "en"} {"->"} {session.clientLanguage || "en"}</div>
+                            <div><span className="font-medium">Languages:</span> {languageLabel(session.agentLanguage || agentLanguage)} {"->"} {languageLabel(session.clientLanguage || clientLanguage)}</div>
                         </CardContent>
                     </Card>
 
@@ -1107,6 +1288,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         </CardContent>
                     </Card>
                 </div>
+                    </CollapsibleContent>
+                </Collapsible>
             </div>
         </div>
     );

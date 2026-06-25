@@ -24,7 +24,7 @@ export default async function ViewingSessionPage(
             viewing: {
                 include: {
                     property: { select: { id: true, title: true, reference: true } },
-                    contact: { select: { id: true, name: true } },
+                    contact: { select: { id: true, name: true, preferredLang: true } },
                     user: { select: { id: true, name: true } },
                 },
             },
@@ -72,6 +72,7 @@ export default async function ViewingSessionPage(
                 id: true,
                 name: true,
                 firstName: true,
+                preferredLang: true,
                 updatedAt: true,
             },
             orderBy: [{ updatedAt: "desc" }],
@@ -157,6 +158,7 @@ export default async function ViewingSessionPage(
             contact: {
                 id: session.viewing.contact?.id || "",
                 name: session.viewing.contact?.name || null,
+                preferredLang: session.viewing.contact?.preferredLang || null,
             },
             user: {
                 id: session.viewing.user?.id || "",
@@ -166,6 +168,7 @@ export default async function ViewingSessionPage(
         contact: session.contact ? {
             id: session.contact.id,
             name: session.contact.name || session.contact.firstName || "Contact",
+            preferredLang: session.contact.preferredLang || null,
         } : null,
         primaryProperty: session.primaryProperty ? {
             id: session.primaryProperty.id,
@@ -262,10 +265,11 @@ export default async function ViewingSessionPage(
                 initialMessages={initialMessages}
                 initialSummary={initialSummary}
                 quickContextOptions={{
-                    contacts: recentContacts.map((contact) => ({
-                        id: contact.id,
-                        label: contact.name || contact.firstName || "Contact",
-                    })),
+        contacts: recentContacts.map((contact) => ({
+            id: contact.id,
+            label: contact.name || contact.firstName || "Contact",
+            preferredLang: contact.preferredLang || null,
+        })),
                     properties: recentProperties.map((property) => ({
                         id: property.id,
                         label: property.reference ? `${property.title} (${property.reference})` : property.title,
