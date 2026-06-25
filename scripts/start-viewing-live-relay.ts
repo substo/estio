@@ -765,7 +765,8 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
             ? Array.from(new Set([context.agentLanguage, context.clientLanguage].filter(Boolean)))
             : [context.translationTargetLanguage];
 
-        const createCallbacks = (targetLanguage: string, persistInputTranscript: boolean) => ({
+        const createCallbacks = (targetLanguage: string, persistInputTranscript: boolean) => {
+            return {
                 onopen: () => {
                     context.vendorState = "connected";
                     context.reconnectAttempts = 0;
@@ -905,8 +906,8 @@ async function connectVendorSession(context: RelayContext, reconnecting: boolean
                         reason: "vendor_socket_closed",
                     });
                 },
-            }
-        });
+            };
+        };
 
         if (liveTranslate) {
             for (const target of targets) {
