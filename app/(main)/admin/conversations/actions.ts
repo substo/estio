@@ -301,6 +301,10 @@ type TranscriptManualAuditEventType = typeof TRANSCRIPT_MANUAL_AUDIT_EVENT_TYPES
 
 const TaskSuggestionPrioritySchema = z.enum(["low", "medium", "high"]);
 const ImproveNoteTypeSchema = z.enum(["activity", "viewing"]);
+const NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS = {
+    activity: 420,
+    viewing: 180,
+} as const;
 const ImproveNoteInputSchema = z.object({
     text: z.string().trim().min(3),
     noteType: ImproveNoteTypeSchema,
@@ -11028,17 +11032,9 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
             contact?.email
         );
 
-        let resolvedDefaultModel = "";
-        try {
-            const { resolveAiModelDefault } = await import("@/lib/ai/fetch-models");
-            resolvedDefaultModel = await resolveAiModelDefault(location.id, "general");
-        } catch (resolveError) {
-            console.warn("[improveInternalNoteText] Failed to resolve AI model default:", resolveError);
-        }
-
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
-            : (resolvedDefaultModel || getModelForTask("simple_generation"));
+            : GEMINI_DRAFT_FAST_DEFAULT;
         const startedAt = Date.now();
         const prompt = buildImproveNotePrompt({
             noteType,
@@ -11050,7 +11046,12 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
         const { text: rawOutput, usage } = await callLLMWithMetadata(
             modelId,
             prompt,
-            undefined
+            undefined,
+            {
+                temperature: 0.1,
+                maxOutputTokens: NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS[noteType],
+                thinkingBudget: 0,
+            }
         );
         const latencyMs = Date.now() - startedAt;
         const normalizedOutput = normalizeImprovedNoteOutput(rawOutput, text);

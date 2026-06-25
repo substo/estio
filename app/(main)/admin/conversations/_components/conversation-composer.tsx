@@ -323,7 +323,6 @@ export function ConversationComposer({
     } = useChatWindowActivityNote({
         conversationId: conversation?.id || "",
         contactId: conversation?.contactId,
-        selectedModel,
         onAddActivityEntry,
     });
     const {

@@ -12,7 +12,6 @@ import { CalendarIcon, Check, Pencil, Plus, Trash2, Wand2, X } from 'lucide-reac
 import { cn } from '@/lib/utils';
 import { addContactHistoryEntry, deleteManualActivityEntry, updateManualActivityEntry } from '../actions';
 import { improveInternalNoteText } from '@/app/(main)/admin/conversations/actions';
-import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
 import { toast } from 'sonner';
 import { LeadScoreBadge } from './lead-score-badge';
 import {
@@ -72,7 +71,6 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
     const [isPending, startTransition] = useTransition();
     const [isAddingNote, setIsAddingNote] = useState(false);
     const [isImprovingNote, setIsImprovingNote] = useState(false);
-    const { resolveModelForKind } = useAiModelCatalog();
 
     useEffect(() => {
         setLocalHistory(history || []);
@@ -104,7 +102,6 @@ export function HistoryTab({ history, loading, contact }: HistoryTabProps) {
                 text: sourceText,
                 noteType: 'activity',
                 contactId: contact.id,
-                modelOverride: resolveModelForKind("general") || undefined,
             });
             if (!result.success) {
                 toast.error(result.error || 'Failed to improve note');

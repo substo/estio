@@ -10,14 +10,12 @@ function getDefaultActivityNoteDate() {
 type UseChatWindowActivityNoteArgs = {
     conversationId: string;
     contactId?: string | null;
-    selectedModel: string;
     onAddActivityEntry?: (entryText: string, dateIso: string) => Promise<void>;
 };
 
 export function useChatWindowActivityNote({
     conversationId,
     contactId,
-    selectedModel,
     onAddActivityEntry,
 }: UseChatWindowActivityNoteArgs) {
     const [addNoteOpen, setAddNoteOpen] = useState(false);
@@ -74,7 +72,6 @@ export function useChatWindowActivityNote({
                 noteType: "activity",
                 conversationId,
                 contactId,
-                modelOverride: selectedModel || undefined,
             });
             if (!result.success) {
                 toast.error(result.error || "Failed to improve note");
@@ -87,7 +84,7 @@ export function useChatWindowActivityNote({
         } finally {
             setImprovingNote(false);
         }
-    }, [addNoteText, contactId, conversationId, improvingNote, selectedModel]);
+    }, [addNoteText, contactId, conversationId, improvingNote]);
 
     return {
         addNoteOpen,
