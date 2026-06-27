@@ -13,7 +13,7 @@ import {
     getConversationLanguageSourceLabel,
     resolveConversationLanguageContext,
 } from "@/lib/conversations/language-context";
-import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
+import { selectComposerFinalDraftText, type ComposerAiDraftFeedback, type GenerateDraftResult } from "./conversation-draft-generation";
 
 type GenerateDraft = (
     instruction?: string,
@@ -188,12 +188,14 @@ export function useConversationComposerAiDraft({
                 }
             );
             const text = result?.draft || null;
-            if (text) {
-                onDraftChange(text);
-            } else if (streamedBuffer) {
-                onDraftChange(streamedBuffer);
+            const selectedDraft = selectComposerFinalDraftText({
+                streamedText: streamedBuffer,
+                finalText: text,
+            });
+            if (selectedDraft) {
+                onDraftChange(selectedDraft);
             }
-            const finalDraft = String(text || streamedBuffer || "").trim();
+            const finalDraft = String(selectedDraft || "").trim();
             if (finalDraft) {
                 const feedback: ComposerAiDraftFeedback = {
                     sourceFeature: "ai_draft",

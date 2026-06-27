@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { appendAiStreamText, selectAiStreamFinalText } from '@/lib/ai/stream-text';
-import { generateDraftWithStreamingFallback, streamDraftViaApi } from './conversation-draft-generation';
+import { generateDraftWithStreamingFallback, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
 
 test('appendAiStreamText preserves exact streamed text chunks', () => {
     const chunks = ['Hi ', 'Tony', '.', '\n\n', 'New ', 'listing ', 'alert ', 'in ', 'Peyia', '.'];
@@ -17,6 +17,15 @@ test('selectAiStreamFinalText keeps streamed paragraph spacing over flattened re
 
     assert.equal(selectAiStreamFinalText(streamed, flattened), streamed);
     assert.equal(selectAiStreamFinalText('', flattened), flattened);
+});
+
+test('selectComposerFinalDraftText preserves streamed formatting when final text only collapses whitespace', () => {
+    const streamed = 'Hi Tony,\n\nThis is the first paragraph.\n\nThis is the second paragraph.';
+    const flattened = 'Hi Tony, This is the first paragraph. This is the second paragraph.';
+
+    assert.equal(selectComposerFinalDraftText({ streamedText: streamed, finalText: flattened }), streamed);
+    assert.equal(selectComposerFinalDraftText({ streamedText: streamed, finalText: 'Different final text.' }), 'Different final text.');
+    assert.equal(selectComposerFinalDraftText({ streamedText: '', finalText: flattened }), flattened);
 });
 
 test('appendAiStreamText does not insert spaces inside streamed subword chunks', () => {

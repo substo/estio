@@ -23,6 +23,27 @@ export type ComposerAiDraftFeedback = {
     metadata?: Record<string, unknown>;
 };
 
+function normalizeDraftTextForContentComparison(value: string) {
+    return String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+export function selectComposerFinalDraftText(args: {
+    streamedText?: string | null;
+    finalText?: string | null;
+}) {
+    const streamedText = String(args.streamedText || "");
+    const finalText = String(args.finalText || "");
+
+    if (!streamedText) return finalText;
+    if (!finalText) return streamedText;
+
+    return normalizeDraftTextForContentComparison(streamedText) === normalizeDraftTextForContentComparison(finalText)
+        ? streamedText
+        : finalText;
+}
+
 type DraftStreamArgs = {
     conversationId: string;
     contactId: string;
