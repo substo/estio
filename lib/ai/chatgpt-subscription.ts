@@ -228,7 +228,7 @@ export function getChatGptSubscriptionSetupGuide(): ChatGptSubscriptionSetupGuid
             "Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli before starting the Estio app process.",
             "If the runner has a valid Codex login cache, Estio can use that cache without a separate access token.",
             "For non-interactive deployments, create a Codex access token in a supported ChatGPT workspace and store it as CODEX_ACCESS_TOKEN or as the encrypted per-user token in this profile.",
-            "After setup, use Test Subscription to run a real tiny Codex request through the same runtime path.",
+            "After setup, use Sign in with ChatGPT on the OpenAI integration page to run a real tiny Codex request through the same runtime path and enable the integration.",
         ],
     };
 }

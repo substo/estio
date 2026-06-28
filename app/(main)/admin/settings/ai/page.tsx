@@ -107,7 +107,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         return <div>No location context found.</div>;
     }
 
-    const [siteConfig, aiDoc, hasGoogleAiApiKey, hasOpenAiApiKey] = await Promise.all([
+    const [siteConfig, aiDoc, hasGoogleAiApiKey] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -121,12 +121,6 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             scopeId: locationId,
             domain: SETTINGS_DOMAINS.LOCATION_AI,
             secretKey: SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY,
-        }).catch(() => false),
-        settingsService.hasSecret({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_AI,
-            secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
         }).catch(() => false),
     ]);
 
@@ -161,7 +155,6 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
-                    hasOpenAiApiKey={hasOpenAiApiKey}
                     precisionRemoveInfrastructureReady={isPrecisionRemoveInfrastructureReady()}
                     runtimeSummary={enrichedRuntimeSummary}
                 />

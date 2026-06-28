@@ -3,7 +3,6 @@
 import { useActionState, useState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import {
-    getOpenAiTextModelPickerStateAction,
     runRequirementsIntelligenceNowAction,
     updateAiSettings,
 } from "./actions";
@@ -1346,10 +1345,8 @@ function BrandVoiceResearchSection({
 
 function ApiKeysSection({
     hasGoogleAiApiKey,
-    hasOpenAiApiKey,
 }: {
     hasGoogleAiApiKey: boolean;
-    hasOpenAiApiKey: boolean;
 }) {
     return (
         <div className="space-y-4">
@@ -1381,78 +1378,10 @@ function ApiKeysSection({
                         Clear saved API key
                     </label>
                 </div>
-                <div className="grid gap-2">
-                    <Label htmlFor="openAiApiKey">OpenAI API Key</Label>
-                    <Input
-                        id="openAiApiKey"
-                        name="openAiApiKey"
-                        type="password"
-                        placeholder="sk-..."
-                    />
-                    <p className="text-sm text-muted-foreground">
-                        Used for OpenAI text generation alternatives. ChatGPT account login is not used for server API calls.
-                    </p>
-                    {hasOpenAiApiKey && (
-                        <div className="flex items-center gap-2 text-xs text-emerald-700">
-                            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                            API key is configured.
-                        </div>
-                    )}
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <input
-                            type="checkbox"
-                            name="clearOpenAiApiKey"
-                            className="h-3.5 w-3.5 rounded border-gray-300 text-red-600"
-                        />
-                        Clear saved API key
-                    </label>
-                </div>
             </div>
-        </div>
-    );
-}
-
-function OpenAiModelSection({
-    openAiModels,
-    openAiTextModel,
-    onOpenAiTextModelChange,
-}: {
-    openAiModels: AiModelOption[];
-    openAiTextModel: string;
-    onOpenAiTextModelChange: (value: string) => void;
-}) {
-    return (
-        <div className="space-y-3">
-            <div className="space-y-0.5">
-                <Label className="text-xs text-slate-500 uppercase tracking-wider">
-                    OpenAI Text Alternative
-                </Label>
-                <p className="text-[10px] text-muted-foreground">
-                    OpenAI is available for text generation alternatives only. Live and audio transcript settings remain Google-specific.
-                </p>
-            </div>
-            <div className="grid gap-2 rounded-md border border-slate-200 bg-white p-3">
-                <Label htmlFor="openAiTextModel">OpenAI text model</Label>
-                <select
-                    id="openAiTextModel"
-                    name="openAiTextModel"
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    value={openAiTextModel}
-                    onChange={(event) => onOpenAiTextModelChange(event.target.value)}
-                >
-                    {openAiModels.map((model) => (
-                        <option key={model.value} value={model.value}>
-                            {model.label}
-                        </option>
-                    ))}
-                </select>
-                <p className="text-[10px] text-muted-foreground">
-                    Model names refresh from OpenAI once per day when a key is configured, with curated fallbacks if the list cannot be reached.
-                </p>
-                <p className="text-[10px] text-muted-foreground">
-                    OpenAI does not expose live per-model token-rate pricing through the model list. Estio records token usage and can refresh official organization cost telemetry, but OpenAI per-run cost is shown as unavailable rather than estimated from Google rates.
-                </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+                OpenAI and ChatGPT subscription settings are managed from Settings &gt; Integrations &gt; OpenAI.
+            </p>
         </div>
     );
 }
@@ -1481,7 +1410,6 @@ export function AiSettingsForm({
     locationId,
     settingsVersion,
     hasGoogleAiApiKey,
-    hasOpenAiApiKey,
     precisionRemoveInfrastructureReady,
     runtimeSummary,
 }: {
@@ -1489,7 +1417,6 @@ export function AiSettingsForm({
     locationId: string;
     settingsVersion: number;
     hasGoogleAiApiKey: boolean;
-    hasOpenAiApiKey: boolean;
     precisionRemoveInfrastructureReady: boolean;
     runtimeSummary?: AiRuntimeSummary | null;
 }) {
@@ -1501,7 +1428,6 @@ export function AiSettingsForm({
     const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
 
     const [availableModels, setAvailableModels] = useState<AiModelOption[]>([]);
-    const [openAiModels, setOpenAiModels] = useState<AiModelOption[]>([]);
     const [runningRequirementsScan, setRunningRequirementsScan] = useState(false);
     const [runningVerifyContactsNow, setRunningVerifyContactsNow] = useState(false);
     const [runtimeSummaryState, setRuntimeSummaryState] = useState<AiRuntimeSummary | null>(runtimeSummary || null);
@@ -1538,9 +1464,6 @@ export function AiSettingsForm({
     const [contactProfileVerificationModel, setContactProfileVerificationModel] = useState(
         String(initialData?.contactProfileVerification?.model || initialData?.googleAiModelExtraction || initialData?.googleAiModel || GEMINI_FLASH_LATEST_ALIAS)
     );
-    const [openAiTextModel, setOpenAiTextModel] = useState(
-        String(initialData?.openAiTextModel || "")
-    );
     const hasUserSelectedGeneralModelRef = useRef(false);
     const hasUserSelectedExtractionModelRef = useRef(false);
     const hasUserSelectedDesignModelRef = useRef(false);
@@ -1553,13 +1476,6 @@ export function AiSettingsForm({
     const hasConfiguredTranscriptionModel = hasInitialModelValue(initialData, "googleAiModelTranscription");
     const hasConfiguredTranslationModel = hasInitialModelValue(initialData, "googleAiModelTranslation");
     const modelOptions = availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS;
-    const openAiModelOptions = (() => {
-        const base = openAiModels.length > 0
-            ? openAiModels
-            : [{ value: openAiTextModel || "openai:gpt-4o-mini", label: "OpenAI GPT-4o Mini" }];
-        if (!openAiTextModel || base.some((model) => model.value === openAiTextModel)) return base;
-        return [{ value: openAiTextModel, label: openAiTextModel.replace(/^openai:/, "OpenAI ") }, ...base];
-    })();
 
     function updateContactClassificationQueue(status: ContactClassificationQueueStatus | null | undefined) {
         setContactClassificationQueue(status || null);
@@ -1671,22 +1587,6 @@ export function AiSettingsForm({
         });
         return () => { mounted = false; };
     }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel, hasConfiguredTranslationModel]);
-
-    useEffect(() => {
-        let mounted = true;
-        getOpenAiTextModelPickerStateAction(locationId)
-            .then(({ models, defaultModel }) => {
-                if (!mounted) return;
-                if (Array.isArray(models) && models.length > 0) {
-                    setOpenAiModels(models);
-                }
-                if (!openAiTextModel && defaultModel) {
-                    setOpenAiTextModel(defaultModel);
-                }
-            })
-            .catch(() => null);
-        return () => { mounted = false; };
-    }, [locationId, openAiTextModel]);
 
     useEffect(() => {
         const activeRun = contactClassificationRun && ["queued", "running", "paused"].includes(contactClassificationRun.status);
@@ -1812,15 +1712,9 @@ export function AiSettingsForm({
                 <input type="hidden" name="locationId" value={locationId} />
                 <input type="hidden" name="settingsVersion" value={String(settingsVersion)} />
 
-                <ApiKeysSection hasGoogleAiApiKey={hasGoogleAiApiKey} hasOpenAiApiKey={hasOpenAiApiKey} />
+                <input type="hidden" name="openAiTextModel" value={String(initialData?.openAiTextModel || "")} />
 
-                <Separator />
-
-                <OpenAiModelSection
-                    openAiModels={openAiModelOptions}
-                    openAiTextModel={openAiTextModel || openAiModelOptions[0]?.value || "openai:gpt-4o-mini"}
-                    onOpenAiTextModelChange={setOpenAiTextModel}
-                />
+                <ApiKeysSection hasGoogleAiApiKey={hasGoogleAiApiKey} />
 
                 <Separator />
 

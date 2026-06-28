@@ -13,18 +13,13 @@ For canonical AI automation runtime architecture (policies, decisions, jobs, sug
 
 **Path:** `/admin/settings/ai`
 
-The settings page now writes through `SettingsService`:
+The AI settings page manages Google Gemini model/runtime settings, brand voice, transcription, automation, and skill runtime configuration. It now keeps OpenAI-specific connection controls out of this page.
+
+Google AI settings write through `SettingsService`:
 
 - Non-secret model configuration is stored in `settings_documents` under domain `location.ai`.
 - API keys are stored in `settings_secrets` and encrypted at rest:
   - Google: `google_ai_api_key`
-  - OpenAI: `openai_api_key`
-- OpenAI keys can be stored at two scopes:
-  - Location/admin key: `LOCATION` / `location.ai` / `openai_api_key`
-  - Personal user key: `USER` / `user.integrations.openai` / `openai_api_key`
-- Personal OpenAI preferences are stored in `USER` / `user.integrations.openai` with `enabled` and `defaultTextModel`.
-- Personal ChatGPT subscription preferences are stored in `USER` / `user.integrations.chatgpt_subscription` with `enabled` and `defaultTextModel`.
-- ChatGPT subscription access tokens are stored as encrypted user secrets under `chatgpt_codex_access_token`.
 - During migration windows, legacy `SiteConfig` dual-write may still be enabled via feature flags.
 
 For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
@@ -39,6 +34,26 @@ The AI settings page includes a **Skill Runtime Hub** section that manages:
 
 UI source:
 - `app/(main)/admin/settings/ai/skill-runtime-settings.tsx`
+
+## OpenAI Integration Page
+
+**Path:** `/admin/settings/integrations/openai`
+
+This is the canonical UI for all OpenAI-related setup:
+
+- ChatGPT subscription provider sign-in/connect flow.
+- Optional per-user ChatGPT/Codex access token.
+- Personal OpenAI Platform API key and personal default text model.
+- Location/admin OpenAI Platform API key and organization default text model.
+
+Underlying storage remains:
+
+- Location/admin OpenAI API key: `LOCATION` / `location.ai` / `openai_api_key`
+- Location/admin OpenAI model: `LOCATION` / `location.ai` / `openAiTextModel`
+- Personal OpenAI API key: `USER` / `user.integrations.openai` / `openai_api_key`
+- Personal OpenAI preferences: `USER` / `user.integrations.openai` with `enabled` and `defaultTextModel`
+- Personal ChatGPT subscription preferences: `USER` / `user.integrations.chatgpt_subscription` with `enabled` and `defaultTextModel`
+- ChatGPT subscription access token: `USER` / `user.integrations.chatgpt_subscription` / `chatgpt_codex_access_token`
 
 ## Core Fields in `location.ai`
 
@@ -67,7 +82,7 @@ At runtime, OpenAI text calls resolve credentials in this order:
 2. Location/admin OpenAI key.
 3. `OPENAI_API_KEY` environment variable.
 
-Personal keys and the user’s preferred OpenAI text model are configured from `/admin/user-profile`. Location/admin keys and the location OpenAI text model are configured from `/admin/settings/ai`.
+Personal keys, the user’s preferred OpenAI text model, location/admin keys, the location OpenAI text model, and ChatGPT subscription settings are configured from `/admin/settings/integrations/openai`.
 
 OpenAI server API calls use bearer API keys or short-lived access tokens; consumer ChatGPT login is not an API authentication mechanism for this app. See OpenAI’s API authentication and model-list references:
 - https://developers.openai.com/api/reference/overview#authentication
@@ -81,7 +96,9 @@ The ChatGPT subscription provider uses model IDs with the `chatgpt_subscription:
 - `chatgpt_subscription:gpt-5.4`
 - `chatgpt_subscription:gpt-5.4-mini`
 
-This provider follows the OpenClaw-style pattern: authenticated Codex/ChatGPT subscription access drives text-agent turns through a Codex CLI transport instead of OpenAI Platform API keys. The current Estio transport is deliberately opt-in:
+This provider follows the OpenClaw-style pattern: authenticated Codex/ChatGPT subscription access drives text-agent turns through a Codex CLI transport instead of OpenAI Platform API keys. OpenAI documents ChatGPT sign-in for Codex CLI, app, and IDE sessions; it does not document a general hosted OAuth callback that third-party web apps can use as a drop-in replacement for the OpenAI Platform API.
+
+The current Estio transport is deliberately opt-in:
 
 - `CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli`
 - optional `CODEX_CLI_PATH=/absolute/path/to/codex`
@@ -89,17 +106,11 @@ This provider follows the OpenClaw-style pattern: authenticated Codex/ChatGPT su
 - optional `CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS=120000`
 - optional deployment fallback `CODEX_ACCESS_TOKEN`
 
-Per-user tokens can be configured from `/admin/user-profile` as a **Codex Access Token**, but they are optional when the trusted runner has an authenticated Codex login cache from `codex login --device-auth`. This is appropriate only for trusted servers/runners. Do not use browser session cookies, scraped ChatGPT tokens, or shared personal credentials in a multi-user deployment.
+Per-user tokens can be configured from `/admin/settings/integrations/openai`, but they are optional when the trusted runner has an authenticated Codex login cache from `codex login --device-auth`. Codex access tokens are supported for ChatGPT Business and Enterprise workspaces and are intended for trusted automation. This is appropriate only for trusted servers/runners. Do not use browser session cookies, scraped ChatGPT tokens, or shared personal credentials in a multi-user deployment.
 
 The Codex transport is locked down with `codex exec --ephemeral --ignore-rules --skip-git-repo-check --sandbox read-only --ask-for-approval never` and writes the final answer through `--output-last-message`. It is slower and less deterministic than the API-key path, so it should be limited to human-triggered text drafting/selection workflows. Live transcript, realtime voice, audio transcription, and image generation remain outside this provider.
 
-The user profile page shows whether the server transport flag is enabled and includes a **Test Subscription** action. That action runs the same provider path with a tiny prompt, using the saved per-user token, deployment `CODEX_ACCESS_TOKEN`, or the trusted runner's Codex device-auth cache, so it validates real Codex CLI readiness instead of only checking that a token exists.
-
-The profile page also shows the deployment-specific setup commands:
-
-- `codex login --device-auth` for interactive device-code login on the trusted runner.
-- `codex login status` to confirm the runner has ChatGPT/Codex auth.
-- `printf '%s' "$CODEX_ACCESS_TOKEN" | codex login --with-access-token` for non-interactive Codex access-token login.
+The OpenAI integration page shows whether the server transport flag is enabled and includes a **Sign in with ChatGPT** / reconnect action. That action runs the same provider path with a tiny prompt, using the saved per-user token, deployment `CODEX_ACCESS_TOKEN`, or the trusted runner's Codex device-auth cache, so it validates real Codex CLI readiness instead of only checking that a token exists. When validation succeeds, Estio enables the ChatGPT subscription model preference for the current user.
 
 This is intentionally a guided setup rather than a hosted OAuth callback. Codex device-auth produces local Codex credentials for the trusted runner, and the Estio transport can use that cache directly when no explicit token is configured. Estio should not capture browser session cookies or attempt to impersonate a normal OpenAI API OAuth provider.
 
