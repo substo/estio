@@ -2,12 +2,9 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
-
-const execFileAsync = promisify(execFile);
 
 export const CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX = "chatgpt_subscription:";
 export const CHATGPT_SUBSCRIPTION_DEFAULT_MODEL = "gpt-5.4-mini";
@@ -73,7 +70,11 @@ export type ChatGptSubscriptionSetupGuide = {
     notes: string[];
 };
 
-type ExecFileRunner = typeof execFileAsync;
+type CodexCliRunner = (
+    command: string,
+    args: string[],
+    options: Parameters<typeof execFile>[2]
+) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
 
 type CodexCliCommand = {
     command: string;
@@ -81,6 +82,21 @@ type CodexCliCommand = {
     env: NodeJS.ProcessEnv;
     authMode: "access_token" | "codex_login_cache";
 };
+
+function runCodexCli(command: string, args: string[], options: Parameters<typeof execFile>[2]): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
+    return new Promise((resolve, reject) => {
+        const child = execFile(command, args, options, (error, stdout, stderr) => {
+            if (error) {
+                reject(Object.assign(error, { stdout, stderr }));
+                return;
+            }
+
+            resolve({ stdout, stderr });
+        });
+
+        child.stdin?.end();
+    });
+}
 
 export function isChatGptSubscriptionModelId(modelId: string): boolean {
     return String(modelId || "").trim().startsWith(CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX);
@@ -237,7 +253,7 @@ export async function callChatGptSubscriptionWithMetadata(
     modelId: string,
     systemPrompt: string,
     userContent?: string,
-    options: { accessToken?: string | null; runner?: ExecFileRunner } = {}
+    options: { accessToken?: string | null; runner?: CodexCliRunner } = {}
 ): Promise<ChatGptSubscriptionResult> {
     if (!isChatGptSubscriptionTransportEnabled()) {
         throw new Error("ChatGPT subscription transport is disabled. Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli on a trusted server with Codex CLI installed.");
@@ -255,7 +271,7 @@ export async function callChatGptSubscriptionWithMetadata(
     });
 
     try {
-        await (options.runner || execFileAsync)(command.command, command.args, {
+        await (options.runner || runCodexCli)(command.command, command.args, {
             env: command.env,
             maxBuffer: 1024 * 1024 * 4,
             timeout: Number(process.env.CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS || 120000),
@@ -290,7 +306,7 @@ export async function callChatGptSubscriptionWithMetadata(
 export async function validateChatGptSubscriptionConnection(options: {
     modelId?: string | null;
     accessToken?: string | null;
-    runner?: ExecFileRunner;
+    runner?: CodexCliRunner;
 } = {}): Promise<ChatGptSubscriptionConnectionStatus> {
     const model = resolveChatGptSubscriptionDefaultModel(options.modelId);
     const startedAt = Date.now();
