@@ -1,8 +1,10 @@
 # AI Configuration & Integration
 
-**Last Updated:** 2026-04-04
+**Last Updated:** 2026-06-28
 
-Estio uses Google Gemini models across conversation drafting, selection actions, content generation, and import flows. This document reflects the current model-resolution logic used in production.
+Estio uses Google Gemini models across conversation drafting, selection actions, content generation, import flows, and audio transcription. OpenAI can be configured as a text-generation alternative, but live/audio transcript paths remain Google-specific until a dedicated quality and latency evaluation proves otherwise.
+
+Estio also has an experimental ChatGPT subscription text provider based on the OpenClaw/Codex auth design. It is intentionally separate from the OpenAI Platform API-key provider because ChatGPT subscription auth is not a general `/v1/responses` API credential.
 
 For canonical AI automation runtime architecture (policies, decisions, jobs, suggested response queue), use:
 - `documentation/ai-skills-runtime-implementation.md`
@@ -14,7 +16,15 @@ For canonical AI automation runtime architecture (policies, decisions, jobs, sug
 The settings page now writes through `SettingsService`:
 
 - Non-secret model configuration is stored in `settings_documents` under domain `location.ai`.
-- The API key is stored in `settings_secrets` under secret key `google_ai_api_key` (encrypted at rest).
+- API keys are stored in `settings_secrets` and encrypted at rest:
+  - Google: `google_ai_api_key`
+  - OpenAI: `openai_api_key`
+- OpenAI keys can be stored at two scopes:
+  - Location/admin key: `LOCATION` / `location.ai` / `openai_api_key`
+  - Personal user key: `USER` / `user.integrations.openai` / `openai_api_key`
+- Personal OpenAI preferences are stored in `USER` / `user.integrations.openai` with `enabled` and `defaultTextModel`.
+- Personal ChatGPT subscription preferences are stored in `USER` / `user.integrations.chatgpt_subscription` with `enabled` and `defaultTextModel`.
+- ChatGPT subscription access tokens are stored as encrypted user secrets under `chatgpt_codex_access_token`.
 - During migration windows, legacy `SiteConfig` dual-write may still be enabled via feature flags.
 
 For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
@@ -36,6 +46,7 @@ UI source:
 - `googleAiModel` (general / draft default)
 - `googleAiModelExtraction` (stage 1 extraction)
 - `googleAiModelDesign` (stage 2 design)
+- `openAiTextModel` (OpenAI text-generation alternative; stored with `openai:` prefix)
 - `precisionRemoveEnabled` (per-location toggle for masked property photo removal)
 - `brandVoice`
 - `outreachConfig` (`enabled`, `visionIdPrompt`, `icebreakerPrompt`, `qualifierPrompt`)
@@ -47,6 +58,71 @@ Model options come from two sources:
 
 1. Dynamic fetch from Google Models API (`v1beta/models`, paginated).
 2. Curated fallback/alias list in `lib/ai/models.ts`.
+
+OpenAI text model options are fetched separately from OpenAI’s `/v1/models` endpoint using the location OpenAI API key. The app caches that list for 24 hours via `unstable_cache` and filters it to text-generation candidates. If the API key is missing or the endpoint fails, the UI falls back to a small curated OpenAI text-model list so saved settings remain editable.
+
+At runtime, OpenAI text calls resolve credentials in this order:
+
+1. Current authenticated user’s enabled personal OpenAI key.
+2. Location/admin OpenAI key.
+3. `OPENAI_API_KEY` environment variable.
+
+Personal keys and the user’s preferred OpenAI text model are configured from `/admin/user-profile`. Location/admin keys and the location OpenAI text model are configured from `/admin/settings/ai`.
+
+OpenAI server API calls use bearer API keys or short-lived access tokens; consumer ChatGPT login is not an API authentication mechanism for this app. See OpenAI’s API authentication and model-list references:
+- https://developers.openai.com/api/reference/overview#authentication
+- https://developers.openai.com/api/reference/resources/models/methods/list
+
+### Experimental ChatGPT Subscription Provider
+
+The ChatGPT subscription provider uses model IDs with the `chatgpt_subscription:` prefix, for example:
+
+- `chatgpt_subscription:gpt-5.5`
+- `chatgpt_subscription:gpt-5.4`
+- `chatgpt_subscription:gpt-5.4-mini`
+
+This provider follows the OpenClaw-style pattern: authenticated Codex/ChatGPT subscription access drives text-agent turns through a Codex CLI transport instead of OpenAI Platform API keys. The current Estio transport is deliberately opt-in:
+
+- `CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli`
+- optional `CODEX_CLI_PATH=/absolute/path/to/codex`
+- optional `CHATGPT_SUBSCRIPTION_CODEX_CWD=/private/tmp`
+- optional `CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS=120000`
+- optional deployment fallback `CODEX_ACCESS_TOKEN`
+
+Per-user tokens can be configured from `/admin/user-profile` as a **Codex Access Token**, but they are optional when the trusted runner has an authenticated Codex login cache from `codex login --device-auth`. This is appropriate only for trusted servers/runners. Do not use browser session cookies, scraped ChatGPT tokens, or shared personal credentials in a multi-user deployment.
+
+The Codex transport is locked down with `codex exec --ephemeral --ignore-rules --skip-git-repo-check --sandbox read-only --ask-for-approval never` and writes the final answer through `--output-last-message`. It is slower and less deterministic than the API-key path, so it should be limited to human-triggered text drafting/selection workflows. Live transcript, realtime voice, audio transcription, and image generation remain outside this provider.
+
+The user profile page shows whether the server transport flag is enabled and includes a **Test Subscription** action. That action runs the same provider path with a tiny prompt, using the saved per-user token, deployment `CODEX_ACCESS_TOKEN`, or the trusted runner's Codex device-auth cache, so it validates real Codex CLI readiness instead of only checking that a token exists.
+
+The profile page also shows the deployment-specific setup commands:
+
+- `codex login --device-auth` for interactive device-code login on the trusted runner.
+- `codex login status` to confirm the runner has ChatGPT/Codex auth.
+- `printf '%s' "$CODEX_ACCESS_TOKEN" | codex login --with-access-token` for non-interactive Codex access-token login.
+
+This is intentionally a guided setup rather than a hosted OAuth callback. Codex device-auth produces local Codex credentials for the trusted runner, and the Estio transport can use that cache directly when no explicit token is configured. Estio should not capture browser session cookies or attempt to impersonate a normal OpenAI API OAuth provider.
+
+Because Codex subscription usage does not expose normal per-call token pricing, runtime cost metadata uses `provider_pricing_unavailable` with estimated token counts derived from prompt/output text length.
+
+OpenAI pricing is not returned by `/v1/models`; do not treat model discovery as pricing discovery. The app can refresh official OpenAI organization cost telemetry from the Admin Costs API when `OPENAI_ADMIN_API_KEY` or `OPENAI_API_KEY` has the required organization access:
+
+- https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage
+
+That cost endpoint returns historical billed cost buckets, not a per-model token-rate table. Runtime OpenAI cost estimates therefore use `provider_pricing_unavailable`: token usage is recorded, but the numeric cost remains `0` with a low-confidence note rather than pretending OpenAI usage is free or applying Google/Gemini rates to OpenAI calls.
+
+### Provider Catalog Refresh
+
+OpenAI model discovery is cached for 24 hours. The cron route below invalidates and warms the OpenAI text-model cache for every location and enabled user with an encrypted OpenAI key. It also attempts to refresh OpenAI organization cost telemetry for the last day when a deployment-level OpenAI key is configured:
+
+- `GET /api/cron/ai-provider-catalog`
+
+This route intentionally does **not** scrape or invent OpenAI token-rate pricing. Its response includes `pricingRefresh` metadata showing whether official OpenAI cost telemetry was refreshed and the source URL used.
+
+Deployment scheduling:
+
+- Vercel: `vercel.json` runs `/api/cron/ai-provider-catalog` daily at `17 3 * * *`.
+- Server crontab: `scripts/install-cron.sh` installs `scripts/cron-ai-provider-catalog.sh` on the same daily cadence.
 
 Important aliases/constants:
 

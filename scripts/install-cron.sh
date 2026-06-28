@@ -20,6 +20,7 @@ chmod +x "${SCRIPT_DIR}/cron-ai-automations.sh"
 chmod +x "${SCRIPT_DIR}/cron-task-reminders.sh"
 chmod +x "${SCRIPT_DIR}/cron-whatsapp-outbound.sh"
 chmod +x "${SCRIPT_DIR}/cron-provider-outbox.sh"
+chmod +x "${SCRIPT_DIR}/cron-ai-provider-catalog.sh"
 
 # Check if cron entry already exists (Gmail)
 CRON_ENTRY_GMAIL="*/15 * * * * ${SCRIPT_DIR}/cron-gmail-sync.sh"
@@ -28,6 +29,7 @@ CRON_ENTRY_AI_RUNTIME="*/10 * * * * ${SCRIPT_DIR}/cron-ai-automations.sh"
 CRON_ENTRY_TASK_REMINDERS="*/1 * * * * ${SCRIPT_DIR}/cron-task-reminders.sh"
 CRON_ENTRY_WHATSAPP_OUTBOUND="*/1 * * * * ${SCRIPT_DIR}/cron-whatsapp-outbound.sh"
 CRON_ENTRY_PROVIDER_OUTBOX="*/1 * * * * ${SCRIPT_DIR}/cron-provider-outbox.sh"
+CRON_ENTRY_AI_PROVIDER_CATALOG="17 3 * * * ${SCRIPT_DIR}/cron-ai-provider-catalog.sh"
 
 EXISTING_GMAIL=$(crontab -l 2>/dev/null | grep -F "cron-gmail-sync.sh" || true)
 EXISTING_OUTLOOK=$(crontab -l 2>/dev/null | grep -F "cron-outlook-sync.sh" || true)
@@ -35,6 +37,7 @@ EXISTING_AI_RUNTIME=$(crontab -l 2>/dev/null | grep -F "cron-ai-automations.sh" 
 EXISTING_TASK_REMINDERS=$(crontab -l 2>/dev/null | grep -F "cron-task-reminders.sh" || true)
 EXISTING_WHATSAPP_OUTBOUND=$(crontab -l 2>/dev/null | grep -F "cron-whatsapp-outbound.sh" || true)
 EXISTING_PROVIDER_OUTBOX=$(crontab -l 2>/dev/null | grep -F "cron-provider-outbox.sh" || true)
+EXISTING_AI_PROVIDER_CATALOG=$(crontab -l 2>/dev/null | grep -F "cron-ai-provider-catalog.sh" || true)
 
 # Update Gmail Entry
 if [ -n "${EXISTING_GMAIL}" ]; then
@@ -85,10 +88,18 @@ else
     (crontab -l 2>/dev/null; echo "${CRON_ENTRY_PROVIDER_OUTBOX}") | crontab -
 fi
 
+# Update AI Provider Catalog Refresh Entry
+if [ -n "${EXISTING_AI_PROVIDER_CATALOG}" ]; then
+    echo "⚠️  AI Provider Catalog Cron entry already exists. Updating..."
+    (crontab -l 2>/dev/null | grep -v "cron-ai-provider-catalog.sh"; echo "${CRON_ENTRY_AI_PROVIDER_CATALOG}") | crontab -
+else
+    (crontab -l 2>/dev/null; echo "${CRON_ENTRY_AI_PROVIDER_CATALOG}") | crontab -
+fi
+
 echo "✅ Cron jobs installed!"
 echo ""
 echo "Current crontab:"
-crontab -l | grep -E "(gmail|outlook|ai-runtime|ai-automations|task-reminders|whatsapp-outbound|provider-outbox|estio)" || echo "(no estio-related entries)"
+crontab -l | grep -E "(gmail|outlook|ai-runtime|ai-automations|task-reminders|whatsapp-outbound|provider-outbox|ai-provider-catalog|estio)" || echo "(no estio-related entries)"
 echo ""
 echo "📋 Manual verification:"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/gmail-sync-cron.log"
@@ -97,11 +108,13 @@ echo "   - Check logs: tail -f ${APP_DIR}/logs/ai-runtime-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/task-reminders-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/whatsapp-outbound-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/provider-outbox-cron.log"
+echo "   - Check logs: tail -f ${APP_DIR}/logs/ai-provider-catalog-cron.log"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-gmail-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-outlook-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-ai-automations.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-task-reminders.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-whatsapp-outbound.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-provider-outbox.sh"
+echo "   - Test manually: ${SCRIPT_DIR}/cron-ai-provider-catalog.sh"
 echo ""
 echo "🔐 Don't forget to set CRON_SECRET in your environment!"

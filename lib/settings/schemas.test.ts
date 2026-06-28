@@ -85,3 +85,30 @@ test("location AI settings schema accepts running contact classification progres
     assert.equal(payload.contactProfileVerification.lastRun.finishedAt, null);
     assert.equal(payload.contactProfileVerification.lastRun.currentContactId, "contact_123");
 });
+
+test("user OpenAI settings schema defaults disabled personal integration", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS, {}) as any;
+
+    assert.equal(payload.enabled, false);
+    assert.equal(payload.defaultTextModel, null);
+});
+
+test("user OpenAI settings schema trims preferred text model", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS, {
+        enabled: true,
+        defaultTextModel: "  openai:gpt-4o-mini  ",
+    }) as any;
+
+    assert.equal(payload.enabled, true);
+    assert.equal(payload.defaultTextModel, "openai:gpt-4o-mini");
+});
+
+test("user ChatGPT subscription settings schema trims preferred text model", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS, {
+        enabled: true,
+        defaultTextModel: "  chatgpt_subscription:gpt-5.4-mini  ",
+    }) as any;
+
+    assert.equal(payload.enabled, true);
+    assert.equal(payload.defaultTextModel, "chatgpt_subscription:gpt-5.4-mini");
+});

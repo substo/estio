@@ -327,7 +327,53 @@ export async function resolveAiModelDefault(
 }
 
 export async function getAiDraftModelPickerState(locationId?: string): Promise<{ models: ModelOption[]; defaultModel: string }> {
-    return getAiModelPickerState(locationId, "draft");
+    const googleState = await getAiModelPickerState(locationId, "draft");
+    const { getOpenAiTextModelPickerState, hasOpenAiApiKey } = await import("@/lib/ai/openai-models");
+    const { getChatGptSubscriptionModelPickerState, hasChatGptSubscriptionAuth } = await import("@/lib/ai/chatgpt-subscription");
+    const [openAiAvailable, chatGptSubscriptionAvailable] = await Promise.all([
+        hasOpenAiApiKey(locationId),
+        hasChatGptSubscriptionAuth(),
+    ]);
+    if (!openAiAvailable && !chatGptSubscriptionAvailable) {
+        return googleState;
+    }
+
+    const [openAiState, chatGptSubscriptionState] = await Promise.all([
+        openAiAvailable
+            ? getOpenAiTextModelPickerState(locationId)
+            : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
+        chatGptSubscriptionAvailable
+            ? getChatGptSubscriptionModelPickerState()
+            : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
+    ]);
+
+    return buildAiDraftModelPickerStateResult(
+        googleState.models,
+        [...openAiState.models, ...chatGptSubscriptionState.models],
+        googleState.defaultModel,
+        chatGptSubscriptionState.defaultModel || openAiState.defaultModel
+    );
+}
+
+export function buildAiDraftModelPickerStateResult(
+    googleModels: ModelOption[],
+    openAiModels: ModelOption[],
+    googleDefaultModel: string,
+    openAiDefaultModel?: string | null
+): { models: ModelOption[]; defaultModel: string } {
+    const openAiDefault = String(openAiDefaultModel || "").trim();
+    const mergedModels = dedupeModelOptions([
+        ...googleModels,
+        ...openAiModels,
+    ]);
+    const defaultModel = openAiDefault && mergedModels.some((model) => model.value === openAiDefault)
+        ? openAiDefault
+        : googleDefaultModel;
+
+    return {
+        models: mergedModels,
+        defaultModel,
+    };
 }
 
 export async function getAiModelPickerState(
@@ -344,12 +390,62 @@ export async function getAiModelPickerState(
     };
 }
 
+export function buildAiModelPickerDefaultsResult(
+    pickerModels: ModelOption[],
+    openAiModels: ModelOption[],
+    defaults: Record<AiModelDefaultKind, string>,
+    options: { textDefaultModel?: string | null } = {}
+): {
+    models: ModelOption[];
+    defaults: Record<AiModelDefaultKind, string>;
+} {
+    const textDefaultModel = String(options.textDefaultModel || "").trim();
+    const textDefaultAvailable = !!textDefaultModel
+        && [...pickerModels, ...openAiModels].some((model) => model.value === textDefaultModel);
+    const resolvedDefaults = textDefaultAvailable
+        ? {
+            ...defaults,
+            general: textDefaultModel,
+            draft: textDefaultModel,
+        }
+        : defaults;
+
+    const models = dedupeModelOptions([
+        ...pickerModels,
+        ...openAiModels,
+        { value: resolvedDefaults.general, label: mapCuratedLabel(resolvedDefaults.general) || resolvedDefaults.general },
+        { value: resolvedDefaults.draft, label: mapCuratedLabel(resolvedDefaults.draft) || resolvedDefaults.draft },
+        { value: resolvedDefaults.extraction, label: mapCuratedLabel(resolvedDefaults.extraction) || resolvedDefaults.extraction },
+        { value: resolvedDefaults.design, label: mapCuratedLabel(resolvedDefaults.design) || resolvedDefaults.design },
+        { value: resolvedDefaults.translation, label: mapCuratedLabel(resolvedDefaults.translation) || resolvedDefaults.translation },
+    ]);
+
+    return {
+        models: sortModels(models),
+        defaults: resolvedDefaults,
+    };
+}
+
 export async function getAiModelPickerDefaults(locationId?: string): Promise<{
     models: ModelOption[];
     defaults: Record<AiModelDefaultKind, string>;
 }> {
     const allModels = await getAvailableModels(locationId);
     const pickerModels = sortModels(allModels.filter(isDraftPickerModel));
+    const { getOpenAiTextModelPickerState, hasOpenAiApiKey } = await import("@/lib/ai/openai-models");
+    const { getChatGptSubscriptionModelPickerState, hasChatGptSubscriptionAuth } = await import("@/lib/ai/chatgpt-subscription");
+    const [openAiAvailable, chatGptSubscriptionAvailable] = await Promise.all([
+        hasOpenAiApiKey(locationId),
+        hasChatGptSubscriptionAuth(),
+    ]);
+    const [openAiState, chatGptSubscriptionState] = await Promise.all([
+        openAiAvailable
+            ? getOpenAiTextModelPickerState(locationId)
+            : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
+        chatGptSubscriptionAvailable
+            ? getChatGptSubscriptionModelPickerState()
+            : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
+    ]);
 
     const [general, draft, extraction, design, translation] = await Promise.all([
         resolveAiModelDefault(locationId, "general", pickerModels),
@@ -359,19 +455,12 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
         resolveAiModelDefault(locationId, "translation", pickerModels),
     ]);
 
-    const models = dedupeModelOptions([
-        ...pickerModels,
-        { value: general, label: mapCuratedLabel(general) || general },
-        { value: draft, label: mapCuratedLabel(draft) || draft },
-        { value: extraction, label: mapCuratedLabel(extraction) || extraction },
-        { value: design, label: mapCuratedLabel(design) || design },
-        { value: translation, label: mapCuratedLabel(translation) || translation },
-    ]);
-
-    return {
-        models: sortModels(models),
-        defaults: { general, draft, extraction, design, translation }
-    };
+    return buildAiModelPickerDefaultsResult(
+        pickerModels,
+        [...openAiState.models, ...chatGptSubscriptionState.models],
+        { general, draft, extraction, design, translation },
+        { textDefaultModel: chatGptSubscriptionState.defaultModel || openAiState.defaultModel }
+    );
 }
 
 export async function getPropertyImageEnhancementModelCatalog(locationId?: string) {

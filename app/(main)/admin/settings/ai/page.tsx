@@ -51,6 +51,7 @@ function buildAiInitialData({
             googleAiModelDesign: aiPayload?.googleAiModelDesign || siteConfig?.googleAiModelDesign,
             googleAiModelTranscription: aiPayload?.googleAiModelTranscription || siteConfig?.googleAiModelTranscription,
             googleAiModelTranslation: aiPayload?.googleAiModelTranslation || (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LITE_LATEST_ALIAS,
+            openAiTextModel: aiPayload?.openAiTextModel || null,
             defaultReplyLanguage: aiPayload?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiPayload?.precisionRemoveEnabled === true,
             brandVoice: aiPayload?.brandVoice || siteConfig?.brandVoice,
@@ -79,6 +80,7 @@ function buildAiInitialData({
     return {
         ...siteConfig,
         googleAiModelTranslation: (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LITE_LATEST_ALIAS,
+        openAiTextModel: aiPayload?.openAiTextModel || null,
         defaultReplyLanguage: DEFAULT_REPLY_LANGUAGE,
         precisionRemoveEnabled: aiPayload?.precisionRemoveEnabled === true,
         requirementsIntelligence: aiPayload?.requirementsIntelligence || getDefaultRequirementsIntelligence(
@@ -105,7 +107,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
         return <div>No location context found.</div>;
     }
 
-    const [siteConfig, aiDoc, hasGoogleAiApiKey] = await Promise.all([
+    const [siteConfig, aiDoc, hasGoogleAiApiKey, hasOpenAiApiKey] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -119,6 +121,12 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             scopeId: locationId,
             domain: SETTINGS_DOMAINS.LOCATION_AI,
             secretKey: SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY,
+        }).catch(() => false),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_AI,
+            secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
         }).catch(() => false),
     ]);
 
@@ -153,6 +161,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
+                    hasOpenAiApiKey={hasOpenAiApiKey}
                     precisionRemoveInfrastructureReady={isPrecisionRemoveInfrastructureReady()}
                     runtimeSummary={enrichedRuntimeSummary}
                 />

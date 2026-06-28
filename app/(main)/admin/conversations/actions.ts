@@ -11,7 +11,7 @@ import { generateMultiContextDraft } from "@/lib/ai/context-builder";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { syncMessageFromWebhook } from "@/lib/ghl/sync";
 import { checkGHLSMSStatus } from "@/lib/ghl/sms";
-import { calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
+import { buildUnavailableProviderCostEstimate, calculateRunCost, calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage, securelyRecordConversationAiUsage } from "@/lib/ai/usage-metering";
 import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
@@ -671,7 +671,7 @@ async function runMessageTranslationLLM(args: {
         String(args.sourceText || ""),
     ].join("\n\n");
 
-    const { text, usage } = await callLLMWithMetadata(
+    const { text, usage, provider } = await callLLMWithMetadata(
         modelId,
         systemPrompt,
         userPrompt,
@@ -683,7 +683,7 @@ async function runMessageTranslationLLM(args: {
         translatedText: normalizePlainTranslationOutput(text),
         detectedSourceLanguage,
         confidence: detectedSourceLanguage ? 0.75 : null,
-        provider: "google",
+        provider,
         model: modelId,
         usage,
     };
@@ -715,7 +715,7 @@ async function runReplyTranslationLLM(args: {
         String(args.sourceText || ""),
     ].join("\n\n");
 
-    const { text, usage } = await callLLMWithMetadata(
+    const { text, usage, provider } = await callLLMWithMetadata(
         modelId,
         systemPrompt,
         userPrompt,
@@ -726,7 +726,7 @@ async function runReplyTranslationLLM(args: {
         translatedText: normalizePlainTranslationOutput(text),
         detectedSourceLanguage: null as string | null,
         confidence: null as number | null,
-        provider: "google",
+        provider,
         model: modelId,
         usage,
     };
@@ -736,6 +736,16 @@ function normalizeUsageProvider(provider: string | null | undefined): string {
     const normalized = String(provider || "").trim().toLowerCase();
     if (!normalized || normalized === "google") return "google_gemini";
     return normalized;
+}
+
+function isUnpricedTextProvider(provider: string): boolean {
+    return provider === "openai" || provider === "chatgpt_subscription";
+}
+
+function getTextProviderToolName(provider: string): string {
+    if (provider === "openai") return "openai.responses.create";
+    if (provider === "chatgpt_subscription") return "codex.exec";
+    return "gemini.generateContent";
 }
 
 async function resolveConversationTranslationModel(locationId: string): Promise<string> {
@@ -1506,6 +1516,7 @@ async function persistSelectionAiExecution(args: {
     taskTitle: string;
     intent: string;
     modelId: string;
+    provider?: string | null;
     promptText: string;
     rawOutput: string;
     normalizedOutput: string;
@@ -1513,14 +1524,17 @@ async function persistSelectionAiExecution(args: {
     latencyMs?: number | null;
 }) {
     const location = await getAuthenticatedLocationReadOnly();
-    
-    const estimatedCost = calculateRunCostFromUsage(args.modelId, {
-        promptTokens: args.usage.promptTokens || 0,
-        completionTokens: args.usage.completionTokens || 0,
-        totalTokens: args.usage.totalTokens || 0,
-        thoughtsTokens: args.usage.thoughtsTokens || 0,
-        toolUsePromptTokens: args.usage.toolUsePromptTokens || 0,
-    });
+    const provider = normalizeUsageProvider(args.provider);
+
+    const estimatedCost = isUnpricedTextProvider(provider)
+        ? buildUnavailableProviderCostEstimate(provider, args.usage)
+        : calculateRunCostFromUsage(args.modelId, {
+            promptTokens: args.usage.promptTokens || 0,
+            completionTokens: args.usage.completionTokens || 0,
+            totalTokens: args.usage.totalTokens || 0,
+            thoughtsTokens: args.usage.thoughtsTokens || 0,
+            toolUsePromptTokens: args.usage.toolUsePromptTokens || 0,
+        });
 
     const normalizedLatency = typeof args.latencyMs === "number" && Number.isFinite(args.latencyMs)
         ? Math.max(1, Math.round(args.latencyMs))
@@ -1560,16 +1574,19 @@ async function persistSelectionAiExecution(args: {
                     conclusion: `Estimated run cost (${estimatedCost.confidence} confidence)`,
                     data: {
                         usd: estimatedCost.amount,
+                        provider,
                         method: estimatedCost.method,
                         confidence: estimatedCost.confidence,
+                        note: estimatedCost.note,
                         breakdown: estimatedCost.breakdown,
                     },
                 },
             ],
             toolCalls: [
                 {
-                    tool: "gemini.generateContent",
+                    tool: getTextProviderToolName(provider),
                     arguments: {
+                        provider,
                         model: args.modelId,
                         prompt: args.promptText,
                     },
@@ -1605,7 +1622,7 @@ async function persistSelectionAiExecution(args: {
         resourceId: args.conversationInternalId,
         featureArea: "conversational_ai",
         action: args.intent || "selection_tool",
-        provider: "google_gemini",
+        provider,
         model: args.modelId,
         inputTokens: args.usage.promptTokens || 0,
         outputTokens: args.usage.completionTokens || 0,
@@ -10774,6 +10791,7 @@ interface LeadAnalysisTrace {
     start: number;
     end: number;
     model: string;
+    provider?: string;
     thoughtSummary: string;
     llmRequest: {
         model: string;
@@ -10802,6 +10820,8 @@ interface LeadAnalysisTrace {
         usd: number;
         method: string;
         confidence: string;
+        provider?: string;
+        note?: string;
         breakdown: {
             promptTokens: number;
             completionTokens: number;
@@ -10917,7 +10937,7 @@ async function persistLeadAnalysisTraceRecord(args: {
             ],
             toolCalls: [
                 {
-                    tool: "gemini.generateContent",
+                    tool: getTextProviderToolName(trace.provider),
                     arguments: trace.llmRequest,
                     result: trace.llmResponse,
                     error: null
@@ -11043,7 +11063,7 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
             context,
         });
 
-        const { text: rawOutput, usage } = await callLLMWithMetadata(
+        const { text: rawOutput, usage, provider } = await callLLMWithMetadata(
             modelId,
             prompt,
             undefined,
@@ -11051,6 +11071,7 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
                 temperature: 0.1,
                 maxOutputTokens: NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS[noteType],
                 thinkingBudget: 0,
+                locationId: location.id,
             }
         );
         const latencyMs = Date.now() - startedAt;
@@ -11067,6 +11088,7 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
                     taskTitle: noteType === "viewing" ? "Improve Viewing Note" : "Improve Activity Note",
                     intent: noteType === "viewing" ? "viewing_note_improvement" : "activity_note_improvement",
                     modelId,
+                    provider,
                     promptText: prompt,
                     rawOutput,
                     normalizedOutput: improvedText,
@@ -11146,7 +11168,10 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
             '"""',
         ].join("\n");
 
-        const { text: rawSummary, usage } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, { temperature: 0.2 });
+        const { text: rawSummary, usage, provider } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, {
+            temperature: 0.2,
+            locationId: location.id,
+        });
         const latencyMs = Date.now() - startedAt;
         const normalizedSummary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
         const summary = replaceContactIdentityMentionsWithFirstName(
@@ -11168,6 +11193,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
                 taskTitle: "Selection Summary to CRM Log",
                 intent: "selection_summary",
                 modelId,
+                provider,
                 promptText: summaryPrompt,
                 rawOutput: rawSummary,
                 normalizedOutput: summary,
@@ -11269,11 +11295,11 @@ export async function suggestTasksFromSelection(conversationId: string, selected
             },
         });
 
-        const { text: rawOutput, usage } = await callLLMWithMetadata(
+        const { text: rawOutput, usage, provider } = await callLLMWithMetadata(
             modelId,
             prompt,
             undefined,
-            { jsonMode: true, temperature: 0.2 }
+            { jsonMode: true, temperature: 0.2, locationId: location.id }
         );
         const latencyMs = Date.now() - startedAt;
 
@@ -11332,6 +11358,7 @@ export async function suggestTasksFromSelection(conversationId: string, selected
                 taskTitle: "Selection Task Suggestions",
                 intent: "selection_task_suggestions",
                 modelId,
+                provider,
                 promptText: prompt,
                 rawOutput,
                 normalizedOutput: JSON.stringify({ suggestions }),
@@ -11793,6 +11820,7 @@ export async function runCustomSelectionPrompt(
     }
 
     try {
+        const location = await getAuthenticatedLocation();
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
             : getModelForTask("simple_generation");
@@ -11812,12 +11840,14 @@ export async function runCustomSelectionPrompt(
             '"""',
         ].join("\n");
 
-        const { text: rawOutput, usage } = await callLLMWithMetadata(modelId, systemPrompt, undefined, { temperature: 0.25 });
+        const { text: rawOutput, usage, provider } = await callLLMWithMetadata(modelId, systemPrompt, undefined, {
+            temperature: 0.25,
+            locationId: location.id,
+        });
         const latencyMs = Date.now() - startedAt;
         const output = normalizeSingleLine(rawOutput, "No output generated.").slice(0, MAX_CUSTOM_OUTPUT_LENGTH);
 
         try {
-            const location = await getAuthenticatedLocation();
             const conversation = await resolveConversationForCrmLog(location.id, sanitizedConversationId);
             if (conversation) {
                 await persistSelectionAiExecution({
@@ -11825,6 +11855,7 @@ export async function runCustomSelectionPrompt(
                     taskTitle: "Selection Custom Prompt",
                     intent: "selection_custom",
                     modelId,
+                    provider,
                     promptText: systemPrompt,
                     rawOutput,
                     normalizedOutput: output,
@@ -11899,7 +11930,7 @@ async function parseLeadFromTextInternal(
     modelOverride?: string,
     locationOverride?: any
 ): Promise<LeadParseWithTraceResult> {
-    await (locationOverride || getAuthenticatedLocationReadOnly({ requireGhlToken: false }));
+    const location = await (locationOverride || getAuthenticatedLocationReadOnly({ requireGhlToken: false }));
     const normalizedInput = normalizeLeadParseInput(text);
     if (!normalizedInput || normalizedInput.length < 5) {
         return { success: false, error: "Text is too short" };
@@ -12008,6 +12039,7 @@ async function parseLeadFromTextInternal(
         ];
 
         let finalModelId = initialModelId;
+        let finalProvider = "google_gemini";
         let finalJsonStr = "";
         let finalUsage: any = null;
         let finalParsed: any = null;
@@ -12023,16 +12055,18 @@ async function parseLeadFromTextInternal(
             
             try {
                 start = Date.now();
-                const { text: jsonStr, usage } = await callLLMWithMetadata(currentModelId, prompt, undefined, {
+                const { text: jsonStr, usage, provider } = await callLLMWithMetadata(currentModelId, prompt, undefined, {
                     jsonMode: true,
                     temperature: 0,
                     maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
                     thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
+                    locationId: location.id,
                 });
                 end = Date.now();
 
                 finalJsonStr = jsonStr;
                 finalUsage = usage;
+                finalProvider = provider;
 
                 finalParsed = parseJsonObjectFromModelOutput(jsonStr);
                 finalResult = LeadParsingSchema.parse(finalParsed);
@@ -12053,13 +12087,15 @@ async function parseLeadFromTextInternal(
             throw lastError || new Error("Lead parsing failed after multiple attempts.");
         }
 
-        const costEstimate = calculateRunCostFromUsage(finalModelId, {
-            promptTokens: finalUsage.promptTokens,
-            completionTokens: finalUsage.completionTokens,
-            totalTokens: finalUsage.totalTokens,
-            thoughtsTokens: finalUsage.thoughtsTokens,
-            toolUsePromptTokens: finalUsage.toolUsePromptTokens
-        });
+        const costEstimate = isUnpricedTextProvider(finalProvider)
+            ? buildUnavailableProviderCostEstimate(finalProvider, finalUsage)
+            : calculateRunCostFromUsage(finalModelId, {
+                promptTokens: finalUsage.promptTokens,
+                completionTokens: finalUsage.completionTokens,
+                totalTokens: finalUsage.totalTokens,
+                thoughtsTokens: finalUsage.thoughtsTokens,
+                toolUsePromptTokens: finalUsage.toolUsePromptTokens
+            });
 
         const cleanJson = finalJsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
         const parsed = finalParsed;
@@ -12073,6 +12109,7 @@ async function parseLeadFromTextInternal(
             start,
             end,
             model: modelId,
+            provider: finalProvider,
             thoughtSummary: `Lead Analysis (${modelId}):\n- Extracted structured data from normalized text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
             llmRequest: {
                 model: modelId,
@@ -12093,6 +12130,8 @@ async function parseLeadFromTextInternal(
                 usd: costEstimate.amount,
                 method: costEstimate.method,
                 confidence: costEstimate.confidence,
+                provider: costEstimate.provider,
+                note: costEstimate.note,
                 breakdown: costEstimate.breakdown
             },
             promptTokens: usage.promptTokens,
@@ -13232,7 +13271,7 @@ ${trimmedText}
             modelId,
             systemPrompt,
             promptText,
-            { jsonMode: true, temperature: 0.2 }
+            { jsonMode: true, temperature: 0.2, locationId: location.id }
         );
         const latencyMs = Date.now() - startMs;
 
@@ -13304,6 +13343,7 @@ ${trimmedText}
             taskTitle: "Suggest Viewings from Selection",
             intent: "extract_viewings",
             modelId,
+            provider: result.provider,
             promptText: `${systemPrompt}\n\n${promptText}`,
             rawOutput: rawJsonRaw,
             normalizedOutput: JSON.stringify({

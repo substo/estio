@@ -90,6 +90,7 @@ const aiSchema = z.object({
     googleAiModelDesign: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelTranscription: z.string().trim().min(1).default(GEMINI_FLASH_STABLE_FALLBACK),
     googleAiModelTranslation: z.string().trim().min(1).default(GEMINI_FLASH_LITE_LATEST_ALIAS),
+    openAiTextModel: nullableTrimmedString,
     defaultReplyLanguage: defaultReplyLanguageSchema,
     precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,
@@ -188,6 +189,16 @@ const userMicrosoftSchema = z.object({
     outlookSessionExpiry: z.string().datetime().nullable().optional(),
 }).passthrough();
 
+const userOpenAiSchema = z.object({
+    enabled: z.boolean().default(false),
+    defaultTextModel: nullableTrimmedString,
+}).passthrough();
+
+const userChatGptSubscriptionSchema = z.object({
+    enabled: z.boolean().default(false),
+    defaultTextModel: nullableTrimmedString,
+}).passthrough();
+
 export const SETTINGS_DOMAIN_SCHEMAS: Record<SettingsDomain, z.ZodTypeAny> = {
     [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE]: publicSiteSchema,
     [SETTINGS_DOMAINS.LOCATION_AI]: aiSchema,
@@ -198,6 +209,8 @@ export const SETTINGS_DOMAIN_SCHEMAS: Record<SettingsDomain, z.ZodTypeAny> = {
     [SETTINGS_DOMAINS.USER_CRM]: userCrmSchema,
     [SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS]: userGoogleSchema,
     [SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS]: userMicrosoftSchema,
+    [SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS]: userOpenAiSchema,
+    [SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS]: userChatGptSubscriptionSchema,
 };
 
 export function validateSettingsPayload<T>(domain: SettingsDomain, payload: T): T {

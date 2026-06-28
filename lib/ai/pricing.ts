@@ -76,7 +76,8 @@ export const DEFAULT_MODEL = 'gemini-3-flash-preview';
 export type CostEstimateMethod =
     | 'explicit_usage_fields'
     | 'inferred_from_total_gap'
-    | 'prompt_completion_only';
+    | 'prompt_completion_only'
+    | 'provider_pricing_unavailable';
 
 export type CostEstimateConfidence = 'high' | 'medium' | 'low';
 
@@ -92,6 +93,8 @@ export interface CostEstimate {
     amount: number;
     method: CostEstimateMethod;
     confidence: CostEstimateConfidence;
+    provider?: string;
+    note?: string;
     breakdown: {
         promptTokens: number;
         completionTokens: number;
@@ -215,5 +218,37 @@ export function calculateRunCostFromUsage(model: string, usage: UsageForCostEsti
             inputRatePerMillion: inputRate,
             outputRatePerMillion: outputRate
         }
+    };
+}
+
+export function buildUnavailableProviderCostEstimate(
+    provider: string,
+    usage: UsageForCostEstimate,
+    note = "Provider token-rate pricing is not available from an official dynamic API. Usage is recorded, but cost is not estimated."
+): CostEstimate {
+    const promptTokens = sanitizeTokenCount(usage.promptTokens);
+    const completionTokens = sanitizeTokenCount(usage.completionTokens);
+    const totalTokens = sanitizeTokenCount(usage.totalTokens);
+    const thoughtsTokens = sanitizeTokenCount(usage.thoughtsTokens);
+    const toolUsePromptTokens = sanitizeTokenCount(usage.toolUsePromptTokens);
+
+    return {
+        amount: 0,
+        method: "provider_pricing_unavailable",
+        confidence: "low",
+        provider,
+        note,
+        breakdown: {
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            thoughtsTokens,
+            toolUsePromptTokens,
+            inferredOutputTokens: 0,
+            billableInputTokens: promptTokens + toolUsePromptTokens,
+            billableOutputTokens: completionTokens + thoughtsTokens,
+            inputRatePerMillion: 0,
+            outputRatePerMillion: 0,
+        },
     };
 }

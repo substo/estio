@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { appendAiStreamText, selectAiStreamFinalText } from '@/lib/ai/stream-text';
 import { generateDraftWithStreamingFallback, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
+import { resolveComposerDraftModelOverride } from './use-conversation-composer-ai-draft';
 
 test('appendAiStreamText preserves exact streamed text chunks', () => {
     const chunks = ['Hi ', 'Tony', '.', '\n\n', 'New ', 'listing ', 'alert ', 'in ', 'Peyia', '.'];
@@ -219,4 +220,12 @@ test('streamDraftViaApi parses chunk lines and complete result', async () => {
 
     assert.deepEqual(chunks, ['Hel', 'lo']);
     assert.deepEqual(result, { draft: 'Hello', reasoning: 'ok' });
+});
+
+test('resolveComposerDraftModelOverride honors OpenAI defaults without freezing Gemini defaults', () => {
+    assert.equal(resolveComposerDraftModelOverride('openai:gpt-4o-mini', false), 'openai:gpt-4o-mini');
+    assert.equal(resolveComposerDraftModelOverride('chatgpt_subscription:gpt-5.4-mini', false), 'chatgpt_subscription:gpt-5.4-mini');
+    assert.equal(resolveComposerDraftModelOverride('gemini-flash-latest', false), undefined);
+    assert.equal(resolveComposerDraftModelOverride('gemini-flash-latest', true), 'gemini-flash-latest');
+    assert.equal(resolveComposerDraftModelOverride('', true), undefined);
 });

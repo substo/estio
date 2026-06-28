@@ -55,6 +55,13 @@ function logComposerDraftTiming(event: string, fields: Record<string, unknown> =
     }));
 }
 
+export function resolveComposerDraftModelOverride(selectedModel: string, hasUserSelectedModel: boolean): string | undefined {
+    const model = String(selectedModel || "").trim();
+    if (!model) return undefined;
+    if (hasUserSelectedModel) return model;
+    return model.startsWith("openai:") || model.startsWith("chatgpt_subscription:") ? model : undefined;
+}
+
 export function useConversationComposerAiDraft({
     conversation,
     draft,
@@ -167,7 +174,7 @@ export function useConversationComposerAiDraft({
         }
         onAiDraftFeedbackChange?.(null);
         try {
-            const modelOverride = hasUserSelectedModel ? selectedModel : undefined;
+            const modelOverride = resolveComposerDraftModelOverride(selectedModel, hasUserSelectedModel);
             let streamedBuffer = "";
             const result = await onGenerateDraft(
                 instruction,

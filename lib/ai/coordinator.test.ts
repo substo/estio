@@ -4,6 +4,8 @@ import test from "node:test";
 import {
     buildContactRequirementGuide,
     enforceMapSharingInstruction,
+    estimateDraftGenerationCost,
+    isOpenAiDraftModel,
     looksLikeSendReadyDraftInstruction,
     stripUngroundedMapUrls,
 } from "./coordinator";
@@ -107,4 +109,38 @@ test("looksLikeSendReadyDraftInstruction distinguishes operator drafts from comm
         looksLikeSendReadyDraftInstruction("Make it shorter and friendlier, but keep the details."),
         false
     );
+});
+
+test("isOpenAiDraftModel only matches OpenAI-prefixed model selections", () => {
+    assert.equal(isOpenAiDraftModel("openai:gpt-4o-mini"), true);
+    assert.equal(isOpenAiDraftModel(" gpt-4o-mini "), false);
+    assert.equal(isOpenAiDraftModel("gemini-flash-latest"), false);
+});
+
+test("estimateDraftGenerationCost does not apply Gemini pricing to OpenAI drafts", () => {
+    const estimate = estimateDraftGenerationCost({
+        provider: "openai",
+        model: "openai:gpt-4o-mini",
+        promptTokens: 1000,
+        completionTokens: 500,
+        totalTokens: 1500,
+    });
+
+    assert.equal(estimate.amount, 0);
+    assert.equal(estimate.provider, "openai");
+    assert.equal(estimate.method, "provider_pricing_unavailable");
+    assert.match(estimate.note || "", /not available from an official dynamic API/);
+});
+
+test("estimateDraftGenerationCost still prices Gemini drafts", () => {
+    const estimate = estimateDraftGenerationCost({
+        provider: "google_gemini",
+        model: "gemini-2.5-flash-lite",
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        totalTokens: 2_000_000,
+    });
+
+    assert.equal(estimate.amount, 0.5);
+    assert.equal(estimate.method, "prompt_completion_only");
 });

@@ -8,12 +8,16 @@ export const SETTINGS_DOMAINS = {
     USER_CRM: "user.crm",
     USER_GOOGLE_INTEGRATIONS: "user.integrations.google",
     USER_MICROSOFT_INTEGRATIONS: "user.integrations.microsoft",
+    USER_OPENAI_INTEGRATIONS: "user.integrations.openai",
+    USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS: "user.integrations.chatgpt_subscription",
 } as const;
 
 export type SettingsDomain = typeof SETTINGS_DOMAINS[keyof typeof SETTINGS_DOMAINS];
 
 export const SETTINGS_SECRET_KEYS = {
     GOOGLE_AI_API_KEY: "google_ai_api_key",
+    OPENAI_API_KEY: "openai_api_key",
+    CHATGPT_CODEX_ACCESS_TOKEN: "chatgpt_codex_access_token",
     WHATSAPP_ACCESS_TOKEN: "whatsapp_access_token",
     TWILIO_AUTH_TOKEN: "twilio_auth_token",
     CRM_PASSWORD: "crm_password",

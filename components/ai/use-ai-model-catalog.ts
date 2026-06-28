@@ -14,6 +14,7 @@ export type AiModelDefaults = {
     draft: string;
     extraction: string;
     design: string;
+    translation: string;
 };
 
 const EMPTY_DEFAULTS: AiModelDefaults = {
@@ -21,6 +22,7 @@ const EMPTY_DEFAULTS: AiModelDefaults = {
     draft: "",
     extraction: "",
     design: "",
+    translation: "",
 };
 
 function normalizeModelOption(value: unknown): AiModelOption | null {
@@ -47,6 +49,7 @@ function normalizeDefaults(value: unknown): AiModelDefaults {
         draft: String(source.draft || "").trim(),
         extraction: String(source.extraction || "").trim(),
         design: String(source.design || "").trim(),
+        translation: String(source.translation || "").trim(),
     };
 }
 

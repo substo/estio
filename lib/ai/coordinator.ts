@@ -5,6 +5,8 @@ import {
     GEMINI_FLASH_LATEST_ALIAS,
     GEMINI_FLASH_STABLE_FALLBACK,
 } from "@/lib/ai/models";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { isChatGptSubscriptionModelId } from "@/lib/ai/chatgpt-subscription";
 import { validateAction } from "@/lib/ai/policy";
 import { appendAiStreamText, selectAiStreamFinalText } from "@/lib/ai/stream-text";
 import { 
@@ -47,7 +49,7 @@ interface CoordinationContext {
     latencyMode?: "fast" | "full";
 }
 
-import { calculateRunCost } from "@/lib/ai/pricing";
+import { buildUnavailableProviderCostEstimate, calculateRunCost } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 
 type DraftMessage = {
@@ -84,6 +86,64 @@ function getModelMaxOutputTokens(modelName: string): number {
     // Pattern match for any Gemini 2.5+ or 3.x model
     if (/gemini-(?:2\.5|3)/i.test(modelName)) return 65536;
     return MODEL_OUTPUT_DEFAULT_LIMIT;
+}
+
+export function isOpenAiDraftModel(modelName: string): boolean {
+    return String(modelName || "").trim().startsWith("openai:");
+}
+
+export function isChatGptSubscriptionDraftModel(modelName: string): boolean {
+    return isChatGptSubscriptionModelId(modelName);
+}
+
+type DraftGenerationProvider = "google_gemini" | "openai" | "chatgpt_subscription";
+
+function getDraftGenerationProvider(modelName: string): DraftGenerationProvider {
+    if (isOpenAiDraftModel(modelName)) return "openai";
+    if (isChatGptSubscriptionDraftModel(modelName)) return "chatgpt_subscription";
+    return "google_gemini";
+}
+
+function getDraftGenerationTool(provider: DraftGenerationProvider): string {
+    if (provider === "openai") return "openai.responses.create";
+    if (provider === "chatgpt_subscription") return "codex.exec";
+    return "gemini.generateContent";
+}
+
+export function estimateDraftGenerationCost(args: {
+    provider: DraftGenerationProvider;
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens?: number;
+    thoughtsTokens?: number;
+    toolUsePromptTokens?: number;
+}) {
+    return args.provider !== "google_gemini"
+        ? buildUnavailableProviderCostEstimate(args.provider, {
+            promptTokens: args.promptTokens,
+            completionTokens: args.completionTokens,
+            totalTokens: args.totalTokens,
+            thoughtsTokens: args.thoughtsTokens,
+            toolUsePromptTokens: args.toolUsePromptTokens,
+        })
+        : {
+            amount: calculateRunCost(args.model, args.promptTokens, args.completionTokens),
+            method: "prompt_completion_only" as const,
+            confidence: "low" as const,
+            breakdown: {
+                promptTokens: args.promptTokens,
+                completionTokens: args.completionTokens,
+                totalTokens: args.totalTokens || args.promptTokens + args.completionTokens,
+                thoughtsTokens: args.thoughtsTokens || 0,
+                toolUsePromptTokens: args.toolUsePromptTokens || 0,
+                inferredOutputTokens: 0,
+                billableInputTokens: args.promptTokens + (args.toolUsePromptTokens || 0),
+                billableOutputTokens: args.completionTokens + (args.thoughtsTokens || 0),
+                inputRatePerMillion: 0,
+                outputRatePerMillion: 0,
+            },
+        };
 }
 
 function formatDraftContextValue(value: unknown): string {
@@ -634,8 +694,9 @@ export async function generateDraft(context: CoordinationContext) {
             : "";
         let requestedModelName = explicitRequestedModel || configuredDraftModel || GEMINI_DRAFT_FAST_DEFAULT;
         let actualModelName = requestedModelName;
+        let activeProvider: DraftGenerationProvider = getDraftGenerationProvider(actualModelName);
 
-        if (!apiKey) {
+        if (activeProvider === "google_gemini" && !apiKey) {
             return {
                 draft: "Error: No AI API Key configured.",
                 reasoning: "Please configure Google AI in Settings.",
@@ -914,6 +975,7 @@ export async function generateDraft(context: CoordinationContext) {
                 ? GEMINI_FLASH_STABLE_FALLBACK
                 : GEMINI_DRAFT_FAST_DEFAULT;
             requestedModelName = actualModelName;
+            activeProvider = getDraftGenerationProvider(actualModelName);
             telemetry.model.requested = requestedModelName;
         }
 
@@ -1108,7 +1170,8 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 - Tone style: ${isEmail ? "Professional Email" : "Conversational Messaging"}
 - Static context version: ${DRAFT_STATIC_CONTEXT_VERSION}`;
 
-        // 4. Call Gemini (with one-time model fallback and 429 backoff).
+        // 4. Call selected provider. Gemini keeps cached-context streaming and
+        // model fallback; OpenAI routes through the shared Responses API wrapper.
         const generateWithModel = async (candidateModel: string) => {
             const cacheModel = await getDraftModelWithCachedContext({
                 apiKey,
@@ -1174,23 +1237,74 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         };
 
         const geminiStartedAt = Date.now();
-        let generationResult: { response: any; rawText: string };
-        try {
-            generationResult = await generateWithModel(actualModelName);
-        } catch (error) {
-            const canRetryWithPinnedFlash =
-                (actualModelName === GEMINI_FLASH_LATEST_ALIAS || actualModelName === GEMINI_DRAFT_FAST_DEFAULT) &&
-                isModelUnavailableError(error);
+        let generationResult: {
+            response: any;
+            rawText: string;
+            provider: DraftGenerationProvider;
+            usage?: {
+                promptTokens: number;
+                completionTokens: number;
+                totalTokens: number;
+                thoughtsTokens: number;
+                cachedContentTokens: number;
+                toolUsePromptTokens: number;
+            };
+        };
 
-            if (!canRetryWithPinnedFlash) {
-                throw error;
+        if (activeProvider !== "google_gemini") {
+            const openAiResult = await callLLMWithMetadata(
+                actualModelName,
+                DRAFT_STATIC_CONTEXT_PROMPT,
+                finalPrompt,
+                {
+                    temperature: 0.2,
+                    maxOutputTokens,
+                    locationId: context.locationId,
+                }
+            );
+            if (context.stream && typeof context.onToken === "function") {
+                telemetry.model.streamed = true;
+                context.onToken(openAiResult.text);
             }
 
-            actualModelName = GEMINI_FLASH_STABLE_FALLBACK;
-            telemetry.model.actual = actualModelName;
-            telemetry.model.fallbackUsed = true;
-            console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable; retrying with ${actualModelName}.`);
-            generationResult = await generateWithModel(actualModelName);
+            generationResult = {
+                response: null,
+                rawText: openAiResult.text,
+                provider: openAiResult.provider,
+                usage: {
+                    promptTokens: openAiResult.usage.promptTokens,
+                    completionTokens: openAiResult.usage.completionTokens,
+                    totalTokens: openAiResult.usage.totalTokens,
+                    thoughtsTokens: openAiResult.usage.thoughtsTokens,
+                    cachedContentTokens: openAiResult.usage.cachedContentTokens,
+                    toolUsePromptTokens: openAiResult.usage.toolUsePromptTokens,
+                },
+            };
+        } else {
+            try {
+                generationResult = {
+                    ...await generateWithModel(actualModelName),
+                    provider: "google_gemini",
+                };
+            } catch (error) {
+                const canRetryWithPinnedFlash =
+                    (actualModelName === GEMINI_FLASH_LATEST_ALIAS || actualModelName === GEMINI_DRAFT_FAST_DEFAULT) &&
+                    isModelUnavailableError(error);
+
+                if (!canRetryWithPinnedFlash) {
+                    throw error;
+                }
+
+                actualModelName = GEMINI_FLASH_STABLE_FALLBACK;
+                activeProvider = "google_gemini";
+                telemetry.model.actual = actualModelName;
+                telemetry.model.fallbackUsed = true;
+                console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable; retrying with ${actualModelName}.`);
+                generationResult = {
+                    ...await generateWithModel(actualModelName),
+                    provider: "google_gemini",
+                };
+            }
         }
         telemetry.stageMs.geminiMs = Date.now() - geminiStartedAt;
 
@@ -1242,7 +1356,14 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             : "";
 
         // 5. Track Costs & Usage
-        if (response.usageMetadata) {
+        if (generationResult.usage) {
+            promptTokens = generationResult.usage.promptTokens;
+            completionTokens = generationResult.usage.completionTokens;
+            telemetry.usage.totalTokens = generationResult.usage.totalTokens;
+            telemetry.usage.thoughtsTokens = generationResult.usage.thoughtsTokens;
+            telemetry.usage.cachedContentTokens = generationResult.usage.cachedContentTokens;
+            telemetry.usage.toolUsePromptTokens = generationResult.usage.toolUsePromptTokens;
+        } else if (response?.usageMetadata) {
             const usageMeta = (response.usageMetadata || {}) as Record<string, unknown>;
             promptTokens = getUsageInt(usageMeta, "promptTokenCount");
             completionTokens = getUsageInt(usageMeta, "candidatesTokenCount");
@@ -1262,7 +1383,16 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             telemetry.usage.totalTokens = promptTokens + completionTokens;
         }
 
-        const cost = calculateRunCost(actualModelName, promptTokens, completionTokens);
+        const costEstimate = estimateDraftGenerationCost({
+            provider: generationResult.provider,
+            model: actualModelName,
+            promptTokens,
+            completionTokens,
+            totalTokens: telemetry.usage.totalTokens,
+            thoughtsTokens: telemetry.usage.thoughtsTokens,
+            toolUsePromptTokens: telemetry.usage.toolUsePromptTokens,
+        });
+        const cost = costEstimate.amount;
         const modelAuditNote = requestedModelName === actualModelName
             ? `Model: ${actualModelName}`
             : `Requested model: ${requestedModelName}; actual model used: ${actualModelName}`;
@@ -1288,8 +1418,9 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                     latencyMs: Math.max(1, Date.now() - overallStartedAt),
                     status: "done",
                     toolCalls: [{
-                        tool: "gemini.generateContent",
+                        tool: getDraftGenerationTool(generationResult.provider),
                         arguments: {
+                            provider: generationResult.provider,
                             model: actualModelName,
                             streamed: telemetry.model.streamed,
                             maxOutputTokens,
@@ -1298,6 +1429,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                         },
                         result: {
                             usage: telemetry.usage,
+                            costEstimate,
                             latencyMs: telemetry.stageMs.geminiMs,
                             firstTokenMs: telemetry.stageMs.firstTokenMs,
                             cacheName: telemetry.cache.name,
@@ -1331,7 +1463,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 resourceId: dbConversation.id,
                 featureArea: "conversational_ai",
                 action: "generate_draft",
-                provider: "google_gemini",
+                provider: generationResult.provider,
                 model: actualModelName,
                 inputTokens: promptTokens,
                 outputTokens: completionTokens,
@@ -1390,11 +1522,15 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 select: { id: true }
             });
             if (errorDbConversation) {
-                const errorCost = calculateRunCost(
-                    telemetry.model.actual,
-                    telemetry.usage.promptTokens,
-                    telemetry.usage.completionTokens
-                );
+                const errorProvider = getDraftGenerationProvider(telemetry.model.actual);
+                const errorCostEstimate = estimateDraftGenerationCost({
+                    provider: errorProvider,
+                    model: telemetry.model.actual,
+                    promptTokens: telemetry.usage.promptTokens,
+                    completionTokens: telemetry.usage.completionTokens,
+                    totalTokens: telemetry.usage.promptTokens + telemetry.usage.completionTokens,
+                });
+                const errorCost = errorCostEstimate.amount;
                 await db.agentExecution.create({
                     data: {
                         conversationId: errorDbConversation.id,
@@ -1407,15 +1543,16 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                         status: "error",
                         errorMessage: String(error.message || "Unknown error").slice(0, 1000),
                         toolCalls: [{
-                            tool: "gemini.generateContent",
+                            tool: getDraftGenerationTool(errorProvider),
                             arguments: {
+                                provider: errorProvider,
                                 model: telemetry.model.actual,
                                 streamed: telemetry.model.streamed,
                                 maxOutputTokens: telemetry.model.maxOutputTokens,
                                 thinkingBudget: telemetry.model.thinkingBudget,
                                 cacheState: telemetry.cache.state,
                             },
-                            result: { error: message },
+                            result: { error: message, costEstimate: errorCostEstimate },
                         }] as any,
                         promptTokens: telemetry.usage.promptTokens,
                         completionTokens: telemetry.usage.completionTokens,
@@ -1441,7 +1578,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                         resourceId: errorDbConversation.id,
                         featureArea: "conversational_ai",
                         action: "generate_draft_error",
-                        provider: "google_gemini",
+                        provider: errorProvider,
                         model: telemetry.model.actual,
                         inputTokens: telemetry.usage.promptTokens,
                         outputTokens: telemetry.usage.completionTokens,

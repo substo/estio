@@ -132,7 +132,7 @@ import { getModelForTask } from "../model-router";
 import { callLLMWithMetadata } from "../llm";
 import { toolRegistry } from "../mcp/registry";
 import { SentimentResult } from "../sentiment";
-import { calculateRunCostFromUsage } from "../pricing";
+import { buildUnavailableProviderCostEstimate, calculateRunCostFromUsage } from "../pricing";
 import {
     buildDealProtectiveCommunicationContract,
     resolveCommunicationLanguage
@@ -770,7 +770,7 @@ You must respond with valid JSON:
     // 3. Call LLM
     try {
         const userPrompt = `Conversation History:\n${context.conversationHistory}\n\nLatest User Message: "${context.message}"`;
-        const { text: response, usage } = await callLLMWithMetadata(
+        const { text: response, usage, provider } = await callLLMWithMetadata(
             modelId,
             systemPrompt,
             userPrompt,
@@ -959,13 +959,21 @@ You must respond with valid JSON:
             toolUsePromptTokens: (usage.toolUsePromptTokens || 0) + (synthesized.usage?.toolUsePromptTokens || 0)
         };
 
-        const costEstimate = calculateRunCostFromUsage(modelId, {
-            promptTokens: aggregatedUsage.promptTokens,
-            completionTokens: aggregatedUsage.completionTokens,
-            totalTokens: aggregatedUsage.totalTokens,
-            thoughtsTokens: aggregatedUsage.thoughtsTokens,
-            toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
-        });
+        const costEstimate = provider === "openai" || provider === "chatgpt_subscription"
+            ? buildUnavailableProviderCostEstimate(provider, {
+                promptTokens: aggregatedUsage.promptTokens,
+                completionTokens: aggregatedUsage.completionTokens,
+                totalTokens: aggregatedUsage.totalTokens,
+                thoughtsTokens: aggregatedUsage.thoughtsTokens,
+                toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
+            })
+            : calculateRunCostFromUsage(modelId, {
+                promptTokens: aggregatedUsage.promptTokens,
+                completionTokens: aggregatedUsage.completionTokens,
+                totalTokens: aggregatedUsage.totalTokens,
+                thoughtsTokens: aggregatedUsage.thoughtsTokens,
+                toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
+            });
         const cost = costEstimate.amount;
         const reqSystem = truncateForTrace(systemPrompt);
         const reqUser = truncateForTrace(userPrompt);
@@ -992,7 +1000,8 @@ You must respond with valid JSON:
             },
             costEstimate: {
                 method: costEstimate.method,
-                confidence: costEstimate.confidence
+                confidence: costEstimate.confidence,
+                note: costEstimate.note
             }
         };
 

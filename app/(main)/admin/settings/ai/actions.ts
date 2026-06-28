@@ -173,6 +173,7 @@ export async function updateAiSettings(
             ? requirementsIntelligenceModeRaw
             : "manual_only";
         const requirementsIntelligenceModel = normalizeOptionalModelOverride(formData.get("requirementsIntelligenceModel")) || transcriptionModel;
+        const openAiTextModel = normalizeOptionalModelOverride(formData.get("openAiTextModel"));
         const requirementsAllowedPropertyDomains = normalizeAllowedPropertyDomains(formData.get("requirementsAllowedPropertyDomains"));
         const requirementsActivityWaitHoursRaw = Number(formData.get("requirementsActivityWaitHours"));
         const requirementsActivityDebounceRaw = Number(formData.get("requirementsActivityDebounceMinutes"));
@@ -201,6 +202,7 @@ export async function updateAiSettings(
             googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelTranscription: transcriptionModel,
             googleAiModelTranslation: translationModel,
+            openAiTextModel,
             defaultReplyLanguage,
             precisionRemoveEnabled: formData.get("precisionRemoveEnabled") === "on",
             whatsappTranscriptOnDemandEnabled: transcriptOnDemandEnabled,
@@ -253,6 +255,8 @@ export async function updateAiSettings(
 
         const clearGoogleAiApiKey = formData.get("clearGoogleAiApiKey") === "on";
         const googleAiApiKey = String(formData.get("googleAiApiKey") || "").trim();
+        const clearOpenAiApiKey = formData.get("clearOpenAiApiKey") === "on";
+        const openAiApiKey = String(formData.get("openAiApiKey") || "").trim();
         let legacySecretAction: "keep" | "clear" | "set" = "keep";
 
         if (clearGoogleAiApiKey) {
@@ -274,6 +278,25 @@ export async function updateAiSettings(
                 actorUserId: localUser?.id,
             });
             legacySecretAction = "set";
+        }
+
+        if (clearOpenAiApiKey) {
+            await settingsService.clearSecret({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_AI,
+                secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
+                actorUserId: localUser?.id,
+            });
+        } else if (openAiApiKey) {
+            await settingsService.setSecret({
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_AI,
+                secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
+                plaintext: openAiApiKey,
+                actorUserId: localUser?.id,
+            });
         }
 
         if (isSettingsDualWriteLegacyEnabled()) {
@@ -374,6 +397,16 @@ export async function runAiAutomationNowAction(
         console.error("[runAiRuntimeNowAction] Error:", error);
         return { success: false, error: error?.message || "Failed to run runtime cron." };
     }
+}
+
+export async function getOpenAiTextModelPickerStateAction(locationId: string) {
+    const authorization = await authorizeAiSettingsLocation(locationId);
+    if (!authorization.ok) {
+        return { models: [], defaultModel: "" };
+    }
+
+    const { getOpenAiTextModelPickerState } = await import("@/lib/ai/openai-models");
+    return getOpenAiTextModelPickerState(authorization.locationId, { includeAuthenticatedUser: false });
 }
 
 export async function runAiRuntimeNowAction(
