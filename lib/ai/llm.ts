@@ -136,7 +136,7 @@ async function callOpenAIWithMetadata(
 ): Promise<LLMResultWithMetadata> {
     const apiKey = await resolveOpenAiApiKey(options.locationId);
     if (!apiKey) {
-        throw new Error("No OpenAI API key configured. Add a personal OpenAI key in your profile, or add a location OpenAI key in AI settings.");
+        throw new Error("No OpenAI API key configured. Add a personal or organization OpenAI key in Settings > Integrations > OpenAI.");
     }
 
     const requestBody = buildOpenAiRequestBody(modelId, systemPrompt, userContent, options);

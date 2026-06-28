@@ -70,7 +70,7 @@ test("callLLMWithMetadata fails before calling OpenAI when no key is configured"
     try {
         await assert.rejects(
             () => callLLMWithMetadata("openai:gpt-test", "System instructions", "User input"),
-            /No OpenAI API key configured\. Add a personal OpenAI key in your profile, or add a location OpenAI key in AI settings\./
+            /No OpenAI API key configured\. Add a personal or organization OpenAI key in Settings > Integrations > OpenAI\./
         );
         assert.equal(fetchCalls, 0);
     } finally {

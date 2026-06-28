@@ -145,7 +145,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             <div>
                 <h1 className="text-2xl font-bold tracking-tight">AI Configuration</h1>
                 <p className="text-muted-foreground">
-                    Manage AI models, API keys, and brand voice settings.
+                    Manage Gemini models, automation, and brand voice settings.
                 </p>
             </div>
 
