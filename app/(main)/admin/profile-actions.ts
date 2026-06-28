@@ -6,9 +6,6 @@ import { revalidatePath } from 'next/cache';
 import { updateGHLUser } from '@/lib/ghl/users';
 import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from '@/lib/viewings/datetime';
-import { settingsService } from '@/lib/settings/service';
-import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from '@/lib/settings/constants';
-import { validateChatGptSubscriptionConnection } from '@/lib/ai/chatgpt-subscription';
 
 export async function completeUserProfile(formData: FormData) {
     const { userId: clerkUserId } = await auth();
@@ -56,80 +53,6 @@ export async function completeUserProfile(formData: FormData) {
             }
         });
 
-        const openAiSettingsSubmitted = formData.get('openAiSettingsSubmitted') === '1';
-        if (openAiSettingsSubmitted) {
-            const openAiApiKey = String(formData.get('openAiApiKey') || '').trim();
-            const clearOpenAiApiKey = formData.get('clearOpenAiApiKey') === 'on';
-            const openAiEnabled = formData.get('openAiEnabled') === 'on';
-            const openAiDefaultTextModel = String(formData.get('openAiDefaultTextModel') || '').trim() || null;
-            const chatGptSubscriptionAccessToken = String(formData.get('chatGptSubscriptionAccessToken') || '').trim();
-            const clearChatGptSubscriptionAccessToken = formData.get('clearChatGptSubscriptionAccessToken') === 'on';
-            const chatGptSubscriptionEnabled = formData.get('chatGptSubscriptionEnabled') === 'on';
-            const chatGptSubscriptionDefaultTextModel = String(formData.get('chatGptSubscriptionDefaultTextModel') || '').trim() || null;
-
-            await settingsService.upsertDocument({
-                scopeType: 'USER',
-                scopeId: user.id,
-                domain: SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS,
-                payload: {
-                    enabled: openAiEnabled,
-                    defaultTextModel: openAiDefaultTextModel,
-                },
-                actorUserId: user.id,
-                schemaVersion: 1,
-            });
-
-            if (clearOpenAiApiKey) {
-                await settingsService.clearSecret({
-                    scopeType: 'USER',
-                    scopeId: user.id,
-                    domain: SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS,
-                    secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
-                    actorUserId: user.id,
-                });
-            } else if (openAiApiKey) {
-                await settingsService.setSecret({
-                    scopeType: 'USER',
-                    scopeId: user.id,
-                    domain: SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS,
-                    secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
-                    plaintext: openAiApiKey,
-                    actorUserId: user.id,
-                });
-            }
-
-            await settingsService.upsertDocument({
-                scopeType: 'USER',
-                scopeId: user.id,
-                domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
-                payload: {
-                    enabled: chatGptSubscriptionEnabled,
-                    defaultTextModel: chatGptSubscriptionDefaultTextModel,
-                },
-                actorUserId: user.id,
-                schemaVersion: 1,
-            });
-
-            if (clearChatGptSubscriptionAccessToken) {
-                await settingsService.clearSecret({
-                    scopeType: 'USER',
-                    scopeId: user.id,
-                    domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
-                    secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN,
-                    actorUserId: user.id,
-                });
-            } else if (chatGptSubscriptionAccessToken) {
-                await settingsService.setSecret({
-                    scopeType: 'USER',
-                    scopeId: user.id,
-                    domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
-                    secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN,
-                    plaintext: chatGptSubscriptionAccessToken,
-                    actorUserId: user.id,
-                });
-            }
-        }
-
         // 2. Sync to Clerk
         try {
             const client = await clerkClient();
@@ -167,31 +90,6 @@ export async function completeUserProfile(formData: FormData) {
         console.error('[Profile] Failed to update profile:', error);
         return { success: false, error: error.message || 'Failed to update profile' };
     }
-}
-
-export async function testChatGptSubscriptionConnection() {
-    const { userId: clerkUserId } = await auth();
-    if (!clerkUserId) {
-        return {
-            success: false,
-            error: 'Unauthorized',
-        };
-    }
-
-    const status = await validateChatGptSubscriptionConnection();
-    if (!status.ok) {
-        return {
-            success: false,
-            error: status.message,
-            status,
-        };
-    }
-
-    return {
-        success: true,
-        message: status.message,
-        status,
-    };
 }
 
 export async function getUserProfileStatus() {
