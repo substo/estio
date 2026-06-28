@@ -19,6 +19,7 @@ import {
     VIEWING_SESSION_INSIGHT_STATES,
     VIEWING_SESSION_INSIGHT_TYPES,
     VIEWING_SESSION_SPEAKERS,
+    VIEWING_SESSION_TRANSCRIPT_STATUSES,
     VIEWING_SESSION_TRANSLATION_STATUSES,
 } from "@/lib/viewings/sessions/types";
 
@@ -252,6 +253,22 @@ async function getMessageWithSession(sessionId: string, messageId: string) {
             },
         },
     });
+}
+
+async function isSupersededProvisionalMessage(message: Awaited<ReturnType<typeof getMessageWithSession>>) {
+    if (!message || message.transcriptStatus !== VIEWING_SESSION_TRANSCRIPT_STATUSES.provisional) {
+        return false;
+    }
+
+    const replacement = await db.viewingSessionMessage.findFirst({
+        where: {
+            sessionId: message.sessionId,
+            supersedesMessageId: message.id,
+        },
+        select: { id: true },
+    });
+
+    return !!replacement?.id;
 }
 
 function serializeRealtimeInsight(item: any) {
@@ -596,6 +613,54 @@ export async function runViewingSessionMessageTranslation(input: {
         throw new Error("Viewing session message not found.");
     }
 
+    if (
+        message.translationStatus !== VIEWING_SESSION_TRANSLATION_STATUSES.completed &&
+        await isSupersededProvisionalMessage(message)
+    ) {
+        const updated = await db.viewingSessionMessage.update({
+            where: { id: message.id },
+            data: {
+                translationStatus: VIEWING_SESSION_TRANSLATION_STATUSES.skipped,
+                analysisStatus: deriveViewingSessionAnalysisStatus({
+                    translationStatus: VIEWING_SESSION_TRANSLATION_STATUSES.skipped,
+                    insightStatus: (message.insightStatus as any) || VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.pending,
+                }),
+            },
+        });
+
+        await publishViewingSessionRealtimeEvent({
+            sessionId,
+            locationId: message.session.locationId,
+            type: VIEWING_SESSION_EVENT_TYPES.messageUpdated,
+            payload: {
+                message: {
+                    id: updated.id,
+                    translationStatus: updated.translationStatus,
+                    insightStatus: updated.insightStatus,
+                    analysisStatus: updated.analysisStatus,
+                },
+            },
+        });
+
+        await appendViewingSessionEvent({
+            sessionId,
+            locationId: message.session.locationId,
+            type: "viewing_session.translation.skipped",
+            source: "worker",
+            payload: {
+                messageId: message.id,
+                reason: "superseded_provisional_transcript",
+            },
+        });
+
+        return {
+            ok: true,
+            messageId: message.id,
+            translatedText: message.translatedText || null,
+            skipped: true,
+        };
+    }
+
     await db.viewingSessionMessage.update({
         where: { id: message.id },
         data: {
@@ -729,6 +794,55 @@ export async function runViewingSessionMessageInsights(input: {
     const message = await getMessageWithSession(sessionId, messageId);
     if (!message) {
         throw new Error("Viewing session message not found.");
+    }
+
+    if (
+        message.insightStatus !== VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.completed &&
+        await isSupersededProvisionalMessage(message)
+    ) {
+        const updated = await db.viewingSessionMessage.update({
+            where: { id: message.id },
+            data: {
+                insightStatus: VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped,
+                analysisStatus: deriveViewingSessionAnalysisStatus({
+                    translationStatus: (message.translationStatus as any) || VIEWING_SESSION_TRANSLATION_STATUSES.pending,
+                    insightStatus: VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped,
+                }),
+            },
+        });
+
+        await publishViewingSessionRealtimeEvent({
+            sessionId,
+            locationId: message.session.locationId,
+            type: VIEWING_SESSION_EVENT_TYPES.messageUpdated,
+            payload: {
+                message: {
+                    id: updated.id,
+                    translationStatus: updated.translationStatus,
+                    insightStatus: updated.insightStatus,
+                    analysisStatus: updated.analysisStatus,
+                },
+            },
+        });
+
+        await appendViewingSessionEvent({
+            sessionId,
+            locationId: message.session.locationId,
+            type: "viewing_session.insights.skipped",
+            source: "worker",
+            payload: {
+                messageId: message.id,
+                reason: "superseded_provisional_transcript",
+            },
+        });
+
+        return {
+            ok: true,
+            messageId: message.id,
+            insightsCreated: 0,
+            insightsSuperseded: 0,
+            skipped: true,
+        };
     }
 
     await db.viewingSessionMessage.update({

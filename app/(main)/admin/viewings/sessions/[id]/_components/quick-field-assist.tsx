@@ -212,6 +212,36 @@ function languageCode(value: string | null | undefined) {
     return normalizeReplyLanguage(value) || "en";
 }
 
+function isPendingTranslationStatus(value: string | null | undefined) {
+    return !value || value === "pending" || value === "processing";
+}
+
+function resolveMessageTargetLanguage(message: SessionMessage, agentLanguage: string, clientLanguage: string) {
+    if (message.targetLanguage) return languageCode(message.targetLanguage);
+    if (message.speaker === "agent") return languageCode(clientLanguage);
+    if (message.speaker === "customer") return languageCode(agentLanguage);
+    return languageCode(clientLanguage || agentLanguage);
+}
+
+function getMessageDisplayState(message: SessionMessage, agentLanguage: string, clientLanguage: string) {
+    const targetLanguage = resolveMessageTargetLanguage(message, agentLanguage, clientLanguage);
+    const translatedText = message.translatedText?.trim() || "";
+    const originalText = message.originalText.trim();
+    const hasTranslatedText = !!translatedText && translatedText !== originalText;
+    const sourceLanguage = message.originalLanguage ? languageCode(message.originalLanguage) : null;
+    const isDifferentLanguage = !sourceLanguage || sourceLanguage !== targetLanguage;
+    const isWaitingForTranslation = !hasTranslatedText && isDifferentLanguage && isPendingTranslationStatus(message.translationStatus);
+
+    return {
+        primaryText: hasTranslatedText
+            ? translatedText
+            : isWaitingForTranslation
+                ? `Translating to ${languageLabel(targetLanguage)}...`
+                : message.originalText,
+        isWaitingForTranslation,
+    };
+}
+
 function LanguagePicker({
     value,
     onChange,
@@ -389,6 +419,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const sessionTitle = session.primaryProperty?.title || session.viewing?.property.title || "Quick Field Assist";
     const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
+    const isListenOnlyMode = session.sessionKind === "listen_only" || session.speechMode === "listen_only" || session.participantMode === "agent_only";
     const selectedContact = quickContextOptions.contacts.find((contact) => contact.id === selectedContactId) || null;
     const contactLanguageHint = selectedContact?.preferredLang && languageCode(selectedContact.preferredLang) === languageCode(clientLanguage)
         ? `${languageLabel(selectedContact.preferredLang)} from contact`
@@ -1095,7 +1126,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     <CardHeader className="pb-2">
                         <CardTitle className="text-base">Live Interpreter</CardTitle>
                         <CardDescription>
-                            {isInterpreterMode
+                            {isListenOnlyMode
+                                ? (session.transportStatus === "connected" ? `Translating your speech to ${languageLabel(clientLanguage)}.` : "Choose languages, then start the mic.")
+                                : isInterpreterMode
                                 ? (session.transportStatus === "connected" ? "Speak either language." : "Choose two languages, then start the mic.")
                                 : (session.transportStatus === "connected" ? "Connected" : "Choose languages, then start speaking.")}
                         </CardDescription>
@@ -1153,15 +1186,15 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             <div className="space-y-3">
                                 {renderedMessages.length === 0 && (
                                     <div className="rounded-xl border border-dashed bg-white px-4 py-8 text-center text-sm text-muted-foreground">
-                                        {isInterpreterMode
+                                        {isListenOnlyMode
+                                            ? `Start the mic and speak ${languageLabel(agentLanguage)}.`
+                                            : isInterpreterMode
                                             ? "Start the mic and speak either selected language."
                                             : "Start speaking, listening, or typing to begin the session."}
                                     </div>
                                 )}
                                 {renderedMessages.map((message, index) => {
-                                    const translated = message.translatedText && message.translatedText !== message.originalText
-                                        ? message.translatedText
-                                        : message.originalText;
+                                    const display = getMessageDisplayState(message, agentLanguage, clientLanguage);
                                     return (
                                         <div
                                             key={message.id}
@@ -1174,7 +1207,14 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                                 <span>{message.speaker}</span>
                                                 <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                                             </div>
-                                            <div className="text-lg font-medium leading-snug text-slate-950">{translated}</div>
+                                            <div
+                                                className={cn(
+                                                    "text-lg font-medium leading-snug",
+                                                    display.isWaitingForTranslation ? "text-slate-500" : "text-slate-950"
+                                                )}
+                                            >
+                                                {display.primaryText}
+                                            </div>
                                             <div className="mt-1 text-sm text-slate-500">{message.originalText}</div>
                                             <div className="mt-2 text-[10px] text-muted-foreground">
                                                 {message.translationStatus || "pending"} • {message.transcriptStatus || "final"}
@@ -1199,7 +1239,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 )}
                             </div>
                             <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                                <span>{isInterpreterMode ? "Translates both directions from one mic." : "Live audio relay first, browser fallback last."}</span>
+                                <span>{isListenOnlyMode ? `Translates ${languageLabel(agentLanguage)} to ${languageLabel(clientLanguage)}.` : isInterpreterMode ? "Translates both directions from one mic." : "Live audio relay first, browser fallback last."}</span>
                                 <label className="flex items-center gap-2">
                                     Speak
                                     <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} />
