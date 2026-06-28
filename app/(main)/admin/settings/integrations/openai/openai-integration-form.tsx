@@ -10,8 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import {
-    connectChatGptSubscriptionFromIntegration,
-    disconnectChatGptSubscriptionFromIntegration,
     saveOpenAiIntegrationSettings,
     type OpenAiIntegrationActionState,
 } from "./actions";
@@ -49,6 +47,7 @@ type OpenAiIntegrationFormProps = {
 };
 
 const initialState: OpenAiIntegrationActionState = {};
+const CHATGPT_SUBSCRIPTION_API_PATH = "/api/admin/settings/integrations/openai/chatgpt-subscription";
 
 function StatusPill({ ok, children }: { ok: boolean; children: ReactNode }) {
     return (
@@ -125,11 +124,34 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
         });
     }, [state, toast]);
 
+    const runSubscriptionOperation = async (operation: "connect" | "disconnect") => {
+        const response = await fetch(CHATGPT_SUBSCRIPTION_API_PATH, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ operation, modelId: subscriptionModel }),
+        });
+
+        const payload = await response.json().catch(() => null);
+        if (!payload || typeof payload !== "object") {
+            return {
+                success: false,
+                error: response.ok
+                    ? "ChatGPT subscription returned an unreadable response."
+                    : `ChatGPT subscription request failed (${response.status}).`,
+            };
+        }
+
+        return payload as OpenAiIntegrationActionState;
+    };
+
     const connectSubscription = () => {
         setConnectionMessage(null);
         setConnectionOk(null);
         startSubscriptionConnectionTransition(async () => {
-            const result = await connectChatGptSubscriptionFromIntegration(subscriptionModel);
+            const result = await runSubscriptionOperation("connect").catch((error: any) => ({
+                success: false,
+                error: error?.message || "ChatGPT subscription connection failed.",
+            }));
             setConnectionOk(result.success === true);
             setConnectionMessage(result.message || result.error || null);
             if (result.success) {
@@ -147,7 +169,10 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
         setConnectionMessage(null);
         setConnectionOk(null);
         startSubscriptionConnectionTransition(async () => {
-            const result = await disconnectChatGptSubscriptionFromIntegration(subscriptionModel);
+            const result = await runSubscriptionOperation("disconnect").catch((error: any) => ({
+                success: false,
+                error: error?.message || "ChatGPT subscription disconnect failed.",
+            }));
             setConnectionOk(result.success === true);
             setConnectionMessage(result.message || result.error || null);
             if (result.success) {
