@@ -40,14 +40,14 @@ test("buildCodexCliCommand uses locked-down noninteractive Codex execution", () 
         assert.equal(command.env.CODEX_ACCESS_TOKEN, "codex-token");
         assert.equal(command.authMode, "access_token");
         assert.deepEqual(command.args.slice(0, 8), [
+            "--ask-for-approval",
+            "never",
             "exec",
             "--ephemeral",
             "--ignore-rules",
             "--skip-git-repo-check",
             "--sandbox",
             "read-only",
-            "--ask-for-approval",
-            "never",
         ]);
         assert.equal(command.args.includes("gpt-5.4-mini"), true);
         assert.equal(command.args.includes("/tmp/out.txt"), true);

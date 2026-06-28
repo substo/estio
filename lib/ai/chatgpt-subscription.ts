@@ -185,14 +185,14 @@ export function buildCodexCliCommand(args: {
     return {
         command,
         args: [
+            "--ask-for-approval",
+            "never",
             "exec",
             "--ephemeral",
             "--ignore-rules",
             "--skip-git-repo-check",
             "--sandbox",
             "read-only",
-            "--ask-for-approval",
-            "never",
             "-C",
             cwd,
             "-m",
