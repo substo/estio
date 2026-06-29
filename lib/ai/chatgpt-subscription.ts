@@ -17,6 +17,11 @@ export type ChatGptSubscriptionModelOption = {
 
 export const CHATGPT_SUBSCRIPTION_TEXT_MODELS: ChatGptSubscriptionModelOption[] = [
     {
+        value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4-mini`,
+        label: "ChatGPT Subscription GPT-5.4 Mini",
+        description: "Fastest lower-usage Codex/ChatGPT subscription-backed text agent model",
+    },
+    {
         value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.5`,
         label: "ChatGPT Subscription GPT-5.5",
         description: "Codex/ChatGPT subscription-backed text agent model",
@@ -25,11 +30,6 @@ export const CHATGPT_SUBSCRIPTION_TEXT_MODELS: ChatGptSubscriptionModelOption[] 
         value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4`,
         label: "ChatGPT Subscription GPT-5.4",
         description: "Codex/ChatGPT subscription-backed text agent model",
-    },
-    {
-        value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4-mini`,
-        label: "ChatGPT Subscription GPT-5.4 Mini",
-        description: "Lower-usage Codex/ChatGPT subscription-backed text agent model",
     },
 ];
 

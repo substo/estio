@@ -351,7 +351,7 @@ export async function getAiDraftModelPickerState(locationId?: string): Promise<{
         googleState.models,
         [...openAiState.models, ...chatGptSubscriptionState.models],
         googleState.defaultModel,
-        chatGptSubscriptionState.defaultModel || openAiState.defaultModel
+        openAiState.defaultModel
     );
 }
 
@@ -459,7 +459,7 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
         pickerModels,
         [...openAiState.models, ...chatGptSubscriptionState.models],
         { general, draft, extraction, design, translation },
-        { textDefaultModel: chatGptSubscriptionState.defaultModel || openAiState.defaultModel }
+        { textDefaultModel: openAiState.defaultModel }
     );
 }
 

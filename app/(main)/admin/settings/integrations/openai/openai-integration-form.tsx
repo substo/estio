@@ -198,7 +198,7 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
                                 ChatGPT Subscription
                             </CardTitle>
                             <CardDescription>
-                                Use your ChatGPT subscription for AI drafts without entering an OpenAI Platform API key.
+                                Use the trusted server ChatGPT/Codex session for AI drafts without entering an OpenAI Platform API key.
                             </CardDescription>
                         </div>
                         <StatusPill ok={subscriptionEnabled && initialData.chatGptSubscriptionTransportEnabled}>
@@ -219,8 +219,8 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
                         </div>
                         <div className="text-muted-foreground">
                             {subscriptionEnabled
-                                ? "Estio will show ChatGPT subscription models in AI draft pickers."
-                                : "Connect ChatGPT to show subscription models in AI draft pickers."}
+                                ? "Estio will show ChatGPT subscription models in AI draft pickers. Direct API models remain the fastest default when configured."
+                                : "Verify the server login to show subscription models in AI draft pickers."}
                         </div>
                     </div>
 
@@ -238,7 +238,7 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
                     <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="text-sm text-muted-foreground">
                             {initialData.chatGptSubscriptionTransportEnabled
-                                ? "Connect once to enable subscription-backed models for your account."
+                                ? "No phone login window opens here. Estio checks the trusted server's existing ChatGPT login and enables it for your account."
                                 : "A server admin must finish the trusted Codex login setup before users can connect."}
                         </div>
                         <div className="flex gap-2">
@@ -262,7 +262,7 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
                                 ) : (
                                     <LogIn className="mr-2 h-4 w-4" />
                                 )}
-                                {subscriptionEnabled ? "Reconnect ChatGPT" : "Sign in with ChatGPT"}
+                                {subscriptionEnabled ? "Recheck ChatGPT Login" : "Verify ChatGPT Login"}
                             </Button>
                         </div>
                     </div>

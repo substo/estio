@@ -116,6 +116,22 @@ test("buildAiDraftModelPickerStateResult prefers available OpenAI default", () =
     ]));
 });
 
+test("buildAiDraftModelPickerStateResult prefers direct OpenAI default over subscription default", () => {
+    const state = buildAiDraftModelPickerStateResult(
+        [
+            { value: GEMINI_DRAFT_FAST_DEFAULT, label: "Gemini 2.5 Flash-Lite" },
+        ],
+        [
+            { value: "openai:gpt-4o-mini", label: "OpenAI GPT-4o Mini" },
+            { value: "chatgpt_subscription:gpt-5.4-mini", label: "ChatGPT Subscription GPT-5.4 Mini" },
+        ],
+        GEMINI_DRAFT_FAST_DEFAULT,
+        "openai:gpt-4o-mini"
+    );
+
+    assert.equal(state.defaultModel, "openai:gpt-4o-mini");
+});
+
 test("buildAiDraftModelPickerStateResult falls back to Gemini when OpenAI default is unavailable", () => {
     const state = buildAiDraftModelPickerStateResult(
         [
@@ -127,4 +143,23 @@ test("buildAiDraftModelPickerStateResult falls back to Gemini when OpenAI defaul
     );
 
     assert.equal(state.defaultModel, GEMINI_DRAFT_FAST_DEFAULT);
+});
+
+test("buildAiDraftModelPickerStateResult keeps Gemini default when only subscription models are added", () => {
+    const state = buildAiDraftModelPickerStateResult(
+        [
+            { value: GEMINI_DRAFT_FAST_DEFAULT, label: "Gemini 2.5 Flash-Lite" },
+        ],
+        [
+            { value: "chatgpt_subscription:gpt-5.4-mini", label: "ChatGPT Subscription GPT-5.4 Mini" },
+        ],
+        GEMINI_DRAFT_FAST_DEFAULT,
+        null
+    );
+
+    assert.equal(state.defaultModel, GEMINI_DRAFT_FAST_DEFAULT);
+    assert.deepEqual(new Set(state.models.map((model) => model.value)), new Set([
+        GEMINI_DRAFT_FAST_DEFAULT,
+        "chatgpt_subscription:gpt-5.4-mini",
+    ]));
 });
