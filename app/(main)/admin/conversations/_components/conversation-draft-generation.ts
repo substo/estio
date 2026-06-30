@@ -71,6 +71,15 @@ type DraftFallbackArgs = {
 };
 
 const DEFAULT_DRAFT_STREAM_TIMEOUT_MS = 12_000;
+const COMPLETION_CHUNK_DRAFT_STREAM_TIMEOUT_MS = 45_000;
+
+export function resolveDraftStreamTimeoutMs(model?: string | null) {
+    const normalizedModel = String(model || "").trim();
+    if (normalizedModel.startsWith("chatgpt_subscription:") || normalizedModel.startsWith("openai:")) {
+        return COMPLETION_CHUNK_DRAFT_STREAM_TIMEOUT_MS;
+    }
+    return DEFAULT_DRAFT_STREAM_TIMEOUT_MS;
+}
 
 function logDraftTiming(event: string, fields: Record<string, unknown> = {}) {
     if (typeof console === "undefined") return;
@@ -108,7 +117,7 @@ export async function streamDraftViaApi(
 ): Promise<GenerateDraftResult | null> {
     const startedAt = Date.now();
     let firstChunkMs: number | null = null;
-    const timeoutMs = args.timeoutMs ?? DEFAULT_DRAFT_STREAM_TIMEOUT_MS;
+    const timeoutMs = args.timeoutMs ?? resolveDraftStreamTimeoutMs(args.model);
     const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeout = abortController
         ? setTimeout(() => abortController.abort(), timeoutMs)
@@ -275,7 +284,7 @@ export async function generateDraftWithStreamingFallback(args: {
     if (args.onChunk) {
         try {
             const streamStartedAt = Date.now();
-            const timeoutMs = args.streamTimeoutMs ?? DEFAULT_DRAFT_STREAM_TIMEOUT_MS;
+            const timeoutMs = args.streamTimeoutMs ?? resolveDraftStreamTimeoutMs(args.model);
             result = await withTimeout((args.streamDraft || streamDraftViaApi)({
                 conversationId: args.conversationId,
                 contactId: args.contactId,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { appendAiStreamText, selectAiStreamFinalText } from '@/lib/ai/stream-text';
-import { generateDraftWithStreamingFallback, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
+import { generateDraftWithStreamingFallback, resolveDraftStreamTimeoutMs, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
 import { resolveComposerDraftModelOverride } from './use-conversation-composer-ai-draft';
 
 test('appendAiStreamText preserves exact streamed text chunks', () => {
@@ -27,6 +27,12 @@ test('selectComposerFinalDraftText preserves streamed formatting when final text
     assert.equal(selectComposerFinalDraftText({ streamedText: streamed, finalText: flattened }), streamed);
     assert.equal(selectComposerFinalDraftText({ streamedText: streamed, finalText: 'Different final text.' }), 'Different final text.');
     assert.equal(selectComposerFinalDraftText({ streamedText: '', finalText: flattened }), flattened);
+});
+
+test('resolveDraftStreamTimeoutMs gives completion-chunk providers enough time', () => {
+    assert.equal(resolveDraftStreamTimeoutMs('gemini-flash-latest'), 12_000);
+    assert.equal(resolveDraftStreamTimeoutMs('chatgpt_subscription:gpt-5.5'), 45_000);
+    assert.equal(resolveDraftStreamTimeoutMs('openai:gpt-4o-mini'), 45_000);
 });
 
 test('appendAiStreamText does not insert spaces inside streamed subword chunks', () => {
@@ -68,6 +74,26 @@ test('generateDraftWithStreamingFallback uses stream result when chunks are supp
     assert.deepEqual(chunks, ['Hello']);
     assert.equal(fallbackCalled, false);
     assert.deepEqual(result, { draft: 'Hello there', reasoning: 'streamed' });
+});
+
+test('generateDraftWithStreamingFallback uses longer timeout for ChatGPT subscription streams', async () => {
+    let observedTimeoutMs = 0;
+
+    const result = await generateDraftWithStreamingFallback({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        model: 'chatgpt_subscription:gpt-5.5',
+        onChunk: () => {},
+        streamDraft: async (args) => {
+            observedTimeoutMs = args.timeoutMs || 0;
+            return { draft: 'subscription draft' };
+        },
+        generateDraft: async () => ({ draft: 'fallback' }),
+    });
+
+    assert.equal(observedTimeoutMs, 45_000);
+    assert.deepEqual(result, { draft: 'subscription draft' });
 });
 
 test('generateDraftWithStreamingFallback falls back when stream fails', async () => {
