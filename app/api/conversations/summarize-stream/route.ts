@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { securelyRecordConversationAiUsage } from "@/lib/ai/usage-metering";
 import { revalidatePath } from "next/cache";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -247,17 +247,6 @@ export async function POST(req: NextRequest) {
         '"""',
     ].join("\n");
 
-    // Resolve API key and model
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId: location.id },
-    });
-    const configAny = siteConfig as any;
-    const apiKey = configAny?.googleAiApiKey || process.env.GOOGLE_API_KEY;
-
-    if (!apiKey) {
-        return NextResponse.json({ success: false, error: "No AI API key configured" }, { status: 500 });
-    }
-
     const modelId = modelOverride || getModelForTask("simple_generation");
 
     const encoder = new TextEncoder();
@@ -274,32 +263,14 @@ export async function POST(req: NextRequest) {
             try {
                 push({ type: "started", ts: now.toISOString(), prefix: generatedPrefix });
 
-                const genAI = new GoogleGenerativeAI(apiKey);
-                const model = genAI.getGenerativeModel({
-                    model: modelId,
-                    generationConfig: {
-                        responseMimeType: "text/plain",
-                        temperature: 0.2,
-                    } as any,
-                });
-
                 const startedAt = Date.now();
-                const streamResult = await model.generateContentStream(summaryPrompt);
-                let rawSummary = "";
-
-                for await (const chunk of streamResult.stream) {
-                    const delta = chunk.text();
-                    if (!delta) continue;
-                    rawSummary += delta;
-                    push({ type: "chunk", text: delta });
-                }
-
-                const response = await streamResult.response;
-                if (!rawSummary) {
-                    rawSummary = response.text();
-                    if (rawSummary) {
-                        push({ type: "chunk", text: rawSummary });
-                    }
+                const llmResult = await callLLMWithMetadata(modelId, summaryPrompt, undefined, {
+                    temperature: 0.2,
+                    locationId: location.id,
+                });
+                const rawSummary = llmResult.text;
+                if (rawSummary) {
+                    push({ type: "chunk", text: rawSummary });
                 }
 
                 const latencyMs = Date.now() - startedAt;
@@ -360,17 +331,12 @@ export async function POST(req: NextRequest) {
 
                 // Persist AI execution trace (fire and forget)
                 try {
-                    const usageMeta = (response.usageMetadata || {}) as Record<string, unknown>;
-                    const readUsage = (key: string) => {
-                        const value = Number(usageMeta[key]);
-                        return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
-                    };
                     const usage = {
-                        promptTokens: readUsage("promptTokenCount"),
-                        completionTokens: readUsage("candidatesTokenCount"),
-                        totalTokens: readUsage("totalTokenCount"),
-                        thoughtsTokens: readUsage("thoughtsTokenCount"),
-                        toolUsePromptTokens: readUsage("toolUsePromptTokenCount"),
+                        promptTokens: llmResult.usage.promptTokens,
+                        completionTokens: llmResult.usage.completionTokens,
+                        totalTokens: llmResult.usage.totalTokens,
+                        thoughtsTokens: llmResult.usage.thoughtsTokens,
+                        toolUsePromptTokens: llmResult.usage.toolUsePromptTokens,
                     };
 
                     const costEstimate = calculateRunCostFromUsage(modelId, usage);
@@ -403,13 +369,14 @@ export async function POST(req: NextRequest) {
                         locationId: location.id,
                         conversationId: conversation.id,
                         action: "selection_summary_stream",
-                        provider: "google_gemini",
+                        provider: llmResult.provider,
                         model: modelId,
                         inputTokens: usage.promptTokens,
                         outputTokens: usage.completionTokens,
                         metadata: {
                             source: "summarize-stream",
                             cached: false,
+                            provider: llmResult.provider,
                         },
                     });
                 } catch (traceError) {
