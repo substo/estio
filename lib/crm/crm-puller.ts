@@ -9,6 +9,7 @@ import { normalizeInternationalPhone } from '@/lib/utils/phone';
 import { buildStructuredLeadDisplayName } from '@/lib/contacts/name-builder';
 import { resolveImportedOwner } from '@/lib/crm/owner-import';
 import { registerTemporaryMediaAssets } from '@/lib/media/media-assets';
+import { ensureConversationForImportedContact } from '@/lib/conversations/imported-contact-bootstrap';
 
 function getLocationLabels(areaKey: string | null | undefined, districtKey: string | null | undefined) {
     const district = PROPERTY_LOCATIONS.find((item) => item.district_key === districtKey) || null;
@@ -474,6 +475,20 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
             extractedData.ownerEntityPath = resolvedOwner.ownerEntityPath;
             extractedData.ownerBusinessSubtype = resolvedOwner.ownerBusinessSubtype;
             extractedData.ownerMatchSource = resolvedOwner.ownerMatchSource;
+            if (resolvedOwner.ownerContactId) {
+                try {
+                    await ensureConversationForImportedContact({
+                        contactId: resolvedOwner.ownerContactId,
+                        locationId,
+                        source: 'legacy_crm_property_import',
+                    });
+                } catch (error: any) {
+                    console.warn('[CRM PULL] Failed to bootstrap owner conversation', {
+                        contactId: resolvedOwner.ownerContactId,
+                        error: error?.message || String(error),
+                    });
+                }
+            }
             if (resolvedOwner.ownerEntityType === "person" && resolvedOwner.ownerDisplayName) {
                 extractedData.ownerName = resolvedOwner.ownerDisplayName;
             }

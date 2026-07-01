@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { eventBus } from '@/lib/ai/events/event-bus';
 import { importAllListingsForProspect } from '@/lib/leads/property-import';
+import { buildProspectImportContactName } from '@/lib/leads/prospect-contact-import';
+import { ensureConversationForImportedContact } from '@/lib/conversations/imported-contact-bootstrap';
 import {
     applyProspectCompanyLinkSelection,
     COMPANY_LINK_HIGH_CONFIDENCE_THRESHOLD,
@@ -91,6 +93,7 @@ export type AcceptProspectResponse =
     | {
         success: true;
         contactId: string;
+        conversationId: string;
         propertiesImported: number;
         propertiesSkipped: number;
         companyId?: string | null;
@@ -104,6 +107,11 @@ export type AcceptProspectResponse =
       };
 
 async function createOrReactivateContactForProspect(prospect: any) {
+    const contactName = buildProspectImportContactName({
+        prospect,
+        listings: prospect.scrapedListings || [],
+    });
+
     if (prospect.createdContactId) {
         const existing = await db.contact.findUnique({ where: { id: prospect.createdContactId }, select: { id: true } });
         if (existing) {
@@ -111,7 +119,7 @@ async function createOrReactivateContactForProspect(prospect: any) {
                 where: { id: existing.id },
                 data: {
                     status: 'active',
-                    name: prospect.name || 'Unknown',
+                    name: contactName,
                     firstName: prospect.firstName,
                     lastName: prospect.lastName,
                     email: prospect.email,
@@ -132,7 +140,7 @@ async function createOrReactivateContactForProspect(prospect: any) {
             locationId: prospect.locationId,
             status: 'active',
             contactType: 'Lead',
-            name: prospect.name || 'Unknown',
+            name: contactName,
             firstName: prospect.firstName,
             lastName: prospect.lastName,
             email: prospect.email,
@@ -391,6 +399,7 @@ export async function acceptProspectWithListings(
                 email: true,
                 phone: true,
                 message: true,
+                sourceUrl: true,
                 aiScore: true,
                 createdContactId: true,
                 isAgency: true,
@@ -398,6 +407,22 @@ export async function acceptProspectWithListings(
                 sellerType: true,
                 sellerTypeManual: true,
                 aiScoreBreakdown: true,
+                scrapedListings: {
+                    where: { status: { in: ['NEW', 'REVIEWING', 'REJECTED'] } },
+                    orderBy: { createdAt: 'asc' },
+                    select: {
+                        title: true,
+                        price: true,
+                        currency: true,
+                        propertyType: true,
+                        listingType: true,
+                        locationText: true,
+                        bedrooms: true,
+                        externalId: true,
+                        url: true,
+                    },
+                    take: 3,
+                },
             },
         });
         if (!prospect) return { success: false, message: 'Prospect not found' };
@@ -475,6 +500,11 @@ export async function acceptProspectWithListings(
 
         // 1. Create or reactivate CRM Contact with leadGoal
         const contactId = await createOrReactivateContactForProspect(prospect);
+        const { conversationId } = await ensureConversationForImportedContact({
+            contactId,
+            locationId: prospect.locationId,
+            source: 'prospect_property_import',
+        });
 
         if (companyId) {
             await db.contactCompanyRole.upsert({
@@ -531,6 +561,7 @@ export async function acceptProspectWithListings(
                 changes: JSON.stringify([
                     { field: 'source', old: null, new: prospect.source },
                     { field: 'prospectId', old: null, new: prospect.id },
+                    { field: 'conversationId', old: null, new: conversationId },
                     { field: 'propertiesImported', old: null, new: imported.length },
                     { field: 'propertiesSkipped', old: null, new: skipped.length },
                 ])
@@ -554,6 +585,7 @@ export async function acceptProspectWithListings(
         return {
             success: true,
             contactId,
+            conversationId,
             propertiesImported: imported.length,
             propertiesSkipped: skipped.length,
             companyId,
