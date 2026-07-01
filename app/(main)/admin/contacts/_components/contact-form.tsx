@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { createContact, updateContact, updateContactTypeAction, deleteContactRole, verifyAndHealContact, openOrStartConversationForContact } from '../actions';
+import { createContact, updateContact, updateContactIdentityAction, updateContactTypeAction, deleteContactRole, verifyAndHealContact, openOrStartConversationForContact } from '../actions';
 import { useToast } from '@/components/ui/use-toast';
 import { GoogleSyncManager } from './google-sync-manager';
 import { OutlookSyncManager } from './outlook-sync-manager';
@@ -258,6 +258,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     const [managerOpen, setManagerOpen] = useState(false);
     const [outlookOpen, setOutlookOpen] = useState(false);
     const [isSavingContactType, setIsSavingContactType] = useState(false);
+    const [isSavingIdentity, setIsSavingIdentity] = useState(false);
     const [isOpeningConversation, startConversationTransition] = useTransition();
     const [conversationError, setConversationError] = useState<string | null>(null);
     const [contactPatch, setContactPatch] = useState<Partial<ContactData>>({});
@@ -663,6 +664,170 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
         const normalized = String(value || '').trim();
         return normalized === REPLY_LANGUAGE_AUTO_VALUE ? '' : normalized;
     };
+    const normalizeNullableIdentityScalar = (value: unknown) => {
+        const normalized = String(value || '').trim();
+        return normalized || null;
+    };
+    const identityFastPathFields = new Set([
+        'name',
+        'email',
+        'phone',
+        'firstName',
+        'lastName',
+        'preferredLang',
+        'contactType',
+    ]);
+    const nonIdentityFastPathFields = [
+        'dateOfBirth',
+        'tags',
+        'message',
+        'address1',
+        'city',
+        'state',
+        'postalCode',
+        'country',
+        'roleType',
+        'entityId',
+        'entityIds',
+        'roleName',
+        'leadGoal',
+        'leadPriority',
+        'leadStage',
+        'leadSource',
+        'leadNextAction',
+        'leadFollowUpDate',
+        'leadAssignedToAgent',
+        'leadOtherDetails',
+        'requirementStatus',
+        'requirementDistrict',
+        'requirementBedrooms',
+        'requirementMinPrice',
+        'requirementMaxPrice',
+        'requirementCondition',
+        'requirementPropertyTypes',
+        'requirementPropertyLocations',
+        'requirementOtherDetails',
+        'matchingPropertiesToMatch',
+        'matchingEmailMatchedProperties',
+        'matchingNotificationFrequency',
+        'matchingLastMatchDate',
+        'propertiesInterested',
+        'propertiesInspected',
+        'propertiesEmailed',
+        'propertiesMatched',
+        'propertyWonValue',
+        'wonCommission',
+        'propertyWonReference',
+        'propertyWonDate',
+    ] as const;
+    const nonIdentityFastPathDefaults: Partial<Record<typeof nonIdentityFastPathFields[number], string>> = {
+        leadPriority: 'Medium',
+        leadStage: 'Unassigned',
+        requirementStatus: 'For Sale',
+        requirementDistrict: 'Any District',
+        requirementBedrooms: 'Any Bedrooms',
+        requirementMinPrice: 'Any',
+        requirementMaxPrice: 'Any',
+        requirementCondition: 'Any Condition',
+        matchingPropertiesToMatch: 'Updated and New',
+        matchingEmailMatchedProperties: 'Yes - Automatic',
+        matchingNotificationFrequency: 'Weekly',
+    };
+    const jsonArrayFastPathFields = new Set([
+        'entityIds',
+        'requirementPropertyTypes',
+        'requirementPropertyLocations',
+        'propertiesInterested',
+        'propertiesInspected',
+        'propertiesEmailed',
+        'propertiesMatched',
+    ]);
+
+    const normalizeArrayComparable = (value: unknown) => {
+        if (Array.isArray(value)) return [...value].map(String).map((item) => item.trim()).filter(Boolean).sort().join('|');
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return normalizeArrayComparable(parsed);
+        } catch {
+            // Fall through to comma parsing.
+        }
+        return raw.split(',').map((item) => item.trim()).filter(Boolean).sort().join('|');
+    };
+
+    const normalizeNonIdentityFastPathValue = (
+        field: typeof nonIdentityFastPathFields[number],
+        value: unknown,
+        source: 'form' | 'contact'
+    ) => {
+        if (field === 'tags' || jsonArrayFastPathFields.has(field)) return normalizeArrayComparable(value);
+        if (field.endsWith('Date') || field === 'dateOfBirth') return formatDate(value as any);
+
+        const normalized = String(value || '').trim();
+        if (normalized) return normalized;
+        if (source === 'contact') return nonIdentityFastPathDefaults[field] || '';
+        return normalized;
+    };
+
+    const formCanUseIdentityFastPath = (formData: FormData) => {
+        if (!contact || isCreating || !skipRouterRefresh) return false;
+        if (!normalizeSubmittedScalar(formData.get('name'))) return false;
+
+        for (const field of nonIdentityFastPathFields) {
+            if (!formData.has(field)) continue;
+            const currentValue = field === 'message'
+                ? contact.leadOtherDetails ?? contact.notes
+                : contact[field as keyof ContactData];
+            if (
+                normalizeNonIdentityFastPathValue(field, formData.get(field), 'form')
+                !== normalizeNonIdentityFastPathValue(field, currentValue, 'contact')
+            ) {
+                return false;
+            }
+        }
+
+        for (const key of Array.from(formData.keys())) {
+            if (key === 'locationId' || key === 'contactId') continue;
+            if (identityFastPathFields.has(key)) continue;
+            if (nonIdentityFastPathFields.includes(key as any)) continue;
+            return false;
+        }
+
+        return true;
+    };
+
+    const buildIdentityPatchFromForm = (formData: FormData): ContactIdentityPatch | null => {
+        if (!contact) return null;
+        const patch: ContactIdentityPatch = { id: contact.id };
+
+        if (formData.has('name')) patch.name = normalizeSubmittedScalar(formData.get('name')) || 'Unknown Contact';
+        if (formData.has('email')) patch.email = normalizeNullableIdentityScalar(formData.get('email'));
+        if (formData.has('phone')) patch.phone = normalizeNullableIdentityScalar(formData.get('phone'));
+        if (formData.has('firstName')) patch.firstName = normalizeNullableIdentityScalar(formData.get('firstName'));
+        if (formData.has('lastName')) patch.lastName = normalizeNullableIdentityScalar(formData.get('lastName'));
+        if (formData.has('preferredLang')) {
+            const preferredLang = normalizeReplyLanguageScalar(formData.get('preferredLang'));
+            patch.preferredLang = preferredLang || null;
+        }
+        if (formData.has('contactType')) patch.contactType = normalizeNullableIdentityScalar(formData.get('contactType'));
+
+        return patch;
+    };
+
+    const buildCurrentIdentityPatch = (): ContactIdentityPatch | null => {
+        if (!contact) return null;
+        return {
+            id: contact.id,
+            name: contact.name ?? null,
+            email: contact.email ?? null,
+            phone: contact.phone ?? null,
+            firstName: contact.firstName ?? null,
+            lastName: contact.lastName ?? null,
+            preferredLang: contact.preferredLang ?? null,
+            contactType: contact.contactType ?? null,
+        };
+    };
 
     const formMatchesCurrentContactExceptType = (formData: FormData) => {
         if (!contact || isCreating) return false;
@@ -696,9 +861,76 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     };
 
     const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-        if (!contact || isCreating || isSavingContactType) return;
+        if (!contact || isCreating || isSavingContactType || isSavingIdentity) return;
 
         const formData = new FormData(event.currentTarget);
+        if (formCanUseIdentityFastPath(formData)) {
+            const optimisticPatch = buildIdentityPatchFromForm(formData);
+            const rollbackPatch = buildCurrentIdentityPatch();
+            if (!optimisticPatch) return;
+
+            event.preventDefault();
+            setIsSavingIdentity(true);
+            setContactPatch((prev) => ({ ...prev, ...optimisticPatch }));
+            setFormRenderKey((prev) => prev + 1);
+            onContactSavedRef.current?.(optimisticPatch);
+            setIsEditing(false);
+            onSuccessRef.current?.();
+            toast({
+                title: 'Saved',
+                description: 'Contact updated.',
+            });
+
+            startTransition(async () => {
+                try {
+                    const result = await updateContactIdentityAction(contact.id, optimisticPatch);
+                    if (!result.success) {
+                        if (rollbackPatch) {
+                            setContactPatch((prev) => ({ ...prev, ...rollbackPatch }));
+                            onContactSavedRef.current?.(rollbackPatch);
+                        }
+                        setIsEditing(true);
+                        toast({
+                            title: 'Error',
+                            description: result.error || 'Failed to update contact.',
+                            variant: 'destructive',
+                        });
+                        return;
+                    }
+
+                    if (result.contact) {
+                        const savedIdentityPatch: ContactIdentityPatch = {
+                            id: result.contact.id,
+                            name: result.contact.name ?? null,
+                            email: result.contact.email ?? null,
+                            phone: result.contact.phone ?? null,
+                            firstName: result.contact.firstName ?? null,
+                            lastName: result.contact.lastName ?? null,
+                            preferredLang: result.contact.preferredLang ?? null,
+                            contactType: result.contact.contactType ?? null,
+                        };
+                        setContactPatch((prev) => ({ ...prev, ...savedIdentityPatch }));
+                        onContactSavedRef.current?.(savedIdentityPatch);
+                    }
+                } catch (error) {
+                    console.error('[ContactForm] Failed to update contact identity:', error);
+                    if (rollbackPatch) {
+                        setContactPatch((prev) => ({ ...prev, ...rollbackPatch }));
+                        onContactSavedRef.current?.(rollbackPatch);
+                    }
+                    setIsEditing(true);
+                    toast({
+                        title: 'Error',
+                        description: 'Failed to update contact.',
+                        variant: 'destructive',
+                    });
+                } finally {
+                    setIsSavingIdentity(false);
+                }
+            });
+            return;
+        }
+
         if (!formMatchesCurrentContactExceptType(formData)) return;
 
         event.preventDefault();
@@ -1436,7 +1668,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                     )}
                 </div>
                 <div className="flex justify-end">
-                    <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} saving={isSavingContactType} />
+                    <SubmitButton isEditing={isEditing} isCreating={isCreating} toggler={toggleEdit} saving={isSavingContactType || isSavingIdentity} />
                 </div>
             </div>
 

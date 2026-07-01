@@ -377,6 +377,31 @@ const updateContactSchema = createContactSchema.extend({
 
 type ValidatedContactData = z.infer<typeof createContactSchema>;
 
+const contactIdentityUpdateSchema = z.object({
+  name: z.string().min(1, 'Name is required').optional(),
+  firstName: z.string().optional().nullable(),
+  lastName: z.string().optional().nullable(),
+  email: z.string().regex(/^[\w\-\.\+=]+@[\w\-\.]+\.[a-zA-Z]{2,}$/, 'Invalid email address').optional().or(z.literal('')).nullable(),
+  phone: z.string().optional().nullable().transform(normalizePhone),
+  preferredLang: z.string().optional().nullable().transform((value, ctx) => {
+    if (value === undefined) return undefined;
+    const raw = String(value || '').trim();
+    if (!raw || raw.toLowerCase() === 'auto') return null;
+    const normalized = parsePreferredLanguage(raw);
+    if (!normalized) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Invalid preferred language code',
+      });
+      return z.NEVER;
+    }
+    return normalized;
+  }),
+  contactType: z.enum(CONTACT_TYPES).optional().nullable(),
+});
+
+type ContactIdentityUpdateData = z.infer<typeof contactIdentityUpdateSchema>;
+
 export type CreateContactState = {
   errors?: Record<string, string[] | undefined>;
   message?: string;
@@ -408,6 +433,28 @@ function buildDuplicatePhoneState(
       email: contact.email ?? null,
       phone: contact.phone ?? null,
     },
+  };
+}
+
+function buildContactIdentityPatch(contact: {
+  id: string;
+  name: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  preferredLang: string | null;
+  contactType: string | null;
+}): NonNullable<CreateContactState["contact"]> {
+  return {
+    id: contact.id,
+    name: contact.name || '',
+    firstName: contact.firstName || null,
+    lastName: contact.lastName || null,
+    email: contact.email || null,
+    phone: contact.phone || null,
+    preferredLang: contact.preferredLang || null,
+    contactType: contact.contactType || null,
   };
 }
 
@@ -1152,6 +1199,163 @@ export async function updateContactAction(contactId: string, data: Partial<Valid
   const res = await updateContactCore(fullData, userId);
   revalidatePath('/admin/contacts');
   return res.success ? { success: true } : { success: false, error: res.message };
+}
+
+export async function updateContactIdentityAction(contactId: string, data: ContactIdentityUpdateData) {
+  const t0 = performance.now();
+  const normalizedContactId = String(contactId || '').trim();
+  if (!normalizedContactId) return { success: false as const, error: 'Missing contact ID' };
+
+  const validatedFields = contactIdentityUpdateSchema.safeParse(data);
+  if (!validatedFields.success) {
+    const errors = validatedFields.error.flatten().fieldErrors;
+    const firstError = Object.values(errors).flat().find(Boolean);
+    return {
+      success: false as const,
+      error: firstError || 'Invalid contact details.',
+      errors,
+    };
+  }
+
+  const patch = validatedFields.data;
+  const requestedKeys = Object.keys(patch).filter((key) => patch[key as keyof typeof patch] !== undefined);
+  if (requestedKeys.length === 0) return { success: false as const, error: 'No contact details changed.' };
+
+  const { userId } = await auth();
+  if (!userId) return { success: false as const, error: 'Unauthorized' };
+
+  const existing = await db.contact.findUnique({
+    where: { id: normalizedContactId },
+    select: {
+      id: true,
+      locationId: true,
+      name: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      preferredLang: true,
+      contactType: true,
+      leadGoal: true,
+    },
+  });
+
+  if (!existing) return { success: false as const, error: 'Contact not found' };
+
+  const hasAccess = await verifyUserHasAccessToLocation(userId, existing.locationId);
+  if (!hasAccess) return { success: false as const, error: 'Unauthorized' };
+
+  if (patch.contactType && shouldPreserveLeadTypeAgainstGenericContactDowngrade(existing, { contactType: patch.contactType })) {
+    return {
+      success: false as const,
+      error: 'This contact has an active lead goal. Clear the lead goal before changing it from Lead to Contact.',
+    };
+  }
+
+  if (patch.email && !areValuesEqual(patch.email, existing.email)) {
+    const duplicate = await db.contact.findFirst({
+      where: {
+        locationId: existing.locationId,
+        email: patch.email,
+        NOT: { id: existing.id },
+      },
+      select: { id: true },
+    });
+    if (duplicate) return { success: false as const, error: 'Contact with this email already exists.' };
+  }
+
+  if (patch.phone && !areValuesEqual(patch.phone, existing.phone)) {
+    const phoneDuplicate = await checkPhoneDuplicate(existing.locationId, patch.phone, existing.id);
+    if (phoneDuplicate?.type === 'Exact') {
+      return {
+        success: false as const,
+        error: 'Phone already exists. Open the existing contact instead.',
+        duplicateContact: phoneDuplicate.contact,
+      };
+    }
+  }
+
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
+  const internalUserId = dbUser?.id || null;
+
+  const updateData: Prisma.ContactUpdateInput = {};
+  for (const key of requestedKeys) {
+    const typedKey = key as keyof ContactIdentityUpdateData;
+    const value = patch[typedKey];
+    if (value === undefined) continue;
+    (updateData as any)[typedKey] = value;
+  }
+
+  const changes = requestedKeys
+    .map((key) => {
+      const typedKey = key as keyof ContactIdentityUpdateData;
+      const oldValue = existing[typedKey as keyof typeof existing];
+      const newValue = patch[typedKey];
+      if (areValuesEqual(oldValue, newValue)) return null;
+      return { field: key, old: normalizeForDiff(oldValue), new: normalizeForDiff(newValue) };
+    })
+    .filter((change): change is { field: string; old: any; new: any } => !!change);
+
+  if (changes.length === 0) {
+    return {
+      success: true as const,
+      contact: buildContactIdentityPatch(existing),
+      unchanged: true as const,
+    };
+  }
+
+  const updatedContact = await db.$transaction(async (tx) => {
+    const updated = await tx.contact.update({
+      where: { id: existing.id },
+      data: withChangedProfileVerificationInvalidation(updateData, existing),
+      select: {
+        id: true,
+        name: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        preferredLang: true,
+        contactType: true,
+      },
+    });
+
+    await upsertManualContactLanguage(tx, updated.id, existing.locationId, updated.preferredLang);
+    await logContactHistory(tx, updated.id, internalUserId, 'UPDATED', changes);
+    await enqueueContactSync(tx as Prisma.TransactionClient, {
+      contactId: updated.id,
+      locationId: existing.locationId,
+      operation: 'update',
+      payload: { preferredUserId: internalUserId, fields: changes.map((change) => change.field) },
+    });
+
+    return updated;
+  });
+
+  enqueueProviderContactMirrorsAfterResponse({
+    locationId: existing.locationId,
+    contactId: existing.id,
+    userId: internalUserId,
+    reason: 'contact_identity_update',
+    googleEvent: 'update',
+  });
+
+  console.log('[updateContactIdentityAction:perf]', JSON.stringify({
+    total_ms: Math.round(performance.now() - t0),
+    contactId: existing.id,
+    locationId: existing.locationId,
+    changedFields: changes.map((change) => change.field),
+  }));
+
+  revalidateTag('conversations:list');
+  revalidateTag('conversations:workspace');
+  revalidateTag('conversations:workspace:core');
+  revalidateTag('conversations:workspace:sidebar');
+
+  return {
+    success: true as const,
+    contact: buildContactIdentityPatch(updatedContact),
+  };
 }
 
 export async function updateContactTypeAction(contactId: string, contactType: ContactType) {
