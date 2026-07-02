@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
     getConversationChannelCapabilities,
@@ -8,6 +8,7 @@ import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summar
 import {
     availableChannel,
     createDefaultChannelCapabilities,
+    getBestAvailableDefaultChannel,
     getConversationContactIdentity,
     getFirstAvailableChannel,
     unavailableChannel,
@@ -34,6 +35,20 @@ export function getInitialComposerChannel(
     options: { smsRelayEnabled?: boolean } = {},
 ): ComposerChannel {
     return deriveComposerInitialChannel(conversation, options);
+}
+
+export function selectComposerChannelAfterCapabilityUpdate(args: {
+    previousChannel: ComposerChannel;
+    capabilities: ConversationChannelCapabilities;
+    userSelectedChannel: boolean;
+}): ComposerChannel {
+    if (args.userSelectedChannel) {
+        return getFirstAvailableChannel(args.previousChannel, args.capabilities) || args.previousChannel;
+    }
+
+    return getBestAvailableDefaultChannel(args.capabilities)
+        || getFirstAvailableChannel(args.previousChannel, args.capabilities)
+        || args.previousChannel;
 }
 
 type CachedConversationChannelCapabilities = {
@@ -146,8 +161,10 @@ export function useConversationComposerChannel({
     );
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
+    const userSelectedChannelRef = useRef(false);
 
     useEffect(() => {
+        userSelectedChannelRef.current = false;
         setSelectedChannel(getInitialComposerChannel(conversation, { smsRelayEnabled }));
     }, [conversation?.id, smsRelayEnabled]);
 
@@ -175,12 +192,20 @@ export function useConversationComposerChannel({
                     ? { status: "eligible" }
                     : { status: "ineligible", reason: cachedCapabilities.WhatsApp.label || undefined }
             );
-            setSelectedChannel((prev) => getFirstAvailableChannel(prev, cachedCapabilities) || prev);
+            setSelectedChannel((prev) => selectComposerChannelAfterCapabilityUpdate({
+                previousChannel: prev,
+                capabilities: cachedCapabilities,
+                userSelectedChannel: userSelectedChannelRef.current,
+            }));
         } else {
             setSmsEligibility({ status: "checking" });
             setWhatsAppEligibility({ status: "checking" });
             setCapabilities(provisionalCapabilities);
-            setSelectedChannel((prev) => getFirstAvailableChannel(prev, provisionalCapabilities) || prev);
+            setSelectedChannel((prev) => selectComposerChannelAfterCapabilityUpdate({
+                previousChannel: prev,
+                capabilities: provisionalCapabilities,
+                userSelectedChannel: userSelectedChannelRef.current,
+            }));
         }
 
         getConversationChannelCapabilities(conversation.id)
@@ -208,7 +233,11 @@ export function useConversationComposerChannel({
                         ? { status: "eligible" }
                         : { status: "ineligible", reason: res.capabilities.WhatsApp.label || undefined }
                 );
-                setSelectedChannel((prev) => getFirstAvailableChannel(prev, res.capabilities) || prev);
+                setSelectedChannel((prev) => selectComposerChannelAfterCapabilityUpdate({
+                    previousChannel: prev,
+                    capabilities: res.capabilities,
+                    userSelectedChannel: userSelectedChannelRef.current,
+                }));
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -243,6 +272,7 @@ export function useConversationComposerChannel({
     const selectChannel = useCallback((channel: ComposerChannel) => {
         if (isUnavailable) return;
         if (!capabilities[channel]?.available) return;
+        userSelectedChannelRef.current = true;
         setSelectedChannel(channel);
     }, [capabilities, isUnavailable]);
 

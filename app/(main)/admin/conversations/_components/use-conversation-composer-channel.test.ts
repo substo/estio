@@ -7,7 +7,13 @@ import {
     buildConversationChannelCapabilityCacheKey,
     deriveProvisionalConversationChannelCapabilities,
     isConversationChannelCapabilityCacheFresh,
+    selectComposerChannelAfterCapabilityUpdate,
 } from "./use-conversation-composer-channel";
+import {
+    availableChannel,
+    unavailableChannel,
+    type ConversationChannelCapabilities,
+} from "@/lib/conversations/channel-capabilities";
 
 test("composer initial channel selects Android SMS when latest message is SMS relay and relay is enabled", () => {
     const conversation = {
@@ -77,4 +83,34 @@ test("provisional channel state allows email from local address", () => {
     } as Conversation);
 
     assert.equal(capabilities.Email.available, true);
+});
+
+test("capability update auto-selects WhatsApp over provisional SMS when user has not chosen", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: availableChannel(),
+        SMS: availableChannel(),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+
+    assert.equal(selectComposerChannelAfterCapabilityUpdate({
+        previousChannel: "SMS",
+        capabilities,
+        userSelectedChannel: false,
+    }), "WhatsApp");
+});
+
+test("capability update preserves manual SMS selection when still available", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: availableChannel(),
+        SMS: availableChannel(),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+
+    assert.equal(selectComposerChannelAfterCapabilityUpdate({
+        previousChannel: "SMS",
+        capabilities,
+        userSelectedChannel: true,
+    }), "SMS");
 });

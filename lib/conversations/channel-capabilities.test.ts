@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     availableChannel,
     getConversationContactIdentity,
+    getBestAvailableDefaultChannel,
     getFirstAvailableChannel,
     unavailableChannel,
     type ConversationChannelCapabilities,
@@ -61,4 +62,18 @@ test("preferred available channel is preserved", () => {
     };
 
     assert.equal(getFirstAvailableChannel("WhatsApp", capabilities), "WhatsApp");
+});
+
+test("best default channel prefers WhatsApp over available SMS channels", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: availableChannel(),
+        SMS: availableChannel(),
+        SMS_RELAY: availableChannel(),
+        Email: availableChannel(),
+    };
+
+    assert.equal(getBestAvailableDefaultChannel(capabilities), "WhatsApp");
+
+    capabilities.WhatsApp = unavailableChannel("whatsapp_number_not_found");
+    assert.equal(getBestAvailableDefaultChannel(capabilities), "SMS_RELAY");
 });

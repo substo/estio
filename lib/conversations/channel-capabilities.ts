@@ -80,6 +80,15 @@ export function getFirstAvailableChannel(
     return null;
 }
 
+export function getBestAvailableDefaultChannel(
+    capabilities: ConversationChannelCapabilities
+): ConversationComposerChannel | null {
+    for (const channel of ["WhatsApp", "SMS_RELAY", "SMS", "Email"] as ConversationComposerChannel[]) {
+        if (capabilities[channel]?.available) return channel;
+    }
+    return null;
+}
+
 export function getConversationContactIdentity(conversation: Conversation | null | undefined) {
     return {
         hasPhone: String(conversation?.contactPhone || "").replace(/\D/g, "").length >= 7,
