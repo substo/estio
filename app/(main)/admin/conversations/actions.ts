@@ -8715,6 +8715,7 @@ export async function getAgentPlan(conversationId: string) {
 
 const DEFAULT_TRACE_HISTORY_LIMIT = 10;
 const MAX_TRACE_HISTORY_LIMIT = 25;
+const TRACE_PREVIEW_CHAR_LIMIT = 8_000;
 
 function parseAgentExecutionJsonField(value: any, fallback: any) {
     if (value == null) return fallback;
@@ -8750,7 +8751,12 @@ function mapAgentExecutionSummary(e: any) {
         },
         latencyMs: e.latencyMs,
         errorMessage: e.errorMessage,
-        createdAt: e.createdAt.toISOString()
+        createdAt: e.createdAt.toISOString(),
+        preview: {
+            request: typeof e.promptPreview === "string" ? e.promptPreview : "",
+            response: typeof e.responsePreview === "string" ? e.responsePreview : "",
+            truncated: Boolean(e.promptPreviewTruncated || e.responsePreviewTruncated),
+        },
     };
 }
 
@@ -8776,40 +8782,55 @@ export async function getAgentExecutionHistoryPage(
 
     const requestedLimit = Math.floor(Number(options?.limit || DEFAULT_TRACE_HISTORY_LIMIT));
     const limit = Math.min(MAX_TRACE_HISTORY_LIMIT, Math.max(1, requestedLimit || DEFAULT_TRACE_HISTORY_LIMIT));
+    const cursorRow = options?.cursor
+        ? await db.agentExecution.findFirst({
+            where: {
+                id: options.cursor,
+                conversationId: conversation.id,
+                locationId: location.id,
+            },
+            select: { id: true, createdAt: true },
+        })
+        : null;
+
+    const cursorCondition = cursorRow
+        ? Prisma.sql`AND ("createdAt" < ${cursorRow.createdAt} OR ("createdAt" = ${cursorRow.createdAt} AND "id" < ${cursorRow.id}))`
+        : Prisma.empty;
 
     // Fetch root spans (where parentSpanId is null OR spanId == traceId)
     // The current schema treats AgentExecution as a flattened span log.
     // We want the 'Root' entries which usually correspond to 'runAgent' or top-level tasks.
-    const executions = await db.agentExecution.findMany({
-        where: {
-            conversationId: conversation.id,
-            // Simple heuristic for root spans: parentSpanId is null
-            parentSpanId: null
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit + 1,
-        skip: options?.cursor ? 1 : 0,
-        cursor: options?.cursor ? { id: options.cursor } : undefined,
-        select: {
-            id: true,
-            traceId: true,
-            spanId: true,
-            taskId: true,
-            taskTitle: true,
-            taskStatus: true,
-            status: true,
-            thoughtSummary: true,
-            draftReply: true,
-            promptTokens: true,
-            completionTokens: true,
-            totalTokens: true,
-            model: true,
-            cost: true,
-            latencyMs: true,
-            errorMessage: true,
-            createdAt: true,
-        },
-    });
+    const executions = await db.$queryRaw<any[]>`
+        SELECT
+            "id",
+            "traceId",
+            "spanId",
+            "taskId",
+            "taskTitle",
+            "taskStatus",
+            "status",
+            "thoughtSummary",
+            "draftReply",
+            "promptTokens",
+            "completionTokens",
+            "totalTokens",
+            "model",
+            "cost",
+            "latencyMs",
+            "errorMessage",
+            "createdAt",
+            LEFT(COALESCE(("toolCalls"->0->'arguments')::text, ''), ${TRACE_PREVIEW_CHAR_LIMIT}) AS "promptPreview",
+            LEFT(COALESCE(("toolCalls"->0->'result')::text, "draftReply", ''), ${TRACE_PREVIEW_CHAR_LIMIT}) AS "responsePreview",
+            LENGTH(COALESCE(("toolCalls"->0->'arguments')::text, '')) > ${TRACE_PREVIEW_CHAR_LIMIT} AS "promptPreviewTruncated",
+            LENGTH(COALESCE(("toolCalls"->0->'result')::text, "draftReply", '')) > ${TRACE_PREVIEW_CHAR_LIMIT} AS "responsePreviewTruncated"
+        FROM "AgentExecution"
+        WHERE "conversationId" = ${conversation.id}
+            AND "locationId" = ${location.id}
+            AND "parentSpanId" IS NULL
+            ${cursorCondition}
+        ORDER BY "createdAt" DESC, "id" DESC
+        LIMIT ${limit + 1}
+    `;
 
     const pageItems = executions.slice(0, limit);
 

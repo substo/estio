@@ -104,6 +104,7 @@ export function CoordinatorPanel({
         loadingMoreHistory,
         loadingTraceDetails,
         handleSelectTrace,
+        loadTraceDetails,
         loadMoreExecutionHistory,
         refreshExecutionHistory,
     } = useCoordinatorTraceModal({
@@ -381,6 +382,7 @@ export function CoordinatorPanel({
                     loadingMoreHistory={loadingMoreHistory}
                     loadingTraceDetails={loadingTraceDetails}
                     handleSelectTrace={handleSelectTrace}
+                    loadTraceDetails={loadTraceDetails}
                     loadMoreExecutionHistory={loadMoreExecutionHistory}
                     transcriptUsage={transcriptUsage}
                 />

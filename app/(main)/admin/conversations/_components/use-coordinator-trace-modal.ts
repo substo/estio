@@ -30,24 +30,32 @@ export function useCoordinatorTraceModal({
         setRawTrace(trace);
         setTraceTree(null);
         setInsights([]);
-        setLoadingTraceDetails(true);
+        setLoadingTraceDetails(false);
+    }, []);
 
+    const loadTraceDetails = useCallback(async () => {
+        const selectedTrace = rawTraceRef.current;
+        if (!conversationId || !selectedTrace?.id || loadingTraceDetails) return;
+
+        setLoadingTraceDetails(true);
         try {
             const [detail, tree, recentInsights] = await Promise.all([
-                conversationId && trace.id ? getAgentExecutionDetail(conversationId, trace.id) : Promise.resolve(null),
-                trace.traceId ? getTraceTreeAction(trace.traceId) : Promise.resolve(null),
+                getAgentExecutionDetail(conversationId, selectedTrace.id),
+                selectedTrace.traceId ? getTraceTreeAction(selectedTrace.traceId) : Promise.resolve(null),
                 contactId ? getContactInsightsAction(contactId) : Promise.resolve([]),
             ]);
 
-            if (detail) setRawTrace(detail);
-            setTraceTree(tree);
-            setInsights(recentInsights);
+            if (detail && rawTraceRef.current?.id === selectedTrace.id) setRawTrace(detail);
+            if (rawTraceRef.current?.id === selectedTrace.id) {
+                setTraceTree(tree);
+                setInsights(recentInsights);
+            }
         } catch (e) {
             console.error("Failed to load trace details", e);
         } finally {
             setLoadingTraceDetails(false);
         }
-    }, [contactId, conversationId]);
+    }, [contactId, conversationId, loadingTraceDetails]);
 
     const refreshExecutionHistory = useCallback((autoSelectLatest = false) => {
         if (!conversationId) return;
@@ -103,6 +111,7 @@ export function useCoordinatorTraceModal({
         loadingMoreHistory,
         loadingTraceDetails,
         handleSelectTrace,
+        loadTraceDetails,
         loadMoreExecutionHistory,
         refreshExecutionHistory,
     };

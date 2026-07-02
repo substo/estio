@@ -20,6 +20,7 @@ interface CoordinatorTraceModalProps {
     loadingMoreHistory: boolean;
     loadingTraceDetails: boolean;
     handleSelectTrace: (trace: any) => void;
+    loadTraceDetails: () => void;
     loadMoreExecutionHistory: () => void;
     transcriptUsage: {
         totalTokens: number;
@@ -47,6 +48,7 @@ export function CoordinatorTraceModal({
     loadingMoreHistory,
     loadingTraceDetails,
     handleSelectTrace,
+    loadTraceDetails,
     loadMoreExecutionHistory,
     transcriptUsage,
 }: CoordinatorTraceModalProps) {
@@ -54,8 +56,10 @@ export function CoordinatorTraceModal({
     const llmToolCall = traceToolCalls.find((call: any) =>
         ["gemini.generateContent", "openai.responses.create", "codex.exec"].includes(String(call?.tool || ""))
     ) || traceToolCalls[0] || null;
-    const promptPreview = stringifyTracePayload(llmToolCall?.arguments);
-    const responsePreview = stringifyTracePayload(llmToolCall?.result || rawTrace?.draftReply);
+    const promptPreview = stringifyTracePayload(llmToolCall?.arguments) || rawTrace?.preview?.request || "";
+    const responsePreview = stringifyTracePayload(llmToolCall?.result || rawTrace?.draftReply) || rawTrace?.preview?.response || "";
+    const hasPromptResponsePreview = Boolean(promptPreview || responsePreview);
+    const detailsLoaded = traceToolCalls.length > 0 || Boolean(traceTree) || insights.length > 0;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -160,13 +164,18 @@ export function CoordinatorTraceModal({
                                     </div>
                                 </div>
 
-                                {llmToolCall && (
+                                {hasPromptResponsePreview && (
                                     <Card className="border-slate-200 shadow-sm">
                                         <CardHeader className="border-b bg-slate-50/50 px-4 py-3">
-                                            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                                                <Activity className="h-4 w-4 text-blue-500" />
-                                                Prompt & Response
-                                            </CardTitle>
+                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                                                    <Activity className="h-4 w-4 text-blue-500" />
+                                                    Prompt & Response
+                                                </CardTitle>
+                                                {rawTrace?.preview?.truncated && (
+                                                    <Badge variant="outline" className="w-fit text-[10px]">Preview capped</Badge>
+                                                )}
+                                            </div>
                                         </CardHeader>
                                         <CardContent className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4">
                                             <div className="min-w-0">
@@ -184,6 +193,23 @@ export function CoordinatorTraceModal({
                                         </CardContent>
                                     </Card>
                                 )}
+
+                                <div className="flex flex-col gap-2 rounded border bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="text-xs text-muted-foreground">
+                                        Full trace tree, raw tool calls, and memory context are loaded only when needed.
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full sm:w-auto"
+                                        onClick={loadTraceDetails}
+                                        disabled={loadingTraceDetails || detailsLoaded}
+                                    >
+                                        {loadingTraceDetails && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        {detailsLoaded ? "Full trace loaded" : "Load full trace"}
+                                    </Button>
+                                </div>
 
                                 {loadingTraceDetails && (
                                     <div className="flex justify-center rounded border bg-white p-4 text-muted-foreground">
