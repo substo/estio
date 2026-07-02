@@ -8713,42 +8713,23 @@ export async function getAgentPlan(conversationId: string) {
     };
 }
 
-// [Updated] Return full tracing fields
-export async function getAgentExecutions(conversationId: string) {
-    const location = await getAuthenticatedLocation();
-    const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
-        select: { id: true }
-    });
+const DEFAULT_TRACE_HISTORY_LIMIT = 10;
+const MAX_TRACE_HISTORY_LIMIT = 25;
 
-    if (!conversation) return [];
-
-    // Fetch root spans (where parentSpanId is null OR spanId == traceId)
-    // The current schema treats AgentExecution as a flattened span log. 
-    // We want the 'Root' entries which usually correspond to 'runAgent' or top-level tasks.
-    const executions = await db.agentExecution.findMany({
-        where: {
-            conversationId: conversation.id,
-            // Simple heuristic for root spans: parentSpanId is null
-            parentSpanId: null
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 20
-    });
-
-    const parseJsonField = (value: any, fallback: any) => {
-        if (value == null) return fallback;
-        if (typeof value === "string") {
-            try {
-                return JSON.parse(value);
-            } catch {
-                return fallback;
-            }
+function parseAgentExecutionJsonField(value: any, fallback: any) {
+    if (value == null) return fallback;
+    if (typeof value === "string") {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return fallback;
         }
-        return value;
-    };
+    }
+    return value;
+}
 
-    return executions.map(e => ({
+function mapAgentExecutionSummary(e: any) {
+    return {
         id: e.id,
         traceId: e.traceId,
         spanId: e.spanId,
@@ -8759,8 +8740,6 @@ export async function getAgentExecutions(conversationId: string) {
                 e.taskStatus === "failed" ? "error" :
                     e.taskStatus || (e.status === "success" ? "success" : e.status === "error" ? "error" : e.status),
         thoughtSummary: e.thoughtSummary,
-        thoughtSteps: parseJsonField(e.thoughtSteps, []),
-        toolCalls: parseJsonField(e.toolCalls, []),
         draftReply: e.draftReply,
         usage: {
             promptTokenCount: e.promptTokens,
@@ -8772,7 +8751,99 @@ export async function getAgentExecutions(conversationId: string) {
         latencyMs: e.latencyMs,
         errorMessage: e.errorMessage,
         createdAt: e.createdAt.toISOString()
-    }));
+    };
+}
+
+function mapAgentExecutionDetail(e: any) {
+    return {
+        ...mapAgentExecutionSummary(e),
+        thoughtSteps: parseAgentExecutionJsonField(e.thoughtSteps, []),
+        toolCalls: parseAgentExecutionJsonField(e.toolCalls, []),
+    };
+}
+
+export async function getAgentExecutionHistoryPage(
+    conversationId: string,
+    options?: { cursor?: string | null; limit?: number | null }
+) {
+    const location = await getAuthenticatedLocation();
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
+        select: { id: true }
+    });
+
+    if (!conversation) return { items: [], nextCursor: null, hasMore: false };
+
+    const requestedLimit = Math.floor(Number(options?.limit || DEFAULT_TRACE_HISTORY_LIMIT));
+    const limit = Math.min(MAX_TRACE_HISTORY_LIMIT, Math.max(1, requestedLimit || DEFAULT_TRACE_HISTORY_LIMIT));
+
+    // Fetch root spans (where parentSpanId is null OR spanId == traceId)
+    // The current schema treats AgentExecution as a flattened span log.
+    // We want the 'Root' entries which usually correspond to 'runAgent' or top-level tasks.
+    const executions = await db.agentExecution.findMany({
+        where: {
+            conversationId: conversation.id,
+            // Simple heuristic for root spans: parentSpanId is null
+            parentSpanId: null
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit + 1,
+        skip: options?.cursor ? 1 : 0,
+        cursor: options?.cursor ? { id: options.cursor } : undefined,
+        select: {
+            id: true,
+            traceId: true,
+            spanId: true,
+            taskId: true,
+            taskTitle: true,
+            taskStatus: true,
+            status: true,
+            thoughtSummary: true,
+            draftReply: true,
+            promptTokens: true,
+            completionTokens: true,
+            totalTokens: true,
+            model: true,
+            cost: true,
+            latencyMs: true,
+            errorMessage: true,
+            createdAt: true,
+        },
+    });
+
+    const pageItems = executions.slice(0, limit);
+
+    return {
+        items: pageItems.map(mapAgentExecutionSummary),
+        nextCursor: executions.length > limit ? pageItems[pageItems.length - 1]?.id || null : null,
+        hasMore: executions.length > limit,
+    };
+}
+
+// Compatibility wrapper used by mission-control summary hydration.
+export async function getAgentExecutions(conversationId: string) {
+    const page = await getAgentExecutionHistoryPage(conversationId, { limit: DEFAULT_TRACE_HISTORY_LIMIT });
+    return page.items;
+}
+
+export async function getAgentExecutionDetail(conversationId: string, executionId: string) {
+    const location = await getAuthenticatedLocation();
+    const conversation = await db.conversation.findFirst({
+        where: buildConversationReferenceWhere(location.id, conversationId),
+        select: { id: true }
+    });
+
+    if (!conversation) return null;
+
+    const execution = await db.agentExecution.findFirst({
+        where: {
+            id: executionId,
+            conversationId: conversation.id,
+            locationId: location.id,
+        },
+    });
+
+    return execution ? mapAgentExecutionDetail(execution) : null;
 }
 
 import { getTrace } from "@/lib/ai/tracing-queries";
@@ -10969,6 +11040,24 @@ async function persistLeadAnalysisTraceRecord(args: {
             latencyMs: trace.end - trace.start,
             createdAt: new Date(trace.start)
         }
+    });
+
+    await securelyRecordAiUsage({
+        locationId,
+        resourceType: "conversation",
+        resourceId: conversationId,
+        featureArea: "conversational_ai",
+        action: "lead_parse",
+        provider: trace.provider,
+        model: trace.model,
+        inputTokens: trace.promptTokens,
+        outputTokens: trace.completionTokens,
+        metadata: {
+            traceId: trace.traceId,
+            source: "paste_lead",
+            costEstimate: estimatedCost,
+            costAuthority: trace.provider === "chatgpt_subscription" ? "subscription_zero_cost" : "estimated",
+        },
     });
 }
 

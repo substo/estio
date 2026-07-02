@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAgentExecutions, getContactInsightsAction, getTraceTreeAction } from "../actions";
+import { getAgentExecutionDetail, getAgentExecutionHistoryPage, getContactInsightsAction, getTraceTreeAction } from "../actions";
 
 interface UseCoordinatorTraceModalOptions {
     conversationId?: string | null;
@@ -15,7 +15,10 @@ export function useCoordinatorTraceModal({
     const [insights, setInsights] = useState<any[]>([]);
     const [traceModalOpen, setTraceModalOpen] = useState(false);
     const [executionHistory, setExecutionHistory] = useState<any[]>([]);
+    const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+    const [hasMoreHistory, setHasMoreHistory] = useState(false);
     const [loadingHistory, setLoadingHistory] = useState(false);
+    const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
     const [loadingTraceDetails, setLoadingTraceDetails] = useState(false);
     const rawTraceRef = useRef<any>(null);
 
@@ -30,34 +33,55 @@ export function useCoordinatorTraceModal({
         setLoadingTraceDetails(true);
 
         try {
-            if (trace.traceId) {
-                const tree = await getTraceTreeAction(trace.traceId);
-                setTraceTree(tree);
-            }
+            const [detail, tree, recentInsights] = await Promise.all([
+                conversationId && trace.id ? getAgentExecutionDetail(conversationId, trace.id) : Promise.resolve(null),
+                trace.traceId ? getTraceTreeAction(trace.traceId) : Promise.resolve(null),
+                contactId ? getContactInsightsAction(contactId) : Promise.resolve([]),
+            ]);
 
-            if (contactId) {
-                const recentInsights = await getContactInsightsAction(contactId);
-                setInsights(recentInsights);
-            }
+            if (detail) setRawTrace(detail);
+            setTraceTree(tree);
+            setInsights(recentInsights);
         } catch (e) {
             console.error("Failed to load trace details", e);
         } finally {
             setLoadingTraceDetails(false);
         }
-    }, [contactId]);
+    }, [contactId, conversationId]);
 
     const refreshExecutionHistory = useCallback((autoSelectLatest = false) => {
         if (!conversationId) return;
 
         setLoadingHistory(true);
-        getAgentExecutions(conversationId).then(history => {
-            setExecutionHistory(history);
-            if (autoSelectLatest && !rawTraceRef.current && history.length > 0) {
-                void handleSelectTrace(history[0]);
+        getAgentExecutionHistoryPage(conversationId, { limit: 10 }).then(page => {
+            setExecutionHistory(page.items);
+            setHistoryCursor(page.nextCursor);
+            setHasMoreHistory(page.hasMore);
+            if (autoSelectLatest && !rawTraceRef.current && page.items.length > 0) {
+                void handleSelectTrace(page.items[0]);
             }
+            setLoadingHistory(false);
+        }).catch((e) => {
+            console.error("Failed to load trace history", e);
             setLoadingHistory(false);
         });
     }, [conversationId, handleSelectTrace]);
+
+    const loadMoreExecutionHistory = useCallback(async () => {
+        if (!conversationId || !historyCursor || loadingMoreHistory) return;
+
+        setLoadingMoreHistory(true);
+        try {
+            const page = await getAgentExecutionHistoryPage(conversationId, { cursor: historyCursor, limit: 10 });
+            setExecutionHistory((current) => [...current, ...page.items]);
+            setHistoryCursor(page.nextCursor);
+            setHasMoreHistory(page.hasMore);
+        } catch (e) {
+            console.error("Failed to load more trace history", e);
+        } finally {
+            setLoadingMoreHistory(false);
+        }
+    }, [conversationId, historyCursor, loadingMoreHistory]);
 
     useEffect(() => {
         if (traceModalOpen && conversationId) {
@@ -74,9 +98,12 @@ export function useCoordinatorTraceModal({
         traceModalOpen,
         setTraceModalOpen,
         executionHistory,
+        hasMoreHistory,
         loadingHistory,
+        loadingMoreHistory,
         loadingTraceDetails,
         handleSelectTrace,
+        loadMoreExecutionHistory,
         refreshExecutionHistory,
     };
 }

@@ -40,6 +40,12 @@ export function calculateAiCost(input: CostCalculationInput): number {
     const provider = String(input.provider || "").toLowerCase();
     const model = normalizeModelName(rawModel);
 
+    // Subscription-backed ChatGPT runs consume plan quota, not billable API credits.
+    // Keep token usage visible in AiUsage while recording zero direct platform cost.
+    if (provider === "chatgpt_subscription" || model.startsWith("chatgpt_subscription:")) {
+        return 0;
+    }
+
     // Vertex Imagen Flat Pricing
     if (provider === "vertex_imagen" || model.includes("imagen")) {
         const costPerImage = IMAGEN_PRICING[model] || 0.03; // fallback to 3 cents if exact model unknown

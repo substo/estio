@@ -1,5 +1,7 @@
 import { Activity, Brain, CheckCircle, ChevronDown, Clock, Database, History, Layers, Loader2, Mic, Wrench, XCircle } from "lucide-react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,15 +15,24 @@ interface CoordinatorTraceModalProps {
     traceTree: any;
     insights: any[];
     executionHistory: any[];
+    hasMoreHistory: boolean;
     loadingHistory: boolean;
+    loadingMoreHistory: boolean;
     loadingTraceDetails: boolean;
     handleSelectTrace: (trace: any) => void;
+    loadMoreExecutionHistory: () => void;
     transcriptUsage: {
         totalTokens: number;
         transcriptCount: number;
         extractionCount: number;
         totalCost: number;
     };
+}
+
+function stringifyTracePayload(value: any) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    return JSON.stringify(value, null, 2);
 }
 
 export function CoordinatorTraceModal({
@@ -31,279 +42,243 @@ export function CoordinatorTraceModal({
     traceTree,
     insights,
     executionHistory,
+    hasMoreHistory,
     loadingHistory,
+    loadingMoreHistory,
     loadingTraceDetails,
     handleSelectTrace,
+    loadMoreExecutionHistory,
     transcriptUsage,
 }: CoordinatorTraceModalProps) {
     const traceToolCalls = Array.isArray(rawTrace?.toolCalls) ? rawTrace.toolCalls : [];
-    const leadParserToolCall = traceToolCalls.find((c: any) => c?.tool === "gemini.generateContent") || null;
-    const leadParserRequest = leadParserToolCall?.arguments || null;
-    const leadParserResponse = leadParserToolCall?.result || null;
+    const llmToolCall = traceToolCalls.find((call: any) =>
+        ["gemini.generateContent", "openai.responses.create", "codex.exec"].includes(String(call?.tool || ""))
+    ) || traceToolCalls[0] || null;
+    const promptPreview = stringifyTracePayload(llmToolCall?.arguments);
+    const responsePreview = stringifyTracePayload(llmToolCall?.result || rawTrace?.draftReply);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col p-0">
-                <div className="flex h-full max-h-[85vh]">
-                    {/* History Sidebar */}
-                    <div className="w-64 border-r bg-muted/30 flex flex-col">
-                        <div className="p-4 border-b">
-                            <h3 className="font-semibold text-sm flex items-center gap-2 text-foreground">
+            <DialogContent className="h-[96dvh] max-h-[96dvh] w-[calc(100vw-1rem)] max-w-6xl overflow-hidden p-0 sm:h-[90vh] sm:max-h-[90vh]">
+                <div className="flex h-full min-h-0 flex-col sm:flex-row">
+                    <div className="flex max-h-[34dvh] min-h-0 flex-col border-b bg-muted/30 sm:max-h-none sm:w-64 sm:border-b-0 sm:border-r">
+                        <div className="shrink-0 border-b p-3 sm:p-4">
+                            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                                 <History className="h-4 w-4" />
                                 History
                             </h3>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                        <div className="flex-1 overflow-y-auto p-2">
                             {loadingHistory ? (
                                 <div className="flex justify-center p-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
                             ) : executionHistory.length === 0 ? (
-                                <div className="text-xs text-muted-foreground text-center p-4">No history yet</div>
+                                <div className="p-4 text-center text-xs text-muted-foreground">No history yet</div>
                             ) : (
-                                executionHistory.map((ex) => (
-                                    <div
-                                        key={ex.id}
-                                        onClick={() => handleSelectTrace(ex)}
-                                        className={cn(
-                                            "p-3 rounded-md text-xs cursor-pointer transition-colors border relative",
-                                            rawTrace?.id === ex.id
-                                                ? 'bg-purple-100/50 border-purple-200 text-purple-900 ring-1 ring-purple-200'
-                                                : 'bg-card border-border hover:border-purple-200 hover:bg-muted/50'
-                                        )}
-                                    >
-                                        <div className="font-medium truncate pr-4">{ex.taskTitle || "Unknown Task"}</div>
-                                        <div className="flex items-center justify-between mt-1 text-muted-foreground">
-                                            <span>{new Date(ex.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                            <div className="flex gap-1">
-                                                {ex.taskStatus === 'success' && <CheckCircle className="w-3 h-3 text-green-500" />}
-                                                {ex.taskStatus === 'error' && <XCircle className="w-3 h-3 text-red-500" />}
-                                                {ex.taskStatus === 'pending' && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+                                <div className="grid grid-flow-col auto-cols-[minmax(180px,1fr)] gap-2 overflow-x-auto sm:block sm:space-y-2 sm:overflow-x-visible">
+                                    {executionHistory.map((execution) => (
+                                        <button
+                                            type="button"
+                                            key={execution.id}
+                                            onClick={() => handleSelectTrace(execution)}
+                                            className={cn(
+                                                "relative min-w-0 rounded-md border p-3 text-left text-xs transition-colors",
+                                                rawTrace?.id === execution.id
+                                                    ? "border-purple-200 bg-purple-100/50 text-purple-900 ring-1 ring-purple-200"
+                                                    : "border-border bg-card hover:border-purple-200 hover:bg-muted/50"
+                                            )}
+                                        >
+                                            <div className="truncate pr-4 font-medium">{execution.taskTitle || "Unknown Task"}</div>
+                                            <div className="mt-1 flex items-center justify-between text-muted-foreground">
+                                                <span>{new Date(execution.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                                                <div className="flex gap-1">
+                                                    {execution.taskStatus === "success" && <CheckCircle className="h-3 w-3 text-green-500" />}
+                                                    {execution.taskStatus === "error" && <XCircle className="h-3 w-3 text-red-500" />}
+                                                    {execution.taskStatus === "pending" && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                                                </div>
                                             </div>
-                                        </div>
-                                        {typeof ex.usage?.cost === "number" && (
-                                            <div className="text-[10px] text-green-600/80 mt-0.5 font-mono">
-                                                ${ex.usage.cost.toFixed(5)}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))
+                                            {typeof execution.usage?.cost === "number" && (
+                                                <div className="mt-0.5 font-mono text-[10px] text-green-600/80">
+                                                    ${execution.usage.cost.toFixed(5)}
+                                                </div>
+                                            )}
+                                        </button>
+                                    ))}
+                                    {hasMoreHistory && (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-full min-h-16 text-xs sm:w-full"
+                                            onClick={loadMoreExecutionHistory}
+                                            disabled={loadingMoreHistory}
+                                        >
+                                            {loadingMoreHistory && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+                                            Load more
+                                        </Button>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </div>
 
-                    {/* Main Content */}
-                    <div className="flex-1 flex flex-col max-h-[85vh] overflow-hidden bg-background">
-                        <DialogHeader className="px-6 py-4 border-b">
-                            <DialogTitle className="flex items-center gap-2">
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+                        <DialogHeader className="shrink-0 border-b px-4 py-3 sm:px-6 sm:py-4">
+                            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
                                 <Brain className="h-5 w-5 text-purple-600" />
-                                Full AI Thinking Trace
+                                AI Usage Trace
                             </DialogTitle>
-                            <DialogDescription>
-                                Complete reasoning flow from the AI agent execution
-                            </DialogDescription>
+                            <DialogDescription>Prompt, response, tokens, cost, and execution trace</DialogDescription>
                         </DialogHeader>
 
                         {rawTrace && (
-                            <div className="flex-1 overflow-y-auto space-y-4 p-6 bg-slate-50/50">
-                                {/* 1. TRACE HEADER */}
-                                <div className="flex items-start justify-between bg-white p-4 rounded-lg border shadow-sm">
-                                    <div>
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <h2 className="text-lg font-bold text-slate-800">{rawTrace.taskTitle || "Unnamed Task"}</h2>
-                                            {rawTrace.taskStatus === 'success' && <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200"><CheckCircle className="w-3 h-3 mr-1" /> Success</Badge>}
-                                            {rawTrace.taskStatus === 'error' && <Badge className="bg-red-100 text-red-800 hover:bg-red-100 border-red-200"><XCircle className="w-3 h-3 mr-1" /> Failed</Badge>}
-                                            {rawTrace.taskStatus === 'pending' && <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border-blue-200"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Pending</Badge>}
+                            <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50/50 p-4 sm:p-6">
+                                <div className="flex flex-col gap-3 rounded-lg border bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="min-w-0">
+                                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                                            <h2 className="min-w-0 break-words text-base font-bold text-slate-800 sm:text-lg">{rawTrace.taskTitle || "Unnamed Task"}</h2>
+                                            {rawTrace.taskStatus === "success" && <Badge className="border-green-200 bg-green-100 text-green-800 hover:bg-green-100"><CheckCircle className="mr-1 h-3 w-3" /> Success</Badge>}
+                                            {rawTrace.taskStatus === "error" && <Badge className="border-red-200 bg-red-100 text-red-800 hover:bg-red-100"><XCircle className="mr-1 h-3 w-3" /> Failed</Badge>}
+                                            {rawTrace.taskStatus === "pending" && <Badge className="border-blue-200 bg-blue-100 text-blue-800 hover:bg-blue-100"><Loader2 className="mr-1 h-3 w-3 animate-spin" /> Pending</Badge>}
                                         </div>
-                                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
                                             <div className="flex items-center gap-1.5">
-                                                <Clock className="w-3.5 h-3.5" />
+                                                <Clock className="h-3.5 w-3.5" />
                                                 <span className="font-mono">{new Date(rawTrace.createdAt).toLocaleString()}</span>
                                             </div>
                                             <div className="flex items-center gap-1.5">
-                                                <Activity className="w-3.5 h-3.5" />
-                                                <span className="font-mono">
-                                                    {typeof rawTrace.latencyMs === "number" && Number.isFinite(rawTrace.latencyMs)
-                                                        ? `${rawTrace.latencyMs}ms`
-                                                        : "N/A"}
-                                                </span>
+                                                <Activity className="h-3.5 w-3.5" />
+                                                <span className="font-mono">{typeof rawTrace.latencyMs === "number" ? `${rawTrace.latencyMs}ms` : "N/A"}</span>
                                             </div>
-                                            <div className="flex items-center gap-1.5">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                                                <span className="font-mono text-[10px]">{rawTrace.traceId?.slice(0, 8)}...</span>
-                                            </div>
+                                            <span className="min-w-0 truncate font-mono text-[10px]">{rawTrace.traceId || "No trace ID"}</span>
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Model</div>
-                                        <Badge variant="outline" className="font-mono text-xs bg-slate-100">
+                                    <div className="min-w-0 sm:text-right">
+                                        <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Model</div>
+                                        <Badge variant="outline" className="max-w-full truncate bg-slate-100 font-mono text-xs">
                                             {rawTrace.usage?.model || "unknown-model"}
                                         </Badge>
                                     </div>
                                 </div>
 
-                                {/* 2. SPAN WATERFALL (Hierarchical) */}
-                                {loadingTraceDetails ? (
-                                    <div className="flex justify-center p-8 bg-white border rounded text-muted-foreground">
-                                        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                                        Loading full trace...
-                                    </div>
-                                ) : traceTree ? (
-                                    <Card className="shadow-sm border-slate-200">
-                                        <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
-                                            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                                <Layers className="w-4 h-4 text-indigo-500" />
-                                                Execution Trace
+                                {llmToolCall && (
+                                    <Card className="border-slate-200 shadow-sm">
+                                        <CardHeader className="border-b bg-slate-50/50 px-4 py-3">
+                                            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                                                <Activity className="h-4 w-4 text-blue-500" />
+                                                Prompt & Response
                                             </CardTitle>
                                         </CardHeader>
-                                        <CardContent className="p-4 space-y-1">
-                                            <TraceNodeRenderer node={traceTree} totalDuration={traceTree.latency || 1} />
-                                        </CardContent>
-                                    </Card>
-                                ) : null}
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* 3. MEMORY PANEL */}
-                                    <Card className="shadow-sm border-slate-200 h-full">
-                                        <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
-                                            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                                <Database className="w-4 h-4 text-amber-500" />
-                                                Memory Context
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="p-0">
-                                            <div className="max-h-[250px] overflow-y-auto p-4 space-y-3">
-                                                <div className="space-y-2">
-                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Stored Insights</span>
-                                                    {insights.filter(i => new Date(i.createdAt) > new Date(rawTrace.createdAt)).length > 0 ? (
-                                                        insights.filter(i => new Date(i.createdAt) > new Date(rawTrace.createdAt)).map(i => (
-                                                            <div key={i.id} className="bg-amber-50 border border-amber-100 p-2 rounded text-xs text-amber-900">
-                                                                <div className="font-semibold mb-0.5">{i.category}</div>
-                                                                {i.text}
-                                                            </div>
-                                                        ))
-                                                    ) : (
-                                                        <div className="text-xs text-muted-foreground italic">No new insights stored during this trace.</div>
-                                                    )}
-                                                </div>
-
-                                                <div className="space-y-2 pt-2 border-t">
-                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Available Context</span>
-                                                    {insights.length > 0 ? (
-                                                        insights.slice(0, 3).map(i => (
-                                                            <div key={i.id} className="bg-slate-50 border p-2 rounded text-xs text-slate-700">
-                                                                <div className="flex justify-between">
-                                                                    <span className="font-semibold capitalize text-slate-900">{i.category}</span>
-                                                                    <span className="text-[10px] text-slate-400">{new Date(i.createdAt).toLocaleDateString()}</span>
-                                                                </div>
-                                                                {i.text}
-                                                            </div>
-                                                        ))
-                                                    ) : (
-                                                        <div className="text-xs text-muted-foreground italic">No prior insights found.</div>
-                                                    )}
-                                                </div>
+                                        <CardContent className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4">
+                                            <div className="min-w-0">
+                                                <div className="mb-1 text-[10px] font-bold uppercase text-slate-400">Request</div>
+                                                <pre className="max-h-[42dvh] overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-50 sm:max-h-[360px]">
+                                                    {promptPreview}
+                                                </pre>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="mb-1 text-[10px] font-bold uppercase text-slate-400">Response</div>
+                                                <pre className="max-h-[42dvh] overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-50 sm:max-h-[360px]">
+                                                    {responsePreview}
+                                                </pre>
                                             </div>
                                         </CardContent>
                                     </Card>
+                                )}
 
-                                    {/* 4. REASONING & OUTPUT */}
+                                {loadingTraceDetails && (
+                                    <div className="flex justify-center rounded border bg-white p-4 text-muted-foreground">
+                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                        Loading full trace...
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    <UsageStat label="Tokens" value={(rawTrace.usage?.totalTokenCount || 0).toLocaleString()} />
+                                    <UsageStat label="Input" value={(rawTrace.usage?.promptTokenCount || 0).toLocaleString()} />
+                                    <UsageStat label="Output" value={(rawTrace.usage?.candidatesTokenCount || 0).toLocaleString()} />
+                                    <UsageStat label="Cost" value={`$${Number(rawTrace.usage?.cost || 0).toFixed(5)}`} valueClassName="text-green-600" />
+                                </div>
+
+                                {!loadingTraceDetails && traceTree && (
+                                    <Card className="border-slate-200 shadow-sm">
+                                        <CardHeader className="border-b bg-slate-50/50 px-4 py-3">
+                                            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                                                <Layers className="h-4 w-4 text-indigo-500" />
+                                                Execution Trace
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="space-y-1 overflow-x-auto p-4">
+                                            <TraceNodeRenderer node={traceTree} totalDuration={traceTree.latency || 1} />
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                    <Card className="h-full border-slate-200 shadow-sm">
+                                        <CardHeader className="border-b bg-slate-50/50 px-4 py-3">
+                                            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                                                <Database className="h-4 w-4 text-amber-500" />
+                                                Memory Context
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="max-h-[250px] space-y-3 overflow-y-auto p-4">
+                                            {insights.length > 0 ? (
+                                                insights.slice(0, 5).map((insight) => (
+                                                    <div key={insight.id} className="rounded border bg-slate-50 p-2 text-xs text-slate-700">
+                                                        <div className="flex justify-between gap-2">
+                                                            <span className="font-semibold capitalize text-slate-900">{insight.category}</span>
+                                                            <span className="shrink-0 text-[10px] text-slate-400">{new Date(insight.createdAt).toLocaleDateString()}</span>
+                                                        </div>
+                                                        {insight.text}
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-xs italic text-muted-foreground">No contact insights found.</div>
+                                            )}
+                                        </CardContent>
+                                    </Card>
+
                                     <div className="space-y-4">
-                                        {/* Reasoning */}
-                                        <Card className="shadow-sm border-slate-200">
-                                            <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
-                                                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                                    <Brain className="w-4 h-4 text-purple-500" />
+                                        <Card className="border-slate-200 shadow-sm">
+                                            <CardHeader className="border-b bg-slate-50/50 px-4 py-3">
+                                                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                                                    <Brain className="h-4 w-4 text-purple-500" />
                                                     Reasoning
                                                 </CardTitle>
                                             </CardHeader>
-                                            <CardContent className="p-4 text-xs space-y-3">
-                                                <div className="bg-purple-50 rounded p-2 text-purple-900 border border-purple-100">
-                                                    <span className="font-bold mr-1">Goal:</span>
+                                            <CardContent className="space-y-3 p-4 text-xs">
+                                                <div className="rounded border border-purple-100 bg-purple-50 p-2 text-purple-900">
+                                                    <span className="mr-1 font-bold">Goal:</span>
                                                     {rawTrace.taskTitle}
                                                 </div>
-                                                <div className="text-slate-700 leading-relaxed">
-                                                    {rawTrace.thoughtSummary}
-                                                </div>
+                                                <div className="leading-relaxed text-slate-700">{rawTrace.thoughtSummary || "No reasoning summary recorded."}</div>
                                             </CardContent>
                                         </Card>
 
-                                        {leadParserToolCall && (
-                                            <Card className="shadow-sm border-slate-200">
-                                                <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
-                                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                                        <Activity className="w-4 h-4 text-blue-500" />
-                                                        LLM Request/Response
-                                                    </CardTitle>
-                                                </CardHeader>
-                                                <CardContent className="p-4 space-y-3">
-                                                    <div>
-                                                        <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Request</div>
-                                                        <pre className="bg-slate-950 text-slate-50 text-[10px] p-2 rounded overflow-x-auto max-h-[160px] overflow-y-auto font-mono whitespace-pre-wrap">
-                                                            {JSON.stringify(leadParserRequest, null, 2)}
-                                                        </pre>
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Response</div>
-                                                        <pre className="bg-slate-950 text-slate-50 text-[10px] p-2 rounded overflow-x-auto max-h-[160px] overflow-y-auto font-mono whitespace-pre-wrap">
-                                                            {JSON.stringify(leadParserResponse, null, 2)}
-                                                        </pre>
-                                                    </div>
-                                                </CardContent>
-                                            </Card>
-                                        )}
-
-                                        {/* Tool Usage Stats */}
-                                        <Card className="shadow-sm border-slate-200">
-                                            <CardHeader className="py-3 px-4 bg-slate-50/50 border-b">
-                                                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                                    <Wrench className="w-4 h-4 text-slate-500" />
+                                        <Card className="border-slate-200 shadow-sm">
+                                            <CardHeader className="border-b bg-slate-50/50 px-4 py-3">
+                                                <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                                                    <Wrench className="h-4 w-4 text-slate-500" />
                                                     Performance
                                                 </CardTitle>
                                             </CardHeader>
-                                            <CardContent className="p-4 grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <div className="text-[10px] font-bold text-slate-400 uppercase">Latency</div>
-                                                    <div className="text-sm font-mono">
-                                                        {typeof rawTrace.latencyMs === "number" && Number.isFinite(rawTrace.latencyMs)
-                                                            ? `${rawTrace.latencyMs}ms`
-                                                            : "N/A"}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-bold text-slate-400 uppercase">Cost</div>
-                                                    <div className={cn(
-                                                        "text-sm font-mono font-bold",
-                                                        typeof rawTrace.usage?.cost === "number" ? "text-green-600" : "text-slate-500"
-                                                    )}>
-                                                        {typeof rawTrace.usage?.cost === "number"
-                                                            ? `$${rawTrace.usage.cost.toFixed(5)}`
-                                                            : "N/A"}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-bold text-slate-400 uppercase">Tokens</div>
-                                                    <div className="text-sm font-mono">{rawTrace.usage?.totalTokenCount || 0}</div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-bold text-slate-400 uppercase">Status</div>
-                                                    <div className="text-sm font-medium capitalize">{rawTrace.taskStatus}</div>
-                                                </div>
+                                            <CardContent className="grid grid-cols-2 gap-4 p-4">
+                                                <UsageStat label="Latency" value={typeof rawTrace.latencyMs === "number" ? `${rawTrace.latencyMs}ms` : "N/A"} />
+                                                <UsageStat label="Status" value={rawTrace.taskStatus || "unknown"} valueClassName="capitalize" />
                                                 {transcriptUsage.totalTokens > 0 && (
                                                     <>
-                                                        <div>
-                                                            <div className="text-[10px] font-bold text-amber-500 uppercase flex items-center gap-1">
-                                                                <Mic className="h-3 w-3" /> Transcript Tokens
-                                                            </div>
-                                                            <div className="text-sm font-mono">{transcriptUsage.totalTokens.toLocaleString()}</div>
-                                                            <div className="text-[10px] text-slate-400">{transcriptUsage.transcriptCount} files, {transcriptUsage.extractionCount} extractions</div>
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-[10px] font-bold text-amber-500 uppercase flex items-center gap-1">
-                                                                <Mic className="h-3 w-3" /> Transcript Cost
-                                                            </div>
-                                                            <div className="text-sm font-mono font-bold text-amber-600">
-                                                                ${transcriptUsage.totalCost.toFixed(5)}
-                                                            </div>
-                                                        </div>
+                                                        <UsageStat
+                                                            label="Transcript Tokens"
+                                                            value={transcriptUsage.totalTokens.toLocaleString()}
+                                                            description={`${transcriptUsage.transcriptCount} files, ${transcriptUsage.extractionCount} extractions`}
+                                                            icon={<Mic className="h-3 w-3" />}
+                                                        />
+                                                        <UsageStat
+                                                            label="Transcript Cost"
+                                                            value={`$${transcriptUsage.totalCost.toFixed(5)}`}
+                                                            valueClassName="text-amber-600"
+                                                            icon={<Mic className="h-3 w-3" />}
+                                                        />
                                                     </>
                                                 )}
                                             </CardContent>
@@ -311,14 +286,13 @@ export function CoordinatorTraceModal({
                                     </div>
                                 </div>
 
-                                {/* Raw JSON (collapsible) */}
                                 <Collapsible>
                                     <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
                                         <ChevronDown className="h-3 w-3" />
                                         View Raw JSON
                                     </CollapsibleTrigger>
                                     <CollapsibleContent>
-                                        <pre className="mt-2 bg-slate-950 text-slate-50 text-[10px] p-3 rounded-lg overflow-x-auto font-mono">
+                                        <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 font-mono text-[10px] text-slate-50">
                                             {JSON.stringify(rawTrace, null, 2)}
                                         </pre>
                                     </CollapsibleContent>
@@ -329,5 +303,30 @@ export function CoordinatorTraceModal({
                 </div>
             </DialogContent>
         </Dialog>
+    );
+}
+
+function UsageStat({
+    label,
+    value,
+    description,
+    valueClassName,
+    icon,
+}: {
+    label: string;
+    value: string;
+    description?: string;
+    valueClassName?: string;
+    icon?: ReactNode;
+}) {
+    return (
+        <div className="rounded border bg-white p-3">
+            <div className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-400">
+                {icon}
+                {label}
+            </div>
+            <div className={cn("font-mono text-sm font-semibold", valueClassName)}>{value}</div>
+            {description && <div className="text-[10px] text-slate-400">{description}</div>}
+        </div>
     );
 }

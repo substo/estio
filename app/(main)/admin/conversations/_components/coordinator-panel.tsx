@@ -99,9 +99,12 @@ export function CoordinatorPanel({
         traceModalOpen,
         setTraceModalOpen,
         executionHistory,
+        hasMoreHistory,
         loadingHistory,
+        loadingMoreHistory,
         loadingTraceDetails,
         handleSelectTrace,
+        loadMoreExecutionHistory,
         refreshExecutionHistory,
     } = useCoordinatorTraceModal({
         conversationId: conversation.id,
@@ -373,9 +376,12 @@ export function CoordinatorPanel({
                     traceTree={traceTree}
                     insights={insights}
                     executionHistory={executionHistory}
+                    hasMoreHistory={hasMoreHistory}
                     loadingHistory={loadingHistory}
+                    loadingMoreHistory={loadingMoreHistory}
                     loadingTraceDetails={loadingTraceDetails}
                     handleSelectTrace={handleSelectTrace}
+                    loadMoreExecutionHistory={loadMoreExecutionHistory}
                     transcriptUsage={transcriptUsage}
                 />
 
