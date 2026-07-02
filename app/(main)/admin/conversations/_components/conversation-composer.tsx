@@ -55,6 +55,7 @@ interface ConversationComposerProps {
         model?: string,
         draftLanguage?: string | null,
         baseDraft?: string | null,
+        channel?: ComposerChannel | null,
         onChunk?: (chunk: string) => void
     ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
@@ -278,6 +279,20 @@ export function ConversationComposer({
     const [whatsAppCallState, setWhatsAppCallState] = useState<WhatsAppCallUiState | null>(null);
     const [latestAiDraftFeedback, setLatestAiDraftFeedback] = useState<ComposerAiDraftFeedback | null>(null);
     const {
+        selectedChannel,
+        selectChannel,
+        isWhatsAppDisabled,
+        isSmsDisabled,
+        isSmsRelayDisabled,
+        isEmailDisabled,
+        channelSelectorTitle,
+        noAvailableChannelReason,
+    } = useConversationComposerChannel({
+        conversation,
+        isUnavailable,
+        smsRelayEnabled,
+    });
+    const {
         generatingDraft,
         selectedModel,
         handleModelChange,
@@ -305,6 +320,7 @@ export function ConversationComposer({
         insertDraftSeed,
         onDraftChange,
         onGenerateDraft,
+        selectedChannel,
         onAiDraftFeedbackChange: setLatestAiDraftFeedback,
         onSetReplyLanguageOverride,
         onModelChange,
@@ -324,20 +340,6 @@ export function ConversationComposer({
         conversationId: conversation?.id || "",
         contactId: conversation?.contactId,
         onAddActivityEntry,
-    });
-    const {
-        selectedChannel,
-        selectChannel,
-        isWhatsAppDisabled,
-        isSmsDisabled,
-        isSmsRelayDisabled,
-        isEmailDisabled,
-        channelSelectorTitle,
-        noAvailableChannelReason,
-    } = useConversationComposerChannel({
-        conversation,
-        isUnavailable,
-        smsRelayEnabled,
     });
     const sendUnavailableReason = disabledReason || noAvailableChannelReason || channelSelectorTitle;
     const isSendUnavailable = isUnavailable || !!noAvailableChannelReason || !!channelSelectorTitle;

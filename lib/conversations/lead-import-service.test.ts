@@ -5,6 +5,8 @@ import {
     buildPasteLeadCompanyContactName,
     buildPasteLeadCompanyPatch,
     buildPasteLeadCompanyProfile,
+    applyPasteLeadContactFallbacks,
+    extractFirstPhoneFromPasteLeadText,
     isGenericPasteLeadCompanyContact,
     resolvePasteLeadCompanyRole,
     type LeadImportParsedData,
@@ -90,4 +92,36 @@ test("buildPasteLeadCompanyPatch only fills missing company fields", () => {
         website: "https://agency.example",
         type: "Agency",
     });
+});
+
+test("extractFirstPhoneFromPasteLeadText reads WhatsApp links and labeled phones", () => {
+    assert.equal(
+        extractFirstPhoneFromPasteLeadText("WhatsApp: https://wa.me/35799758742"),
+        "+35799758742"
+    );
+    assert.equal(
+        extractFirstPhoneFromPasteLeadText("Mobile: 99 758 742", "CY"),
+        "+35799758742"
+    );
+});
+
+test("applyPasteLeadContactFallbacks fills parser-missed contact phone and email", () => {
+    const parsed: LeadImportParsedData = {
+        contact: {
+            name: "Costas Pouroutides",
+            role: "Lead",
+            email: null,
+            phone: null,
+            countryCode: "CY",
+        },
+        goal: "To Buy",
+    };
+
+    const patched = applyPasteLeadContactFallbacks(
+        parsed,
+        "Email: PouroutosAutomotive@Gmail.com\nPhone: 99 758 742"
+    );
+
+    assert.equal(patched.contact?.phone, "+35799758742");
+    assert.equal(patched.contact?.email, "pouroutosautomotive@gmail.com");
 });

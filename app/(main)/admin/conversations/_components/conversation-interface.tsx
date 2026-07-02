@@ -2862,6 +2862,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         model?: string,
         draftLanguage?: string | null,
         baseDraft?: string | null,
+        channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null,
         onChunk?: (chunk: string) => void
     ) => {
         if (!activeConversation) return null;
@@ -2875,6 +2876,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 model,
                 mode: "chat",
                 draftLanguage,
+                channel: channel || null,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
                 onStreamError: (streamError) => {
@@ -2951,6 +2953,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         model?: string,
         draftLanguage?: string | null,
         baseDraft?: string | null,
+        channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null,
         onChunk?: (chunk: string) => void
     ) => {
         if (!selectedDealConversation) return null;
@@ -2964,6 +2967,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 mode: "deal",
                 dealId: activeDealId || undefined,
                 draftLanguage,
+                channel: channel || null,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
                 onStreamError: (streamError) => {

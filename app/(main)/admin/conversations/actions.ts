@@ -5442,6 +5442,7 @@ type GenerateAIDraftOptions = {
     dealId?: string;
     draftLanguage?: string | null;
     baseDraft?: string | null;
+    channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
 };
 
 function logAIDraftTiming(event: string, fields: Record<string, unknown> = {}) {
@@ -5647,6 +5648,7 @@ export async function generateAIDraft(
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
         draftLanguage: options?.draftLanguage || undefined,
+        channel: options?.channel || undefined,
     });
     logAIDraftTiming("generateAIDraft_legacy_end", {
         conversationId,
@@ -5699,6 +5701,7 @@ export async function generateComposerAIDraft(
         mode: options?.mode || "chat",
         dealId: options?.dealId || undefined,
         draftLanguage: options?.draftLanguage || undefined,
+        channel: options?.channel || undefined,
     });
     logAIDraftTiming("generateComposerAIDraft_legacy_end", {
         conversationId,

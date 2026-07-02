@@ -7,6 +7,7 @@ import {
     estimateDraftGenerationCost,
     isOpenAiDraftModel,
     looksLikeSendReadyDraftInstruction,
+    resolveDraftChannelName,
     stripUngroundedMapUrls,
 } from "./coordinator";
 
@@ -115,6 +116,24 @@ test("isOpenAiDraftModel only matches OpenAI-prefixed model selections", () => {
     assert.equal(isOpenAiDraftModel("openai:gpt-4o-mini"), true);
     assert.equal(isOpenAiDraftModel(" gpt-4o-mini "), false);
     assert.equal(isOpenAiDraftModel("gemini-flash-latest"), false);
+});
+
+test("resolveDraftChannelName lets explicit composer channel override conversation metadata", () => {
+    assert.equal(resolveDraftChannelName({
+        selectedChannel: "WhatsApp",
+        conversationType: "TYPE_EMAIL",
+    }), "WhatsApp");
+    assert.equal(resolveDraftChannelName({
+        selectedChannel: "Email",
+        conversationType: "TYPE_WHATSAPP",
+    }), "Email");
+    assert.equal(resolveDraftChannelName({
+        selectedChannel: "SMS_RELAY",
+        conversationType: "TYPE_EMAIL",
+    }), "SMS");
+    assert.equal(resolveDraftChannelName({
+        conversationType: "TYPE_EMAIL",
+    }), "Email");
 });
 
 test("estimateDraftGenerationCost does not apply Gemini pricing to OpenAI drafts", () => {

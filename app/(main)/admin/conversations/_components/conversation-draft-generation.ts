@@ -1,4 +1,5 @@
 type DraftMode = "chat" | "deal";
+export type DraftComposerChannel = "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
 
 export type GenerateDraftResult = {
     draft?: string | null;
@@ -53,6 +54,7 @@ type DraftStreamArgs = {
     mode: DraftMode;
     dealId?: string | null;
     draftLanguage?: string | null;
+    channel?: DraftComposerChannel | null;
     onChunk?: (chunk: string) => void;
     timeoutMs?: number;
 };
@@ -67,6 +69,7 @@ type DraftFallbackArgs = {
         mode: DraftMode;
         dealId?: string;
         draftLanguage?: string | null;
+        channel?: DraftComposerChannel | null;
     };
 };
 
@@ -145,6 +148,7 @@ export async function streamDraftViaApi(
                     mode: args.mode,
                     dealId: args.dealId,
                     draftLanguage: args.draftLanguage ?? null,
+                    channel: args.channel ?? undefined,
                 },
             }),
         });
@@ -266,6 +270,7 @@ export async function generateDraftWithStreamingFallback(args: {
     mode: DraftMode;
     dealId?: string;
     draftLanguage?: string | null;
+    channel?: DraftComposerChannel | null;
     onChunk?: (chunk: string) => void;
     streamTimeoutMs?: number;
     streamDraft?: (args: DraftStreamArgs) => Promise<GenerateDraftResult | null>;
@@ -294,6 +299,7 @@ export async function generateDraftWithStreamingFallback(args: {
                 mode: args.mode,
                 dealId: args.dealId ?? undefined,
                 draftLanguage: args.draftLanguage,
+                channel: args.channel ?? null,
                 onChunk: args.onChunk,
                 timeoutMs,
             }), timeoutMs);
@@ -329,6 +335,7 @@ export async function generateDraftWithStreamingFallback(args: {
             mode: args.mode,
             dealId: args.dealId || undefined,
             draftLanguage: args.draftLanguage,
+            ...(args.channel ? { channel: args.channel } : {}),
             ...(args.baseDraft ? { baseDraft: args.baseDraft } : {}),
         }
     );

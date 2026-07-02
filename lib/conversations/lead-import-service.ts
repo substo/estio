@@ -179,6 +179,68 @@ function normalizePasteLeadCompanyValue(value?: string | null): string | null {
     return raw || null;
 }
 
+function extractFirstEmailFromLeadText(text: string): string | null {
+    const match = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match?.[0]?.trim().toLowerCase() || null;
+}
+
+function collectPasteLeadPhoneCandidates(text: string): string[] {
+    const source = String(text || "");
+    const candidates = new Set<string>();
+
+    const whatsappHrefRegex = /(?:wa\.me\/|api\.whatsapp\.com\/send\?phone=)(\+?\d[\d\s().-]{6,}\d)/gi;
+    for (const match of source.matchAll(whatsappHrefRegex)) {
+        if (match[1]) candidates.add(match[1]);
+    }
+
+    const internationalRegex = /(?:\+|00)\d[\d\s().-]{6,}\d/g;
+    for (const match of source.matchAll(internationalRegex)) {
+        candidates.add(match[0]);
+    }
+
+    const labeledLineRegex = /(?:phone|tel|telephone|mobile|whatsapp|viber|call)\s*[:\-]?\s*(\+?\d[\d\s().-]{6,}\d)/gi;
+    for (const match of source.matchAll(labeledLineRegex)) {
+        if (match[1]) candidates.add(match[1]);
+    }
+
+    return Array.from(candidates);
+}
+
+export function extractFirstPhoneFromPasteLeadText(text: string, inferredCountry?: string | null): string | null {
+    for (const candidate of collectPasteLeadPhoneCandidates(text)) {
+        const normalized = normalizeInternationalPhone(candidate, inferredCountry);
+        if (normalized.formatted) return normalized.formatted;
+    }
+    return null;
+}
+
+export function applyPasteLeadContactFallbacks(
+    data: LeadImportParsedData,
+    originalText: string
+): LeadImportParsedData {
+    const contact = data.contact || {};
+    const nextContact = { ...contact };
+    let changed = false;
+
+    if (!normalizePasteLeadCompanyValue(nextContact.phone)) {
+        const fallbackPhone = extractFirstPhoneFromPasteLeadText(originalText, nextContact.countryCode);
+        if (fallbackPhone) {
+            nextContact.phone = fallbackPhone;
+            changed = true;
+        }
+    }
+
+    if (!normalizePasteLeadCompanyValue(nextContact.email)) {
+        const fallbackEmail = extractFirstEmailFromLeadText(originalText);
+        if (fallbackEmail) {
+            nextContact.email = fallbackEmail;
+            changed = true;
+        }
+    }
+
+    return changed ? { ...data, contact: nextContact } : data;
+}
+
 function normalizeCompanyNameForComparison(value?: string | null): string {
     return String(value || "")
         .toLowerCase()
@@ -699,6 +761,8 @@ export async function createParsedLeadForLocation(
     });
 
     try {
+        data = applyPasteLeadContactFallbacks(data, originalText);
+
         if (data.contact && data.contact.phone) {
             const { formatted } = normalizeInternationalPhone(data.contact.phone, data.contact.countryCode);
             if (formatted) {

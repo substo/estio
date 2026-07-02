@@ -19,6 +19,7 @@ type DraftStreamBody = {
         mode?: "chat" | "deal";
         dealId?: string;
         draftLanguage?: string | null;
+        channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
     };
 };
 
@@ -74,6 +75,12 @@ export async function POST(req: NextRequest) {
     const mode = body?.options?.mode === "deal" ? "deal" : "chat";
     const dealId = sanitizeString(body?.options?.dealId);
     const draftLanguage = body?.options?.draftLanguage ?? null;
+    const channel = body?.options?.channel === "Email"
+        || body?.options?.channel === "WhatsApp"
+        || body?.options?.channel === "SMS"
+        || body?.options?.channel === "SMS_RELAY"
+        ? body.options.channel
+        : null;
 
     if (!conversationId || !contactId) {
         return NextResponse.json({ success: false, error: "conversationId and contactId are required" }, { status: 400 });
@@ -153,6 +160,7 @@ export async function POST(req: NextRequest) {
                     mode,
                     dealId,
                     draftLanguage,
+                    channel,
                     stream: true,
                     latencyMode: "fast",
                     onToken: (chunk) => {

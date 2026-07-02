@@ -53,6 +53,7 @@ interface UnifiedTimelineProps {
         model?: string,
         draftLanguage?: string | null,
         baseDraft?: string | null,
+        channel?: ComposerChannel | null,
         onChunk?: (chunk: string) => void
     ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;

@@ -42,6 +42,7 @@ interface CoordinationContext {
     instruction?: string;
     baseDraft?: string;
     model?: string;
+    channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
     replyLanguageOverride?: string | null;
     draftLanguage?: string | null;
     stream?: boolean;
@@ -57,6 +58,19 @@ type DraftMessage = {
     body: string;
     createdAt: Date | null;
 };
+
+export function resolveDraftChannelName(args: {
+    selectedChannel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
+    conversationType?: string | null;
+}) {
+    const selectedChannel = String(args.selectedChannel || "").trim();
+    if (selectedChannel === "Email") return "Email";
+    if (selectedChannel === "WhatsApp") return "WhatsApp";
+    if (selectedChannel === "SMS" || selectedChannel === "SMS_RELAY") return "SMS";
+
+    const channelType = String(args.conversationType || "SMS").toUpperCase();
+    return channelType.includes("EMAIL") ? "Email" : "WhatsApp/SMS";
+}
 
 const NAME_GREETING_LONG_BREAK_HOURS = 3;
 const TIMELINE_RECENT_EVENT_WINDOW = 36;
@@ -801,10 +815,14 @@ export async function generateDraft(context: CoordinationContext) {
             }
         }
 
-        // Determine Channel
-        const channelType = conversationType.toUpperCase();
-        const isEmail = channelType.includes('EMAIL');
-        const channelName = isEmail ? 'Email' : 'WhatsApp/SMS';
+        // Determine Channel. An explicit composer selection should win over
+        // conversation history, because imported leads may have both email and
+        // phone before their first real outbound message.
+        const channelName = resolveDraftChannelName({
+            selectedChannel: context.channel,
+            conversationType,
+        });
+        const isEmail = channelName === 'Email';
         const agentName = (context.agentName || "").trim();
         const businessName = (context.businessName || configAny?.name || "the agency").trim();
 

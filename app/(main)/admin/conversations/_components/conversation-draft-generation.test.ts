@@ -157,6 +157,54 @@ test('generateDraftWithStreamingFallback passes base draft through stream and fa
     assert.deepEqual(result, { draft: 'Shorter draft' });
 });
 
+test('generateDraftWithStreamingFallback passes selected channel through stream and fallback paths', async () => {
+    let sawStreamChannel = false;
+    let sawFallbackChannel = false;
+
+    const result = await generateDraftWithStreamingFallback({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        instruction: 'Draft first outreach',
+        mode: 'chat',
+        channel: 'WhatsApp',
+        onChunk: () => {},
+        streamDraft: async (args) => {
+            sawStreamChannel = args.channel === 'WhatsApp';
+            return { reasoning: 'missing draft' };
+        },
+        generateDraft: async (_conversationId, _contactId, _instruction, _model, options) => {
+            sawFallbackChannel = options?.channel === 'WhatsApp';
+            return { draft: 'WhatsApp draft' };
+        },
+    });
+
+    assert.equal(sawStreamChannel, true);
+    assert.equal(sawFallbackChannel, true);
+    assert.deepEqual(result, { draft: 'WhatsApp draft' });
+});
+
+test('streamDraftViaApi includes selected channel in request options', async () => {
+    let requestBody: any = null;
+    const response = new Response(
+        `${JSON.stringify({ type: 'complete', result: { draft: 'stream draft' } })}\n`,
+        { status: 200 }
+    );
+    const fetchImpl: typeof fetch = async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body || '{}'));
+        return response;
+    };
+
+    const result = await streamDraftViaApi({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        channel: 'WhatsApp',
+    }, fetchImpl);
+
+    assert.equal(requestBody.options.channel, 'WhatsApp');
+    assert.deepEqual(result, { draft: 'stream draft' });
+});
+
 test('generateDraftWithStreamingFallback times out stream before direct fallback', async () => {
     let sawStreamError = false;
     let fallbackCalls = 0;

@@ -21,6 +21,7 @@ type GenerateDraft = (
     model?: string,
     draftLanguage?: string | null,
     baseDraft?: string | null,
+    channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null,
     onChunk?: (chunk: string) => void
 ) => Promise<GenerateDraftResult | null>;
 
@@ -35,6 +36,7 @@ interface UseConversationComposerAiDraftArgs {
     insertDraftSeed?: { key: string; body: string } | null;
     onDraftChange: (draft: string) => void;
     onGenerateDraft?: GenerateDraft;
+    selectedChannel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
     onAiDraftFeedbackChange?: (feedback: ComposerAiDraftFeedback | null) => void;
     onSetReplyLanguageOverride?: SetReplyLanguageOverride;
     onModelChange?: (model: string) => void;
@@ -70,6 +72,7 @@ export function useConversationComposerAiDraft({
     insertDraftSeed,
     onDraftChange,
     onGenerateDraft,
+    selectedChannel,
     onAiDraftFeedbackChange,
     onSetReplyLanguageOverride,
     onModelChange,
@@ -176,6 +179,7 @@ export function useConversationComposerAiDraft({
                 modelOverride,
                 agentDraftLanguage,
                 baseDraft,
+                selectedChannel || null,
                 (chunk) => {
                     if (!chunk) return;
                     if (firstChunkMs === null) {
