@@ -26,6 +26,10 @@ import type { ComposerAiDraftFeedback, GenerateDraftResult } from './conversatio
 import { getConversationChannelInfo } from './conversation-channel-info';
 import { MessageImageGroup } from "./message-image-group";
 import { groupAdjacentWhatsAppImageMessages } from "./message-image-grouping";
+import {
+    isMobileAiSuggestionDefaultCollapsed,
+    usePersistentAiSuggestionsCollapsed,
+} from "./use-persistent-ai-suggestions-collapsed";
 
 interface UnifiedTimelineProps {
     dealId: string;
@@ -130,8 +134,9 @@ export function UnifiedTimeline({
 }: UnifiedTimelineProps) {
     const [selectedModel, setSelectedModel] = useState("");
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(composerConversation));
-    const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = useState(
-        () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
+    const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = usePersistentAiSuggestionsCollapsed(
+        "idx.conversations.suggestedResponsesCollapsed.v1",
+        isMobileAiSuggestionDefaultCollapsed()
     );
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const events = useMemo(() => (Array.isArray(timelineEvents) ? timelineEvents : []), [timelineEvents]);

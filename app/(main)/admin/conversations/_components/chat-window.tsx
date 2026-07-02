@@ -33,6 +33,10 @@ import { getConversationChannelInfo } from "./conversation-channel-info";
 import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
 import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
 import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
+import {
+    isMobileAiSuggestionDefaultCollapsed,
+    usePersistentAiSuggestionsCollapsed,
+} from "./use-persistent-ai-suggestions-collapsed";
 
 interface ChatWindowProps {
     conversation: Conversation;
@@ -213,8 +217,9 @@ export function ChatWindow({
     });
     const [selectedModel, setSelectedModel] = useState("");
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(conversation));
-    const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = useState(
-        () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
+    const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = usePersistentAiSuggestionsCollapsed(
+        "idx.conversations.suggestedResponsesCollapsed.v1",
+        isMobileAiSuggestionDefaultCollapsed()
     );
     const lastTimelineCountLogRef = useRef<string | null>(null);
     const {
