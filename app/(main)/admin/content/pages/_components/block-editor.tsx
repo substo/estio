@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,8 @@ import { GEMINI_FLASH_LATEST_ALIAS, GOOGLE_AI_MODELS } from "@/lib/ai/models";
 import { CloudflareImageUploader } from "@/components/media/CloudflareImageUploader";
 import { getImageDeliveryUrl } from "@/lib/cloudflareImages";
 import { MediaGalleryDialog } from "@/components/media/MediaGalleryDialog";
+import { usePersistentAiModelSelection } from "@/components/ai/use-persistent-ai-model-selection";
+import type { AiModelOption } from "@/components/ai/use-ai-model-catalog";
 
 import {
     Dialog,
@@ -252,31 +254,36 @@ export function BlockEditor({ blocks, onChange, onPreview, siteConfig }: BlockEd
     const [instructions, setInstructions] = useState<{ [key: number]: string }>({});
     const [isRegeneratingDesign, setIsRegeneratingDesign] = useState(false);
     const [isRedesignConfirmOpen, setIsRedesignConfirmOpen] = useState(false);
-    const [designModel, setDesignModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
+    const [defaultDesignModel, setDefaultDesignModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [promptOverride, setPromptOverride] = useState("");
 
     // AI Section Generation State
     const [isAiSectionDialogOpen, setIsAiSectionDialogOpen] = useState(false);
     const [aiSectionPrompt, setAiSectionPrompt] = useState("");
     const [aiSectionImage, setAiSectionImage] = useState("");
-    const [aiSectionModel, setAiSectionModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
     const [isGeneratingSection, setIsGeneratingSection] = useState(false);
     const [isPastingImage, setIsPastingImage] = useState(false);
 
-    const [availableModels, setAvailableModels] = useState<any[]>([]);
-    const hasUserSelectedDesignModelRef = useRef(false);
-    const hasUserSelectedAiSectionModelRef = useRef(false);
+    const [availableModels, setAvailableModels] = useState<AiModelOption[]>([]);
+    const selectableModels = availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS;
+    const { selectedModel: designModel, handleModelChange: handleDesignModelChange } = usePersistentAiModelSelection({
+        usageKey: "content.page.redesign",
+        models: selectableModels,
+        defaultModel: defaultDesignModel,
+    });
+    const { selectedModel: aiSectionModel, handleModelChange: handleAiSectionModelChange } = usePersistentAiModelSelection({
+        usageKey: "content.section.generate",
+        models: selectableModels,
+        defaultModel: defaultDesignModel,
+    });
 
     useEffect(() => {
         let mounted = true;
         getAiModelPickerDefaultsAction().then(({ models, defaults }) => {
             if (mounted && models && models.length > 0) {
                 setAvailableModels(models);
-                if (!hasUserSelectedDesignModelRef.current && defaults?.design) {
-                    setDesignModel(defaults.design);
-                }
-                if (!hasUserSelectedAiSectionModelRef.current && defaults?.design) {
-                    setAiSectionModel(defaults.design);
+                if (defaults?.design) {
+                    setDefaultDesignModel(defaults.design);
                 }
             }
         }).catch(err => console.error(err));
@@ -553,12 +560,9 @@ export function BlockEditor({ blocks, onChange, onPreview, siteConfig }: BlockEd
                                     <select
                                         className="flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                         value={designModel}
-                                        onChange={(e) => {
-                                            hasUserSelectedDesignModelRef.current = true;
-                                            setDesignModel(e.target.value);
-                                        }}
+                                        onChange={(e) => handleDesignModelChange(e.target.value)}
                                     >
-                                        {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
+                                        {selectableModels.map((model) => (
                                             <option key={model.value} value={model.value}>
                                                 {model.label}
                                             </option>
@@ -1610,16 +1614,13 @@ export function BlockEditor({ blocks, onChange, onPreview, siteConfig }: BlockEd
                             <Label>AI Model</Label>
                             <Select
                                 value={aiSectionModel}
-                                onValueChange={(value) => {
-                                    hasUserSelectedAiSectionModelRef.current = true;
-                                    setAiSectionModel(value);
-                                }}
+                                onValueChange={handleAiSectionModelChange}
                             >
                                 <SelectTrigger className="w-full">
                                     <SelectValue placeholder="Select Model" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
+                                    {selectableModels.map((model) => (
                                         <SelectItem key={model.value} value={model.value}>
                                             {model.label}
                                         </SelectItem>

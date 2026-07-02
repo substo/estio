@@ -1,7 +1,8 @@
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 
 interface ExtractionResult {
     phoneContactEntry: {
@@ -45,19 +46,9 @@ export async function analyzeContactRequirements(
             return null;
         }
 
-        const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
-        const modelName = siteConfig?.googleAiModel || DEFAULT_MODEL;
-
-        if (!apiKey) {
-            console.error("No AI API Key found.");
-            return null;
-        }
-
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({
-            model: modelName,
-            generationConfig: { responseMimeType: "application/json" }
-        });
+        const modelName = await resolveAiModelDefault(locationId, "extraction")
+            || siteConfig?.googleAiModel
+            || DEFAULT_MODEL;
 
         // 2. Fetch Contact Details
         const contact = await db.contact.findUnique({
@@ -111,8 +102,11 @@ export async function analyzeContactRequirements(
         }
         `;
 
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text();
+        const result = await callLLMWithMetadata(modelName, prompt, undefined, {
+            jsonMode: true,
+            locationId,
+        });
+        const responseText = result.text;
 
         try {
             const data = JSON.parse(responseText) as ExtractionResult;

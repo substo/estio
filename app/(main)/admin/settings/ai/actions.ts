@@ -195,9 +195,12 @@ export async function updateAiSettings(
             || requirementsIntelligenceModel
             || transcriptionModel;
         const defaultReplyLanguage = normalizeReplyLanguage(String(formData.get("defaultReplyLanguage") || "")) || DEFAULT_REPLY_LANGUAGE;
+        const generalModel = String(formData.get("googleAiModel") || "").trim() || GEMINI_FLASH_LATEST_ALIAS;
+        const draftModel = String(formData.get("googleAiModelDraft") || "").trim() || generalModel;
         const payload = {
             ...existingPayload,
-            googleAiModel: formData.get("googleAiModel") as string || GEMINI_FLASH_LATEST_ALIAS,
+            googleAiModel: generalModel,
+            googleAiModelDraft: draftModel,
             googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelDesign: formData.get("googleAiModelDesign") as string || GEMINI_FLASH_LATEST_ALIAS,
             googleAiModelTranscription: transcriptionModel,

@@ -1,6 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { assembleViewingSessionContext } from "@/lib/viewings/sessions/context-assembler";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { VIEWING_SESSION_STAGE_MODELS } from "@/lib/viewings/sessions/live-models";
@@ -156,17 +155,6 @@ function parseJsonMaybe(rawText: string): any | null {
         }
         return null;
     }
-}
-
-function extractUsageCounts(usageMetadata: any) {
-    const promptTokens = Number(usageMetadata?.promptTokenCount || 0);
-    const completionTokens = Number(usageMetadata?.candidatesTokenCount || 0);
-    const totalTokens = Number(usageMetadata?.totalTokenCount || (promptTokens + completionTokens));
-    return {
-        promptTokens: Number.isFinite(promptTokens) ? Math.max(0, Math.floor(promptTokens)) : 0,
-        completionTokens: Number.isFinite(completionTokens) ? Math.max(0, Math.floor(completionTokens)) : 0,
-        totalTokens: Number.isFinite(totalTokens) ? Math.max(0, Math.floor(totalTokens)) : 0,
-    };
 }
 
 function estimateAnalysisCostUsd(totalTokens: number): number {
@@ -352,12 +340,11 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
     const targetLanguage = message.speaker === VIEWING_SESSION_SPEAKERS.client
         ? (message.session.agentLanguage || "en")
         : (message.session.clientLanguage || "en");
-    const apiKey = await resolveLocationGoogleAiApiKey(message.session.locationId);
     const primaryModelName = safeString(message.session.translationModel) || VIEWING_SESSION_STAGE_MODELS.translationDefault;
     const fallbackModelName = VIEWING_SESSION_STAGE_MODELS.translationDefault;
     const translationPromptText = prepareTranslationModelText(originalText);
 
-    if (!apiKey || !originalText) {
+    if (!originalText) {
         return {
             provider: null,
             model: primaryModelName || null,
@@ -373,17 +360,7 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
         };
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-
     const tryTranslateWithModel = async (modelName: string): Promise<TranslationResult> => {
-        const model = genAI.getGenerativeModel({
-            model: modelName,
-            generationConfig: {
-                temperature: 0.1,
-                responseMimeType: "application/json",
-            },
-        });
-
         const prompt = [
             "You are a translation assistant for real-estate live viewing sessions.",
             "Translate only. Do not produce extra commentary.",
@@ -392,19 +369,27 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
             `Source utterance: ${translationPromptText}`,
         ].join("\n");
 
-        const result = await model.generateContent([{ text: prompt }] as any);
-        const parsed = parseJsonMaybe(result.response.text());
+        const result = await callLLMWithMetadata(modelName, prompt, undefined, {
+            jsonMode: true,
+            temperature: 0.1,
+            locationId: message.session.locationId,
+        });
+        const parsed = parseJsonMaybe(result.text);
         const normalized = normalizeAnalysisOutput(parsed || {
             translatedText: originalText,
             originalLanguage: message.originalLanguage || null,
             confidence: null,
         }, originalText);
-        const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+        const usageCounts = {
+            promptTokens: result.usage.promptTokens,
+            completionTokens: result.usage.completionTokens,
+            totalTokens: result.usage.totalTokens || result.usage.promptTokens + result.usage.completionTokens,
+        };
 
         return {
-            provider: "google",
-            model: modelName,
-            modelVersion: modelName,
+            provider: result.provider,
+            model: result.model || modelName,
+            modelVersion: result.model || modelName,
             promptTokens: usageCounts.promptTokens,
             completionTokens: usageCounts.completionTokens,
             totalTokens: usageCounts.totalTokens,
@@ -460,13 +445,12 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
         throw new Error("Viewing session message not found.");
     }
 
-    const apiKey = await resolveLocationGoogleAiApiKey(message.session.locationId);
     const primaryModelName = safeString(message.session.insightsModel) || VIEWING_SESSION_STAGE_MODELS.insightsDefault;
     const fallbackModelName = VIEWING_SESSION_STAGE_MODELS.insightsDefault;
     const baseText = safeString(message.translatedText) || safeString(message.originalText);
     const sanitizedText = sanitizeAnalysisModelInputValue(baseText);
 
-    if (!apiKey || !baseText) {
+    if (!baseText) {
         const fallback = applyStaticFallbackAnalysis(baseText);
         return {
             provider: null,
@@ -496,8 +480,6 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
         };
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-
     const objectionLibraryHint = VIEWING_OBJECTION_LIBRARY.map((entry) => ({
         category: entry.category,
         triggerPhrases: entry.triggerPhrases,
@@ -521,16 +503,12 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
     ].join("\n");
 
     const tryInsightsWithModel = async (modelName: string): Promise<InsightResult> => {
-        const model = genAI.getGenerativeModel({
-            model: modelName,
-            generationConfig: {
-                temperature: 0.2,
-                responseMimeType: "application/json",
-            },
+        const result = await callLLMWithMetadata(modelName, prompt, undefined, {
+            jsonMode: true,
+            temperature: 0.2,
+            locationId: message.session.locationId,
         });
-
-        const result = await model.generateContent([{ text: prompt }] as any);
-        const parsed = parseJsonMaybe(result.response.text());
+        const parsed = parseJsonMaybe(result.text);
         const normalized = normalizeAnalysisOutput(parsed || {
             translatedText: baseText,
             originalLanguage: message.originalLanguage || null,
@@ -542,12 +520,16 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
             suggestedReplies: [],
             pivotSuggestions: [],
         }, baseText);
-        const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+        const usageCounts = {
+            promptTokens: result.usage.promptTokens,
+            completionTokens: result.usage.completionTokens,
+            totalTokens: result.usage.totalTokens || result.usage.promptTokens + result.usage.completionTokens,
+        };
 
         return {
-            provider: "google",
-            model: modelName,
-            modelVersion: modelName,
+            provider: result.provider,
+            model: result.model || modelName,
+            modelVersion: result.model || modelName,
             promptTokens: usageCounts.promptTokens,
             completionTokens: usageCounts.completionTokens,
             totalTokens: usageCounts.totalTokens,

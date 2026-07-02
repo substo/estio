@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
+import { usePersistentAiModelSelection } from "@/components/ai/use-persistent-ai-model-selection";
 import { Conversation } from "@/lib/ghl/conversations";
 import {
     DEFAULT_REPLY_LANGUAGE,
@@ -99,9 +100,17 @@ export function useConversationComposerAiDraft({
     autoTranslateTargetLabel: string;
 } {
     const [generatingDraft, setGeneratingDraft] = useState(false);
-    const [selectedModel, setSelectedModel] = useState("");
-    const [hasUserSelectedModel, setHasUserSelectedModel] = useState(false);
     const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
+    const preferredDraftModel = resolveModelForKind("draft") || resolveModelForKind("general");
+    const {
+        selectedModel,
+        hasUserSelectedModel,
+        handleModelChange,
+    } = usePersistentAiModelSelection({
+        usageKey: "conversation.draft",
+        models: availableModels,
+        defaultModel: preferredDraftModel,
+    });
     const [selectedReplyLanguage, setSelectedReplyLanguage] = useState<string>(
         conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE
     );
@@ -110,7 +119,6 @@ export function useConversationComposerAiDraft({
     const [agentDraftLanguage, setAgentDraftLanguage] = useState<string>(DEFAULT_REPLY_LANGUAGE);
     const [aiDraftRestorePoint, setAiDraftRestorePoint] = useState<{ conversationId: string; draft: string } | null>(null);
 
-    const hasUserSelectedModelRef = useRef(false);
     const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
 
     const clearAiDraftState = () => {
@@ -127,13 +135,6 @@ export function useConversationComposerAiDraft({
     }, []);
 
     useEffect(() => {
-        if (hasUserSelectedModelRef.current) return;
-        const preferredModel = resolveModelForKind("general") || resolveModelForKind("draft");
-        if (!preferredModel) return;
-        setSelectedModel(preferredModel);
-    }, [resolveModelForKind]);
-
-    useEffect(() => {
         if (!insertDraftSeed?.key) return;
         if (appliedInsertDraftSeedKeyRef.current === insertDraftSeed.key) return;
         appliedInsertDraftSeedKeyRef.current = insertDraftSeed.key;
@@ -146,12 +147,6 @@ export function useConversationComposerAiDraft({
         setSelectedReplyLanguage(conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE);
         clearAiDraftState();
     }, [conversation?.id, conversation?.replyLanguageOverride]);
-
-    const handleModelChange = (value: string) => {
-        hasUserSelectedModelRef.current = true;
-        setHasUserSelectedModel(true);
-        setSelectedModel(value);
-    };
 
     const handleAiDraft = async (instructionOverride?: string, baseDraftOverride?: string | null) => {
         if (!onGenerateDraft || generatingDraft || isUnavailable) return;

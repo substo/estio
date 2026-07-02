@@ -7,6 +7,8 @@ import path from "path";
 import { FEATURE_CATEGORIES } from "@/lib/properties/filter-constants";
 import { PROPERTY_TYPES, RENTAL_PERIODS } from "@/lib/properties/constants";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 
 
 // --- INTERFACES ---
@@ -112,17 +114,16 @@ export async function extractPropertyDataWithAI(
 
     const siteConfig = await db.siteConfig.findUnique({ where: { locationId: targetLocationId } });
     const configAny = siteConfig as any;
-    if (!configAny?.googleAiApiKey) return { success: false, error: "Google AI API Key is not configured." };
 
-    const apiKey = configAny.googleAiApiKey;
-    const model = modelOverride || DEFAULT_MODEL;
+    const apiKey = configAny?.googleAiApiKey || process.env.GOOGLE_API_KEY || "";
+    const model = modelOverride || await resolveAiModelDefault(targetLocationId, "extraction") || DEFAULT_MODEL;
 
     // --- STAGE 1: VISION (The "Eyes") ---
     console.log("[IMPORT][AI] --- STAGE 1: VISION EXTRACTION ---");
     let rawVisionData: any = {};
 
     if (screenshotBase64) {
-        const visionResult = await runVisionExtraction(apiKey, model, screenshotBase64);
+        const visionResult = await runVisionExtraction(targetLocationId, apiKey, model, screenshotBase64);
         if (visionResult.success) {
             rawVisionData = visionResult.data;
             console.log(`[IMPORT][AI] Vision extracted values.`);
@@ -150,12 +151,12 @@ export async function extractPropertyDataWithAI(
     // Publish depends slightly on Details/Location for meta-generation, but we can pass the raw context.
 
     const results = await Promise.allSettled([
-        runDetailsExtraction(apiKey, model, commonContext),
-        runPricingExtraction(apiKey, model, commonContext),
-        runLocationExtraction(apiKey, model, commonContext, scrapedMapUrl),
-        runSpecsExtraction(apiKey, model, commonContext),
-        runPublishExtraction(apiKey, model, commonContext),
-        runCategoryExtraction(apiKey, model, commonContext)
+        runDetailsExtraction(targetLocationId, apiKey, model, commonContext),
+        runPricingExtraction(targetLocationId, apiKey, model, commonContext),
+        runLocationExtraction(targetLocationId, apiKey, model, commonContext, scrapedMapUrl),
+        runSpecsExtraction(targetLocationId, apiKey, model, commonContext),
+        runPublishExtraction(targetLocationId, apiKey, model, commonContext),
+        runCategoryExtraction(targetLocationId, apiKey, model, commonContext)
     ]);
 
     const detailsParams = results[0].status === 'fulfilled' ? results[0].value : {};
@@ -207,17 +208,17 @@ export async function extractPropertyDataWithAI(
 
 // --- SUB-ROUTINES ---
 
-async function runVisionExtraction(apiKey: string, model: string, base64Image: string) {
+async function runVisionExtraction(locationId: string, apiKey: string, model: string, base64Image: string) {
     const prompt = `
     You are an Optical Character Recognition (OCR) engine. 
     Extract ALL text from this real estate listing screenshot.
     Return a flat JSON object with key-value pairs of every label and value you see.
     Do not summarize. Extract raw text exactly as it appears.
     `;
-    return callGeminiJSON(apiKey, model, prompt, "VISION", base64Image);
+    return callAiJSON(locationId, apiKey, model, prompt, "VISION", base64Image);
 }
 
-async function runDetailsExtraction(apiKey: string, model: string, context: any) {
+async function runDetailsExtraction(locationId: string, apiKey: string, model: string, context: any) {
     const prompt = `
     ROLE: Senior Real Estate Copywriter & Data Analyst.
     TASK: Extract structured details AND write a high-converting marketing description.
@@ -285,11 +286,11 @@ async function runDetailsExtraction(apiKey: string, model: string, context: any)
         "buildYear": "Number"
     }
     `;
-    const res = await callGeminiJSON(apiKey, model, prompt, "DETAILS");
+    const res = await callAiJSON(locationId, apiKey, model, prompt, "DETAILS");
     return res.success ? res.data : {};
 }
 
-async function runCategoryExtraction(apiKey: string, model: string, context: any) {
+async function runCategoryExtraction(locationId: string, apiKey: string, model: string, context: any) {
     // Generate reference list
     const typeReference = PROPERTY_TYPES.map(cat =>
         `CATEGORY: "${cat.category_label}" (Key: "${cat.category_key}")\n` +
@@ -325,11 +326,11 @@ async function runCategoryExtraction(apiKey: string, model: string, context: any
         "type": "String (subtype_key)"
     }
     `;
-    const res = await callGeminiJSON(apiKey, model, prompt, "CATEGORY");
+    const res = await callAiJSON(locationId, apiKey, model, prompt, "CATEGORY");
     return res.success ? res.data : { category: "house", type: "detached_villa" };
 }
 
-async function runPricingExtraction(apiKey: string, model: string, context: any) {
+async function runPricingExtraction(locationId: string, apiKey: string, model: string, context: any) {
     const prompt = `
     ROLE: Real Estate Data Entry Clerk - "Pricing" Tab.
     TASK: Extract "Pricing" tab information.
@@ -376,11 +377,11 @@ async function runPricingExtraction(apiKey: string, model: string, context: any)
         "viewingNotes": "String"
     }
     `;
-    const res = await callGeminiJSON(apiKey, model, prompt, "PRICING");
+    const res = await callAiJSON(locationId, apiKey, model, prompt, "PRICING");
     return res.success ? res.data : {};
 }
 
-async function runLocationExtraction(apiKey: string, model: string, context: any, mapUrl?: string) {
+async function runLocationExtraction(locationId: string, apiKey: string, model: string, context: any, mapUrl?: string) {
     const prompt = `
     ROLE: Real Estate Data Entry Clerk - "Location" Tab.
     TASK: Extract Address and Location Hierarchy.
@@ -412,11 +413,11 @@ async function runLocationExtraction(apiKey: string, model: string, context: any
         "longitude": "Number"
     }
     `;
-    const res = await callGeminiJSON(apiKey, model, prompt, "LOCATION");
+    const res = await callAiJSON(locationId, apiKey, model, prompt, "LOCATION");
     return res.success ? res.data : {};
 }
 
-async function runSpecsExtraction(apiKey: string, model: string, context: any) {
+async function runSpecsExtraction(locationId: string, apiKey: string, model: string, context: any) {
     // Generate a reference list of valid features
     const featureReference = FEATURE_CATEGORIES.map(cat =>
         `CATEGORY: ${cat.label}\n` +
@@ -449,12 +450,12 @@ async function runSpecsExtraction(apiKey: string, model: string, context: any) {
         "features": ["String (key1)", "String (key2)"]
     }
     `;
-    const res = await callGeminiJSON(apiKey, model, prompt, "SPECS");
+    const res = await callAiJSON(locationId, apiKey, model, prompt, "SPECS");
     return res.success ? res.data : { features: [] };
 }
 
 
-async function runPublishExtraction(apiKey: string, model: string, context: any) {
+async function runPublishExtraction(locationId: string, apiKey: string, model: string, context: any) {
     const prompt = `
     ROLE: Marketing Manager - "Publish" Tab.
     TASK: Determine Goal and SEO Metadata.
@@ -487,31 +488,51 @@ async function runPublishExtraction(apiKey: string, model: string, context: any)
         "metaKeywords": "String"
     }
     `;
-    const res = await callGeminiJSON(apiKey, model, prompt, "PUBLISH");
+    const res = await callAiJSON(locationId, apiKey, model, prompt, "PUBLISH");
     return res.success ? res.data : { goal: "SALE" };
 }
 
 
 // --- HELPERS ---
 
-async function callGeminiJSON(apiKey: string, model: string, promptText: string, stage: string, imageBase664?: string): Promise<{ success: boolean; data?: any; error?: string }> {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+function isGeminiModelId(model: string): boolean {
+    return String(model || "").toLowerCase().includes("gemini");
+}
 
+async function callAiJSON(locationId: string, apiKey: string, model: string, promptText: string, stage: string, imageBase664?: string): Promise<{ success: boolean; data?: any; error?: string }> {
     console.log(`[AI][${stage}] >>> SENDING PROMPT (${promptText.length} chars)`);
     // Debug: Log first 500 chars of prompt to see context
     console.log(`[AI][${stage}] PROMPT SNIPPET: ${promptText.substring(0, 500)}...`);
 
-    const parts: any[] = [{ text: promptText }];
-    if (imageBase664) {
-        parts.push({
-            inline_data: {
-                mime_type: "image/jpeg",
-                data: imageBase664
-            }
-        });
-    }
-
     try {
+        if (!imageBase664) {
+            const result = await callLLMWithMetadata(model, promptText, undefined, {
+                jsonMode: true,
+                temperature: 0.1,
+                locationId,
+            });
+            console.log(`[AI][${stage}] <<< RECEIVED RESPONSE:`);
+            console.log(result.text);
+            console.log(`[AI][${stage}] ----------------------`);
+            return { success: true, data: parseAIJson(result.text) };
+        }
+
+        if (!apiKey) {
+            return { success: false, error: "Google AI API key is required for screenshot vision extraction." };
+        }
+
+        const visionModel = isGeminiModelId(model) ? model : DEFAULT_MODEL;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${visionModel}:generateContent?key=${apiKey}`;
+        const parts: any[] = [
+            { text: promptText },
+            {
+                inline_data: {
+                    mime_type: "image/jpeg",
+                    data: imageBase664
+                }
+            },
+        ];
+
         const response = await fetch(geminiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

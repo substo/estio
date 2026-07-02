@@ -1,8 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
@@ -24,8 +23,6 @@ type AnyRecord = Record<string, any>;
 
 const CONTACT_VERIFICATION_MODEL = "contact-profile-name-agent-v1";
 const CONTACT_VERIFICATION_PROVIDER = "deterministic";
-const CONTACT_VERIFICATION_AI_PROVIDER = "google_gemini";
-
 const CONTACT_TYPES = new Set([
   "Lead",
   "Agent",
@@ -554,42 +551,33 @@ async function buildModelBackedContactVerificationAssessment(args: {
   metadata: ContactVerificationRunMetadata;
 }> {
   const modelName = await getContactProfileVerificationModel(args.locationId, args.modelOverride);
-  const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
-  if (!apiKey) {
-    throw new Error("No AI API key configured.");
-  }
 
   const prompt = buildContactVerificationPrompt({
     contact: args.contact,
     recentMessages: args.recentMessages,
     deterministicAssessment: args.deterministicAssessment,
   });
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.1,
-    },
+  const result = await callLLMWithMetadata(modelName, prompt, undefined, {
+    jsonMode: true,
+    temperature: 0.1,
+    locationId: args.locationId,
   });
-  const result = await model.generateContent(prompt);
-  const parsed = extractJsonObject(result.response.text());
+  const parsed = extractJsonObject(result.text);
   const assessment = normalizeAiContactVerificationAssessment({
     raw: parsed,
     contact: args.contact,
     deterministicAssessment: args.deterministicAssessment,
   });
-  const usage = (result.response.usageMetadata || {}) as Record<string, unknown>;
-  const promptTokens = Number(usage.promptTokenCount || 0);
-  const completionTokens = Number(usage.candidatesTokenCount || 0);
-  const totalTokens = Number(usage.totalTokenCount || promptTokens + completionTokens);
-  const estimatedCostUsd = calculateRunCost(modelName, promptTokens, completionTokens);
+  const promptTokens = Number(result.usage.promptTokens || 0);
+  const completionTokens = Number(result.usage.completionTokens || 0);
+  const totalTokens = Number(result.usage.totalTokens || promptTokens + completionTokens);
+  const estimatedCostUsd = calculateRunCost(result.model || modelName, promptTokens, completionTokens);
 
   return {
     assessment,
     metadata: {
-      provider: CONTACT_VERIFICATION_AI_PROVIDER,
-      model: modelName,
+      provider: result.provider,
+      model: result.model || modelName,
       promptTokens,
       completionTokens,
       totalTokens,

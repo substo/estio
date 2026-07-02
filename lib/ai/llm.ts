@@ -9,6 +9,7 @@ import {
     callChatGptSubscriptionWithMetadata,
     isChatGptSubscriptionModelId,
 } from "@/lib/ai/chatgpt-subscription";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 interface CallLLMOptions {
     jsonMode?: boolean;
@@ -203,7 +204,9 @@ export async function callLLM(
     // 1. Get API Key (try Env first, then DB config)
     // In a real app we might pass locationId to get specific config
     // For now, we default to env or generic site config if needed
-    let apiKey = process.env.GOOGLE_API_KEY;
+    let apiKey = options.locationId
+        ? await resolveLocationGoogleAiApiKey(options.locationId)
+        : process.env.GOOGLE_API_KEY;
 
     if (!apiKey) {
         // Fallback: try to find ANY site config with a key
@@ -262,7 +265,9 @@ export async function callLLMWithMetadata(
     }
 
     // 1. Get API Key
-    let apiKey = process.env.GOOGLE_API_KEY;
+    let apiKey = options.locationId
+        ? await resolveLocationGoogleAiApiKey(options.locationId)
+        : process.env.GOOGLE_API_KEY;
     if (!apiKey) {
         const config = await db.siteConfig.findFirst({
             where: { googleAiApiKey: { not: null } }

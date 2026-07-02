@@ -1,10 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 import {
     normalizePropertyPrintGeneratedContent,
     normalizePropertyPrintLanguages,
@@ -53,11 +52,6 @@ export async function generatePropertyPrintCopy(params: {
         throw new Error("Property print draft not found.");
     }
 
-    const apiKey = await resolveLocationGoogleAiApiKey(params.locationId);
-    if (!apiKey) {
-        throw new Error("Google AI API key is not configured for this location.");
-    }
-
     const explicitOverride = String(params.modelOverride || "").trim();
 
     const aiDoc = await settingsService.getDocument<any>({
@@ -92,15 +86,6 @@ export async function generatePropertyPrintCopy(params: {
     const promptSettings = (draft.promptSettings && typeof draft.promptSettings === "object")
         ? draft.promptSettings as Record<string, unknown>
         : {};
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const modelClient = genAI.getGenerativeModel({
-        model,
-        generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.5,
-        },
-    });
 
     const deterministicFeatures = buildPropertyFeatureBullets(property);
     const propertyFacts = {
@@ -165,17 +150,20 @@ export async function generatePropertyPrintCopy(params: {
         `Property facts: ${JSON.stringify(propertyFacts)}`,
     ].join("\n");
 
-    const result = await modelClient.generateContent([prompt]);
-    const text = result.response.text();
-    const usageMeta = (result.response.usageMetadata || {}) as Record<string, unknown>;
-    const inputTokens = Number(usageMeta.promptTokenCount) || 0;
-    const outputTokens = Number(usageMeta.candidatesTokenCount) || 0;
-    const totalTokens = Number(usageMeta.totalTokenCount) || (inputTokens + outputTokens);
+    const result = await callLLMWithMetadata(model, prompt, undefined, {
+        jsonMode: true,
+        temperature: 0.5,
+        locationId: params.locationId,
+    });
+    const text = result.text;
+    const inputTokens = Number(result.usage.promptTokens) || 0;
+    const outputTokens = Number(result.usage.completionTokens) || 0;
+    const totalTokens = Number(result.usage.totalTokens) || (inputTokens + outputTokens);
 
     const generatedContent = parseGeneratedContent(text);
     const generationMetadata = {
-        provider: "google_gemini",
-        model,
+        provider: result.provider,
+        model: result.model || model,
         generatedAt: new Date().toISOString(),
         inputTokens,
         outputTokens,
@@ -189,8 +177,8 @@ export async function generatePropertyPrintCopy(params: {
         resourceId: params.propertyId,
         featureArea: "property_printing",
         action: "generate_print_copy",
-        provider: "google_gemini",
-        model,
+        provider: result.provider,
+        model: result.model || model,
         inputTokens,
         outputTokens,
         metadata: {

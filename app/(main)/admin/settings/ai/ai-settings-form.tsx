@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sparkles, Loader2, Pause, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import { SkillRuntimeSettings } from "./skill-runtime-settings";
+import { filterModelsForTask, type AiTaskId } from "@/lib/ai/model-capabilities";
 
 type AiSettingsFormState = {
     message?: string;
@@ -136,6 +137,7 @@ type AiSettingsInitialData = {
     [key: string]: unknown;
     defaultReplyLanguage?: string;
     googleAiModel?: string;
+    googleAiModelDraft?: string;
     googleAiModelExtraction?: string;
     googleAiModelDesign?: string;
     googleAiModelTranscription?: string;
@@ -214,7 +216,7 @@ type AiRuntimeSummary = {
     }>;
 };
 
-type AiModelPickerDefaults = Partial<Record<"general" | "extraction" | "design" | "translation", string>>;
+type AiModelPickerDefaults = Partial<Record<"general" | "draft" | "extraction" | "design" | "transcription" | "translation", string>>;
 
 const initialState: AiSettingsFormState = {
     message: "",
@@ -263,6 +265,14 @@ type AiModelOption = {
     description?: string;
 };
 
+function getAiModelProviderLabel(modelId: string): string {
+    const normalized = modelId.toLowerCase();
+    if (normalized.startsWith("chatgpt_subscription:")) return "ChatGPT Subscription";
+    if (normalized.startsWith("openai:")) return "OpenAI API";
+    if (normalized.includes("gemini")) return "Google Gemini";
+    return "Other Providers";
+}
+
 function AiModelSelect({
     id,
     name,
@@ -271,6 +281,7 @@ function AiModelSelect({
     models,
     description,
     compactLabel = false,
+    taskId,
     onChange,
 }: {
     id: string;
@@ -280,8 +291,21 @@ function AiModelSelect({
     models: AiModelOption[];
     description?: string;
     compactLabel?: boolean;
+    taskId?: AiTaskId;
     onChange: (value: string) => void;
 }) {
+    const compatibleModels = taskId ? filterModelsForTask(models, taskId) : models;
+    const selectableModels = compatibleModels.length > 0 ? compatibleModels : models;
+    const selectedValue = selectableModels.some((model) => model.value === value)
+        ? value
+        : selectableModels[0]?.value || value;
+    const groupedModels = selectableModels.reduce<Record<string, AiModelOption[]>>((groups, model) => {
+        const provider = getAiModelProviderLabel(model.value);
+        groups[provider] = groups[provider] || [];
+        groups[provider].push(model);
+        return groups;
+    }, {});
+
     return (
         <div className="grid gap-2">
             <Label
@@ -294,13 +318,17 @@ function AiModelSelect({
                 id={id}
                 name={name}
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={value}
+                value={selectedValue}
                 onChange={(e) => onChange(e.target.value)}
             >
-                {models.map((model) => (
-                    <option key={model.value} value={model.value}>
-                        {model.label}
-                    </option>
+                {Object.entries(groupedModels).map(([provider, providerModels]) => (
+                    <optgroup key={provider} label={provider}>
+                        {providerModels.map((model) => (
+                            <option key={model.value} value={model.value}>
+                                {model.label}
+                            </option>
+                        ))}
+                    </optgroup>
                 ))}
             </select>
             {description ? <p className="text-[10px] text-muted-foreground">{description}</p> : null}
@@ -377,11 +405,13 @@ function ModelSelectionSection({
     initialData,
     modelOptions,
     googleAiModel,
+    googleAiModelDraft,
     googleAiModelExtraction,
     googleAiModelDesign,
     googleAiModelTranscription,
     googleAiModelTranslation,
     onGeneralModelChange,
+    onDraftModelChange,
     onExtractionModelChange,
     onDesignModelChange,
     onTranscriptionModelChange,
@@ -390,11 +420,13 @@ function ModelSelectionSection({
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
     googleAiModel: string;
+    googleAiModelDraft: string;
     googleAiModelExtraction: string;
     googleAiModelDesign: string;
     googleAiModelTranscription: string;
     googleAiModelTranslation: string;
     onGeneralModelChange: (value: string) => void;
+    onDraftModelChange: (value: string) => void;
     onExtractionModelChange: (value: string) => void;
     onDesignModelChange: (value: string) => void;
     onTranscriptionModelChange: (value: string) => void;
@@ -422,11 +454,24 @@ function ModelSelectionSection({
             </div>
 
             <AiModelSelect
+                id="googleAiModelDraft"
+                name="googleAiModelDraft"
+                label="AI Drafts & Replies"
+                value={googleAiModelDraft}
+                models={modelOptions}
+                taskId="conversation.draft"
+                description="Default model for conversation AI drafts and reply generation. Provider is taken from the selected model."
+                onChange={onDraftModelChange}
+            />
+
+            <AiModelSelect
                 id="googleAiModel"
                 name="googleAiModel"
-                label="Default Model (General)"
+                label="General AI Default"
                 value={googleAiModel}
                 models={modelOptions}
+                taskId="general.text"
+                description="Fallback for general text tasks when a more specific default is not configured."
                 onChange={onGeneralModelChange}
             />
 
@@ -434,22 +479,24 @@ function ModelSelectionSection({
                 <AiModelSelect
                     id="googleAiModelExtraction"
                     name="googleAiModelExtraction"
-                    label="Stage 1: Extraction"
+                    label="Lead & Property Extraction"
                     value={googleAiModelExtraction}
                     models={modelOptions}
+                    taskId="property.import.text"
                     compactLabel
-                    description="Used for scraping & initial structure."
+                    description="Used for scraping, lead parsing, and structured extraction."
                     onChange={onExtractionModelChange}
                 />
 
                 <AiModelSelect
                     id="googleAiModelDesign"
                     name="googleAiModelDesign"
-                    label="Stage 2: Design Engine"
+                    label="Design & Content"
                     value={googleAiModelDesign}
                     models={modelOptions}
+                    taskId="property.design"
                     compactLabel
-                    description="Used for redesigns & badges."
+                    description="Used for redesigns, badges, and content generation."
                     onChange={onDesignModelChange}
                 />
 
@@ -459,6 +506,7 @@ function ModelSelectionSection({
                     label="Audio: Transcription"
                     value={googleAiModelTranscription}
                     models={modelOptions}
+                    taskId="audio.transcription"
                     compactLabel
                     description="Used for WhatsApp audio transcript generation."
                     onChange={onTranscriptionModelChange}
@@ -470,6 +518,7 @@ function ModelSelectionSection({
                     label="Conversation: Translation"
                     value={googleAiModelTranslation}
                     models={modelOptions}
+                    taskId="conversation.translation"
                     compactLabel
                     description="Used for conversation message, thread, and reply translation."
                     onChange={onTranslationModelChange}
@@ -569,6 +618,17 @@ function LeadIntelligenceSection({
         && activeContactClassificationRun.model
         && contactProfileVerificationModel !== activeContactClassificationRun.model
     );
+    const contactVerificationModels = filterModelsForTask(modelOptions, "contact.verification");
+    const contactVerificationOptions = contactVerificationModels.length > 0 ? contactVerificationModels : modelOptions;
+    const selectedContactVerificationModel = contactVerificationOptions.some((model) => model.value === contactProfileVerificationModel)
+        ? contactProfileVerificationModel
+        : contactVerificationOptions[0]?.value || contactProfileVerificationModel;
+    const requirementModels = filterModelsForTask(modelOptions, "contact.requirements");
+    const requirementOptions = requirementModels.length > 0 ? requirementModels : modelOptions;
+    const requirementModelValue = String(requirements.model || fallbackModel);
+    const selectedRequirementModel = requirementOptions.some((model) => model.value === requirementModelValue)
+        ? requirementModelValue
+        : requirementOptions[0]?.value || requirementModelValue;
 
     return (
         <div className="space-y-3">
@@ -612,10 +672,10 @@ function LeadIntelligenceSection({
                                 id="contactProfileVerificationModel"
                                 name="contactProfileVerificationModel"
                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                                value={contactProfileVerificationModel}
+                                value={selectedContactVerificationModel}
                                 onChange={(event) => onContactProfileVerificationModelChange(event.target.value)}
                             >
-                                {modelOptions.map((model) => (
+                                {contactVerificationOptions.map((model) => (
                                     <option key={model.value} value={model.value}>
                                         {model.label}
                                     </option>
@@ -630,9 +690,9 @@ function LeadIntelligenceSection({
                                 id="requirementsIntelligenceModel"
                                 name="requirementsIntelligenceModel"
                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                                defaultValue={String(requirements.model || fallbackModel)}
+                                defaultValue={selectedRequirementModel}
                             >
-                                {modelOptions.map((model) => (
+                                {requirementOptions.map((model) => (
                                     <option key={model.value} value={model.value}>
                                         {model.label}
                                     </option>
@@ -855,6 +915,7 @@ function OptionalModelSelect({
     value,
     models,
     description,
+    taskId,
 }: {
     id: string;
     name: string;
@@ -862,7 +923,14 @@ function OptionalModelSelect({
     value?: string | null;
     models: AiModelOption[];
     description: string;
+    taskId?: AiTaskId;
 }) {
+    const compatibleModels = taskId ? filterModelsForTask(models, taskId) : models;
+    const selectableModels = compatibleModels.length > 0 ? compatibleModels : models;
+    const selectedValue = selectableModels.some((model) => model.value === String(value || ""))
+        ? String(value || "")
+        : "";
+
     return (
         <div className="grid gap-2">
             <Label htmlFor={id} className="text-xs text-slate-500 uppercase tracking-wider">
@@ -872,10 +940,10 @@ function OptionalModelSelect({
                 id={id}
                 name={name}
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                defaultValue={String(value || "")}
+                defaultValue={selectedValue}
             >
                 <option value="">Use default model</option>
-                {models.map((model) => (
+                {selectableModels.map((model) => (
                     <option key={model.value} value={model.value}>
                         {model.label}
                     </option>
@@ -993,6 +1061,7 @@ function ViewingSessionPolicySection({
                     label="Viewing Sessions: Translation"
                     value={initialData?.viewingSessionTranslationModel}
                     models={modelOptions}
+                    taskId="viewing.translation"
                     description="Optional override for translating live viewing transcripts."
                 />
 
@@ -1002,6 +1071,7 @@ function ViewingSessionPolicySection({
                     label="Viewing Sessions: Insights"
                     value={initialData?.viewingSessionInsightsModel}
                     models={modelOptions}
+                    taskId="viewing.insights"
                     description="Optional override for extracting live viewing insights."
                 />
 
@@ -1011,6 +1081,7 @@ function ViewingSessionPolicySection({
                     label="Viewing Sessions: Summary"
                     value={initialData?.viewingSessionSummaryModel}
                     models={modelOptions}
+                    taskId="viewing.summary"
                     description="Optional override for viewing-session summaries."
                 />
             </div>
@@ -1022,6 +1093,7 @@ function ModelConfigurationSection({
     initialData,
     modelOptions,
     googleAiModel,
+    googleAiModelDraft,
     googleAiModelExtraction,
     googleAiModelDesign,
     googleAiModelTranscription,
@@ -1037,6 +1109,7 @@ function ModelConfigurationSection({
     runningRequirementsScan,
     runningVerifyContactsNow,
     onGeneralModelChange,
+    onDraftModelChange,
     onExtractionModelChange,
     onDesignModelChange,
     onTranscriptionModelChange,
@@ -1051,6 +1124,7 @@ function ModelConfigurationSection({
     initialData: AiSettingsInitialData;
     modelOptions: AiModelOption[];
     googleAiModel: string;
+    googleAiModelDraft: string;
     googleAiModelExtraction: string;
     googleAiModelDesign: string;
     googleAiModelTranscription: string;
@@ -1066,6 +1140,7 @@ function ModelConfigurationSection({
     runningRequirementsScan: boolean;
     runningVerifyContactsNow: boolean;
     onGeneralModelChange: (value: string) => void;
+    onDraftModelChange: (value: string) => void;
     onExtractionModelChange: (value: string) => void;
     onDesignModelChange: (value: string) => void;
     onTranscriptionModelChange: (value: string) => void;
@@ -1085,11 +1160,13 @@ function ModelConfigurationSection({
                     initialData={initialData}
                     modelOptions={modelOptions}
                     googleAiModel={googleAiModel}
+                    googleAiModelDraft={googleAiModelDraft}
                     googleAiModelExtraction={googleAiModelExtraction}
                     googleAiModelDesign={googleAiModelDesign}
                     googleAiModelTranscription={googleAiModelTranscription}
                     googleAiModelTranslation={googleAiModelTranslation}
                     onGeneralModelChange={onGeneralModelChange}
+                    onDraftModelChange={onDraftModelChange}
                     onExtractionModelChange={onExtractionModelChange}
                     onDesignModelChange={onDesignModelChange}
                     onTranscriptionModelChange={onTranscriptionModelChange}
@@ -1449,6 +1526,9 @@ export function AiSettingsForm({
     const [googleAiModel, setGoogleAiModel] = useState(
         getInitialModelValue(initialData, ["googleAiModel"], GEMINI_FLASH_LATEST_ALIAS)
     );
+    const [googleAiModelDraft, setGoogleAiModelDraft] = useState(
+        getInitialModelValue(initialData, ["googleAiModelDraft", "googleAiModel"], GEMINI_FLASH_LATEST_ALIAS)
+    );
     const [googleAiModelExtraction, setGoogleAiModelExtraction] = useState(
         getInitialModelValue(initialData, ["googleAiModelExtraction", "googleAiModel"], GEMINI_FLASH_LATEST_ALIAS)
     );
@@ -1465,12 +1545,14 @@ export function AiSettingsForm({
         String(initialData?.contactProfileVerification?.model || initialData?.googleAiModelExtraction || initialData?.googleAiModel || GEMINI_FLASH_LATEST_ALIAS)
     );
     const hasUserSelectedGeneralModelRef = useRef(false);
+    const hasUserSelectedDraftModelRef = useRef(false);
     const hasUserSelectedExtractionModelRef = useRef(false);
     const hasUserSelectedDesignModelRef = useRef(false);
     const hasUserSelectedTranscriptionModelRef = useRef(false);
     const hasUserSelectedTranslationModelRef = useRef(false);
 
     const hasConfiguredGeneralModel = hasInitialModelValue(initialData, "googleAiModel");
+    const hasConfiguredDraftModel = hasInitialModelValue(initialData, "googleAiModelDraft");
     const hasConfiguredExtractionModel = hasInitialModelValue(initialData, "googleAiModelExtraction");
     const hasConfiguredDesignModel = hasInitialModelValue(initialData, "googleAiModelDesign");
     const hasConfiguredTranscriptionModel = hasInitialModelValue(initialData, "googleAiModelTranscription");
@@ -1570,6 +1652,9 @@ export function AiSettingsForm({
                     if (!hasUserSelectedGeneralModelRef.current && !hasConfiguredGeneralModel && defaults?.general) {
                         setGoogleAiModel(defaults.general);
                     }
+                    if (!hasUserSelectedDraftModelRef.current && !hasConfiguredDraftModel && defaults?.draft) {
+                        setGoogleAiModelDraft(defaults.draft);
+                    }
                     if (!hasUserSelectedExtractionModelRef.current && !hasConfiguredExtractionModel && defaults?.extraction) {
                         setGoogleAiModelExtraction(defaults.extraction);
                     }
@@ -1577,7 +1662,7 @@ export function AiSettingsForm({
                         setGoogleAiModelDesign(defaults.design);
                     }
                     if (!hasUserSelectedTranscriptionModelRef.current && !hasConfiguredTranscriptionModel) {
-                        setGoogleAiModelTranscription(defaults?.extraction || defaults?.general || GEMINI_FLASH_STABLE_FALLBACK);
+                        setGoogleAiModelTranscription(defaults?.transcription || defaults?.extraction || defaults?.general || GEMINI_FLASH_STABLE_FALLBACK);
                     }
                     if (!hasUserSelectedTranslationModelRef.current && !hasConfiguredTranslationModel) {
                         setGoogleAiModelTranslation(defaults?.translation || GEMINI_FLASH_LITE_LATEST_ALIAS);
@@ -1586,7 +1671,7 @@ export function AiSettingsForm({
             });
         });
         return () => { mounted = false; };
-    }, [hasConfiguredDesignModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel, hasConfiguredTranslationModel]);
+    }, [hasConfiguredDesignModel, hasConfiguredDraftModel, hasConfiguredExtractionModel, hasConfiguredGeneralModel, hasConfiguredTranscriptionModel, hasConfiguredTranslationModel]);
 
     useEffect(() => {
         const activeRun = contactClassificationRun && ["queued", "running", "paused"].includes(contactClassificationRun.status);
@@ -1722,6 +1807,7 @@ export function AiSettingsForm({
                     initialData={initialData}
                     modelOptions={modelOptions}
                     googleAiModel={googleAiModel}
+                    googleAiModelDraft={googleAiModelDraft}
                     googleAiModelExtraction={googleAiModelExtraction}
                     googleAiModelDesign={googleAiModelDesign}
                     googleAiModelTranscription={googleAiModelTranscription}
@@ -1739,6 +1825,10 @@ export function AiSettingsForm({
                     onGeneralModelChange={(value) => {
                         hasUserSelectedGeneralModelRef.current = true;
                         setGoogleAiModel(value);
+                    }}
+                    onDraftModelChange={(value) => {
+                        hasUserSelectedDraftModelRef.current = true;
+                        setGoogleAiModelDraft(value);
                     }}
                     onExtractionModelChange={(value) => {
                         hasUserSelectedExtractionModelRef.current = true;

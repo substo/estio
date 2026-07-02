@@ -86,6 +86,7 @@ const publicSiteSchema = z.object({
 
 const aiSchema = z.object({
     googleAiModel: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
+    googleAiModelDraft: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelExtraction: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelDesign: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelTranscription: z.string().trim().min(1).default(GEMINI_FLASH_STABLE_FALLBACK),

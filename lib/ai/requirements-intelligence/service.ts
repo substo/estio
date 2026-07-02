@@ -1,8 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -274,6 +273,7 @@ async function recordRequirementsIntelligenceUsage(args: {
   sourceType?: string | null;
   proposalId?: string | null;
   action: "assess_no_change" | "generate_requirement_proposal";
+  provider: string;
   model: string;
   promptTokens: number;
   completionTokens: number;
@@ -287,7 +287,7 @@ async function recordRequirementsIntelligenceUsage(args: {
     resourceId: args.contactId,
     featureArea: "requirements_intelligence",
     action: args.action,
-    provider: "google_gemini",
+    provider: args.provider,
     model: args.model,
     inputTokens: args.promptTokens,
     outputTokens: args.completionTokens,
@@ -482,12 +482,6 @@ export async function generateRequirementProposal(args: {
   }
 
   const settings = await getRequirementsIntelligenceSettings(args.locationId);
-  const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
-  if (!apiKey) {
-    await recordRequirementsAssessmentFailure(contact.id, "No AI API key configured.");
-    return { success: false as const, error: "No AI API key configured." };
-  }
-
   const snapshot = getRequirementSnapshot(contact);
   const prompt = `You maintain client property requirements for a real-estate CRM.
 
@@ -549,16 +543,12 @@ ${evidenceText.slice(-16000)}
 Resolved property evidence:
 ${propertyEvidence.text || "None"}`;
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: settings.model,
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.1,
-    },
+  const result = await callLLMWithMetadata(settings.model, prompt, userContent, {
+    jsonMode: true,
+    temperature: 0.1,
+    locationId: args.locationId,
   });
-  const result = await model.generateContent([prompt, userContent]);
-  const parsed = extractJsonObject(result.response.text());
+  const parsed = extractJsonObject(result.text);
   const proposedPatch = normalizePatch(parsed.proposedPatch || {});
   const requirementAssessment = normalizeRequirementAssessment(parsed.requirementAssessment);
   const proposedSummary = normalizeText(parsed.proposedSummary || proposedPatch.requirementSummary, 8000);
@@ -566,11 +556,11 @@ ${propertyEvidence.text || "None"}`;
     proposedPatch.requirementSummary = proposedSummary;
   }
 
-  const usage = result.response.usageMetadata || {};
-  const promptTokens = Number(usage.promptTokenCount || 0);
-  const completionTokens = Number(usage.candidatesTokenCount || 0);
-  const totalTokens = Number(usage.totalTokenCount || promptTokens + completionTokens);
-  const estimatedCostUsd = calculateRunCost(settings.model, promptTokens, completionTokens);
+  const promptTokens = Number(result.usage.promptTokens || 0);
+  const completionTokens = Number(result.usage.completionTokens || 0);
+  const totalTokens = Number(result.usage.totalTokens || promptTokens + completionTokens);
+  const meteredModel = result.model || settings.model;
+  const estimatedCostUsd = calculateRunCost(meteredModel, promptTokens, completionTokens);
   const hasMaterialChanges = Boolean(parsed.hasChanges && hasPatchChanges(snapshot, proposedPatch));
 
   if (!hasMaterialChanges) {
@@ -582,7 +572,8 @@ ${propertyEvidence.text || "None"}`;
       actorUserId: args.actorUserId || null,
       sourceType: args.sourceType || "manual",
       action: "assess_no_change",
-      model: settings.model,
+      provider: result.provider,
+      model: meteredModel,
       promptTokens,
       completionTokens,
       totalTokens,
@@ -652,7 +643,8 @@ ${propertyEvidence.text || "None"}`;
     sourceType: args.sourceType || "manual",
     proposalId: proposal.id,
     action: "generate_requirement_proposal",
-    model: settings.model,
+    provider: result.provider,
+    model: meteredModel,
     promptTokens,
     completionTokens,
     totalTokens,

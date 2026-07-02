@@ -47,6 +47,7 @@ function buildAiInitialData({
             ...aiPayload,
             // keep compatibility for old optional reads
             googleAiModel: aiPayload?.googleAiModel || siteConfig?.googleAiModel,
+            googleAiModelDraft: aiPayload?.googleAiModelDraft || aiPayload?.googleAiModel || siteConfig?.googleAiModel,
             googleAiModelExtraction: aiPayload?.googleAiModelExtraction || siteConfig?.googleAiModelExtraction,
             googleAiModelDesign: aiPayload?.googleAiModelDesign || siteConfig?.googleAiModelDesign,
             googleAiModelTranscription: aiPayload?.googleAiModelTranscription || siteConfig?.googleAiModelTranscription,
@@ -79,6 +80,7 @@ function buildAiInitialData({
 
     return {
         ...siteConfig,
+        googleAiModelDraft: aiPayload?.googleAiModelDraft || siteConfig?.googleAiModel,
         googleAiModelTranslation: (siteConfig as any)?.googleAiModelTranslation || GEMINI_FLASH_LITE_LATEST_ALIAS,
         openAiTextModel: aiPayload?.openAiTextModel || null,
         defaultReplyLanguage: DEFAULT_REPLY_LANGUAGE,
@@ -145,7 +147,7 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             <div>
                 <h1 className="text-2xl font-bold tracking-tight">AI Configuration</h1>
                 <p className="text-muted-foreground">
-                    Manage Gemini models, automation, and brand voice settings.
+                    Manage default models, automation, and brand voice settings across connected AI providers.
                 </p>
             </div>
 

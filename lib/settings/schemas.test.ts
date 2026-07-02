@@ -29,6 +29,7 @@ test("location AI settings schema fills defaults for legacy payloads", () => {
     }) as any;
 
     assert.equal(payload.googleAiModelTranslation, GEMINI_FLASH_LITE_LATEST_ALIAS);
+    assert.equal(payload.googleAiModelDraft, GEMINI_FLASH_LATEST_ALIAS);
     assert.equal(payload.requirementsIntelligence.mode, "manual_only");
     assert.equal(payload.requirementsIntelligence.model, GEMINI_FLASH_LATEST_ALIAS);
     assert.deepEqual(payload.requirementsIntelligence.allowedPropertyDomains, []);

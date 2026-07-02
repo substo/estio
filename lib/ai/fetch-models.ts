@@ -1,4 +1,6 @@
 import db from "@/lib/db";
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
     GEMINI_DRAFT_FAST_DEFAULT,
     GEMINI_FLASH_LITE_LATEST_ALIAS,
@@ -15,12 +17,14 @@ export interface ModelOption {
     description?: string;
 }
 
-export type AiModelDefaultKind = "general" | "draft" | "extraction" | "design" | "translation";
+export type AiModelDefaultKind = "general" | "draft" | "extraction" | "design" | "transcription" | "translation";
 
 interface ConfiguredAiModelFields {
     googleAiModel: string | null;
+    googleAiModelDraft: string | null;
     googleAiModelExtraction: string | null;
     googleAiModelDesign: string | null;
+    googleAiModelTranscription: string | null;
     googleAiModelTranslation: string | null;
 }
 
@@ -168,37 +172,54 @@ function ensureModelOption(models: ModelOption[], modelId: string): ModelOption[
 async function getConfiguredAiModelFields(locationId?: string): Promise<ConfiguredAiModelFields | null> {
     if (!locationId) return null;
 
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            googleAiModel: true,
-            googleAiModelExtraction: true,
-            googleAiModelDesign: true,
-            googleAiModelTranslation: true,
-        } as any
-    });
-
-    if (!siteConfig) {
-        return null;
-    }
-
     const normalize = (value: string | null | undefined) => {
         const trimmed = typeof value === "string" ? value.trim() : "";
         return trimmed || null;
     };
 
+    const [siteConfig, aiDoc] = await Promise.all([
+        db.siteConfig.findUnique({
+            where: { locationId },
+            select: {
+                googleAiModel: true,
+                googleAiModelExtraction: true,
+                googleAiModelDesign: true,
+                googleAiModelTranscription: true,
+                googleAiModelTranslation: true,
+            } as any
+        }),
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_AI,
+        }).catch(() => null),
+    ]);
+
+    if (!siteConfig && !aiDoc) {
+        return null;
+    }
+
+    const payload = aiDoc?.payload && typeof aiDoc.payload === "object" ? aiDoc.payload : {};
+    const general = normalize((payload as any).googleAiModel) || normalize(siteConfig?.googleAiModel);
+
     return {
-        googleAiModel: normalize(siteConfig.googleAiModel),
-        googleAiModelExtraction: normalize(siteConfig.googleAiModelExtraction),
-        googleAiModelDesign: normalize(siteConfig.googleAiModelDesign),
-        googleAiModelTranslation: normalize((siteConfig as any).googleAiModelTranslation),
+        googleAiModel: general,
+        googleAiModelDraft: normalize((payload as any).googleAiModelDraft) || general,
+        googleAiModelExtraction: normalize((payload as any).googleAiModelExtraction) || normalize(siteConfig?.googleAiModelExtraction),
+        googleAiModelDesign: normalize((payload as any).googleAiModelDesign) || normalize(siteConfig?.googleAiModelDesign),
+        googleAiModelTranscription: normalize((payload as any).googleAiModelTranscription) || normalize((siteConfig as any)?.googleAiModelTranscription),
+        googleAiModelTranslation: normalize((payload as any).googleAiModelTranslation) || normalize((siteConfig as any)?.googleAiModelTranslation),
     };
 }
 
 function getConfiguredDefaultForKind(fields: ConfiguredAiModelFields | null, kind: AiModelDefaultKind): string | null {
     if (!fields) return null;
 
-    if (kind === "draft" || kind === "general") {
+    if (kind === "draft") {
+        return fields.googleAiModelDraft || fields.googleAiModel || null;
+    }
+
+    if (kind === "general") {
         return fields.googleAiModel || null;
     }
 
@@ -208,6 +229,10 @@ function getConfiguredDefaultForKind(fields: ConfiguredAiModelFields | null, kin
 
     if (kind === "design") {
         return fields.googleAiModelDesign || fields.googleAiModel || null;
+    }
+
+    if (kind === "transcription") {
+        return fields.googleAiModelTranscription || null;
     }
 
     if (kind === "translation") {
@@ -282,6 +307,21 @@ export async function resolveAiModelDefault(
             return true;
         });
         if (firstFastDraft) return firstFastDraft.value;
+
+        return GEMINI_FLASH_STABLE_FALLBACK;
+    }
+
+    if (kind === "transcription") {
+        if (values.has(GEMINI_FLASH_STABLE_FALLBACK)) {
+            return GEMINI_FLASH_STABLE_FALLBACK;
+        }
+
+        if (values.has(GEMINI_DRAFT_FAST_DEFAULT)) {
+            return GEMINI_DRAFT_FAST_DEFAULT;
+        }
+
+        const firstFlash = available.find((m) => m.value.toLowerCase().includes("flash"));
+        if (firstFlash) return firstFlash.value;
 
         return GEMINI_FLASH_STABLE_FALLBACK;
     }
@@ -417,6 +457,7 @@ export function buildAiModelPickerDefaultsResult(
         { value: resolvedDefaults.draft, label: mapCuratedLabel(resolvedDefaults.draft) || resolvedDefaults.draft },
         { value: resolvedDefaults.extraction, label: mapCuratedLabel(resolvedDefaults.extraction) || resolvedDefaults.extraction },
         { value: resolvedDefaults.design, label: mapCuratedLabel(resolvedDefaults.design) || resolvedDefaults.design },
+        { value: resolvedDefaults.transcription, label: mapCuratedLabel(resolvedDefaults.transcription) || resolvedDefaults.transcription },
         { value: resolvedDefaults.translation, label: mapCuratedLabel(resolvedDefaults.translation) || resolvedDefaults.translation },
     ]);
 
@@ -447,18 +488,19 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
             : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
     ]);
 
-    const [general, draft, extraction, design, translation] = await Promise.all([
+    const [general, draft, extraction, design, transcription, translation] = await Promise.all([
         resolveAiModelDefault(locationId, "general", pickerModels),
         resolveAiModelDefault(locationId, "draft", pickerModels),
         resolveAiModelDefault(locationId, "extraction", pickerModels),
         resolveAiModelDefault(locationId, "design", pickerModels),
+        resolveAiModelDefault(locationId, "transcription", pickerModels),
         resolveAiModelDefault(locationId, "translation", pickerModels),
     ]);
 
     return buildAiModelPickerDefaultsResult(
         pickerModels,
         [...openAiState.models, ...chatGptSubscriptionState.models],
-        { general, draft, extraction, design, translation },
+        { general, draft, extraction, design, transcription, translation },
         { textDefaultModel: openAiState.defaultModel }
     );
 }

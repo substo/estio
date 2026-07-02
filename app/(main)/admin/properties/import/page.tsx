@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,8 @@ import { CheckCircle2, Circle, Loader2, RefreshCw } from "lucide-react";
 import { CloudflareImageUploader } from "@/components/media/CloudflareImageUploader";
 import { getImageDeliveryUrl } from "@/lib/cloudflareImages";
 import { Switch } from "@/components/ui/switch";
+import { usePersistentAiModelSelection } from "@/components/ai/use-persistent-ai-model-selection";
+import type { AiModelOption } from "@/components/ai/use-ai-model-catalog";
 
 type ImportStep = 'INIT' | 'SCRAPING' | 'AI_ANALYSIS' | 'MAP_RESOLUTION' | 'IMAGE_PROCESSING' | 'SAVING' | 'DONE';
 
@@ -47,9 +49,14 @@ export default function ImportPropertyPage() {
     const [statusMessage, setStatusMessage] = useState("");
     const [previewData, setPreviewData] = useState<any>(null);
     const [draftId, setDraftId] = useState<string | null>(null);
-    const [selectedModel, setSelectedModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
-    const [availableModels, setAvailableModels] = useState<any[]>([]);
-    const hasUserSelectedModelRef = useRef(false);
+    const [defaultExtractionModel, setDefaultExtractionModel] = useState(GEMINI_FLASH_LATEST_ALIAS);
+    const [availableModels, setAvailableModels] = useState<AiModelOption[]>([]);
+    const selectableModels = availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS;
+    const { selectedModel, handleModelChange } = usePersistentAiModelSelection({
+        usageKey: "property.import.extraction",
+        models: selectableModels,
+        defaultModel: defaultExtractionModel,
+    });
 
     useEffect(() => {
         let mounted = true;
@@ -58,8 +65,8 @@ export default function ImportPropertyPage() {
             mod.getAiModelPickerDefaultsAction().then(({ models, defaults }: any) => {
                 if (mounted && models && models.length > 0) {
                     setAvailableModels(models);
-                    if (!hasUserSelectedModelRef.current && defaults?.extraction) {
-                        setSelectedModel(defaults.extraction);
+                    if (defaults?.extraction) {
+                        setDefaultExtractionModel(defaults.extraction);
                     }
                 }
             });
@@ -365,12 +372,9 @@ export default function ImportPropertyPage() {
                                             id="aiModel"
                                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background disabled:opacity-50 md:text-sm"
                                             value={selectedModel}
-                                            onChange={(e) => {
-                                                hasUserSelectedModelRef.current = true;
-                                                setSelectedModel(e.target.value);
-                                            }}
+                                            onChange={(e) => handleModelChange(e.target.value)}
                                         >
-                                            {(availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS).map((model) => (
+                                            {selectableModels.map((model) => (
                                                 <option key={model.value} value={model.value}>
                                                     {model.label}
                                                 </option>

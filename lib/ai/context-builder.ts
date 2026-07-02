@@ -1,9 +1,10 @@
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
 import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
 import {
@@ -40,11 +41,9 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
 
         // 2. Setup AI
         const configAny = await db.siteConfig.findUnique({ where: { locationId: dealContext.location.id } }) as any;
-        const apiKey = configAny?.googleAiApiKey || process.env.GOOGLE_API_KEY;
-        if (!apiKey) throw new Error("No AI API Key configured");
-
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: configAny?.googleAiModel || DEFAULT_MODEL });
+        const modelName = await resolveAiModelDefault(dealContext.location.id, "draft")
+            || configAny?.googleAiModel
+            || DEFAULT_MODEL;
 
         // 3. Fetch all linked conversations from Estio first. GHL is only a legacy fallback.
         const refs = collectDealConversationReferences(dealContext);
@@ -181,8 +180,11 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
         `;
 
         // 6. Generate
-        const result = await model.generateContent(finalPrompt);
-        const text = result.response.text();
+        const result = await callLLMWithMetadata(modelName, finalPrompt, undefined, {
+            jsonMode: true,
+            locationId: dealContext.location.id,
+        });
+        const text = result.text;
 
         // 7. Parse (Simple heuristic for now, assuming Gemini follows instruction)
         // Clean markdown blocks if present

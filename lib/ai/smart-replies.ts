@@ -1,7 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conversations/timeline-events";
 import { DEFAULT_MODEL, calculateRunCost } from "@/lib/ai/pricing";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import {
     buildDealProtectiveCommunicationContract,
     resolveCommunicationLanguage
@@ -27,22 +28,10 @@ export async function generateSmartReplies(conversationId: string) {
 
         // 2. Setup AI
         const siteConfig = conversation.location.siteConfig as any;
-        const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
-
         // Match coordinator.ts default (assuming 2.5 exists in 2026)
-        let modelName = DEFAULT_MODEL;
-
-        if (siteConfig?.googleAiModel) {
-            modelName = siteConfig.googleAiModel;
-        }
-
-        if (!apiKey) {
-            console.warn("[Smart Reply] No API Key found. Skipping.");
-            return;
-        }
-
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const modelName = await resolveAiModelDefault(conversation.locationId, "draft")
+            || siteConfig?.googleAiModel
+            || DEFAULT_MODEL;
 
         // 3. Prepare Context
         const timelineResult = await assembleTimelineEvents({
@@ -99,12 +88,14 @@ export async function generateSmartReplies(conversationId: string) {
         - Do not output markdown code blocks. Just the raw JSON.
         `;
 
-        console.log("[Smart Reply] Calling Gemini...");
+        console.log("[Smart Reply] Calling AI provider...");
         // 5. Generate
-        const result = await model.generateContent(prompt);
-        const response = result.response;
-        console.log("[Smart Reply] Gemini Response received.");
-        const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        const result = await callLLMWithMetadata(modelName, prompt, undefined, {
+            jsonMode: true,
+            locationId: conversation.locationId,
+        });
+        console.log("[Smart Reply] AI response received.");
+        const text = result.text.replace(/```json/g, '').replace(/```/g, '').trim();
         console.log(`[Smart Reply] Raw AI Output: ${text}`);
 
         let suggestions: string[] = [];
@@ -121,22 +112,9 @@ export async function generateSmartReplies(conversationId: string) {
 
         console.log(`[Smart Reply] Generated suggestions:`, suggestions);
 
-        const usage = response.usageMetadata;
-        
-        let promptTokens = 0;
-        let completionTokens = 0;
-        let totalTokens = 0;
-        
-        if (usage) {
-            promptTokens = usage.promptTokenCount || 0;
-            completionTokens = usage.candidatesTokenCount || 0;
-            totalTokens = usage.totalTokenCount || (promptTokens + completionTokens);
-        } else {
-            // fallback estimate
-            promptTokens = Math.ceil(prompt.length / 4);
-            completionTokens = Math.ceil(text.length / 4);
-            totalTokens = promptTokens + completionTokens;
-        }
+        const promptTokens = result.usage.promptTokens || Math.ceil(prompt.length / 4);
+        const completionTokens = result.usage.completionTokens || Math.ceil(text.length / 4);
+        const totalTokens = result.usage.totalTokens || (promptTokens + completionTokens);
         
         const cost = calculateRunCost(modelName, promptTokens, completionTokens);
 

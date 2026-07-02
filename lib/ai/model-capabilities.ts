@@ -4,6 +4,42 @@ export interface AiModelDescriptor {
     description?: string;
 }
 
+export type AiModelCapability =
+    | "text"
+    | "json"
+    | "vision"
+    | "audioInput"
+    | "imageGeneration"
+    | "imageEdit"
+    | "embedding"
+    | "tools"
+    | "streaming";
+
+export type AiTaskId =
+    | "conversation.draft"
+    | "conversation.translation"
+    | "general.text"
+    | "property.import.text"
+    | "property.import.vision"
+    | "property.print.copy"
+    | "property.translation"
+    | "property.design"
+    | "property.image.analysis"
+    | "property.image.generation"
+    | "audio.transcription"
+    | "contact.requirements"
+    | "contact.verification"
+    | "viewing.translation"
+    | "viewing.insights"
+    | "viewing.summary";
+
+export interface AiTaskDefinition {
+    id: AiTaskId;
+    label: string;
+    requiredCapabilities: AiModelCapability[];
+    description?: string;
+}
+
 export interface PropertyImageModelDefaults {
     analysis: string;
     generation: string;
@@ -33,6 +69,14 @@ function buildModelHaystack(model: AiModelDescriptor): string {
 function isGeminiFamilyModel(model: AiModelDescriptor): boolean {
     const value = normalizeModelValue(model.value).toLowerCase();
     return value.includes("gemini");
+}
+
+function isOpenAiTextModel(model: AiModelDescriptor): boolean {
+    return normalizeModelValue(model.value).toLowerCase().startsWith("openai:");
+}
+
+function isChatGptSubscriptionTextModel(model: AiModelDescriptor): boolean {
+    return normalizeModelValue(model.value).toLowerCase().startsWith("chatgpt_subscription:");
 }
 
 function isExcludedUtilityModel(model: AiModelDescriptor): boolean {
@@ -66,12 +110,142 @@ export function isLikelyPropertyImageAnalysisModel(model: AiModelDescriptor): bo
     return !isLikelyPropertyImageGenerationModel(model);
 }
 
+export function getModelCapabilities(model: AiModelDescriptor): AiModelCapability[] {
+    const value = normalizeModelValue(model.value).toLowerCase();
+    const capabilities = new Set<AiModelCapability>();
+
+    if (isOpenAiTextModel(model) || isChatGptSubscriptionTextModel(model)) {
+        capabilities.add("text");
+        capabilities.add("json");
+        capabilities.add("streaming");
+        return [...capabilities];
+    }
+
+    if (isGeminiFamilyModel(model) && !isExcludedUtilityModel(model)) {
+        if (isLikelyPropertyImageGenerationModel(model)) {
+            capabilities.add("imageGeneration");
+            capabilities.add("imageEdit");
+            return [...capabilities];
+        }
+
+        capabilities.add("text");
+        capabilities.add("json");
+        capabilities.add("vision");
+
+        if (value.includes("flash")) {
+            capabilities.add("audioInput");
+        }
+
+    }
+
+    if (value.includes("embedding")) {
+        capabilities.add("embedding");
+    }
+
+    return [...capabilities];
+}
+
+export const AI_TASK_DEFINITIONS: Record<AiTaskId, AiTaskDefinition> = {
+    "conversation.draft": {
+        id: "conversation.draft",
+        label: "AI drafts and replies",
+        requiredCapabilities: ["text", "json"],
+    },
+    "conversation.translation": {
+        id: "conversation.translation",
+        label: "Conversation translation",
+        requiredCapabilities: ["text", "json"],
+    },
+    "general.text": {
+        id: "general.text",
+        label: "General text generation",
+        requiredCapabilities: ["text", "json"],
+    },
+    "property.import.text": {
+        id: "property.import.text",
+        label: "Property import text extraction",
+        requiredCapabilities: ["text", "json"],
+    },
+    "property.import.vision": {
+        id: "property.import.vision",
+        label: "Property import screenshot vision",
+        requiredCapabilities: ["vision", "json"],
+    },
+    "property.print.copy": {
+        id: "property.print.copy",
+        label: "Property print copy",
+        requiredCapabilities: ["text", "json"],
+    },
+    "property.translation": {
+        id: "property.translation",
+        label: "Property translation",
+        requiredCapabilities: ["text", "json"],
+    },
+    "property.design": {
+        id: "property.design",
+        label: "Design and content generation",
+        requiredCapabilities: ["text", "json"],
+    },
+    "property.image.analysis": {
+        id: "property.image.analysis",
+        label: "Property image analysis",
+        requiredCapabilities: ["vision", "json"],
+    },
+    "property.image.generation": {
+        id: "property.image.generation",
+        label: "Property image generation and editing",
+        requiredCapabilities: ["imageGeneration"],
+    },
+    "audio.transcription": {
+        id: "audio.transcription",
+        label: "Audio transcription",
+        requiredCapabilities: ["audioInput"],
+    },
+    "contact.requirements": {
+        id: "contact.requirements",
+        label: "Contact requirements intelligence",
+        requiredCapabilities: ["text", "json"],
+    },
+    "contact.verification": {
+        id: "contact.verification",
+        label: "Contact profile verification",
+        requiredCapabilities: ["text", "json"],
+    },
+    "viewing.translation": {
+        id: "viewing.translation",
+        label: "Viewing-session translation",
+        requiredCapabilities: ["text", "json"],
+    },
+    "viewing.insights": {
+        id: "viewing.insights",
+        label: "Viewing-session insights",
+        requiredCapabilities: ["text", "json"],
+    },
+    "viewing.summary": {
+        id: "viewing.summary",
+        label: "Viewing-session summary",
+        requiredCapabilities: ["text", "json"],
+    },
+};
+
+export function modelSupportsTask(model: AiModelDescriptor, taskId: AiTaskId): boolean {
+    const task = AI_TASK_DEFINITIONS[taskId];
+    if (!task) return true;
+
+    const capabilities = new Set(getModelCapabilities(model));
+    return task.requiredCapabilities.every((capability) => capabilities.has(capability));
+}
+
+export function filterModelsForTask<T extends AiModelDescriptor>(models: readonly T[], taskId: AiTaskId): T[] {
+    return models.filter((model) => modelSupportsTask(model, taskId));
+}
+
 export function filterPropertyImageAnalysisModels<T extends AiModelDescriptor>(models: readonly T[]): T[] {
-    return models.filter((model) => isLikelyPropertyImageAnalysisModel(model));
+    return filterModelsForTask(models, "property.image.analysis").filter((model) => isLikelyPropertyImageAnalysisModel(model));
 }
 
 export function filterPropertyImageGenerationModels<T extends AiModelDescriptor>(models: readonly T[]): T[] {
-    return models.filter((model) => isLikelyPropertyImageGenerationModel(model));
+    return filterModelsForTask(models, "property.image.generation").filter((model) => isLikelyPropertyImageGenerationModel(model));
 }
 
 function resolvePreferredModel<T extends AiModelDescriptor>(

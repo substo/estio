@@ -1,9 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 import {
   evaluateStructuredPropertyMatch,
@@ -1601,24 +1600,6 @@ async function scoreCandidateWithAi(args: {
   model?: string | null;
   actorUserId?: string | null;
 }) {
-  const apiKey = await resolveLocationGoogleAiApiKey(args.locationId);
-  if (!apiKey) {
-    return {
-      verdict: "maybe" as MatchVerdict,
-      confidence: 0.45,
-      reasoning: "No AI API key configured; kept for human review.",
-      evidence: {
-        ...(args.candidate.evidence || {}),
-        structured: {
-          ...(args.candidate.evidence?.structured || {}),
-          needsAi: false,
-        },
-      },
-      matchSummary: "Needs manual review.",
-      usage: null,
-    };
-  }
-
   const modelName = normalizeText(args.model, 120) || GEMINI_FLASH_STABLE_FALLBACK;
   const prompt = `You review whether a real-estate lead should receive a new listing.
 
@@ -1667,22 +1648,18 @@ ${JSON.stringify(args.candidate.evidence?.structured || {}, null, 2)}
 Recent messages:
 ${messageText || "No recent messages."}`;
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.1,
-    },
+  const result = await callLLMWithMetadata(modelName, prompt, userContent, {
+    jsonMode: true,
+    temperature: 0.1,
+    locationId: args.locationId,
   });
-  const result = await model.generateContent([prompt, userContent]);
-  const parsed = extractJsonObject(result.response.text());
+  const parsed = extractJsonObject(result.text);
   const normalized = normalizeAiMatchAssessment(parsed, args.candidate.evidence || {});
-  const usage = (result.response.usageMetadata || {}) as any;
-  const promptTokens = Number(usage.promptTokenCount || 0);
-  const completionTokens = Number(usage.candidatesTokenCount || 0);
-  const totalTokens = Number(usage.totalTokenCount || promptTokens + completionTokens);
-  const estimatedCostUsd = calculateRunCost(modelName, promptTokens, completionTokens);
+  const promptTokens = Number(result.usage.promptTokens || 0);
+  const completionTokens = Number(result.usage.completionTokens || 0);
+  const totalTokens = Number(result.usage.totalTokens || promptTokens + completionTokens);
+  const meteredModel = result.model || modelName;
+  const estimatedCostUsd = calculateRunCost(meteredModel, promptTokens, completionTokens);
 
   await securelyRecordAiUsage({
     locationId: args.locationId,
@@ -1691,8 +1668,8 @@ ${messageText || "No recent messages."}`;
     resourceId: args.candidate.contactId,
     featureArea: "property_match_campaigns",
     action: "score_candidate",
-    provider: "google_gemini",
-    model: modelName,
+    provider: result.provider,
+    model: meteredModel,
     inputTokens: promptTokens,
     outputTokens: completionTokens,
     metadata: {

@@ -1,10 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 
 export interface PropertyTranslationInput {
     title: string;
@@ -34,11 +33,6 @@ export async function generatePropertyLanguageTranslation(params: {
     sourceData: PropertyTranslationInput;
     userId?: string | null;
 }): Promise<PropertyTranslationOutput> {
-    const apiKey = await resolveLocationGoogleAiApiKey(params.locationId);
-    if (!apiKey) {
-        throw new Error("Google AI API key is not configured for this location.");
-    }
-
     const aiDoc = await settingsService.getDocument<any>({
         scopeType: "LOCATION",
         scopeId: params.locationId,
@@ -57,15 +51,6 @@ export async function generatePropertyLanguageTranslation(params: {
         || siteConfig?.googleAiModel
         || await resolveAiModelDefault(params.locationId, "design")
     ).trim();
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const modelClient = genAI.getGenerativeModel({
-        model,
-        generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.3,
-        },
-    });
 
     const prompt = [
         `You are an expert luxury real estate multilingual translator.`,
@@ -89,8 +74,12 @@ export async function generatePropertyLanguageTranslation(params: {
         })
     ].join("\n");
 
-    const result = await modelClient.generateContent([prompt]);
-    const text = stripMarkdownCodeFences(result.response.text());
+    const result = await callLLMWithMetadata(model, prompt, undefined, {
+        jsonMode: true,
+        temperature: 0.3,
+        locationId: params.locationId,
+    });
+    const text = stripMarkdownCodeFences(result.text);
 
     let parsed: any;
     try {
@@ -99,7 +88,6 @@ export async function generatePropertyLanguageTranslation(params: {
         throw new Error("AI response did not contain valid translation JSON.");
     }
 
-    const usageMeta = (result.response.usageMetadata || {}) as Record<string, unknown>;
     void securelyRecordAiUsage({
         locationId: params.locationId,
         userId: params.userId || null,
@@ -107,10 +95,10 @@ export async function generatePropertyLanguageTranslation(params: {
         resourceId: params.propertyId,
         featureArea: "property_translation",
         action: "generate_language_translation",
-        provider: "google_gemini",
-        model,
-        inputTokens: Number(usageMeta.promptTokenCount) || 0,
-        outputTokens: Number(usageMeta.candidatesTokenCount) || 0,
+        provider: result.provider,
+        model: result.model || model,
+        inputTokens: Number(result.usage.promptTokens) || 0,
+        outputTokens: Number(result.usage.completionTokens) || 0,
         metadata: {
             targetLanguage: params.targetLanguage,
         },

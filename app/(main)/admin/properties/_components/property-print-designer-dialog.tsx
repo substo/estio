@@ -45,6 +45,7 @@ import { CloudflareImage } from "@/components/media/CloudflareImage";
 import { MediaGalleryDialog } from "@/components/media/MediaGalleryDialog";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
+import { usePersistentAiModelSelection } from "@/components/ai/use-persistent-ai-model-selection";
 import {
     createPropertyPrintDraft,
     deletePropertyPrintDraft,
@@ -316,7 +317,6 @@ export function PropertyPrintDesignerDialog({
 
     // Shared AI model catalog
     const { models: availableModels, resolveModelForKind, loading: modelCatalogLoading } = useAiModelCatalog();
-    const [selectedModel, setSelectedModel] = useState<string>("");
 
     const selectedDraft = useMemo(() => drafts.find((draft) => draft.id === selectedDraftId) || null, [drafts, selectedDraftId]);
     const template = getPropertyPrintTemplate(selectedDraft?.templateId);
@@ -340,13 +340,17 @@ export function PropertyPrintDesignerDialog({
         return resolveModelForKind("design");
     }, [selectedDraft, availableModels, resolveModelForKind]);
 
-    // Sync selected model when resolved model changes
-    useMemo(() => {
-        if (resolvedModel && !selectedModel) setSelectedModel(resolvedModel);
-    }, [resolvedModel]);
+    const {
+        selectedModel,
+        handleModelChange: persistModelSelection,
+    } = usePersistentAiModelSelection({
+        usageKey: "property.print.copy",
+        models: availableModels,
+        defaultModel: resolvedModel,
+    });
 
     const handleModelChange = (value: string) => {
-        setSelectedModel(value);
+        persistModelSelection(value);
         if (selectedDraft) {
             updateCurrentDraft((draft) => ({
                 ...draft,

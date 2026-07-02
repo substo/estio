@@ -5,6 +5,8 @@ import { auth } from "@clerk/nextjs/server";
 
 import { COMPONENT_SCHEMA } from "@/lib/ai/component-schema";
 import { DESIGN_SYSTEM_PROMPT, RECOMPOSITION_PROMPT } from "@/lib/ai/prompts/design-system";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 
 import { load } from "cheerio";
 
@@ -15,6 +17,36 @@ interface GenerateContentResult {
     title?: string;
     slug?: string;
     error?: string;
+}
+
+function extractJsonText(generatedText: string): string {
+    let jsonString = generatedText.replace(/```json/g, "").replace(/```/g, "").trim();
+    const markersMatch = generatedText.match(/___JSON_START___([\s\S]*?)___JSON_END___/);
+    if (markersMatch?.[1]) {
+        jsonString = markersMatch[1];
+    }
+    if (jsonString.startsWith("json")) jsonString = jsonString.slice(4).trim();
+    const firstBrace = jsonString.indexOf("{");
+    const lastBrace = jsonString.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1) {
+        jsonString = jsonString.substring(firstBrace, lastBrace + 1);
+    }
+    return jsonString;
+}
+
+async function callContentAiModel(args: {
+    model: string;
+    prompt: string;
+    locationId: string;
+    jsonMode?: boolean;
+    temperature?: number;
+}): Promise<string> {
+    const result = await callLLMWithMetadata(args.model, args.prompt, undefined, {
+        jsonMode: args.jsonMode ?? true,
+        temperature: args.temperature,
+        locationId: args.locationId,
+    });
+    return result.text;
 }
 
 export async function generateContentFromUrl(url: string, locationId?: string, brandVoiceOverride?: string, extractionModelOverride?: string): Promise<GenerateContentResult> {
@@ -42,18 +74,13 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
             return { success: false, error: "No Location found for user." };
         }
 
-        // 1. Fetch Site Config for API Key
+        // 1. Fetch Site Config for brand/theme defaults.
         const siteConfig = await db.siteConfig.findUnique({
             where: { locationId: targetLocationId },
         });
 
         // Cast to any for new props
         const configAny = siteConfig as any;
-
-        if (!configAny?.googleAiApiKey) {
-            console.log("Error: No API Key");
-            return { success: false, error: "Google AI API Key is not configured in AI Settings." };
-        }
 
         // 2. Scrape URL
         console.log("Step 2: Scraping URL...");
@@ -129,9 +156,12 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         // In a real app we might have a specific "mood" field
         const designMood = "Modern & Professional";
 
-        // 4. Call Gemini API
         // STAGE 1 CHOICE: Extraction Model (Default to Flash for speed if not set)
-        const model = extractionModelOverride || configAny.googleAiModelExtraction || configAny.googleAiModel || "gemini-2.5-flash";
+        const model = extractionModelOverride
+            || await resolveAiModelDefault(targetLocationId, "extraction")
+            || configAny.googleAiModelExtraction
+            || configAny.googleAiModel
+            || "gemini-2.5-flash";
 
         // Use brand voice from settings, or fallback to default
         const globalBrandVoice = configAny.brandVoice || "Professional, Trustworthy, Modern";
@@ -159,7 +189,10 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         // Actually, let's use the DESIGN model for this main function because it outputs the final blocks.
         // The "Extraction" model is theoretically for just Raw Text -> JSON, but we are skipping that step in this single function.
         // Let's use the Design Link.
-        const activeModel = extractionModelOverride || configAny.googleAiModelDesign || "gemini-2.5-flash";
+        const activeModel = extractionModelOverride
+            || await resolveAiModelDefault(targetLocationId, "design")
+            || configAny.googleAiModelDesign
+            || "gemini-2.5-flash";
 
         console.log(`Active Model: ${activeModel}`);
         console.log(`Brand Voice: ${finalBrandVoice}`);
@@ -213,63 +246,28 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         console.log(prompt);
         console.log("------------------------");
 
-        console.log("Sending Prompt to Gemini...");
-
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${configAny.googleAiApiKey}`;
-
-        const aiResponse = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [{ text: prompt }]
-                }]
-            })
+        console.log("Sending Prompt to AI provider...");
+        const generatedText = await callContentAiModel({
+            model: activeModel,
+            prompt,
+            locationId: targetLocationId,
+            jsonMode: true,
+            temperature: 0.4,
         });
-
-        if (!aiResponse.ok) {
-            const errorText = await aiResponse.text();
-            console.log(`Gemini API Error: ${errorText}`);
-            // Fallback: If Flash/Pro fails, strict error
-            return { success: false, error: `Gemini API Error: ${errorText}` };
-        }
-
-        const aiData = await aiResponse.json();
-        const generatedText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!generatedText) {
             console.log("Error: No generated text found.");
             return { success: false, error: "No content generated from AI." };
         }
 
-        console.log("Gemini Response Received. Length: " + generatedText.length);
+        console.log("AI Response Received. Length: " + generatedText.length);
         console.log("--- AI IMPORT RAW RESPONSE ---");
         console.log(generatedText);
         console.log("------------------------------");
 
         // ... (Parsing logic remains the same) ...
         // 5. Robust Parsing Logic
-        let jsonString = generatedText;
-
-        // A. Try extracting from custom markers
-        const markersMatch = generatedText.match(/___JSON_START___([\s\S]*?)___JSON_END___/);
-        if (markersMatch && markersMatch[1]) {
-            jsonString = markersMatch[1];
-        }
-        // B. Try extracting from Markdown block
-        else {
-            const markdownMatch = generatedText.match(/```json([\s\S]*?)```/);
-            if (markdownMatch && markdownMatch[1]) {
-                jsonString = markdownMatch[1];
-            } else {
-                // C. Last resort: Try finding the first '{' and last '}'
-                const firstBrace = generatedText.indexOf('{');
-                const lastBrace = generatedText.lastIndexOf('}');
-                if (firstBrace !== -1 && lastBrace !== -1) {
-                    jsonString = generatedText.substring(firstBrace, lastBrace + 1);
-                }
-            }
-        }
+        const jsonString = extractJsonText(generatedText);
 
         try {
             const parsed = JSON.parse(jsonString);
@@ -323,9 +321,11 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
     try {
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const configAny = siteConfig as any;
-        if (!configAny?.googleAiApiKey) return { success: false, error: "No API Key" };
 
-        const model = designModelOverride || configAny.googleAiModelDesign || "gemini-2.5-flash";
+        const model = designModelOverride
+            || await resolveAiModelDefault(locationId, "design")
+            || configAny.googleAiModelDesign
+            || "gemini-2.5-flash";
         const theme = (configAny.theme as any) || {};
         const brandName = theme.logo?.textTop || "Brand";
         const brandTagline = theme.logo?.textBottom || "";
@@ -387,20 +387,13 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
         console.log(prompt);
         console.log("------------------------------");
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${configAny.googleAiApiKey}`;
-
-        const aiResponse = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        const generatedText = await callContentAiModel({
+            model,
+            prompt,
+            locationId,
+            jsonMode: true,
+            temperature: 0.5,
         });
-
-        if (!aiResponse.ok) {
-            return { success: false, error: await aiResponse.text() };
-        }
-
-        const aiData = await aiResponse.json();
-        const generatedText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
         console.log("--- AI DESIGN REGEN RAW RESPONSE ---");
         console.log(generatedText);
@@ -408,19 +401,7 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
 
         if (!generatedText) return { success: false, error: "No design generated." };
 
-        let jsonString = generatedText.replace(/```json/g, "").replace(/```/g, "").trim();
-        // A. Try extracting from custom markers
-        const markersMatch = generatedText.match(/___JSON_START___([\s\S]*?)___JSON_END___/);
-        if (markersMatch && markersMatch[1]) {
-            jsonString = markersMatch[1];
-        }
-        // Basic cleanup if pure json wasn't returned
-        if (jsonString.startsWith("json")) jsonString = jsonString.slice(4).trim();
-        const firstBrace = jsonString.indexOf('{');
-        const lastBrace = jsonString.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1) {
-            jsonString = jsonString.substring(firstBrace, lastBrace + 1);
-        }
+        const jsonString = extractJsonText(generatedText);
 
         const parsed = JSON.parse(jsonString);
 
@@ -535,18 +516,16 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
 
         const configAny = siteConfig as any;
 
-        if (!configAny?.googleAiApiKey) {
-            return { success: false, error: "Google AI API Key is not configured." };
-        }
-
         const targetUrl = websiteUrl || (configAny.domain ? `https://${configAny.domain}` : null);
 
         if (!targetUrl) {
             return { success: false, error: "No URL provided or Domain configured." };
         }
 
-        // 2. AI Research & Generation (Using Google Search Grounding)
-        const model = configAny.googleAiModel || "gemini-2.5-flash";
+        // 2. AI Research & Generation
+        const model = await resolveAiModelDefault(locationId, "general")
+            || configAny.googleAiModel
+            || "gemini-2.5-flash";
 
         // Use provided URL or domain as the search anchor
         const searchQuery = targetUrl || configAny.domain || "Brand Name";
@@ -570,24 +549,13 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
         console.log(prompt);
         console.log("-----------------------------");
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${configAny.googleAiApiKey}`;
-
-        const aiResponse = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                tools: [{ google_search: {} }] // Use modern tool syntax
-            })
+        const generatedText = await callContentAiModel({
+            model,
+            prompt,
+            locationId,
+            jsonMode: true,
+            temperature: 0.4,
         });
-
-        if (!aiResponse.ok) {
-            const errorText = await aiResponse.text();
-            return { success: false, error: `Gemini API Error: ${errorText}` };
-        }
-
-        const aiData = await aiResponse.json();
-        const generatedText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
         console.log("--- AI BRAND VOICE RAW RESPONSE ---");
         console.log(generatedText);
@@ -625,9 +593,10 @@ export async function refineBlockContent(currentBlock: any, instruction: string,
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const configAny = siteConfig as any;
 
-        if (!configAny?.googleAiApiKey) return { success: false, error: "Google AI API Key not configured." };
-
-        const model = configAny.googleAiModel || "gemini-2.5-flash";
+        const model = await resolveAiModelDefault(locationId, "design")
+            || configAny.googleAiModelDesign
+            || configAny.googleAiModel
+            || "gemini-2.5-flash";
 
         const theme = (configAny.theme as any) || {};
         const primaryColor = theme.primaryColor || "#000000";
@@ -661,28 +630,19 @@ export async function refineBlockContent(currentBlock: any, instruction: string,
         { ...updated block json... }
         `;
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${configAny.googleAiApiKey}`;
-
         console.log("--- AI REFINEMENT REQUEST ---");
         console.log("Instruction:", instruction);
         console.log("Block Type:", currentBlock.type);
         console.log("FULL PROMPT:\n", prompt);
         console.log("----------------------------");
 
-        const aiResponse = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        const generatedText = await callContentAiModel({
+            model,
+            prompt,
+            locationId,
+            jsonMode: true,
+            temperature: 0.3,
         });
-
-        if (!aiResponse.ok) {
-            const err = await aiResponse.text();
-            console.log("AI API ERROR:", err);
-            return { success: false, error: `AI Error: ${err}` };
-        }
-
-        const aiData = await aiResponse.json();
-        const generatedText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
         console.log("--- AI REFINEMENT RESPONSE ---");
         console.log("Raw Output Length:", generatedText?.length);
@@ -692,8 +652,7 @@ export async function refineBlockContent(currentBlock: any, instruction: string,
         if (!generatedText) return { success: false, error: "No response from AI." };
 
         // Clean JSON
-        let jsonString = generatedText.replace(/```json/g, "").replace(/```/g, "").trim();
-        if (jsonString.startsWith("json")) jsonString = jsonString.slice(4).trim();
+        const jsonString = extractJsonText(generatedText);
 
         try {
             const newBlock = JSON.parse(jsonString);
@@ -723,9 +682,10 @@ export async function generateSiteTheme(
         // Cast to any to access new fields if types aren't updated
         const configAny = siteConfig as any;
 
-        if (!configAny?.googleAiApiKey) return { success: false, error: "Google AI API Key not configured." };
-
-        const model = configAny.googleAiModel || "gemini-2.5-flash";
+        const model = await resolveAiModelDefault(locationId, "design")
+            || configAny.googleAiModelDesign
+            || configAny.googleAiModel
+            || "gemini-2.5-flash";
 
         let scrapedContext = "";
         if (researchUrl) {
@@ -801,28 +761,19 @@ export async function generateSiteTheme(
         RETURN ONLY VALID JSON. No markdown.
         `;
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${configAny.googleAiApiKey}`;
-
         console.log("--- AI THEME GENERATION REQUEST ---");
         console.log("Instruction:", instruction);
         console.log("Research URL:", researchUrl);
         console.log("FULL PROMPT:\n", prompt);
         console.log("-----------------------------------");
 
-        const aiResponse = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        const generatedText = await callContentAiModel({
+            model,
+            prompt,
+            locationId,
+            jsonMode: true,
+            temperature: 0.4,
         });
-
-        if (!aiResponse.ok) {
-            const err = await aiResponse.text();
-            console.error("AI Theme Error:", err);
-            return { success: false, error: `AI Error: ${err}` };
-        }
-
-        const aiData = await aiResponse.json();
-        const generatedText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
         console.log("--- AI THEME RESPONSE ---");
         console.log("RAW OUTPUT:\n", generatedText);
@@ -830,8 +781,7 @@ export async function generateSiteTheme(
 
         if (!generatedText) return { success: false, error: "No response from AI." };
 
-        let jsonString = generatedText.replace(/```json/g, "").replace(/```/g, "").trim();
-        if (jsonString.startsWith("json")) jsonString = jsonString.slice(4).trim();
+        const jsonString = extractJsonText(generatedText);
 
         try {
             const theme = JSON.parse(jsonString);
@@ -861,9 +811,10 @@ export async function generateSectionFromPrompt(
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const configAny = siteConfig as any;
 
-        if (!configAny?.googleAiApiKey) return { success: false, error: "Google AI API Key not configured." };
-
-        const model = modelOverride || configAny.googleAiModelDesign || "gemini-2.5-flash";
+        const model = modelOverride
+            || await resolveAiModelDefault(locationId, "design")
+            || configAny.googleAiModelDesign
+            || "gemini-2.5-flash";
 
         const theme = (configAny.theme as any) || {};
         const primaryColor = theme.primaryColor || "#000000";
@@ -908,42 +859,18 @@ export async function generateSectionFromPrompt(
         }
         `;
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${configAny.googleAiApiKey}`;
-
-        // Prepare content parts. If we had the image bytes we could send inline_data, 
-        // but for now we just pass the prompt text. 
-        // Note: For true image analysis, we'd need to fetch the image and send base64, 
-        // or use a model with tools enabled. 
-        // For this iteration, we treat the URL as text context.
-
-        const requestBody = {
-            contents: [{
-                parts: [{ text: systemPrompt }]
-            }]
-        };
-
-        const aiResponse = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(requestBody)
+        const generatedText = await callContentAiModel({
+            model,
+            prompt: systemPrompt,
+            locationId,
+            jsonMode: true,
+            temperature: 0.5,
         });
-
-        if (!aiResponse.ok) {
-            return { success: false, error: await aiResponse.text() };
-        }
-
-        const aiData = await aiResponse.json();
-        const generatedText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!generatedText) return { success: false, error: "No content generated." };
 
         // Clean JSON
-        let jsonString = generatedText.replace(/```json/g, "").replace(/```/g, "").trim();
-        const firstBrace = jsonString.indexOf('{');
-        const lastBrace = jsonString.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1) {
-            jsonString = jsonString.substring(firstBrace, lastBrace + 1);
-        }
+        const jsonString = extractJsonText(generatedText);
 
         const parsed = JSON.parse(jsonString);
 

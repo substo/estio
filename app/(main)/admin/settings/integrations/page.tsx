@@ -54,7 +54,7 @@ const INTEGRATION_SECTIONS: IntegrationSection[] = [
     },
     {
         title: "OpenAI",
-        description: "Connect ChatGPT subscription access, OpenAI API keys, and text model defaults in one place.",
+        description: "Connect ChatGPT subscription access and OpenAI API keys. Default model selection lives in AI Configuration.",
         href: "/admin/settings/integrations/openai",
         cta: "Configure OpenAI",
         icon: Bot,

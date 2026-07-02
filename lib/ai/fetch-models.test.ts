@@ -40,6 +40,7 @@ test("buildAiModelPickerDefaultsResult includes OpenAI models while keeping Gemi
             draft: GEMINI_DRAFT_FAST_DEFAULT,
             extraction: GEMINI_FLASH_LATEST_ALIAS,
             design: GEMINI_FLASH_LATEST_ALIAS,
+            transcription: GEMINI_DRAFT_FAST_DEFAULT,
             translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
         }
     );
@@ -64,6 +65,7 @@ test("buildAiModelPickerDefaultsResult uses available OpenAI text default for ge
             draft: GEMINI_DRAFT_FAST_DEFAULT,
             extraction: GEMINI_FLASH_LATEST_ALIAS,
             design: GEMINI_FLASH_LATEST_ALIAS,
+            transcription: GEMINI_DRAFT_FAST_DEFAULT,
             translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
         },
         { textDefaultModel: "openai:gpt-4o-mini" }
@@ -73,6 +75,7 @@ test("buildAiModelPickerDefaultsResult uses available OpenAI text default for ge
     assert.equal(state.defaults.draft, "openai:gpt-4o-mini");
     assert.equal(state.defaults.extraction, GEMINI_FLASH_LATEST_ALIAS);
     assert.equal(state.defaults.design, GEMINI_FLASH_LATEST_ALIAS);
+    assert.equal(state.defaults.transcription, GEMINI_DRAFT_FAST_DEFAULT);
     assert.equal(state.defaults.translation, GEMINI_FLASH_LITE_LATEST_ALIAS);
 });
 
@@ -88,6 +91,7 @@ test("buildAiModelPickerDefaultsResult ignores unavailable OpenAI text default",
             draft: GEMINI_DRAFT_FAST_DEFAULT,
             extraction: GEMINI_FLASH_LATEST_ALIAS,
             design: GEMINI_FLASH_LATEST_ALIAS,
+            transcription: GEMINI_DRAFT_FAST_DEFAULT,
             translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
         },
         { textDefaultModel: "openai:gpt-4o-mini" }

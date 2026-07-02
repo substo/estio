@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import type { ReactNode } from "react";
@@ -222,6 +223,18 @@ export function OpenAiIntegrationForm({ initialData }: OpenAiIntegrationFormProp
                                 ? "Estio will show ChatGPT subscription models in AI draft pickers. Direct API models remain the fastest default when configured."
                                 : "Verify the server login to show subscription models in AI draft pickers."}
                         </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <div className="text-sm font-medium">Default AI models</div>
+                            <div className="text-sm text-muted-foreground">
+                                Choose the default model for drafts, extraction, design, transcription, and translation in AI Configuration.
+                            </div>
+                        </div>
+                        <Button type="button" variant="outline" asChild>
+                            <Link href="/admin/settings/ai">Set defaults</Link>
+                        </Button>
                     </div>
 
                     <div className="grid gap-2">

@@ -1,6 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { VIEWING_SESSION_STAGE_MODELS } from "@/lib/viewings/sessions/live-models";
@@ -245,17 +244,6 @@ function estimateSummaryCostUsd(totalTokens: number): number {
     return Number((tokens * 0.0000015).toFixed(6));
 }
 
-function extractUsageCounts(usageMetadata: any) {
-    const promptTokens = Number(usageMetadata?.promptTokenCount || 0);
-    const completionTokens = Number(usageMetadata?.candidatesTokenCount || 0);
-    const totalTokens = Number(usageMetadata?.totalTokenCount || (promptTokens + completionTokens));
-    return {
-        promptTokens: Number.isFinite(promptTokens) ? Math.max(0, Math.floor(promptTokens)) : 0,
-        completionTokens: Number.isFinite(completionTokens) ? Math.max(0, Math.floor(completionTokens)) : 0,
-        totalTokens: Number.isFinite(totalTokens) ? Math.max(0, Math.floor(totalTokens)) : 0,
-    };
-}
-
 function buildLeadPreferencePatch(existing: string | null | undefined, keyPoints: string[]): string | null {
     const keyPointPreview = sliceForPreview(keyPoints, 4);
     if (keyPointPreview.length === 0) return asString(existing) || null;
@@ -267,7 +255,7 @@ function buildLeadPreferencePatch(existing: string | null | undefined, keyPoints
 }
 
 async function maybeBuildLlmSummary(args: {
-    apiKey: string | null;
+    locationId: string;
     modelName: string;
     fallbackModelName: string;
     clientName: string;
@@ -284,25 +272,7 @@ async function maybeBuildLlmSummary(args: {
     }>;
     fallbackArtifacts: SummaryArtifacts;
 }): Promise<{ artifacts: SummaryArtifacts; usage: SummaryUsage }> {
-    if (!args.apiKey) {
-        return {
-            artifacts: args.fallbackArtifacts,
-            usage: {
-                provider: null,
-                model: null,
-                promptTokens: null,
-                completionTokens: null,
-                totalTokens: null,
-                estimatedCostUsd: null,
-                usedFallback: true,
-                errorMessage: "No Google AI API key configured for this location.",
-            },
-        };
-    }
-
     try {
-        const genAI = new GoogleGenerativeAI(args.apiKey);
-
         const transcriptPreview = args.recentMessages
             .slice(-16)
             .map((item) => {
@@ -331,27 +301,27 @@ async function maybeBuildLlmSummary(args: {
         ].join("\n");
 
         const trySummaryWithModel = async (modelName: string) => {
-            const model = genAI.getGenerativeModel({
-                model: modelName,
-                generationConfig: {
-                    temperature: 0.2,
-                    responseMimeType: "application/json",
-                },
+            const result = await callLLMWithMetadata(modelName, prompt, undefined, {
+                jsonMode: true,
+                temperature: 0.2,
+                locationId: args.locationId,
             });
-
-            const result = await model.generateContent([{ text: prompt }] as any);
-            const parsed = parseJsonMaybe(result.response.text());
+            const parsed = parseJsonMaybe(result.text);
             const artifacts = parsed
                 ? normalizeSummaryArtifacts(parsed, args.fallbackArtifacts)
                 : args.fallbackArtifacts;
-            const usageCounts = extractUsageCounts((result as any)?.response?.usageMetadata);
+            const usageCounts = {
+                promptTokens: result.usage.promptTokens,
+                completionTokens: result.usage.completionTokens,
+                totalTokens: result.usage.totalTokens || result.usage.promptTokens + result.usage.completionTokens,
+            };
             const estimatedCostUsd = estimateSummaryCostUsd(usageCounts.totalTokens);
 
             return {
                 artifacts,
                 usage: {
-                    provider: "google",
-                    model: modelName,
+                    provider: result.provider,
+                    model: result.model || modelName,
                     promptTokens: usageCounts.promptTokens,
                     completionTokens: usageCounts.completionTokens,
                     totalTokens: usageCounts.totalTokens,
@@ -500,10 +470,9 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
         },
     });
 
-    const apiKey = await resolveLocationGoogleAiApiKey(session.locationId);
     const modelName = asString(session.summaryModel) || VIEWING_SESSION_STAGE_MODELS.summaryDefault;
     const llm = await maybeBuildLlmSummary({
-        apiKey,
+        locationId: session.locationId,
         modelName,
         fallbackModelName: VIEWING_SESSION_STAGE_MODELS.summaryDefault,
         clientName,
