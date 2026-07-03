@@ -680,27 +680,9 @@ async function findMatchingGoogleContact(
     people: people_v1.People,
     contact: { phone?: string | null, email?: string | null }
 ): Promise<{ resourceName: string; etag?: string } | null> {
-    // 1. Search by Email first. It is indexed and avoids the slow phone
-    // fallback scan for contacts that already have a stable email identity.
-    if (contact.email) {
-        const searchRes = await people.people.searchContacts({
-            query: contact.email,
-            readMask: 'names,emailAddresses,metadata'
-        });
-        const found = searchRes.data.results?.find(r => {
-            return r.person?.emailAddresses?.some(e => e.value?.toLowerCase() === contact.email?.toLowerCase());
-        });
-
-        if (found?.person?.resourceName) {
-            console.log(`[Google Sync] Found existing contact by email: ${found.person.resourceName}`);
-            return {
-                resourceName: found.person.resourceName,
-                etag: found.person.etag || undefined
-            };
-        }
-    }
-
-    // 2. Search by Phone (Clean digits)
+    // 1. Search by phone first. The phone number is the strongest identity
+    // for CRM contacts and avoids linking the wrong Google contact when a
+    // shared/family email is present.
     if (contact.phone) {
         const phoneDigits = contact.phone.replace(/\D/g, '');
         // Search query needs to be precise. Google People API search is fuzzy.
@@ -709,18 +691,8 @@ async function findMatchingGoogleContact(
             readMask: 'names,phoneNumbers,metadata'
         });
 
-        // Tight matching on phone number using same robust logic
-        const found = searchRes.data.results?.find(r => {
-            const p = r.person;
-            // First check strict substring (original logic) as fast path
-            // THEN check robust suffix match
-            return p?.phoneNumbers?.some(pn =>
-                getGooglePhoneCandidates(pn).some(candidate =>
-                    candidate.replace(/\D/g, '').includes(phoneDigits) ||
-                    arePhoneNumbersEquivalent(candidate, contact.phone!)
-                )
-            );
-        });
+        // Tight matching on phone number using same robust logic.
+        const found = searchRes.data.results?.find(r => personHasEquivalentPhone(r.person, contact.phone!));
 
         if (found?.person?.resourceName) {
             console.log(`[Google Sync] Found existing contact by phone: ${found.person.resourceName}`);
@@ -738,6 +710,26 @@ async function findMatchingGoogleContact(
             return {
                 resourceName: fallbackMatches[0].resourceName,
                 etag: fallbackMatches[0].etag || undefined
+            };
+        }
+    }
+
+    // 2. Search by Email when no phone match was found. It is indexed and fast,
+    // but lower confidence than phone for duplicate/contact linking.
+    if (contact.email) {
+        const searchRes = await people.people.searchContacts({
+            query: contact.email,
+            readMask: 'names,emailAddresses,metadata'
+        });
+        const found = searchRes.data.results?.find(r => {
+            return r.person?.emailAddresses?.some(e => e.value?.toLowerCase() === contact.email?.toLowerCase());
+        });
+
+        if (found?.person?.resourceName) {
+            console.log(`[Google Sync] Found existing contact by email: ${found.person.resourceName}`);
+            return {
+                resourceName: found.person.resourceName,
+                etag: found.person.etag || undefined
             };
         }
     }

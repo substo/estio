@@ -11,6 +11,12 @@ import { ContactData } from "./contact-form";
 
 type ContactWithSync = ContactData & { error?: string | null; googleContactId?: string | null; lastGoogleSync?: Date | null };
 
+function getPreferredGoogleContactSearchQuery(contact?: Pick<ContactWithSync, 'phone' | 'email' | 'name'> | null) {
+    return [contact?.phone, contact?.email, contact?.name]
+        .map(value => value?.trim())
+        .find((value): value is string => !!value) || "";
+}
+
 interface GoogleSyncManagerProps {
     // Single contact mode (backward compatible)
     contact?: ContactWithSync;
@@ -53,7 +59,7 @@ export function GoogleSyncManager({
 
     // Google Data State
     const [googleData, setGoogleData] = useState<any>(null);
-    const [searchQuery, setSearchQuery] = useState(contact?.email || contact?.name || "");
+    const [searchQuery, setSearchQuery] = useState(getPreferredGoogleContactSearchQuery(contact));
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const warmedSearchRef = useRef(false);
 
@@ -67,9 +73,10 @@ export function GoogleSyncManager({
         setCurrentIndex(newIndex);
         setGoogleData(null);
         setSearchResults([]);
+        setSearchQuery(getPreferredGoogleContactSearchQuery(contacts?.[newIndex]));
         setStep('view');
         onNavigate?.(newIndex);
-    }, [isMultiMode, currentIndex, onNavigate]);
+    }, [isMultiMode, currentIndex, contacts, onNavigate]);
 
     const goToNext = useCallback(() => {
         if (!isMultiMode || currentIndex >= totalContacts - 1) return;
@@ -77,9 +84,10 @@ export function GoogleSyncManager({
         setCurrentIndex(newIndex);
         setGoogleData(null);
         setSearchResults([]);
+        setSearchQuery(getPreferredGoogleContactSearchQuery(contacts?.[newIndex]));
         setStep('view');
         onNavigate?.(newIndex);
-    }, [isMultiMode, currentIndex, totalContacts, onNavigate]);
+    }, [isMultiMode, currentIndex, totalContacts, contacts, onNavigate]);
 
     // Keyboard navigation
     useEffect(() => {
@@ -115,10 +123,10 @@ export function GoogleSyncManager({
             fetchLinkedContact(contact.googleContactId);
         }
         else {
-            // Email/name search is indexed and fast. Phone fallback can scan
-            // the address book, so automatic open uses only the lightweight
-            // People API search. Manual Search still enables the deep fallback.
-            const initialQuery = contact.email || contact.name || contact.phone;
+            // Prefer the phone already stored on the local contact. The deep
+            // phone fallback can scan the address book, so the automatic check
+            // uses only the lightweight People API search.
+            const initialQuery = getPreferredGoogleContactSearchQuery(contact);
             if (initialQuery) {
                 setSearchQuery(initialQuery);
                 handleSearch(initialQuery, true, { phoneFallback: false }); // true = auto-fetch
@@ -146,7 +154,7 @@ export function GoogleSyncManager({
                 // 404 or error - Link broken. Auto-recover UI.
                 toast({ title: "Sync Issue", description: "Linked contact not found. Searching for match...", variant: "default" });
                 setGoogleData(null);
-                const fallbackQuery = contact.email || contact.phone;
+                const fallbackQuery = contact.phone || contact.email;
                 if (fallbackQuery) {
                     setSearchQuery(fallbackQuery);
                     handleSearch(fallbackQuery, true, { phoneFallback: false });
@@ -175,7 +183,8 @@ export function GoogleSyncManager({
                 // Logic to auto-select if we are just fetching for comparison
                 const exactMatch = res.data.find((p: any) =>
                     p.resourceName === contact.googleContactId ||
-                    p.email === contact.email
+                    (contact.phone && arePhoneNumbersEquivalent(p.phone, contact.phone)) ||
+                    (contact.email && p.email === contact.email)
                 );
 
                 if (exactMatch) {
@@ -378,9 +387,9 @@ export function GoogleSyncManager({
                     <div className="font-semibold text-center border-b pb-2 text-green-700 flex justify-between items-center">
                         <span>Google Contacts</span>
                         <Button type="button" variant="ghost" size="sm" onClick={() => {
-                            const defaultQuery = contact.phone || contact.email || "";
+                            const defaultQuery = getPreferredGoogleContactSearchQuery(contact);
                             setSearchQuery(defaultQuery);
-                            if (defaultQuery) handleSearch(defaultQuery);
+                            if (defaultQuery) handleSearch(defaultQuery, false, { phoneFallback: false });
                             setStep('search');
                         }} className="h-6">
                             <Search className="h-3 w-3 mr-1" /> {googleData ? 'Find Different' : 'Find Match'}
@@ -422,9 +431,9 @@ export function GoogleSyncManager({
                             <Input
                                 value={searchQuery}
                                 onChange={e => setSearchQuery(e.target.value)}
-                                placeholder="Search by name or email..."
+                                placeholder="Search by phone, email, or name..."
                             />
-                            <Button type="button" onClick={() => handleSearch(searchQuery)} disabled={loading}>
+                            <Button type="button" onClick={() => handleSearch(searchQuery, false, { phoneFallback: false })} disabled={loading}>
                                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                             </Button>
                         </div>
@@ -434,7 +443,9 @@ export function GoogleSyncManager({
                                     onClick={() => { setGoogleData(res); setStep('view'); }}>
                                     <div>
                                         <div className="font-medium">{res.name}</div>
-                                        <div className="text-xs text-muted-foreground">{res.email}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            {[res.phone, res.email].filter(Boolean).join(" · ")}
+                                        </div>
                                     </div>
                                     <Button type="button" size="sm" variant="secondary">Select</Button>
                                 </div>
