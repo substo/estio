@@ -102,6 +102,7 @@ import {
 } from "@/lib/ai/runtime/engine";
 import { recordAgentFeedback } from "@/lib/ai/agent-feedback";
 import { createLearningSessionFromAgentFeedback } from "@/lib/ai/agent-learning";
+import { resolveManualDraftSkillRouting } from "@/lib/ai/manual-draft-routing";
 import {
     approveLearningProposal,
     createCurrentPromptVersion,
@@ -4867,6 +4868,9 @@ type SendReplyAgentFeedbackPayload = {
     traceId?: string | null;
     skillId?: string | null;
     model?: string | null;
+    reasoning?: string | null;
+    routeReason?: string | null;
+    requiresHumanApproval?: boolean | null;
     metadata?: Record<string, unknown> | null;
 } | null;
 
@@ -4918,6 +4922,9 @@ async function recordSendAgentFeedback(args: {
                 ...(feedback.metadata || {}),
                 channel: args.channel,
                 sentBody: args.sentBody,
+                reasoning: feedback.reasoning || feedback.metadata?.reasoning || null,
+                routeReason: feedback.routeReason || feedback.metadata?.routeReason || null,
+                requiresHumanApproval: feedback.requiresHumanApproval ?? feedback.metadata?.requiresHumanApproval ?? null,
             },
         });
     } catch (error: any) {
@@ -5575,16 +5582,20 @@ export async function generateAIDraft(
     if (conversationRecord?.id && contactRecord?.id) {
         try {
             const runtimeStartedAt = Date.now();
+            const skillRouting = resolveManualDraftSkillRouting(instruction, options);
             const runtimeResult = await runAiSkillDecision({
                 locationId: location.id,
                 conversationId: conversationRecord.id,
                 contactId: contactRecord.id,
                 source: "manual",
+                forceSkillId: skillRouting.forceSkillId,
+                objectiveHint: skillRouting.objectiveHint,
                 contextSummary: [
                     `Mode: ${options?.mode || "chat"}`,
                     options?.dealId ? `Deal: ${options.dealId}` : null,
                     options?.draftLanguage ? `Draft language for agent review: ${options.draftLanguage}` : null,
                     options?.baseDraft ? "Mode: revise current composer draft" : null,
+                    `Manual draft skill route: ${skillRouting.forceSkillId} (${skillRouting.reason})`,
                 ].filter(Boolean).join("\n"),
                 extraInstruction: [
                     buildConversationalMessagingContract({ channel: "WhatsApp/SMS/chat" }),
@@ -5604,6 +5615,8 @@ export async function generateAIDraft(
                 success: runtimeResult.success,
                 hasDraft: !!runtimeResult.draftBody,
                 traceId: runtimeResult.traceId || null,
+                selectedSkillId: runtimeResult.selectedSkillId || skillRouting.forceSkillId,
+                routeReason: skillRouting.reason,
             });
 
             if (runtimeResult.success && runtimeResult.draftBody) {
@@ -5614,12 +5627,13 @@ export async function generateAIDraft(
                 });
                 return {
                     draft: runtimeResult.draftBody,
-                    reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || "skill"}).`,
+                    reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || skillRouting.forceSkillId || "skill"}; ${skillRouting.reason}).`,
                     requiresHumanApproval: true,
                     generationId: runtimeResult.agentExecutionId || null,
                     agentExecutionId: runtimeResult.agentExecutionId || null,
                     decisionId: runtimeResult.decisionId || null,
-                    selectedSkillId: runtimeResult.selectedSkillId || null,
+                    selectedSkillId: runtimeResult.selectedSkillId || skillRouting.forceSkillId || null,
+                    routeReason: skillRouting.reason,
                     traceId: runtimeResult.traceId || null,
                 };
             }
@@ -5672,7 +5686,7 @@ export async function generateComposerAIDraft(
     logAIDraftTiming("generateComposerAIDraft_start", {
         conversationId,
         mode: options?.mode || "chat",
-        backend: "legacy_generateDraft",
+        backend: "skill_runtime_then_legacy",
     });
 
     const {
@@ -5680,12 +5694,82 @@ export async function generateComposerAIDraft(
         explicitModel,
         agentName,
         conversationRecord,
+        contactRecord,
     } = await prepareAIDraftRequest({
         eventPrefix: "generateComposerAIDraft",
         conversationId,
         contactId,
         model,
     });
+
+    if (conversationRecord?.id && contactRecord?.id) {
+        try {
+            const runtimeStartedAt = Date.now();
+            const skillRouting = resolveManualDraftSkillRouting(instruction, options);
+            const runtimeResult = await runAiSkillDecision({
+                locationId: location.id,
+                conversationId: conversationRecord.id,
+                contactId: contactRecord.id,
+                source: "manual",
+                forceSkillId: skillRouting.forceSkillId,
+                objectiveHint: skillRouting.objectiveHint,
+                contextSummary: [
+                    `Mode: ${options?.mode || "chat"}`,
+                    options?.dealId ? `Deal: ${options.dealId}` : null,
+                    options?.draftLanguage ? `Draft language for agent review: ${options.draftLanguage}` : null,
+                    options?.baseDraft ? "Mode: revise current composer draft" : null,
+                    "Entry point: composer AI draft",
+                    `Manual draft skill route: ${skillRouting.forceSkillId} (${skillRouting.reason})`,
+                ].filter(Boolean).join("\n"),
+                extraInstruction: [
+                    buildConversationalMessagingContract({ channel: options?.channel || "WhatsApp/SMS/chat" }),
+                    options?.baseDraft
+                        ? `Current composer draft to revise:\n${options.baseDraft}`
+                        : null,
+                    instruction || "Draft the best next response based on current conversation context.",
+                    options?.draftLanguage
+                        ? `Write the draft in ${options.draftLanguage} for internal agent review. Do not translate it to the client's send language yet.`
+                        : null,
+                ].filter(Boolean).join("\n\n"),
+                executeImmediately: true,
+            });
+            logAIDraftTiming("generateComposerAIDraft_runtime_end", {
+                conversationId,
+                elapsedMs: getElapsedMs(runtimeStartedAt),
+                success: runtimeResult.success,
+                hasDraft: !!runtimeResult.draftBody,
+                traceId: runtimeResult.traceId || null,
+                selectedSkillId: runtimeResult.selectedSkillId || skillRouting.forceSkillId,
+                routeReason: skillRouting.reason,
+            });
+
+            if (runtimeResult.success && runtimeResult.draftBody) {
+                logAIDraftTiming("generateComposerAIDraft_end", {
+                    conversationId,
+                    elapsedMs: getElapsedMs(overallStartedAt),
+                    path: "skill_runtime",
+                });
+                return {
+                    draft: runtimeResult.draftBody,
+                    reasoning: `Generated via unified skill runtime (${runtimeResult.selectedSkillId || skillRouting.forceSkillId || "skill"}; ${skillRouting.reason}).`,
+                    requiresHumanApproval: true,
+                    generationId: runtimeResult.agentExecutionId || null,
+                    agentExecutionId: runtimeResult.agentExecutionId || null,
+                    decisionId: runtimeResult.decisionId || null,
+                    selectedSkillId: runtimeResult.selectedSkillId || skillRouting.forceSkillId || null,
+                    routeReason: skillRouting.reason,
+                    traceId: runtimeResult.traceId || null,
+                };
+            }
+        } catch (skillError: any) {
+            logAIDraftTiming("generateComposerAIDraft_runtime_failed", {
+                conversationId,
+                elapsedMs: getElapsedMs(overallStartedAt),
+                reason: skillError?.message || String(skillError),
+            });
+            console.warn("[generateComposerAIDraft] Skill runtime failed, falling back to legacy generateDraft:", skillError?.message || skillError);
+        }
+    }
 
     const legacyStartedAt = Date.now();
     const result = await generateDraft({

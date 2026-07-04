@@ -123,6 +123,7 @@ export const DEFAULT_SKILL_POLICY_BLUEPRINTS: Array<Pick<
   AiSkillPolicyConfig,
   "skillId" | "objective" | "enabled" | "humanApprovalRequired"
 >> = [
+  { skillId: "lead_intake_booking", objective: "book_viewing", enabled: true, humanApprovalRequired: true },
   { skillId: "lead_qualification", objective: "nurture", enabled: true, humanApprovalRequired: true },
   { skillId: "viewing_management", objective: "book_viewing", enabled: true, humanApprovalRequired: true },
   { skillId: "property_search", objective: "listing_alert", enabled: true, humanApprovalRequired: true },
@@ -161,4 +162,3 @@ export function parsePolicyJson<T>(value: unknown, schema: z.ZodSchema<T>, fallb
   if (parsed.success) return parsed.data;
   return fallback;
 }
-

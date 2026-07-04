@@ -9,6 +9,8 @@ export type GenerateDraftResult = {
     decisionId?: string | null;
     traceId?: string | null;
     selectedSkillId?: string | null;
+    routeReason?: string | null;
+    requiresHumanApproval?: boolean | null;
     model?: string | null;
 };
 
@@ -21,6 +23,9 @@ export type ComposerAiDraftFeedback = {
     traceId?: string | null;
     skillId?: string | null;
     model?: string | null;
+    reasoning?: string | null;
+    routeReason?: string | null;
+    requiresHumanApproval?: boolean | null;
     metadata?: Record<string, unknown>;
 };
 

@@ -118,6 +118,43 @@ function normalizeInsightCategory(raw: any): "preference" | "objection" | "timel
     return "preference";
 }
 
+function isBlockedFetchHostname(hostname: string): boolean {
+    const normalized = hostname.trim().toLowerCase();
+    if (!normalized) return true;
+    if (normalized === "localhost" || normalized.endsWith(".localhost")) return true;
+    if (normalized === "0.0.0.0") return true;
+    if (/^127\./.test(normalized)) return true;
+    if (/^10\./.test(normalized)) return true;
+    if (/^192\.168\./.test(normalized)) return true;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)) return true;
+    if (normalized === "::1" || normalized === "[::1]") return true;
+    return false;
+}
+
+function normalizePageText(html: string): {
+    title: string | null;
+    description: string | null;
+    text: string;
+} {
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim() || null;
+    const description = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["'][^>]*>/i)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim() || null;
+    const text = html
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+    return { title, description, text };
+}
+
 // ── TOOLS ─────────────────────────────────────────
 
 registerTool(
@@ -139,6 +176,63 @@ registerTool(
                 })))
             }]
         };
+    }
+);
+
+registerTool(
+    "fetch_url_summary",
+    "Fetch and summarize a public HTTP/HTTPS URL that the lead or CRM context provided. Use only for public listing or business pages; never for private/internal URLs.",
+    {
+        url: z.string().url().describe("Public HTTP/HTTPS URL to summarize"),
+        maxChars: z.number().int().min(300).max(4000).optional().default(1600)
+    },
+    async (params: any) => {
+        const parsedUrl = new URL(params.url);
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+            throw new Error("Only HTTP/HTTPS URLs can be fetched.");
+        }
+        if (isBlockedFetchHostname(parsedUrl.hostname)) {
+            throw new Error("Refusing to fetch private or local network URLs.");
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        try {
+            const response = await fetch(parsedUrl.toString(), {
+                signal: controller.signal,
+                redirect: "follow",
+                headers: {
+                    "user-agent": "EstioAIDraft/1.0 (+public-page-summary)"
+                }
+            });
+            if (!response.ok) {
+                throw new Error(`Fetch failed with status ${response.status}.`);
+            }
+
+            const contentType = response.headers.get("content-type") || "";
+            const raw = await response.text();
+            const maxChars = Math.max(300, Math.min(4000, Number(params.maxChars || 1600)));
+            const page = contentType.includes("html")
+                ? normalizePageText(raw)
+                : { title: null, description: null, text: raw.replace(/\s+/g, " ").trim() };
+            const excerpt = page.text.slice(0, maxChars);
+
+            return {
+                content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                        url: parsedUrl.toString(),
+                        contentType,
+                        title: page.title,
+                        description: page.description,
+                        excerpt,
+                        truncated: page.text.length > excerpt.length
+                    })
+                }]
+            };
+        } finally {
+            clearTimeout(timeout);
+        }
     }
 );
 

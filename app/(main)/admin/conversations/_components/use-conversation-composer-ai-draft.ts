@@ -212,10 +212,17 @@ export function useConversationComposerAiDraft({
                     traceId: result?.traceId || null,
                     skillId: result?.selectedSkillId || null,
                     model: result?.model || modelOverride || selectedModel || null,
+                    reasoning: result?.reasoning || null,
+                    routeReason: result?.routeReason || null,
+                    requiresHumanApproval: result?.requiresHumanApproval ?? null,
                     metadata: {
                         hasInstruction: !!instruction,
                         hasBaseDraft: !!baseDraft,
                         draftLanguage: agentDraftLanguage,
+                        selectedSkillId: result?.selectedSkillId || null,
+                        routeReason: result?.routeReason || null,
+                        requiresHumanApproval: result?.requiresHumanApproval ?? null,
+                        reasoning: result?.reasoning || null,
                     },
                 };
                 onAiDraftFeedbackChange?.(feedback);

@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw, MessageSquare, NotebookPen } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw, MessageSquare, NotebookPen, ShieldCheck } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -122,6 +122,28 @@ const REFINE_DRAFT_ACTIONS = [
     "Fix grammar",
     "Add next step",
 ];
+
+const AI_DRAFT_SKILL_LABELS: Record<string, string> = {
+    lead_intake_booking: "Lead intake",
+    lead_qualification: "Qualification",
+    viewing_management: "Viewing",
+    property_search: "Property search",
+    objection_handler: "Objection",
+    negotiator: "Negotiation",
+    closer: "Closing",
+};
+
+function formatAiDraftSkillLabel(skillId?: string | null) {
+    const normalized = String(skillId || "").trim();
+    if (!normalized) return "AI runtime";
+    return AI_DRAFT_SKILL_LABELS[normalized] || normalized.replace(/[_-]+/g, " ");
+}
+
+function formatAiDraftRouteReason(reason?: string | null) {
+    const normalized = String(reason || "").trim();
+    if (!normalized) return null;
+    return normalized.replace(/[_-]+/g, " ");
+}
 
 type WhatsAppCallUiPhase =
     | "starting"
@@ -786,6 +808,29 @@ export function ConversationComposer({
                             <div className="max-h-28 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-700">
                                 {translationPreviewText}
                             </div>
+                        </div>
+                    )}
+
+                    {!isNoteMode && latestAiDraftFeedback?.aiOutput && (
+                        <div
+                            className="mx-2 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-purple-100 bg-purple-50/70 px-2 py-1 text-[10px] text-purple-900"
+                            title={[
+                                latestAiDraftFeedback.reasoning,
+                                formatAiDraftRouteReason(latestAiDraftFeedback.routeReason),
+                                latestAiDraftFeedback.traceId ? `Trace: ${latestAiDraftFeedback.traceId}` : null,
+                            ].filter(Boolean).join(" · ") || undefined}
+                        >
+                            <span className="inline-flex min-w-0 items-center gap-1 font-medium">
+                                <ShieldCheck className="h-3 w-3 shrink-0" />
+                                <span className="truncate">AI draft</span>
+                            </span>
+                            <span className="truncate">Skill: {formatAiDraftSkillLabel(latestAiDraftFeedback.skillId)}</span>
+                            {latestAiDraftFeedback.requiresHumanApproval && (
+                                <span className="shrink-0 rounded-sm bg-white/70 px-1 py-0.5 text-purple-800">Review</span>
+                            )}
+                            {latestAiDraftFeedback.traceId && (
+                                <span className="min-w-0 truncate font-mono text-purple-700">Trace {latestAiDraftFeedback.traceId.slice(0, 10)}</span>
+                            )}
                         </div>
                     )}
 
