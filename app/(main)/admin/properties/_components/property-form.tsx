@@ -72,9 +72,10 @@ interface SortableImageProps {
     children: React.ReactNode;
     onRemove: () => void;
     onOpen?: () => void;
+    removeLabel?: string;
 }
 
-function SortableImage({ id, children, onRemove, onOpen }: SortableImageProps) {
+function SortableImage({ id, children, onRemove, onOpen, removeLabel = "Remove image" }: SortableImageProps) {
     const {
         attributes,
         listeners,
@@ -97,7 +98,7 @@ function SortableImage({ id, children, onRemove, onOpen }: SortableImageProps) {
             style={style}
             {...attributes}
             {...listeners}
-            className="relative group aspect-square rounded-lg overflow-hidden border bg-gray-100 touch-none"
+            className="relative group aspect-square overflow-hidden rounded-lg border bg-gray-100 touch-none"
             onClick={(event) => {
                 if (!onOpen || isDragging) return;
                 const target = event.target as HTMLElement | null;
@@ -114,7 +115,8 @@ function SortableImage({ id, children, onRemove, onOpen }: SortableImageProps) {
                     onRemove();
                 }}
                 onPointerDown={(e) => e.stopPropagation()} // Prevent drag initiation on button
-                className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-red-500 text-white shadow-sm transition hover:bg-red-600 sm:h-8 sm:w-8 sm:opacity-0 sm:group-hover:opacity-100"
+                aria-label={removeLabel}
             >
                 <X className="h-4 w-4" />
             </button>
@@ -678,8 +680,8 @@ export default function PropertyForm({
 
             {/* Import Block */}
             {(!property?.id || property.id === 'new') && (
-                <div className="bg-blue-50 p-4 border-b flex items-center gap-4">
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-3 border-b bg-blue-50 p-3 sm:flex-row sm:items-center sm:p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Label htmlFor="importId" className="whitespace-nowrap">Pull from Old CRM (ID):</Label>
                         <Input
                             id="importId"
@@ -697,7 +699,7 @@ export default function PropertyForm({
                     >
                         {isPulling ? "Pulling..." : "Pull Data"}
                     </Button>
-                    <p className="text-xs text-muted-foreground ml-2">
+                    <p className="text-xs text-muted-foreground sm:ml-2">
                         Fetches details, pricing, and images. Review before saving.
                     </p>
                 </div>
@@ -709,9 +711,10 @@ export default function PropertyForm({
                 </div>
             )}
 
-            <Tabs defaultValue="details" className="flex-1 flex flex-col overflow-hidden">
-                <div className="px-1 pt-1 flex items-center justify-between gap-4">
-                    <TabsList className="grid flex-1 grid-cols-8">
+            <Tabs defaultValue="details" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="flex flex-col gap-3 px-1 pt-1 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="-mx-1 overflow-x-auto px-1 pb-1">
+                    <TabsList className="inline-grid min-w-max grid-cols-8 lg:w-full">
                         <TabsTrigger value="details">Details</TabsTrigger>
                         <TabsTrigger value="pricing">Pricing</TabsTrigger>
                         <TabsTrigger value="location">Location</TabsTrigger>
@@ -721,11 +724,12 @@ export default function PropertyForm({
                         <TabsTrigger value="stakeholders">Stakeholders</TabsTrigger>
                         <TabsTrigger value="notes">Notes</TabsTrigger>
                     </TabsList>
+                    </div>
                     
-                    <div className="flex items-center gap-2 mr-2">
+                    <div className="flex items-center gap-2 lg:mr-2">
                         <Label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Editing:</Label>
                         <Select value={activeLanguage} onValueChange={setActiveLanguage}>
-                            <SelectTrigger className="w-[140px] h-8 text-xs font-semibold bg-blue-50 border-blue-200">
+                            <SelectTrigger className="h-8 w-[140px] bg-blue-50 text-xs font-semibold border-blue-200">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -737,7 +741,7 @@ export default function PropertyForm({
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-1">
+                <div className="min-h-0 flex-1 overflow-y-auto px-1">
                     <TabsContent value="details" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
                         
                         {activeLanguage !== "en" && (
@@ -754,7 +758,7 @@ export default function PropertyForm({
                             </div>
                         )}
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className={`space-y-2 col-span-2 ${activeLanguage !== 'en' ? 'hidden' : ''}`}>
                                 <Label htmlFor="title">Property Title</Label>
                                 <Input id="title" name="title" defaultValue={property?.title} required />
@@ -914,7 +918,7 @@ export default function PropertyForm({
                     </TabsContent>
 
                     <TabsContent value="pricing" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="space-y-2">
                                 <Label htmlFor="price">Price</Label>
                                 <Input type="number" id="price" name="price" defaultValue={property?.price} required />
@@ -976,7 +980,7 @@ export default function PropertyForm({
 
 
                     <TabsContent value="location" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="space-y-2 col-span-2">
                                 <Label htmlFor="addressLine1">Address Line 1</Label>
                                 <Input id="addressLine1" name="addressLine1" defaultValue={property?.addressLine1 || ""} />
@@ -1040,7 +1044,7 @@ export default function PropertyForm({
                                 <Input id="country" name="country" defaultValue={property?.country || "Cyprus"} />
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                        <div className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-2">
                             <div className="space-y-2">
                                 <Label htmlFor="latitude">Latitude</Label>
                                 <Input type="number" step="any" id="latitude" name="latitude" defaultValue={property?.latitude} />
@@ -1057,7 +1061,7 @@ export default function PropertyForm({
 
 
                     <TabsContent value="specs" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="space-y-2">
                                 <Label htmlFor="bedrooms">Bedrooms</Label>
                                 <Input type="number" id="bedrooms" name="bedrooms" defaultValue={property?.bedrooms} />
@@ -1154,7 +1158,7 @@ export default function PropertyForm({
 
                         <div className="space-y-4 pt-4 border-t">
                             <Label className="text-lg font-semibold text-gray-700">Publishing Information</Label>
-                            <div className="grid grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 {/* Created By Column */}
                                 <div className="space-y-2">
                                     <Label className="text-muted-foreground text-xs uppercase tracking-wider">Created By</Label>
@@ -1269,7 +1273,7 @@ export default function PropertyForm({
                         <div className="space-y-6">
                             {/* Images Section */}
                             <div className="space-y-4">
-                                <div className="flex items-center justify-between">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <Label className="text-lg font-semibold">Images</Label>
                                     <div className="flex items-center gap-1">
                                         <span className="text-xs text-muted-foreground mr-1">{visibleImages.length} photos</span>
@@ -1277,8 +1281,9 @@ export default function PropertyForm({
                                             type="button"
                                             onClick={() => setGalleryColumns((c) => Math.min(c + 1, 8))}
                                             disabled={galleryColumns >= 8}
-                                            className="inline-flex items-center justify-center rounded-md border bg-background p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                                             title="Smaller thumbnails (more per row)"
+                                            aria-label="Show more thumbnails per row"
                                         >
                                             <ZoomOut className="h-4 w-4" />
                                         </button>
@@ -1287,8 +1292,9 @@ export default function PropertyForm({
                                             type="button"
                                             onClick={() => setGalleryColumns((c) => Math.max(c - 1, 2))}
                                             disabled={galleryColumns <= 2}
-                                            className="inline-flex items-center justify-center rounded-md border bg-background p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                                             title="Larger thumbnails (fewer per row)"
+                                            aria-label="Show fewer thumbnails per row"
                                         >
                                             <ZoomIn className="h-4 w-4" />
                                         </button>
@@ -1314,8 +1320,10 @@ export default function PropertyForm({
                                             strategy={rectSortingStrategy}
                                         >
                                             <div
-                                                className="grid gap-4"
-                                                style={{ gridTemplateColumns: `repeat(${galleryColumns}, minmax(0, 1fr))` }}
+                                                className="grid gap-3 sm:gap-4"
+                                                style={{
+                                                    gridTemplateColumns: `repeat(auto-fill, minmax(${Math.max(112, Math.round(720 / Math.max(2, galleryColumns)))}px, 1fr))`,
+                                                }}
                                             >
                                                 {visibleImages.map((img, index) => {
                                                     const uniqueId = getPropertyMediaIdentity(img);
@@ -1332,6 +1340,7 @@ export default function PropertyForm({
                                                             id={uniqueId}
                                                             onRemove={() => handleRemoveImage(uniqueId)}
                                                             onOpen={() => handleOpenImageViewer(index)}
+                                                            removeLabel={`Remove image ${index + 1}`}
                                                         >
                                                             {img.cloudflareImageId ? (
                                                                 <CloudflareImage
@@ -1362,7 +1371,7 @@ export default function PropertyForm({
                                                                 }}
                                                                 onPointerDown={(e) => e.stopPropagation()}
                                                                 disabled={!canEnhance}
-                                                                className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                className="absolute bottom-2 left-2 inline-flex min-h-8 items-center gap-1 rounded-md bg-black/75 px-2 py-1 text-[11px] font-medium text-white shadow-sm transition hover:bg-black/85 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0"
                                                                 title={canEnhance ? "Enhance this image with AI" : "Save property first to enable AI enhancement for this image"}
                                                             >
                                                                 <Sparkles className="h-3 w-3" />
@@ -1377,7 +1386,7 @@ export default function PropertyForm({
                                                                         handleRevertAiImage(uniqueId);
                                                                     }}
                                                                     onPointerDown={(e) => e.stopPropagation()}
-                                                                    className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[11px] font-medium text-foreground transition hover:bg-white"
+                                                                    className="absolute bottom-2 right-2 inline-flex min-h-8 items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-white sm:min-h-0"
                                                                 >
                                                                     Revert
                                                                 </button>
@@ -1472,7 +1481,7 @@ export default function PropertyForm({
                                 <div className="space-y-2 mb-4">
                                     {videoUrls.map((url, index) => (
                                         <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded border">
-                                            <span className="text-sm truncate max-w-[80%]">{url}</span>
+                                            <span className="min-w-0 flex-1 truncate text-sm">{url}</span>
                                             <button
                                                 type="button"
                                                 onClick={() => handleRemoveMedia('video', index)}
@@ -1501,7 +1510,7 @@ export default function PropertyForm({
                                 <div className="space-y-2 mb-4">
                                     {documentUrls.map((url, index) => (
                                         <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded border">
-                                            <span className="text-sm truncate max-w-[80%]">{url}</span>
+                                            <span className="min-w-0 flex-1 truncate text-sm">{url}</span>
                                             <button
                                                 type="button"
                                                 onClick={() => handleRemoveMedia('document', index)}
@@ -1529,7 +1538,7 @@ export default function PropertyForm({
                             <Label className="text-lg font-semibold text-gray-700">Owner Details</Label>
                             <div className="space-y-2">
                                 <Label>Select Owner</Label>
-                                <div className="flex gap-2">
+                                <div className="flex flex-col gap-2 sm:flex-row">
                                     <SearchableSelect
                                         name="ownerId"
                                         value={selectedOwnerId}
@@ -1565,7 +1574,7 @@ export default function PropertyForm({
                                     if (!owner) return null;
                                     return (
                                         <div className="mt-2 p-3 bg-white rounded border text-sm space-y-1 relative group">
-                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="absolute top-2 right-2 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                                                 <ContactDialog
                                                     locationId={locationId}
                                                     roleName="Owner"
@@ -1600,7 +1609,7 @@ export default function PropertyForm({
                             <Label className="text-lg font-semibold text-gray-700">Developer Details</Label>
                             <div className="space-y-2">
                                 <Label>Select Developer</Label>
-                                <div className="flex gap-2">
+                                <div className="flex flex-col gap-2 sm:flex-row">
                                     <SearchableSelect
                                         name="developerId"
                                         value={selectedDeveloperId}
@@ -1627,7 +1636,7 @@ export default function PropertyForm({
                             <Label className="text-lg font-semibold text-gray-700">External Agent Details</Label>
                             <div className="space-y-2">
                                 <Label>Select Agent</Label>
-                                <div className="flex gap-2">
+                                <div className="flex flex-col gap-2 sm:flex-row">
                                     <SearchableSelect
                                         name="agentId"
                                         value={selectedAgentId}
@@ -1661,7 +1670,7 @@ export default function PropertyForm({
                             <Label className="text-lg font-semibold text-gray-700">Maintenance Contacts</Label>
                             <div className="space-y-2">
                                 <Label>Select Maintenance Contacts</Label>
-                                <div className="flex gap-2">
+                                <div className="flex flex-col gap-2 sm:flex-row">
                                     <div className="flex-1">
                                         <MultiPropertySelect
                                             name="maintenanceIds"
@@ -1732,10 +1741,10 @@ export default function PropertyForm({
                         {/* Project / Development Details */}
                         <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
                             <Label className="text-lg font-semibold text-gray-700">Project / Development Details</Label>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="projectName">Project Name</Label>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-col gap-2 sm:flex-row">
                                         <div className="flex-1">
                                             <SearchableSelect
                                                 name="projectIdSelect"
@@ -1794,7 +1803,7 @@ export default function PropertyForm({
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="managementCompany">Management Company</Label>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-col gap-2 sm:flex-row">
                                         <SearchableSelect
                                             name="managementCompanyId"
                                             value={selectedManagementCompanyId}
@@ -1820,7 +1829,7 @@ export default function PropertyForm({
                         {/* Key Holder, Viewings and Directions */}
                         <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
                             <Label className="text-lg font-semibold text-gray-700">Key Holder, Viewings and Directions</Label>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="keyHolder">Key Holder</Label>
                                     <Input id="keyHolder" name="keyHolder" defaultValue={property?.keyHolder || ""} />
@@ -1855,7 +1864,7 @@ export default function PropertyForm({
                         {/* Legal and Financial */}
                         <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
                             <Label className="text-lg font-semibold text-gray-700">Legal and Financial</Label>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label htmlFor="lawyer">Property Lawyer</Label>
                                     <Input id="lawyer" name="lawyer" defaultValue={property?.lawyer || ""} />
@@ -1886,7 +1895,7 @@ export default function PropertyForm({
                         {/* Agency Agreement */}
                         <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
                             <Label className="text-lg font-semibold text-gray-700">Agency Agreement</Label>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                                 <div className="space-y-2">
                                     <Label htmlFor="agencyAgreement">Agency Agreement (sole/multi)</Label>
                                     <Input id="agencyAgreement" name="agencyAgreement" defaultValue={property?.agencyAgreement || ""} />
@@ -1912,11 +1921,11 @@ export default function PropertyForm({
                 </div>
             </Tabs>
 
-            <div className="flex gap-4 pt-4 border-t mt-auto px-1 pb-4 shrink-0">
-                <Button id="save-property-button" type="submit" disabled={isSubmitting}>
+            <div className="mt-auto flex shrink-0 flex-col gap-2 border-t bg-background px-1 pb-3 pt-3 sm:flex-row sm:gap-4 sm:pb-4">
+                <Button id="save-property-button" type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
                     {isSubmitting ? "Saving..." : "Save Property"}
                 </Button>
-                <Button variant="outline" type="button" onClick={() => onSuccess?.()} disabled={isSubmitting}>
+                <Button variant="outline" type="button" onClick={() => onSuccess?.()} disabled={isSubmitting} className="w-full sm:w-auto">
                     Cancel
                 </Button>
 
@@ -1924,7 +1933,7 @@ export default function PropertyForm({
                     <Button
                         type="button"
                         variant="secondary"
-                        className="ml-auto bg-orange-100 text-orange-900 hover:bg-orange-200 border-orange-200"
+                        className="w-full bg-orange-100 text-orange-900 hover:bg-orange-200 border-orange-200 sm:ml-auto sm:w-auto"
                         onClick={handlePushToCrm}
                         disabled={isPushing || isSubmitting}
                     >

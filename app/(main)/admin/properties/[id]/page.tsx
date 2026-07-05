@@ -80,8 +80,13 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
     const developersData = companiesData;
     const managementCompaniesData = companiesData;
     return (
-        <div className="p-6 max-w-4xl mx-auto">
-            <h1 className="text-2xl font-bold mb-6">{id === "new" ? "Create Property" : "Edit Property"}</h1>
+        <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-7xl flex-col px-3 py-4 sm:px-4 lg:px-6">
+            <div className="mb-4 flex flex-col gap-1 sm:mb-6">
+                <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{id === "new" ? "Create Property" : "Edit Property"}</h1>
+                <p className="text-sm text-muted-foreground">
+                    {id === "new" ? "Add a listing and save it before using AI image editing." : "Update listing details, gallery order, and AI-edited image variants."}
+                </p>
+            </div>
             <PropertyForm
                 property={property}
                 locationId={locationId}

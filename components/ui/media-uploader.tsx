@@ -148,7 +148,7 @@ export function MediaUploader({
         <div className="w-full">
             <div
                 className={cn(
-                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer relative",
+                    "relative cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors sm:p-8",
                     isDragging ? "border-primary bg-primary/5" : "border-gray-300 hover:border-primary/50",
                     isUploading ? "opacity-50 pointer-events-none" : ""
                 )}
@@ -173,7 +173,7 @@ export function MediaUploader({
                         <UploadCloud className="h-10 w-10 text-gray-400" />
                     )}
 
-                    <div className="text-lg font-medium text-gray-700">
+                    <div className="text-base font-medium text-gray-700 sm:text-lg">
                         {isUploading ? "Uploading..." : label}
                     </div>
 

@@ -948,7 +948,7 @@ export function PropertyImageEnhanceDialog({
         return (
             <div className="space-y-2">
                 <Label className="text-sm font-medium">Mode</Label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {[
                         { value: "polish", label: "Polish" },
                         { value: "precision_remove", label: "Precision Remove" },
@@ -1039,7 +1039,7 @@ export function PropertyImageEnhanceDialog({
                 <div className="space-y-3 rounded-md border p-3">
                     {renderRoomTypeSelector()}
 
-                    <div className="flex items-center justify-between rounded-md border p-3">
+                    <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <Label className="text-sm font-medium">Use Saved Room Profile Prompt</Label>
                             <p className="text-xs text-muted-foreground">
@@ -1386,7 +1386,7 @@ export function PropertyImageEnhanceDialog({
                     <p className="text-xs text-muted-foreground">
                         One-click automatic segmentation for common cleanup tasks.
                     </p>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {PRECISION_REMOVE_SMART_PRESETS.map((preset) => (
                             <Button
                                 key={preset.key}
@@ -1537,8 +1537,9 @@ export function PropertyImageEnhanceDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-7xl max-h-[94vh] overflow-y-auto">
-                <DialogHeader>
+            <DialogContent className="h-[100dvh] max-h-[100dvh] w-screen max-w-none overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[94vh] sm:w-[96vw] sm:max-w-7xl sm:rounded-lg sm:p-6">
+                <div className="flex h-full min-h-0 flex-col sm:block">
+                <DialogHeader className="shrink-0 border-b px-4 py-4 pr-12 sm:border-0 sm:px-0 sm:py-0 sm:pr-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Sparkles className="h-4 w-4" />
                         AI Enhance Listing Photo
@@ -1550,6 +1551,7 @@ export function PropertyImageEnhanceDialog({
                     </DialogDescription>
                 </DialogHeader>
 
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:overflow-visible sm:px-0 sm:py-0">
                 {!canRun ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                         Save the property first and use a hosted image to enable AI enhancement.
@@ -1564,7 +1566,7 @@ export function PropertyImageEnhanceDialog({
                             </div>
                         ) : null}
 
-                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
                             <div className="space-y-4">
                                 <div className={cn(stage === "review" ? "hidden" : "")}>
                                     {mode === "precision_remove" ? (
@@ -1580,6 +1582,7 @@ export function PropertyImageEnhanceDialog({
                                                 clickSelectEnabled={precisionClickSelectEnabled}
                                                 disabled={isBusy}
                                                 onStateChange={setPrecisionEditorState}
+                                                className="max-h-[65dvh] sm:max-h-none"
                                             />
                                         </div>
                                     ) : (
@@ -1607,7 +1610,7 @@ export function PropertyImageEnhanceDialog({
                                             </div>
 
                                             {effectiveAnalysis ? (
-                                                <div className="space-y-4 rounded-md border p-4">
+                                                <div className="space-y-4 rounded-md border p-3 sm:p-4">
                                                     <div className="space-y-1">
                                                         <Label className="text-sm font-medium">Scene Summary</Label>
                                                         <p className="text-sm text-muted-foreground">{effectiveAnalysis.sceneSummary}</p>
@@ -1655,7 +1658,7 @@ export function PropertyImageEnhanceDialog({
                                                                                 type="button"
                                                                                 onClick={() => startEditingFix(fix.id, fix.label)}
                                                                                 className={cn(
-                                                                                    "absolute right-1 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity",
+                                                                                    "absolute right-1 rounded-full p-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100",
                                                                                     active ? "text-primary-foreground hover:bg-primary/20" : "text-muted-foreground hover:bg-muted-foreground/20"
                                                                                 )}
                                                                             >
@@ -1749,7 +1752,7 @@ export function PropertyImageEnhanceDialog({
                                 ) : null}
                             </div>
 
-                            <div className="space-y-4 rounded-md border p-4">
+                            <div className="space-y-4 rounded-md border p-3 sm:p-4 xl:sticky xl:top-0 xl:max-h-[calc(94vh-9rem)] xl:overflow-y-auto">
                                 {stage === "edit" ? (
                                     <>
                                         <div className="space-y-1">
@@ -1770,11 +1773,14 @@ export function PropertyImageEnhanceDialog({
                     </div>
                 ) : null}
 
-                <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                </div>
+
+                <DialogFooter className="shrink-0 border-t bg-background px-4 py-3 sm:border-0 sm:px-0 sm:py-0">
+                    <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
                         Close
                     </Button>
                 </DialogFooter>
+                </div>
             </DialogContent>
         </Dialog>
     );

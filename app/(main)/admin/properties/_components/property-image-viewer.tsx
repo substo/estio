@@ -156,22 +156,23 @@ export function PropertyImageViewer({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-[95vw] w-full h-[95vh] p-0 border-none bg-black/95 shadow-none flex flex-col items-center justify-center outline-none">
+            <DialogContent className="h-[100dvh] w-screen max-w-none border-none bg-black/95 p-0 shadow-none outline-none sm:h-[95vh] sm:w-full sm:max-w-[95vw] sm:rounded-lg">
                 <VisuallyHidden.Root>
                     <DialogTitle>Property image viewer</DialogTitle>
                 </VisuallyHidden.Root>
 
-                <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+                <div className="absolute right-3 top-3 z-50 flex items-center gap-2 sm:right-4 sm:top-4">
                     {canPreviewOriginal ? (
                         <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-10 rounded-full border border-white/20 bg-black/50 px-4 text-white hover:bg-black/70"
+                            className="h-10 rounded-full border border-white/20 bg-black/50 px-3 text-white hover:bg-black/70 sm:px-4"
                             onClick={togglePersistentOriginalPreview}
                         >
                             <Eye className="mr-1 h-4 w-4" />
-                            {isPreviewingOriginal ? "Viewing Original" : "Preview Original"}
+                            <span className="hidden sm:inline">{isPreviewingOriginal ? "Viewing Original" : "Preview Original"}</span>
+                            <span className="sm:hidden">{isPreviewingOriginal ? "Original" : "Before"}</span>
                         </Button>
                     ) : null}
                     <Button
@@ -186,7 +187,7 @@ export function PropertyImageViewer({
                     </Button>
                 </div>
 
-                <div className="absolute top-4 left-4 z-40">
+                <div className="absolute left-3 top-3 z-40 sm:left-4 sm:top-4">
                     <PropertyImageAiTags
                         isAiGenerated={resolvedDisplay.isAiGenerated}
                         hasOriginalAvailable={resolvedDisplay.hasOriginalAvailable}
@@ -194,7 +195,7 @@ export function PropertyImageViewer({
                 </div>
 
                 <div className="relative w-full h-full flex items-center justify-center">
-                    <div className="relative w-full h-full p-4 md:p-10">
+                    <div className="relative h-full w-full p-2 sm:p-4 md:p-10">
                         {resolvedDisplay.displayImage.cloudflareImageId ? (
                             <CloudflareImage
                                 imageId={resolvedDisplay.displayImage.cloudflareImageId}
@@ -218,23 +219,23 @@ export function PropertyImageViewer({
                             <button
                                 type="button"
                                 onClick={goPrev}
-                                className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-colors border border-white/10"
+                                className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/50 p-2 text-white transition-colors hover:bg-black/70 sm:left-4 sm:p-3"
                                 aria-label="Previous image"
                             >
-                                <ChevronLeft className="h-8 w-8" />
+                                <ChevronLeft className="h-7 w-7 sm:h-8 sm:w-8" />
                             </button>
                             <button
                                 type="button"
                                 onClick={goNext}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white p-3 rounded-full transition-colors border border-white/10"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-black/50 p-2 text-white transition-colors hover:bg-black/70 sm:right-4 sm:p-3"
                                 aria-label="Next image"
                             >
-                                <ChevronRight className="h-8 w-8" />
+                                <ChevronRight className="h-7 w-7 sm:h-8 sm:w-8" />
                             </button>
                         </>
                     ) : null}
 
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white bg-black/50 px-4 py-2 rounded-full backdrop-blur-md border border-white/10 text-sm">
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/10 bg-black/50 px-4 py-2 text-sm text-white backdrop-blur-md sm:bottom-6">
                         {safeIndex + 1} / {visibleImages.length}
                     </div>
                 </div>

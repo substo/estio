@@ -502,7 +502,7 @@ export const PropertyImageMaskEditor = forwardRef<PrecisionMaskEditorHandle, Pro
         return (
             <div className={cn("space-y-2", className)}>
                 <div
-                    className="relative w-full overflow-hidden rounded-lg border bg-black/90"
+                    className="relative w-full max-h-[inherit] overflow-hidden rounded-lg border bg-black/90"
                     style={{ aspectRatio }}
                 >
                     {!isReady ? (
