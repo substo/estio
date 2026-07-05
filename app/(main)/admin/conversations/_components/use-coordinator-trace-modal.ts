@@ -21,6 +21,9 @@ export function useCoordinatorTraceModal({
     const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
     const [loadingTraceDetails, setLoadingTraceDetails] = useState(false);
     const rawTraceRef = useRef<any>(null);
+    const historyLoadedRef = useRef(false);
+    const historyLoadingRef = useRef(false);
+    const historyRequestSeqRef = useRef(0);
 
     useEffect(() => {
         rawTraceRef.current = rawTrace;
@@ -57,21 +60,31 @@ export function useCoordinatorTraceModal({
         }
     }, [contactId, conversationId, loadingTraceDetails]);
 
-    const refreshExecutionHistory = useCallback((autoSelectLatest = false) => {
-        if (!conversationId) return;
+    const refreshExecutionHistory = useCallback((autoSelectLatest = false, options?: { silent?: boolean }) => {
+        if (!conversationId || historyLoadingRef.current) return;
 
-        setLoadingHistory(true);
+        const requestSeq = historyRequestSeqRef.current + 1;
+        historyRequestSeqRef.current = requestSeq;
+        historyLoadingRef.current = true;
+        if (!options?.silent) setLoadingHistory(true);
         getAgentExecutionHistoryPage(conversationId, { limit: 10 }).then(page => {
+            if (historyRequestSeqRef.current !== requestSeq) return;
             setExecutionHistory(page.items);
             setHistoryCursor(page.nextCursor);
             setHasMoreHistory(page.hasMore);
+            historyLoadedRef.current = true;
             if (autoSelectLatest && !rawTraceRef.current && page.items.length > 0) {
                 void handleSelectTrace(page.items[0]);
             }
             setLoadingHistory(false);
         }).catch((e) => {
+            if (historyRequestSeqRef.current !== requestSeq) return;
             console.error("Failed to load trace history", e);
             setLoadingHistory(false);
+        }).finally(() => {
+            if (historyRequestSeqRef.current === requestSeq) {
+                historyLoadingRef.current = false;
+            }
         });
     }, [conversationId, handleSelectTrace]);
 
@@ -92,10 +105,32 @@ export function useCoordinatorTraceModal({
     }, [conversationId, historyCursor, loadingMoreHistory]);
 
     useEffect(() => {
-        if (traceModalOpen && conversationId) {
+        if (traceModalOpen && conversationId && !historyLoadedRef.current && !historyLoadingRef.current && !loadingHistory) {
             refreshExecutionHistory(true);
         }
-    }, [traceModalOpen, conversationId, refreshExecutionHistory]);
+    }, [traceModalOpen, conversationId, loadingHistory, refreshExecutionHistory]);
+
+    useEffect(() => {
+        historyLoadedRef.current = false;
+        historyLoadingRef.current = false;
+        historyRequestSeqRef.current += 1;
+        setExecutionHistory([]);
+        setHistoryCursor(null);
+        setHasMoreHistory(false);
+        setRawTrace(null);
+        setTraceTree(null);
+        setInsights([]);
+
+        if (!conversationId) return;
+
+        const prefetchTimer = window.setTimeout(() => {
+            refreshExecutionHistory(true, { silent: true });
+        }, 150);
+
+        return () => {
+            window.clearTimeout(prefetchTimer);
+        };
+    }, [conversationId, refreshExecutionHistory]);
 
     return {
         rawTrace,
