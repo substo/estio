@@ -7,6 +7,7 @@ import { fetchImageBuffer } from "@/lib/ai/property-image-enhancement";
 import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { assertPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 import { removeImageContentWithPrecisionMask } from "@/lib/ai/property-image-precision-remove";
+import { resolvePropertyImageGenerationModel } from "@/lib/ai/property-image-model-routing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
 
@@ -72,18 +73,13 @@ export async function POST(req: Request) {
         await assertPrecisionRemoveEnabledForLocation(parsed.data.locationId);
 
         const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
-        const availableGenerationModels = new Set(modelCatalog.generationModels.map((model) => model.value));
         const requestedGenerationModel = String(parsed.data.generationModel || "").trim();
-
-        if (requestedGenerationModel && !availableGenerationModels.has(requestedGenerationModel)) {
-            return NextResponse.json(
-                { error: "The selected generation model is unavailable or incompatible with image editing." },
-                { status: 400 }
-            );
-        }
-
-        const generationModel = requestedGenerationModel || modelCatalog.defaults.generation;
-        if (!generationModel) {
+        const modelResolution = await resolvePropertyImageGenerationModel({
+            locationId: parsed.data.locationId,
+            requestedModel: requestedGenerationModel || modelCatalog.defaults.generation,
+            fallbackModels: modelCatalog.generationModels,
+        });
+        if (!modelResolution?.model) {
             return NextResponse.json(
                 { error: "No compatible image generation models are available for this location." },
                 { status: 400 }
@@ -108,7 +104,7 @@ export async function POST(req: Request) {
             maskMode: parsed.data.maskMode,
             semanticMaskClassIds: parsed.data.semanticMaskClassIds,
             guidance: parsed.data.guidance,
-            generationModel,
+            generationModel: modelResolution.model,
         });
 
         const bytes = new Uint8Array(result.imageBuffer);
@@ -131,6 +127,7 @@ export async function POST(req: Request) {
                 sourceCloudflareImageId: ownedMedia.cloudflareImageId,
                 resultCloudflareImageId: upload.imageId,
                 maskCoverage: result.maskCoverage,
+                modelWarning: modelResolution.warning,
             },
         });
 
@@ -140,6 +137,7 @@ export async function POST(req: Request) {
             generatedImageUrl,
             actionLog: result.actionLog,
             model: result.model,
+            modelWarning: modelResolution.warning,
             maskCoverage: result.maskCoverage,
         });
     } catch (error) {

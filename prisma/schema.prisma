@@ -1005,6 +1005,32 @@ model SettingsAuditLog {
   @@map("settings_audit_log")
 }
 
+model AiProviderModel {
+  id                 String    @id @default(cuid())
+  provider           String
+  scopeType          String    @map("scope_type")
+  scopeId            String    @map("scope_id")
+  modelId            String    @map("model_id")
+  displayName        String?   @map("display_name")
+  description        String?   @db.Text
+  capabilities       Json
+  status             String    @default("active")
+  source             String?
+  rawMetadata        Json?     @map("raw_metadata")
+  firstSeenAt        DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt         DateTime  @default(now()) @map("last_seen_at")
+  lastCheckedAt      DateTime  @default(now()) @map("last_checked_at")
+  unavailableSince   DateTime? @map("unavailable_since")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@unique([provider, scopeType, scopeId, modelId], map: "ai_provider_models_provider_scope_model_key")
+  @@index([provider, scopeType, scopeId, status], map: "ai_provider_models_scope_status_idx")
+  @@index([provider, modelId], map: "ai_provider_models_provider_model_idx")
+  @@index([lastCheckedAt], map: "ai_provider_models_last_checked_idx")
+  @@map("ai_provider_models")
+}
+
 model UserLocationRole {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())

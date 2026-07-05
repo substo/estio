@@ -72,11 +72,13 @@ function isGeminiFamilyModel(model: AiModelDescriptor): boolean {
 }
 
 function isOpenAiTextModel(model: AiModelDescriptor): boolean {
-    return normalizeModelValue(model.value).toLowerCase().startsWith("openai:");
+    const value = normalizeModelValue(model.value).toLowerCase();
+    return value.startsWith("openai:") && !value.includes("image");
 }
 
 function isChatGptSubscriptionTextModel(model: AiModelDescriptor): boolean {
-    return normalizeModelValue(model.value).toLowerCase().startsWith("chatgpt_subscription:");
+    const value = normalizeModelValue(model.value).toLowerCase();
+    return value.startsWith("chatgpt_subscription:") && !value.includes("image");
 }
 
 function isExcludedUtilityModel(model: AiModelDescriptor): boolean {
@@ -261,6 +263,14 @@ function resolvePreferredModel<T extends AiModelDescriptor>(
         }
     }
 
+    if (allowed.has("gemini-3.1-flash-lite-image")) {
+        return "gemini-3.1-flash-lite-image";
+    }
+
+    if (allowed.has("gemini-3.1-flash-image")) {
+        return "gemini-3.1-flash-image";
+    }
+
     if (allowed.has("gemini-2.5-flash-image")) {
         return "gemini-2.5-flash-image";
     }
@@ -274,6 +284,7 @@ export function buildPropertyImageModelCatalog<T extends AiModelDescriptor>(
         general?: string | null;
         extraction?: string | null;
         design?: string | null;
+        imageGeneration?: string | null;
     }
 ): PropertyImageModelCatalog<T> {
     const analysisModels = filterPropertyImageAnalysisModels(models);
@@ -288,6 +299,7 @@ export function buildPropertyImageModelCatalog<T extends AiModelDescriptor>(
                 defaults?.general,
             ]),
             generation: resolvePreferredModel(generationModels, [
+                defaults?.imageGeneration,
                 defaults?.design,
                 defaults?.general,
             ]),

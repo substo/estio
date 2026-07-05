@@ -12,6 +12,7 @@ import {
 import {
     ENHANCEMENT_AGGRESSION_LEVELS,
 } from "@/lib/ai/property-image-enhancement-types";
+import { resolvePropertyImageGenerationModel } from "@/lib/ai/property-image-model-routing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
@@ -75,18 +76,13 @@ export async function POST(req: Request) {
         }
 
         const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
-        const availableGenerationModels = new Set(modelCatalog.generationModels.map((model) => model.value));
         const requestedGenerationModel = String(parsed.data.generationModel || "").trim();
-
-        if (requestedGenerationModel && !availableGenerationModels.has(requestedGenerationModel)) {
-            return NextResponse.json(
-                { error: "The selected generation model is unavailable or incompatible with image editing." },
-                { status: 400 }
-            );
-        }
-
-        const generationModel = requestedGenerationModel || modelCatalog.defaults.generation;
-        if (!generationModel) {
+        const modelResolution = await resolvePropertyImageGenerationModel({
+            locationId: parsed.data.locationId,
+            requestedModel: requestedGenerationModel || modelCatalog.defaults.generation,
+            fallbackModels: modelCatalog.generationModels,
+        });
+        if (!modelResolution?.model) {
             return NextResponse.json(
                 { error: "No compatible image generation models are available for this location." },
                 { status: 400 }
@@ -97,7 +93,7 @@ export async function POST(req: Request) {
         const normalizedAnalysis = normalizeImageEnhancementAnalysis(parsed.data.analysis);
         const generated = await generateEnhancedImage({
             apiKey,
-            model: generationModel,
+            model: modelResolution.model,
             sourceImageBase64: sourceImage.base64,
             sourceImageMimeType: sourceImage.mimeType,
             analysis: normalizedAnalysis,
@@ -132,6 +128,7 @@ export async function POST(req: Request) {
                 sourceCloudflareImageId: ownedMedia.cloudflareImageId,
                 resultCloudflareImageId: upload.imageId,
                 aggression: parsed.data.aggression,
+                modelWarning: modelResolution.warning,
             },
         });
 
@@ -143,6 +140,7 @@ export async function POST(req: Request) {
             finalPrompt: generated.finalPrompt,
             reusablePrompt: generated.reusablePrompt,
             model: generated.model,
+            modelWarning: modelResolution.warning,
         });
     } catch (error) {
         console.error("[/api/images/enhance/generate] Error:", error);

@@ -169,12 +169,14 @@ test("buildPropertyImageModelCatalog separates analysis and generation models", 
     const catalog = buildPropertyImageModelCatalog([
         { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
         { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana 2)" },
-        { value: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview (Nano Banana Pro)" },
+        { value: "gemini-3.1-flash-lite-image", label: "Gemini 3.1 Flash-Lite Image (Nano Banana 2 Lite)" },
+        { value: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image (Nano Banana 2)" },
+        { value: "gemini-3-pro-image", label: "Gemini 3 Pro Image (Nano Banana Pro)" },
     ], {
         general: "gemini-2.5-flash",
         extraction: "gemini-2.5-pro",
-        design: "gemini-3-pro-image-preview",
+        design: "gemini-3-pro-image",
+        imageGeneration: "gemini-3.1-flash-lite-image",
     });
 
     assert.deepEqual(
@@ -183,16 +185,17 @@ test("buildPropertyImageModelCatalog separates analysis and generation models", 
     );
     assert.deepEqual(
         catalog.generationModels.map((model) => model.value),
-        ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"]
+        ["gemini-3.1-flash-lite-image", "gemini-3.1-flash-image", "gemini-3-pro-image"]
     );
     assert.equal(catalog.defaults.analysis, "gemini-2.5-pro");
-    assert.equal(catalog.defaults.generation, "gemini-3-pro-image-preview");
+    assert.equal(catalog.defaults.generation, "gemini-3.1-flash-lite-image");
 });
 
 test("buildPropertyImageModelCatalog falls back when design default is not image-capable", () => {
     const catalog = buildPropertyImageModelCatalog([
         { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana 2)" },
+        { value: "gemini-3.1-flash-lite-image", label: "Gemini 3.1 Flash-Lite Image (Nano Banana 2 Lite)" },
+        { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image (Nano Banana Legacy)" },
     ], {
         general: "gemini-2.5-flash",
         extraction: "gemini-2.5-flash",
@@ -200,14 +203,16 @@ test("buildPropertyImageModelCatalog falls back when design default is not image
     });
 
     assert.equal(catalog.defaults.analysis, "gemini-2.5-flash");
-    assert.equal(catalog.defaults.generation, "gemini-2.5-flash-image");
+    assert.equal(catalog.defaults.generation, "gemini-3.1-flash-lite-image");
 });
 
 test("model capability registry keeps text providers out of audio and image tasks", () => {
     const models = [
         { value: "openai:gpt-4o-mini", label: "OpenAI GPT-4o Mini" },
         { value: "chatgpt_subscription:gpt-5.4-mini", label: "ChatGPT Subscription GPT-5.4 Mini" },
+        { value: "chatgpt_subscription:gpt-image-2", label: "ChatGPT Subscription GPT Image 2" },
         { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+        { value: "gemini-3.1-flash-lite-image", label: "Gemini 3.1 Flash-Lite Image" },
         { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image" },
     ];
 
@@ -221,7 +226,7 @@ test("model capability registry keeps text providers out of audio and image task
     );
     assert.deepEqual(
         filterModelsForTask(models, "property.image.generation").map((model) => model.value),
-        ["gemini-2.5-flash-image"]
+        ["gemini-3.1-flash-lite-image", "gemini-2.5-flash-image"]
     );
 });
 
@@ -229,6 +234,7 @@ test("model capability registry describes provider capabilities", () => {
     assert.deepEqual(getModelCapabilities({ value: "openai:gpt-4o-mini" }), ["text", "json", "streaming"]);
     assert.deepEqual(getModelCapabilities({ value: "chatgpt_subscription:gpt-5.4-mini" }), ["text", "json", "streaming"]);
     assert.equal(getModelCapabilities({ value: "gemini-2.5-flash" }).includes("audioInput"), true);
+    assert.equal(getModelCapabilities({ value: "gemini-3.1-flash-lite-image" }).includes("imageGeneration"), true);
     assert.equal(getModelCapabilities({ value: "gemini-2.5-flash-image" }).includes("imageGeneration"), true);
 });
 

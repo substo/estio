@@ -6,9 +6,13 @@ import {
     GEMINI_FLASH_LITE_LATEST_ALIAS,
     GEMINI_FLASH_LATEST_ALIAS,
     GEMINI_FLASH_STABLE_FALLBACK,
+    GEMINI_IMAGE_FAST_DEFAULT,
+    GEMINI_IMAGE_GENERAL_DEFAULT,
+    GEMINI_IMAGE_LEGACY_FALLBACK,
     GOOGLE_AI_MODELS as FALLBACK_MODELS,
 } from "./models";
 import { buildPropertyImageModelCatalog } from "./model-capabilities";
+import { getStoredProviderModelOptions } from "@/lib/ai/provider-model-catalog";
 import { unstable_cache } from "next/cache";
 
 export interface ModelOption {
@@ -17,7 +21,7 @@ export interface ModelOption {
     description?: string;
 }
 
-export type AiModelDefaultKind = "general" | "draft" | "extraction" | "design" | "transcription" | "translation";
+export type AiModelDefaultKind = "general" | "draft" | "extraction" | "design" | "imageGeneration" | "transcription" | "translation";
 
 interface ConfiguredAiModelFields {
     googleAiModel: string | null;
@@ -28,7 +32,7 @@ interface ConfiguredAiModelFields {
     googleAiModelTranslation: string | null;
 }
 
-interface ModelsApiResponse {
+export interface ModelsApiResponse {
     models?: Array<{
         name?: string;
         baseModelId?: string;
@@ -39,7 +43,7 @@ interface ModelsApiResponse {
     nextPageToken?: string;
 }
 
-type ApiModel = NonNullable<ModelsApiResponse["models"]>[number];
+export type ApiModel = NonNullable<ModelsApiResponse["models"]>[number];
 
 async function getGoogleAiApiKey(locationId?: string): Promise<string | undefined> {
     let apiKey = process.env.GOOGLE_API_KEY;
@@ -58,7 +62,7 @@ function mapCuratedLabel(modelId: string): string | undefined {
     return FALLBACK_MODELS.find((m) => m.value === modelId)?.label;
 }
 
-function normalizeModelId(model: ApiModel): string | null {
+export function normalizeGoogleModelId(model: ApiModel): string | null {
     const baseModelId = typeof model.baseModelId === "string" ? model.baseModelId.trim() : "";
     if (baseModelId) return baseModelId;
 
@@ -69,7 +73,7 @@ function normalizeModelId(model: ApiModel): string | null {
 }
 
 function isGeminiGenerateContentModel(model: ApiModel): boolean {
-    const modelId = normalizeModelId(model);
+    const modelId = normalizeGoogleModelId(model);
     if (!modelId) return false;
     if (!modelId.toLowerCase().includes("gemini")) return false;
     return Array.isArray(model.supportedGenerationMethods)
@@ -100,7 +104,7 @@ function sortModels(models: ModelOption[]): ModelOption[] {
     );
 }
 
-async function fetchGoogleModels(apiKey: string): Promise<NonNullable<ModelsApiResponse["models"]> | null> {
+export async function fetchGoogleModels(apiKey: string): Promise<NonNullable<ModelsApiResponse["models"]> | null> {
     const collected: NonNullable<ModelsApiResponse["models"]> = [];
     let nextPageToken: string | undefined;
 
@@ -132,7 +136,7 @@ function buildModelOptions(apiModels: NonNullable<ModelsApiResponse["models"]>):
     const discovered = apiModels
         .filter(isGeminiGenerateContentModel)
         .map((m) => {
-            const id = normalizeModelId(m)!;
+            const id = normalizeGoogleModelId(m)!;
             const curatedLabel = mapCuratedLabel(id);
             const displayName = (typeof m.displayName === "string" && m.displayName.trim()) || "";
             return {
@@ -231,6 +235,10 @@ function getConfiguredDefaultForKind(fields: ConfiguredAiModelFields | null, kin
         return fields.googleAiModelDesign || fields.googleAiModel || null;
     }
 
+    if (kind === "imageGeneration") {
+        return null;
+    }
+
     if (kind === "transcription") {
         return fields.googleAiModelTranscription || null;
     }
@@ -246,6 +254,28 @@ function getConfiguredDefaultForKind(fields: ConfiguredAiModelFields | null, kin
 export const getAvailableModels = unstable_cache(
     async (locationId?: string): Promise<ModelOption[]> => {
         try {
+            const storedModels = locationId
+                ? [
+                    ...(await getStoredProviderModelOptions({
+                        provider: "google_gemini",
+                        scopeType: "LOCATION",
+                        scopeId: locationId,
+                    })),
+                    ...(await getStoredProviderModelOptions({
+                        provider: "google_gemini",
+                        scopeType: "GLOBAL",
+                        scopeId: "global",
+                    })),
+                ]
+                : await getStoredProviderModelOptions({
+                    provider: "google_gemini",
+                    scopeType: "GLOBAL",
+                    scopeId: "global",
+                });
+            if (storedModels.length > 0) {
+                return sortModels(dedupeModelOptions(storedModels));
+            }
+
             // 1. Resolve API Key
             const apiKey = await getGoogleAiApiKey(locationId);
 
@@ -350,6 +380,37 @@ export async function resolveAiModelDefault(
         if (firstFlash) return firstFlash.value;
 
         return GEMINI_DRAFT_FAST_DEFAULT;
+    }
+
+    if (kind === "imageGeneration") {
+        if (values.has(GEMINI_IMAGE_FAST_DEFAULT)) {
+            return GEMINI_IMAGE_FAST_DEFAULT;
+        }
+
+        if (values.has(GEMINI_IMAGE_GENERAL_DEFAULT)) {
+            return GEMINI_IMAGE_GENERAL_DEFAULT;
+        }
+
+        if (values.has(GEMINI_IMAGE_LEGACY_FALLBACK)) {
+            return GEMINI_IMAGE_LEGACY_FALLBACK;
+        }
+
+        const firstImageFlashLite = available.find((m) => {
+            const id = m.value.toLowerCase();
+            return id.includes("image") && id.includes("flash-lite");
+        });
+        if (firstImageFlashLite) return firstImageFlashLite.value;
+
+        const firstImageFlash = available.find((m) => {
+            const id = m.value.toLowerCase();
+            return id.includes("image") && id.includes("flash");
+        });
+        if (firstImageFlash) return firstImageFlash.value;
+
+        const firstImage = available.find((m) => m.value.toLowerCase().includes("image"));
+        if (firstImage) return firstImage.value;
+
+        return GEMINI_IMAGE_LEGACY_FALLBACK;
     }
 
     if (values.has(GEMINI_FLASH_LATEST_ALIAS)) {
@@ -457,6 +518,7 @@ export function buildAiModelPickerDefaultsResult(
         { value: resolvedDefaults.draft, label: mapCuratedLabel(resolvedDefaults.draft) || resolvedDefaults.draft },
         { value: resolvedDefaults.extraction, label: mapCuratedLabel(resolvedDefaults.extraction) || resolvedDefaults.extraction },
         { value: resolvedDefaults.design, label: mapCuratedLabel(resolvedDefaults.design) || resolvedDefaults.design },
+        { value: resolvedDefaults.imageGeneration, label: mapCuratedLabel(resolvedDefaults.imageGeneration) || resolvedDefaults.imageGeneration },
         { value: resolvedDefaults.transcription, label: mapCuratedLabel(resolvedDefaults.transcription) || resolvedDefaults.transcription },
         { value: resolvedDefaults.translation, label: mapCuratedLabel(resolvedDefaults.translation) || resolvedDefaults.translation },
     ]);
@@ -488,11 +550,12 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
             : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
     ]);
 
-    const [general, draft, extraction, design, transcription, translation] = await Promise.all([
+    const [general, draft, extraction, design, imageGeneration, transcription, translation] = await Promise.all([
         resolveAiModelDefault(locationId, "general", pickerModels),
         resolveAiModelDefault(locationId, "draft", pickerModels),
         resolveAiModelDefault(locationId, "extraction", pickerModels),
         resolveAiModelDefault(locationId, "design", pickerModels),
+        resolveAiModelDefault(locationId, "imageGeneration", allModels),
         resolveAiModelDefault(locationId, "transcription", pickerModels),
         resolveAiModelDefault(locationId, "translation", pickerModels),
     ]);
@@ -500,7 +563,7 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
     return buildAiModelPickerDefaultsResult(
         pickerModels,
         [...openAiState.models, ...chatGptSubscriptionState.models],
-        { general, draft, extraction, design, transcription, translation },
+        { general, draft, extraction, design, imageGeneration, transcription, translation },
         { textDefaultModel: openAiState.defaultModel }
     );
 }

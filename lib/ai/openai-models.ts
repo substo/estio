@@ -3,6 +3,7 @@ import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { AI_PROVIDER_CATALOG_CACHE_TAG } from "@/lib/ai/provider-cache";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
+import { getStoredProviderModelOptions } from "@/lib/ai/provider-model-catalog";
 
 export const OPENAI_MODEL_VALUE_PREFIX = "openai:";
 export const OPENAI_DEFAULT_TEXT_MODEL = "gpt-4o-mini";
@@ -29,7 +30,7 @@ const FALLBACK_OPENAI_TEXT_MODELS: OpenAiModelOption[] = [
     { value: `${OPENAI_MODEL_VALUE_PREFIX}gpt-4.1`, label: "OpenAI GPT-4.1" },
 ];
 
-function normalizeOpenAiModelValue(modelId: string): string {
+export function normalizeOpenAiModelValue(modelId: string): string {
     const trimmed = String(modelId || "").trim();
     if (!trimmed) return "";
     return trimmed.startsWith(OPENAI_MODEL_VALUE_PREFIX)
@@ -196,7 +197,7 @@ async function resolveUserOpenAiApiKey(userId: string): Promise<string | null> {
     }).catch(() => null);
 }
 
-async function fetchOpenAiModels(apiKey: string): Promise<OpenAiModelsResponse["data"] | null> {
+export async function fetchOpenAiModels(apiKey: string): Promise<OpenAiModelsResponse["data"] | null> {
     const response = await fetch("https://api.openai.com/v1/models", {
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -228,6 +229,31 @@ function buildOpenAiModelOptions(apiModels: NonNullable<OpenAiModelsResponse["da
 export const getAvailableOpenAiTextModels = unstable_cache(
     async (locationId?: string): Promise<OpenAiModelOption[]> => {
         try {
+            const storedModels = locationId
+                ? [
+                    ...(await getStoredProviderModelOptions({
+                        provider: "openai_api",
+                        scopeType: "LOCATION",
+                        scopeId: locationId,
+                        taskId: "general.text",
+                    })),
+                    ...(await getStoredProviderModelOptions({
+                        provider: "openai_api",
+                        scopeType: "GLOBAL",
+                        scopeId: "global",
+                        taskId: "general.text",
+                    })),
+                ]
+                : await getStoredProviderModelOptions({
+                    provider: "openai_api",
+                    scopeType: "GLOBAL",
+                    scopeId: "global",
+                    taskId: "general.text",
+                });
+            if (storedModels.length > 0) {
+                return sortOpenAiModels(dedupeModelOptions(storedModels));
+            }
+
             const apiKey = await resolveOpenAiApiKey(locationId, { includeAuthenticatedUser: false });
             if (!apiKey) return FALLBACK_OPENAI_TEXT_MODELS;
 
@@ -247,6 +273,16 @@ export const getAvailableOpenAiTextModels = unstable_cache(
 export const getAvailableOpenAiTextModelsForUser = unstable_cache(
     async (userId: string): Promise<OpenAiModelOption[]> => {
         try {
+            const storedModels = await getStoredProviderModelOptions({
+                provider: "openai_api",
+                scopeType: "USER",
+                scopeId: userId,
+                taskId: "general.text",
+            });
+            if (storedModels.length > 0) {
+                return sortOpenAiModels(dedupeModelOptions(storedModels));
+            }
+
             const apiKey = await resolveUserOpenAiApiKey(userId);
             if (!apiKey) return FALLBACK_OPENAI_TEXT_MODELS;
 
