@@ -158,6 +158,60 @@ function normalizeFix(
     };
 }
 
+function buildFallbackFixes(
+    analysis: Pick<ImageEnhancementAnalysis, "sceneSummary" | "detectedElements">
+): ImageEnhancementSuggestedFix[] {
+    const detected = analysis.detectedElements.slice(0, 4).map((element, index) => ({
+        id: `improve_${slugifyId(element.id || element.label) || `element_${index + 1}`}`,
+        label: `Improve ${toSingleLine(element.label).slice(0, 80)}`,
+        description: `Enhance the visible ${toSingleLine(element.label).toLowerCase()} so it looks clean, realistic, and listing-ready.`,
+        impact: element.severity === "high" ? "high" as const : "medium" as const,
+        defaultSelected: index < 3,
+        promptInstruction: `Improve the ${toSingleLine(element.label).toLowerCase()} while preserving its real shape, material, and position.`,
+    }));
+
+    const baseline: ImageEnhancementSuggestedFix[] = [
+        {
+            id: "improve_lighting",
+            label: "Improve lighting",
+            description: "Balance exposure, shadows, and highlights for a clearer listing photo.",
+            impact: "high",
+            defaultSelected: true,
+            promptInstruction: "Improve lighting, exposure, and shadow balance while keeping the scene natural.",
+        },
+        {
+            id: "enhance_clarity",
+            label: "Enhance clarity",
+            description: "Reduce softness and noise while preserving realistic texture.",
+            impact: "medium",
+            defaultSelected: true,
+            promptInstruction: "Enhance image clarity, sharpness, and noise control without making surfaces look artificial.",
+        },
+        {
+            id: "correct_composition",
+            label: "Correct composition",
+            description: "Straighten perspective and improve framing without changing the room layout.",
+            impact: "medium",
+            defaultSelected: true,
+            promptInstruction: "Correct perspective, horizon, and framing while preserving the real room proportions.",
+        },
+        {
+            id: "clean_visual_distractions",
+            label: "Clean distractions",
+            description: "Reduce minor clutter and visual distractions that hurt listing quality.",
+            impact: "medium",
+            defaultSelected: false,
+            promptInstruction: "Clean minor visual distractions and clutter while preserving permanent property features.",
+        },
+    ];
+
+    const unique = new Map<string, ImageEnhancementSuggestedFix>();
+    for (const fix of [...detected, ...baseline]) {
+        if (!unique.has(fix.id)) unique.set(fix.id, fix);
+    }
+    return Array.from(unique.values()).slice(0, 8);
+}
+
 function requireSelectedModel(model: string, step: "analysis" | "generation"): string {
     const normalized = String(model || "").trim();
     if (!normalized) {
@@ -211,13 +265,19 @@ export function normalizeImageEnhancementAnalysis(raw: unknown): ImageEnhancemen
         if (!uniqueFixes.has(fix.id)) uniqueFixes.set(fix.id, fix);
     }
 
-    return {
+    const normalizedAnalysis = {
         sceneSummary: toSingleLine(parsed.data.sceneSummary),
         sceneContext: toSingleLine(parsed.data.sceneContext || parsed.data.promptPolish || parsed.data.sceneSummary),
         detectedElements: normalizedElements,
         suggestedFixes: Array.from(uniqueFixes.values()),
         actionLogDraft: parsed.data.actionLogDraft.map((line) => toSingleLine(line)).filter(Boolean),
     };
+
+    if (normalizedAnalysis.suggestedFixes.length === 0) {
+        normalizedAnalysis.suggestedFixes = buildFallbackFixes(normalizedAnalysis);
+    }
+
+    return normalizedAnalysis;
 }
 
 function getTextPartsFromResponse(response: GeminiGenerateContentResponse): string[] {

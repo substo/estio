@@ -97,7 +97,7 @@ export async function POST(req: Request) {
         // Blocking AI usage telemetry to ensure it is not cancelled by the Next.js runtime.
         await securelyRecordAiUsage({
             locationId: parsed.data.locationId,
-            userId,
+            userId: null,
             resourceType: "property",
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",

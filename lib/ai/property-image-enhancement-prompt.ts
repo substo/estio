@@ -118,6 +118,9 @@ Output strict JSON only:
 Rules:
 - Keep bbox optional and normalized to 0..1 when provided.
 - Keep labels concise and UI-friendly.
+- Always return at least 3 and ideally 5-8 "suggestedFixes" for ordinary property photos, even if the photo is acceptable. Include technical quality, lighting/color, composition/crop, cleanup/clutter, and lens/perspective fixes where relevant.
+- Return suggestedFixes as user-facing feature chips, not as prose. Each chip must have a specific imperative promptInstruction that can be selected independently.
+- Return detectedElements for visible objects or areas a user may want to preserve, improve, or remove, such as furniture, windows, lights, floor, walls, clutter, reflections, people, vehicles, sky, pool, garden, or balcony.
 - Focus on real-estate listing improvements (composition, cleanup, lighting, clarity, realism).
 - Do not suggest changes that misrepresent property structure.
 - "sceneContext" must stay neutral and descriptive. Do not embed optional fixes, removals, or edit instructions in it.

@@ -218,6 +218,7 @@ export function PropertyImageEnhanceDialog({
     } = usePropertyImageEnhancementModelCatalog();
     const [mode, setMode] = useState<EnhancementMode>("polish");
     const [workflowMode, setWorkflowMode] = useState<EnhancementWorkflowMode>("semi_auto");
+    const [activePolishTab, setActivePolishTab] = useState<"classify" | "analysis" | "generate">("classify");
     const [showUsage, setShowUsage] = useState(false);
     const [usageRefreshKey, setUsageRefreshKey] = useState(0);
     const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
@@ -237,11 +238,7 @@ export function PropertyImageEnhanceDialog({
     const [selectedGenerationModel, setSelectedGenerationModel] = useState("");
     const [persistedModelPreference, setPersistedModelPreference] = useState<PropertyImageEnhancementModelPreference>(EMPTY_MODEL_PREFERENCE);
     const [usedAnalysisModel, setUsedAnalysisModel] = useState<string | null>(null);
-    const [showAnalysisSettings, setShowAnalysisSettings] = useState(false);
-    const [showInstructionEditor, setShowInstructionEditor] = useState(false);
-    const [showAnalysisModelPicker, setShowAnalysisModelPicker] = useState(false);
-    const [showGenerationSettings, setShowGenerationSettings] = useState(false);
-    const [showLivePrompt, setShowLivePrompt] = useState(false);
+    const [showAnalysisSettings, setShowAnalysisSettings] = useState(true);
     const [precisionTool, setPrecisionTool] = useState<PrecisionMaskTool>("brush");
     const [precisionBrushSize, setPrecisionBrushSize] = useState(36);
     const [precisionEraseMode, setPrecisionEraseMode] = useState(false);
@@ -345,6 +342,7 @@ export function PropertyImageEnhanceDialog({
     useEffect(() => {
         if (!open) {
             setMode("polish");
+            setActivePolishTab("classify");
             setAnalysis(null);
             setSelectedFixIds([]);
             setRemovedDetectedElementIds([]);
@@ -361,11 +359,7 @@ export function PropertyImageEnhanceDialog({
             analysisModelTouchedRef.current = false;
             generationModelTouchedRef.current = false;
             setUsedAnalysisModel(null);
-            setShowAnalysisSettings(false);
-            setShowInstructionEditor(false);
-            setShowAnalysisModelPicker(false);
-            setShowGenerationSettings(false);
-            setShowLivePrompt(false);
+            setShowAnalysisSettings(true);
             setPrecisionTool("brush");
             setPrecisionBrushSize(36);
             setPrecisionEraseMode(false);
@@ -419,6 +413,7 @@ export function PropertyImageEnhanceDialog({
             return;
         }
         setAnalysis(null);
+        setActivePolishTab("classify");
         setSelectedFixIds([]);
         setRemovedDetectedElementIds([]);
         setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
@@ -432,11 +427,7 @@ export function PropertyImageEnhanceDialog({
         fullAutoRunKeyRef.current = "";
         setUserInstructions("");
         setUsedAnalysisModel(null);
-        setShowAnalysisSettings(false);
-        setShowInstructionEditor(false);
-        setShowAnalysisModelPicker(false);
-        setShowGenerationSettings(false);
-        setShowLivePrompt(false);
+        setShowAnalysisSettings(true);
         setPrecisionSelectableRegions([]);
         setPrecisionClickSelectEnabled(false);
         setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
@@ -1219,290 +1210,370 @@ export function PropertyImageEnhanceDialog({
     }
 
     function renderPolishControls() {
-        const selectedFixes = effectiveAnalysis?.suggestedFixes.filter((fix) => selectedFixIds.includes(fix.id)) || [];
-        const removedElements = effectiveAnalysis?.detectedElements.filter((item) => removedDetectedElementIds.includes(item.id)) || [];
-
         return (
-            <div className="grid gap-3 lg:grid-cols-3">
-                <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <Badge variant="outline">1. Classify</Badge>
-                            <p className="mt-2 text-sm font-medium">{selectedRoomType.label || "Unclassified room"}</p>
-                        </div>
-                        {roomTypePrediction ? (
-                            <Badge variant="secondary">{Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%</Badge>
-                        ) : null}
-                    </div>
-
-                    {renderRoomTypeSelector()}
-
-                    <div className="flex items-center justify-between gap-3 rounded-md border p-2">
-                        <span className="text-xs font-medium">Reuse saved room prompt</span>
-                        <Switch
-                            checked={reuseSavedRoomPrompt}
-                            onCheckedChange={setReuseSavedRoomPrompt}
-                            disabled={!hasSelectedRoomPrompt}
-                        />
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                        <Button
+            <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-1 rounded-md border bg-muted/40 p-1">
+                    {[
+                        { value: "classify", label: "Classify" },
+                        { value: "analysis", label: "Analyze" },
+                        { value: "generate", label: "Generate" },
+                    ].map((tab) => (
+                        <button
+                            key={tab.value}
                             type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => void handlePredictRoomTypeForCurrentImage()}
-                            disabled={isBusy || !selectedAnalysisModel || Boolean(roomTypePrediction)}
+                            onClick={() => setActivePolishTab(tab.value as typeof activePolishTab)}
+                            className={cn(
+                                "rounded px-2 py-2 text-xs font-medium transition-colors sm:text-sm",
+                                activePolishTab === tab.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                            )}
                         >
-                            {isPredictingRoomType ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            Classify
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowInstructionEditor((prev) => !prev)}
-                        >
-                            AI request
-                        </Button>
-                    </div>
-
-                    {showInstructionEditor ? (
-                        <div className="space-y-2">
-                            <Textarea
-                                value={userInstructions}
-                                onChange={(event) => setUserInstructions(event.target.value)}
-                                placeholder="Add a specific request for this photo."
-                                className="min-h-[96px] text-sm"
-                            />
-                            <p className="text-xs text-muted-foreground">These notes are included in analysis and generation.</p>
-                        </div>
-                    ) : (
-                        <p className="line-clamp-2 text-xs text-muted-foreground">
-                            {userInstructions.trim() || (hasSelectedRoomPrompt ? "Saved prompt memory is available for this room type." : "No extra AI request added.")}
-                        </p>
-                    )}
+                            {tab.label}
+                        </button>
+                    ))}
                 </div>
 
-                <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <Badge variant="outline">2. Analyze</Badge>
-                            <p className="mt-2 text-sm font-medium">
-                                {effectiveAnalysis ? `${effectiveAnalysis.suggestedFixes.length} feature chips` : "Find editable features"}
-                            </p>
+                {activePolishTab === "classify" ? (
+                    <div className="grid gap-3 rounded-md border p-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <div className="space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <Label className="text-sm font-medium">Classification & Prompt Memory</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        Classify the room, then reuse saved prompt context for matching room types.
+                                    </p>
+                                </div>
+                                {roomTypePrediction ? (
+                                    <Badge variant="secondary">{Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%</Badge>
+                                ) : null}
+                            </div>
+                            {renderRoomTypeSelector()}
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void handlePredictRoomTypeForCurrentImage()}
+                                disabled={isBusy || !selectedAnalysisModel || Boolean(roomTypePrediction)}
+                            >
+                                {isPredictingRoomType ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                Classify Photo
+                            </Button>
                         </div>
-                        {analysis ? <Badge variant="secondary">Done</Badge> : null}
-                    </div>
 
-                    <button
-                        type="button"
-                        onClick={() => setShowAnalysisModelPicker((prev) => !prev)}
-                        className="w-full rounded-md border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted"
-                    >
-                        Model: {getModelLabel(usedAnalysisModel || selectedAnalysisModel) || "Select analysis model"}
-                    </button>
-
-                    {showAnalysisModelPicker || showAnalysisSettings ? (
-                        <div className="space-y-2">
-                            <AiModelSelect
-                                value={selectedAnalysisModel}
-                                models={analysisModels}
-                                onValueChange={handleAnalysisModelChange}
-                                disabled={isBusy || modelCatalogLoading}
-                                placeholder={modelCatalogLoading ? "Loading models..." : "Select analysis model"}
-                            />
-                            {analysisModels.length === 0 && !modelCatalogLoading ? (
-                                <p className="text-xs text-amber-700">No compatible analysis models are available.</p>
-                            ) : null}
-                        </div>
-                    ) : null}
-
-                    <Button
-                        type="button"
-                        onClick={handleAnalyze}
-                        disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || !selectedAnalysisModel}
-                        className="w-full"
-                    >
-                        {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {analysis ? "Re-analyze" : "Analyze"}
-                    </Button>
-
-                    {effectiveAnalysis ? (
-                        <div className="space-y-2">
-                            <p className="line-clamp-2 text-xs text-muted-foreground">{effectiveAnalysis.sceneSummary}</p>
-                            <div className="flex flex-wrap gap-2">
-                                {effectiveAnalysis.suggestedFixes.map((fix) => {
-                                    const active = selectedFixIds.includes(fix.id);
-                                    if (editingFixId === fix.id) {
-                                        return (
-                                            <Input
-                                                key={fix.id}
-                                                autoFocus
-                                                value={editingFixLabel}
-                                                onChange={(event) => setEditingFixLabel(event.target.value)}
-                                                onKeyDown={(event) => event.key === "Enter" && saveEditingFix()}
-                                                onBlur={saveEditingFix}
-                                                className="h-8 w-44 text-xs"
-                                            />
-                                        );
-                                    }
-                                    return (
-                                        <button
-                                            key={fix.id}
-                                            type="button"
-                                            onClick={() => toggleFix(fix.id)}
-                                            onDoubleClick={() => startEditingFix(fix.id, fix.label)}
-                                            className={cn(
-                                                "rounded-full border px-3 py-1 text-xs transition-colors",
-                                                active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted"
-                                            )}
-                                            title="Click to select. Double-click to edit the feature instruction."
-                                        >
-                                            {fix.label}
-                                        </button>
-                                    );
-                                })}
-                                {isAddingFix ? (
-                                    <Input
-                                        autoFocus
-                                        value={newFixLabel}
-                                        onChange={(event) => setNewFixLabel(event.target.value)}
-                                        onKeyDown={(event) => event.key === "Enter" && saveNewFix()}
-                                        onBlur={saveNewFix}
-                                        placeholder="New feature"
-                                        className="h-8 w-36 text-xs"
-                                    />
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsAddingFix(true)}
-                                        className="rounded-full border border-dashed px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                                    >
-                                        + Feature
-                                    </button>
-                                )}
+                        <div className="space-y-3">
+                            <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <Label className="text-sm font-medium">Use Saved Room Profile Prompt</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        {hasSelectedRoomPrompt
+                                            ? "Reuses the saved approved prompt for this room type during analysis and generation."
+                                            : "No saved prompt exists for this room type yet."}
+                                    </p>
+                                </div>
+                                <Switch
+                                    checked={reuseSavedRoomPrompt}
+                                    onCheckedChange={setReuseSavedRoomPrompt}
+                                    disabled={!hasSelectedRoomPrompt}
+                                />
                             </div>
 
-                            {effectiveAnalysis.detectedElements.length > 0 ? (
-                                <div className="flex flex-wrap gap-2">
-                                    {effectiveAnalysis.detectedElements.slice(0, 8).map((item) => {
-                                        const active = removedDetectedElementIds.includes(item.id);
-                                        return (
-                                            <button
-                                                key={item.id}
-                                                type="button"
-                                                onClick={() => toggleDetectedElementRemoval(item.id)}
-                                                className={cn(
-                                                    "rounded-full border px-3 py-1 text-xs transition-colors",
-                                                    active ? "border-destructive bg-destructive text-destructive-foreground" : "border-border bg-background hover:bg-muted"
-                                                )}
-                                            >
-                                                {active ? "Remove " : ""}{item.label}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            ) : null}
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Additional Instructions / Override</Label>
+                                <Textarea
+                                    value={userInstructions}
+                                    onChange={(event) => setUserInstructions(event.target.value)}
+                                    placeholder="Example: Remove the two people near the pool, keep the pool shape and terrace exactly the same, and preserve the natural sky."
+                                    className="min-h-[110px] text-sm"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    These notes are sent to analysis and generation.
+                                </p>
+                            </div>
                         </div>
-                    ) : (
-                        <p className="text-xs text-muted-foreground">Analyze once to turn the prompt into selectable feature chips.</p>
-                    )}
-                </div>
-
-                <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <Badge variant="outline">3. Generate</Badge>
-                            <p className="mt-2 text-sm font-medium">
-                                {selectedFixes.length + removedElements.length > 0
-                                    ? `${selectedFixes.length + removedElements.length} selected changes`
-                                    : "Ready after analysis"}
-                            </p>
-                        </div>
-                        {effectiveAnalysis ? <Badge variant="secondary">Ready</Badge> : null}
                     </div>
+                ) : null}
 
-                    <button
-                        type="button"
-                        onClick={() => setShowGenerationSettings((prev) => !prev)}
-                        className="w-full rounded-md border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted"
-                    >
-                        Model: {getModelLabel(selectedGenerationModel) || "Select generation model"}
-                    </button>
-
-                    {showGenerationSettings ? (
+                {activePolishTab === "analysis" ? (
+                    <div className="grid gap-3 rounded-md border p-3 lg:grid-cols-[320px_minmax(0,1fr)]">
                         <div className="space-y-3">
-                            <AiModelSelect
-                                value={selectedGenerationModel}
-                                models={generationModels}
-                                onValueChange={handleGenerationModelChange}
-                                disabled={isBusy || modelCatalogLoading}
-                                placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
-                            />
-                            <RadioGroup
-                                value={aggression}
-                                onValueChange={(value) => setAggression(value as EnhancementAggression)}
-                                className="grid grid-cols-3 gap-2"
-                            >
-                                {[
-                                    { value: "conservative", label: "Light" },
-                                    { value: "balanced", label: "Balanced" },
-                                    { value: "aggressive", label: "Strong" },
-                                ].map((option) => (
-                                    <label
-                                        key={option.value}
-                                        className={cn(
-                                            "flex items-center justify-center rounded-md border px-2 py-2 text-xs font-medium",
-                                            aggression === option.value ? "border-primary bg-primary/5" : "border-border"
-                                        )}
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <Label className="text-sm font-medium">Analysis</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        Use a structured vision model to identify issues and prepare fix chips.
+                                    </p>
+                                </div>
+                                {analysis ? <Badge variant="outline">Complete</Badge> : null}
+                            </div>
+
+                            {analysis && !showAnalysisSettings ? (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-muted-foreground">
+                                        Last analysis model: {getModelLabel(usedAnalysisModel || selectedAnalysisModel)}
+                                    </p>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => setShowAnalysisSettings(true)}
+                                        disabled={isBusy}
                                     >
-                                        <RadioGroupItem value={option.value} className="sr-only" />
-                                        {option.label}
-                                    </label>
-                                ))}
-                            </RadioGroup>
-                            {generationModels.length === 0 && !modelCatalogLoading ? (
-                                <p className="text-xs text-amber-700">No compatible generation models are available.</p>
-                            ) : null}
+                                        Change Analysis Model
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium">Analysis Model</Label>
+                                        <AiModelSelect
+                                            value={selectedAnalysisModel}
+                                            models={analysisModels}
+                                            onValueChange={handleAnalysisModelChange}
+                                            disabled={isBusy || modelCatalogLoading}
+                                            placeholder={modelCatalogLoading ? "Loading models..." : "Select analysis model"}
+                                        />
+                                        <p className="text-xs text-muted-foreground">
+                                            Only models compatible with structured image analysis are shown here.
+                                        </p>
+                                    </div>
+
+                                    {analysisModels.length === 0 && !modelCatalogLoading ? (
+                                        <p className="text-xs text-amber-700">
+                                            No compatible analysis models are available for this location&apos;s Google AI key.
+                                        </p>
+                                    ) : null}
+                                </div>
+                            )}
+
+                            <Button
+                                type="button"
+                                onClick={handleAnalyze}
+                                disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || !selectedAnalysisModel}
+                                className="w-full"
+                            >
+                                {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                {analysis ? "Re-analyze Photo" : "Analyze Photo"}
+                            </Button>
                         </div>
-                    ) : null}
 
-                    <Button
-                        type="button"
-                        onClick={() => void (effectiveAnalysis ? handleGenerate() : handleEnhancePhoto())}
-                        disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || generationModels.length === 0 || !selectedAnalysisModel || !selectedGenerationModel}
-                        className="w-full"
-                    >
-                        {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                        {effectiveAnalysis ? "Generate Image" : "Analyze + Generate"}
-                    </Button>
+                        <div className="space-y-4">
+                            {effectiveAnalysis ? (
+                                <>
+                                    <div className="space-y-1">
+                                        <Label className="text-sm font-medium">Scene Summary</Label>
+                                        <p className="text-sm text-muted-foreground">{effectiveAnalysis.sceneSummary}</p>
+                                    </div>
 
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowLivePrompt((prev) => !prev)}
-                        disabled={!effectiveAnalysis}
-                        className="w-full"
-                    >
-                        {showLivePrompt ? "Hide Prompt" : "View Prompt"}
-                    </Button>
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium">Suggested Fixes</Label>
+                                        {effectiveAnalysis.suggestedFixes.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                No fixes were suggested. You can still generate with polish mode or use the override instructions.
+                                            </p>
+                                        ) : (
+                                            <div className="flex flex-wrap gap-2">
+                                                {effectiveAnalysis.suggestedFixes.map((fix) => {
+                                                    const active = selectedFixIds.includes(fix.id);
+                                                    if (editingFixId === fix.id) {
+                                                        return (
+                                                            <div key={fix.id} className="flex items-center gap-1">
+                                                                <Input
+                                                                    autoFocus
+                                                                    value={editingFixLabel}
+                                                                    onChange={(event) => setEditingFixLabel(event.target.value)}
+                                                                    onKeyDown={(event) => event.key === "Enter" && saveEditingFix()}
+                                                                    onBlur={saveEditingFix}
+                                                                    className="h-7 w-40 px-2 py-1 text-xs"
+                                                                />
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div key={fix.id} className="group relative flex items-center">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => toggleFix(fix.id)}
+                                                                className={cn(
+                                                                    "rounded-full border px-3 py-1 pr-7 text-xs transition-colors",
+                                                                    active
+                                                                        ? "border-primary bg-primary text-primary-foreground"
+                                                                        : "border-border bg-background text-foreground hover:bg-muted"
+                                                                )}
+                                                            >
+                                                                {fix.label}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => startEditingFix(fix.id, fix.label)}
+                                                                className={cn(
+                                                                    "absolute right-1 rounded-full p-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100",
+                                                                    active ? "text-primary-foreground hover:bg-primary/20" : "text-muted-foreground hover:bg-muted-foreground/20"
+                                                                )}
+                                                            >
+                                                                <span className="text-[10px] leading-none">Edit</span>
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {isAddingFix ? (
+                                                    <div className="flex items-center gap-1">
+                                                        <Input
+                                                            autoFocus
+                                                            value={newFixLabel}
+                                                            onChange={(event) => setNewFixLabel(event.target.value)}
+                                                            onKeyDown={(event) => event.key === "Enter" && saveNewFix()}
+                                                            onBlur={saveNewFix}
+                                                            placeholder="Type fix..."
+                                                            className="h-7 w-32 px-2 py-1 text-xs"
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsAddingFix(true)}
+                                                        className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-transparent px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                                                    >
+                                                        <span>Add Fix</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
 
-                    {showLivePrompt && effectiveAnalysis ? (
-                        <Textarea value={liveFinalPrompt} readOnly className="min-h-[120px] text-xs" />
-                    ) : (
-                        <p className="line-clamp-2 text-xs text-muted-foreground">
-                            {effectiveAnalysis
-                                ? liveFinalPrompt
-                                : "The final prompt will be assembled from the selected feature chips, removed objects, room memory, and user request."}
-                        </p>
-                    )}
+                                    {effectiveAnalysis.detectedElements.length > 0 ? (
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium">Detected Elements</Label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {effectiveAnalysis.detectedElements.slice(0, 12).map((item) => {
+                                                    const markedForRemoval = removedDetectedElementIds.includes(item.id);
+                                                    return (
+                                                        <button
+                                                            key={item.id}
+                                                            type="button"
+                                                            onClick={() => toggleDetectedElementRemoval(item.id)}
+                                                            className={cn(
+                                                                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors",
+                                                                markedForRemoval
+                                                                    ? "border-destructive bg-destructive text-destructive-foreground"
+                                                                    : "border-border bg-background text-foreground hover:bg-muted"
+                                                            )}
+                                                        >
+                                                            <span>{item.label}</span>
+                                                            <span className={cn(
+                                                                "text-[10px]",
+                                                                markedForRemoval ? "text-destructive-foreground/90" : "text-muted-foreground"
+                                                            )}>
+                                                                {markedForRemoval ? "Will remove" : `Remove (${item.severity})`}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : null}
 
-                    {workflowMode === "full_auto" ? (
-                        <p className="text-xs text-amber-700">Auto runs classification, analysis, and generation for this photo.</p>
-                    ) : null}
-                </div>
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium">Live Final Prompt</Label>
+                                        <Textarea value={liveFinalPrompt} readOnly className="min-h-[140px] text-xs" />
+                                        <p className="text-xs text-muted-foreground">
+                                            This prompt updates whenever you change fixes, removals, aggression, prompt reuse, or override instructions.
+                                        </p>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                                    Run analysis to produce selectable fix chips, detected elements, and the live final prompt.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ) : null}
+
+                {activePolishTab === "generate" ? (
+                    <div className="grid gap-3 rounded-md border p-3 lg:grid-cols-[320px_minmax(0,1fr)]">
+                        <div className="space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <Label className="text-sm font-medium">Generation</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        Choose an image-editing model and create the listing-ready result.
+                                    </p>
+                                </div>
+                                {effectiveAnalysis ? <Badge variant="secondary">Ready</Badge> : null}
+                            </div>
+
+                            {!effectiveAnalysis ? (
+                                <p className="text-xs text-muted-foreground">
+                                    Run analysis or use a saved room profile prompt so the next step has context to work from.
+                                </p>
+                            ) : null}
+
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Generation Model</Label>
+                                <AiModelSelect
+                                    value={selectedGenerationModel}
+                                    models={generationModels}
+                                    onValueChange={handleGenerationModelChange}
+                                    disabled={isBusy || modelCatalogLoading}
+                                    placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Only models that look capable of returning edited images are shown here.
+                                </p>
+                            </div>
+
+                            {generationModels.length === 0 && !modelCatalogLoading ? (
+                                <p className="text-xs text-amber-700">
+                                    No compatible image-generation models are available for this location&apos;s Google AI key.
+                                </p>
+                            ) : null}
+
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void handleGenerate()}
+                                disabled={!effectiveAnalysis || isBusy || modelCatalogLoading || generationModels.length === 0 || !selectedGenerationModel}
+                                className="w-full"
+                            >
+                                {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                Generate Enhanced Image
+                            </Button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Enhancement Aggression</Label>
+                                <RadioGroup
+                                    value={aggression}
+                                    onValueChange={(value) => setAggression(value as EnhancementAggression)}
+                                    className="grid gap-3 sm:grid-cols-3"
+                                >
+                                    {[
+                                        { value: "conservative", label: "Conservative", help: "Minimal correction, strict scene preservation." },
+                                        { value: "balanced", label: "Balanced", help: "Moderate polish with realistic upgrades." },
+                                        { value: "aggressive", label: "Aggressive", help: "Stronger cleanup and visual polish." },
+                                    ].map((option) => (
+                                        <label
+                                            key={option.value}
+                                            className={cn(
+                                                "flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
+                                                aggression === option.value ? "border-primary bg-primary/5" : "border-border"
+                                            )}
+                                        >
+                                            <RadioGroupItem value={option.value} className="mt-0.5" />
+                                            <span>
+                                                <span className="font-medium">{option.label}</span>
+                                                <span className="block text-xs text-muted-foreground">{option.help}</span>
+                                            </span>
+                                        </label>
+                                    ))}
+                                </RadioGroup>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Selected Prompt Preview</Label>
+                                <Textarea value={liveFinalPrompt} readOnly className="min-h-[160px] text-xs" />
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
             </div>
         );
     }

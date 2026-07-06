@@ -115,7 +115,7 @@ export async function POST(req: Request) {
         // Blocking AI usage telemetry (Imagen uses flat-rate pricing, no tokens)
         await securelyRecordAiUsage({
             locationId: parsed.data.locationId,
-            userId,
+            userId: null,
             resourceType: "property",
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",
