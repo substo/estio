@@ -35,20 +35,35 @@ function timeAgo(dateStr: string): string {
 
 interface PropertyAiUsageBadgeProps {
     propertyId: string;
+    refreshKey?: number;
+    defaultExpanded?: boolean;
+    hideWhenEmpty?: boolean;
+    title?: string;
+    emptyLabel?: string;
+    className?: string;
 }
 
-export function PropertyAiUsageBadge({ propertyId }: PropertyAiUsageBadgeProps) {
+export function PropertyAiUsageBadge({
+    propertyId,
+    refreshKey = 0,
+    defaultExpanded = false,
+    hideWhenEmpty = true,
+    title = "AI Usage",
+    emptyLabel = "No AI usage recorded yet",
+    className = "",
+}: PropertyAiUsageBadgeProps) {
     const [data, setData] = useState<AiUsageSummary | null>(null);
-    const [expanded, setExpanded] = useState(false);
+    const [expanded, setExpanded] = useState(defaultExpanded);
 
     useEffect(() => {
         getPropertyAiUsageSummary(propertyId).then(setData).catch(() => { });
-    }, [propertyId]);
+    }, [propertyId, refreshKey]);
 
-    if (!data || data.totalCalls === 0) return null;
+    if (!data) return null;
+    if (data.totalCalls === 0 && hideWhenEmpty) return null;
 
     return (
-        <div className="border rounded-lg bg-card overflow-hidden">
+        <div className={`border rounded-lg bg-card overflow-hidden ${className}`}>
             {/* Compact summary bar */}
             <button
                 onClick={() => setExpanded((prev) => !prev)}
@@ -56,12 +71,18 @@ export function PropertyAiUsageBadge({ propertyId }: PropertyAiUsageBadgeProps) 
             >
                 <div className="flex items-center gap-2 text-sm font-medium">
                     <Sparkles className="h-4 w-4 text-amber-500" />
-                    <span>AI Usage</span>
+                    <span>{title}</span>
                 </div>
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>{data.totalCalls} calls</span>
-                    <span>{formatTokens(data.totalTokens)} tokens</span>
-                    <span className="font-medium text-foreground">{formatCost(data.totalEstimatedCostUsd)}</span>
+                    {data.totalCalls > 0 ? (
+                        <>
+                            <span>{data.totalCalls} calls</span>
+                            <span>{formatTokens(data.totalTokens)} tokens</span>
+                            <span className="font-medium text-foreground">{formatCost(data.totalEstimatedCostUsd)}</span>
+                        </>
+                    ) : (
+                        <span>{emptyLabel}</span>
+                    )}
                     <svg
                         className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`}
                         xmlns="http://www.w3.org/2000/svg"
@@ -78,6 +99,12 @@ export function PropertyAiUsageBadge({ propertyId }: PropertyAiUsageBadgeProps) 
             {/* Expanded details */}
             {expanded && (
                 <div className="border-t px-4 py-3 space-y-4">
+                    {data.totalCalls === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                            Classification, analysis, generation, and precision remove usage will appear here after AI runs.
+                        </p>
+                    ) : null}
+
                     {/* Breakdown by action */}
                     {data.byAction.length > 0 && (
                         <div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Sparkles, Edit2, Plus } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, Loader2, Sparkles, Edit2, Plus, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { usePropertyImageEnhancementModelCatalog } from "@/components/ai/use-property-image-enhancement-model-catalog";
@@ -66,6 +66,7 @@ import {
     type PrecisionMaskSnapshot,
     type PrecisionMaskTool,
 } from "./property-image-mask-editor";
+import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
 
 interface PropertyImageLike {
     url: string;
@@ -89,12 +90,16 @@ interface PropertyImageEnhanceDialogProps {
     propertyId?: string;
     image: PropertyImageLike | null;
     imageIndex: number;
+    imageCount?: number;
+    onNavigateImage?: (nextIndex: number) => void;
     roomPromptProfiles?: PropertyImagePromptProfile[];
     precisionRemoveEnabled?: boolean;
     onApplyVariant: (payload: GeneratedVariantPayload) => void;
     canRevertActiveSource?: boolean;
     onRevertActiveSource?: () => void;
 }
+
+type EnhancementWorkflowMode = "semi_auto" | "full_auto";
 
 interface AnalyzeApiResponse {
     success: true;
@@ -187,6 +192,8 @@ export function PropertyImageEnhanceDialog({
     propertyId,
     image,
     imageIndex,
+    imageCount = 1,
+    onNavigateImage,
     roomPromptProfiles = [],
     precisionRemoveEnabled = false,
     onApplyVariant,
@@ -197,6 +204,8 @@ export function PropertyImageEnhanceDialog({
     const analysisModelTouchedRef = useRef(false);
     const generationModelTouchedRef = useRef(false);
     const roomTypePredictionRequestRef = useRef("");
+    const fullAutoRunKeyRef = useRef("");
+    const skipNextSourceResetRef = useRef(false);
     const {
         analysisModels,
         generationModels,
@@ -205,6 +214,9 @@ export function PropertyImageEnhanceDialog({
         getModelLabel,
     } = usePropertyImageEnhancementModelCatalog();
     const [mode, setMode] = useState<EnhancementMode>("polish");
+    const [workflowMode, setWorkflowMode] = useState<EnhancementWorkflowMode>("semi_auto");
+    const [showUsage, setShowUsage] = useState(false);
+    const [usageRefreshKey, setUsageRefreshKey] = useState(0);
     const [analysis, setAnalysis] = useState<ImageEnhancementAnalysis | null>(null);
     const [selectedFixIds, setSelectedFixIds] = useState<string[]>([]);
     const [removedDetectedElementIds, setRemovedDetectedElementIds] = useState<string[]>([]);
@@ -237,6 +249,8 @@ export function PropertyImageEnhanceDialog({
     const [isRemoving, setIsRemoving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [generated, setGenerated] = useState<ImageEnhancementGeneratedResult | null>(null);
+    const [hasKeptResult, setHasKeptResult] = useState(false);
+    const [adjustmentInstructions, setAdjustmentInstructions] = useState("");
     const [editingFixId, setEditingFixId] = useState<string | null>(null);
     const [editingFixLabel, setEditingFixLabel] = useState("");
     const [isAddingFix, setIsAddingFix] = useState(false);
@@ -247,6 +261,11 @@ export function PropertyImageEnhanceDialog({
         if (!image) return false;
         return Boolean(image.cloudflareImageId || image.url);
     }, [propertyId, image]);
+    const sourceIdentity = useMemo(() => (
+        String(image?.cloudflareImageId || image?.url || "").trim()
+    ), [image?.cloudflareImageId, image?.url]);
+    const canGoPrevious = imageIndex > 0;
+    const canGoNext = imageIndex < Math.max(0, imageCount - 1);
     const selectedRoomType = useMemo(() => {
         if (roomTypeSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY) {
             const normalizedCustomLabel = normalizePropertyImageRoomTypeLabel(customRoomTypeLabel);
@@ -343,12 +362,47 @@ export function PropertyImageEnhanceDialog({
             setIsRemoving(false);
             setError(null);
             setGenerated(null);
+            setHasKeptResult(false);
+            setAdjustmentInstructions("");
             setEditingFixId(null);
             setEditingFixLabel("");
             setIsAddingFix(false);
             setNewFixLabel("");
+            fullAutoRunKeyRef.current = "";
         }
     }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (skipNextSourceResetRef.current) {
+            skipNextSourceResetRef.current = false;
+            return;
+        }
+        setAnalysis(null);
+        setSelectedFixIds([]);
+        setRemovedDetectedElementIds([]);
+        setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+        setCustomRoomTypeLabel("");
+        setReuseSavedRoomPrompt(false);
+        setIsPredictingRoomType(false);
+        setRoomTypePrediction(null);
+        setRoomTypeCandidates([]);
+        setRoomTypePredictionModel(null);
+        roomTypePredictionRequestRef.current = "";
+        fullAutoRunKeyRef.current = "";
+        setUserInstructions("");
+        setUsedAnalysisModel(null);
+        setShowAnalysisSettings(true);
+        setPrecisionSelectableRegions([]);
+        setPrecisionClickSelectEnabled(false);
+        setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
+        setLastPrecisionRequest(null);
+        setSelectedApplyMode(null);
+        setError(null);
+        setGenerated(null);
+        setHasKeptResult(false);
+        setAdjustmentInstructions("");
+    }, [open, sourceIdentity, propertyId]);
 
     useEffect(() => {
         if (!open) return;
@@ -418,86 +472,6 @@ export function PropertyImageEnhanceDialog({
     ]);
 
     useEffect(() => {
-        if (!open || !canRun || !propertyId || !image) return;
-        if (mode !== "polish") return;
-
-        const sourceIdentity = String(image.cloudflareImageId || image.url || "").trim();
-        const requestKey = `${propertyId}:${sourceIdentity}`;
-        if (!requestKey || roomTypePredictionRequestRef.current === requestKey) return;
-        roomTypePredictionRequestRef.current = requestKey;
-
-        let cancelled = false;
-        setIsPredictingRoomType(true);
-        setRoomTypePrediction(null);
-        setRoomTypeCandidates([]);
-        setRoomTypePredictionModel(null);
-
-        (async () => {
-            try {
-                const response = await fetch("/api/images/enhance/room-type/predict", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        locationId,
-                        propertyId,
-                        cloudflareImageId: image.cloudflareImageId,
-                        sourceUrl: image.url,
-                        analysisModel: selectedAnalysisModel || undefined,
-                    }),
-                });
-
-                const json = await response.json().catch(() => null);
-                if (!response.ok) {
-                    throw new Error(String(json?.error || "Failed to predict room type."));
-                }
-
-                const payload = json as RoomTypePredictApiResponse;
-                const suggested = resolvePropertyImageRoomType(payload.suggestedRoomType);
-                const candidates = (Array.isArray(payload.candidates) ? payload.candidates : [])
-                    .map((candidate) => resolvePropertyImageRoomType(candidate))
-                    .slice(0, 5);
-                const isConfident = Number(suggested.confidence || 0) >= PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE;
-
-                if (cancelled) return;
-                setRoomTypePrediction(suggested);
-                setRoomTypeCandidates(candidates);
-                setRoomTypePredictionModel(payload.model || null);
-
-                if (isConfident) {
-                    const nextSelectValue = toRoomTypeSelectValue(suggested.key);
-                    setRoomTypeSelectValue(nextSelectValue);
-                    setCustomRoomTypeLabel(nextSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? suggested.label : "");
-                    return;
-                }
-
-                setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
-                setCustomRoomTypeLabel("");
-            } catch (err) {
-                if (cancelled) return;
-                console.error("[PropertyImageEnhanceDialog] room type prediction error:", err);
-                setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
-                setCustomRoomTypeLabel("");
-            } finally {
-                if (!cancelled) {
-                    setIsPredictingRoomType(false);
-                }
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [
-        open,
-        canRun,
-        propertyId,
-        image,
-        mode,
-        locationId,
-        selectedAnalysisModel,
-    ]);
-
-    useEffect(() => {
         if (!open) return;
         if (!analysisModelTouchedRef.current && !generationModelTouchedRef.current) return;
 
@@ -515,6 +489,31 @@ export function PropertyImageEnhanceDialog({
         if (precisionSelectableRegions.length > 0) return;
         setPrecisionSelectableRegions(regions);
     }, [open, effectiveAnalysis, precisionSelectableRegions.length]);
+
+    useEffect(() => {
+        if (!open || workflowMode !== "full_auto") return;
+        if (mode !== "polish" || !canRun || !propertyId || !image) return;
+        if (modelCatalogLoading || !selectedAnalysisModel || !selectedGenerationModel) return;
+        if (isBusy || generated) return;
+
+        const runKey = `${propertyId}:${sourceIdentity}:${selectedAnalysisModel}:${selectedGenerationModel}`;
+        if (!sourceIdentity || fullAutoRunKeyRef.current === runKey) return;
+        fullAutoRunKeyRef.current = runKey;
+        void handleEnhancePhoto();
+    }, [
+        open,
+        workflowMode,
+        mode,
+        canRun,
+        propertyId,
+        image,
+        modelCatalogLoading,
+        selectedAnalysisModel,
+        selectedGenerationModel,
+        isBusy,
+        generated,
+        sourceIdentity,
+    ]);
 
     const handleAnalysisModelChange = (value: string) => {
         analysisModelTouchedRef.current = true;
@@ -610,6 +609,70 @@ export function PropertyImageEnhanceDialog({
         setError(null);
     }
 
+    async function handlePredictRoomTypeForCurrentImage() {
+        if (!canRun || !image || !propertyId) return;
+        if (mode !== "polish") return;
+        if (roomTypePrediction) return;
+        if (!selectedAnalysisModel.trim()) return;
+
+        const requestKey = `${propertyId}:${sourceIdentity}`;
+        if (!requestKey || roomTypePredictionRequestRef.current === requestKey) return;
+        roomTypePredictionRequestRef.current = requestKey;
+
+        setIsPredictingRoomType(true);
+        setRoomTypePrediction(null);
+        setRoomTypeCandidates([]);
+        setRoomTypePredictionModel(null);
+
+        try {
+            const response = await fetch("/api/images/enhance/room-type/predict", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    locationId,
+                    propertyId,
+                    cloudflareImageId: image.cloudflareImageId,
+                    sourceUrl: image.url,
+                    analysisModel: selectedAnalysisModel || undefined,
+                }),
+            });
+
+            const json = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(String(json?.error || "Failed to predict room type."));
+            }
+
+            const payload = json as RoomTypePredictApiResponse;
+            const suggested = resolvePropertyImageRoomType(payload.suggestedRoomType);
+            const candidates = (Array.isArray(payload.candidates) ? payload.candidates : [])
+                .map((candidate) => resolvePropertyImageRoomType(candidate))
+                .slice(0, 5);
+            const isConfident = Number(suggested.confidence || 0) >= PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE;
+
+            setRoomTypePrediction(suggested);
+            setRoomTypeCandidates(candidates);
+            setRoomTypePredictionModel(payload.model || null);
+            setUsageRefreshKey((prev) => prev + 1);
+
+            if (isConfident) {
+                const nextSelectValue = toRoomTypeSelectValue(suggested.key);
+                setRoomTypeSelectValue(nextSelectValue);
+                setCustomRoomTypeLabel(nextSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? suggested.label : "");
+            } else {
+                setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+                setCustomRoomTypeLabel("");
+            }
+        } catch (err) {
+            roomTypePredictionRequestRef.current = "";
+            console.error("[PropertyImageEnhanceDialog] room type prediction error:", err);
+            const message = err instanceof Error ? err.message : "Failed to predict room type.";
+            setError(message);
+            toast.error(message);
+        } finally {
+            setIsPredictingRoomType(false);
+        }
+    }
+
     async function handlePrecisionDetectSelectableObjects() {
         if (!canRun || !image || !propertyId) return;
 
@@ -663,13 +726,13 @@ export function PropertyImageEnhanceDialog({
         }
     }
 
-    async function handleAnalyze() {
-        if (!canRun || !image || !propertyId) return;
+    async function handleAnalyze(): Promise<ImageEnhancementAnalysis | null> {
+        if (!canRun || !image || !propertyId) return null;
         if (!selectedAnalysisModel.trim()) {
             const message = "Choose an analysis model before running photo analysis.";
             setError(message);
             toast.error(message);
-            return;
+            return null;
         }
 
         setError(null);
@@ -719,23 +782,27 @@ export function PropertyImageEnhanceDialog({
             setRemovedDetectedElementIds([]);
             setUsedAnalysisModel(payload.model);
             setShowAnalysisSettings(false);
+            setUsageRefreshKey((prev) => prev + 1);
+            return payload.analysis;
         } catch (err) {
             console.error("[PropertyImageEnhanceDialog] analyze error:", err);
             const message = err instanceof Error ? err.message : "Failed to analyze image.";
             setError(message);
             toast.error(message);
+            return null;
         } finally {
             setIsAnalyzing(false);
         }
     }
 
-    async function handleGenerate() {
-        if (!canRun || !image || !propertyId || !effectiveAnalysis) return;
+    async function handleGenerate(analysisOverride?: ImageEnhancementAnalysis | null, instructionsOverride?: string): Promise<ImageEnhancementGeneratedResult | null> {
+        const analysisForGeneration = analysisOverride || effectiveAnalysis;
+        if (!canRun || !image || !propertyId || !analysisForGeneration) return null;
         if (!selectedGenerationModel.trim()) {
             const message = "Choose a generation model before creating the enhanced image.";
             setError(message);
             toast.error(message);
-            return;
+            return null;
         }
 
         setError(null);
@@ -750,13 +817,13 @@ export function PropertyImageEnhanceDialog({
                     propertyId,
                     cloudflareImageId: image.cloudflareImageId,
                     sourceUrl: image.url,
-                    analysis: effectiveAnalysis,
+                    analysis: analysisForGeneration,
                     selectedFixIds,
                     removedDetectedElementIds,
                     aggression,
                     generationModel: selectedGenerationModel,
                     priorPrompt: effectivePriorPrompt,
-                    userInstructions,
+                    userInstructions: instructionsOverride ?? userInstructions,
                 }),
             });
 
@@ -766,21 +833,26 @@ export function PropertyImageEnhanceDialog({
             }
 
             const payload = json as GenerateApiResponse;
-            setSelectedApplyMode(null);
-            setGenerated({
-                mode: "polish",
+            const nextGenerated = {
+                mode: "polish" as const,
                 generatedImageId: payload.generatedImageId,
                 generatedImageUrl: payload.generatedImageUrl,
                 actionLog: payload.actionLog,
                 model: payload.model,
                 finalPrompt: payload.finalPrompt,
                 reusablePrompt: payload.reusablePrompt,
-            });
+            };
+            setSelectedApplyMode(null);
+            setGenerated(nextGenerated);
+            setHasKeptResult(false);
+            setUsageRefreshKey((prev) => prev + 1);
+            return nextGenerated;
         } catch (err) {
             console.error("[PropertyImageEnhanceDialog] generate error:", err);
             const message = err instanceof Error ? err.message : "Failed to generate enhanced image.";
             setError(message);
             toast.error(message);
+            return null;
         } finally {
             setIsGenerating(false);
         }
@@ -857,6 +929,8 @@ export function PropertyImageEnhanceDialog({
                 maskCoverage: payload.maskCoverage,
                 reusablePrompt: "",
             });
+            setHasKeptResult(false);
+            setUsageRefreshKey((prev) => prev + 1);
         } catch (err) {
             console.error("[PropertyImageEnhanceDialog] precision remove error:", err);
             const message = err instanceof Error ? err.message : "Failed to remove selected content.";
@@ -876,6 +950,35 @@ export function PropertyImageEnhanceDialog({
         }
 
         await handleGenerate();
+    }
+
+    async function handleEnhancePhoto() {
+        if (mode !== "polish") return;
+        if (!canRun || !image || !propertyId) return;
+
+        await handlePredictRoomTypeForCurrentImage();
+        const analysisForGeneration = effectiveAnalysis || await handleAnalyze();
+        if (!analysisForGeneration) return;
+        await handleGenerate(analysisForGeneration);
+    }
+
+    async function handleApplyAdjustment() {
+        const normalized = adjustmentInstructions.trim();
+        if (!normalized || !effectiveAnalysis) return;
+
+        const nextInstructions = [userInstructions.trim(), normalized]
+            .filter(Boolean)
+            .join("\n\n");
+        setUserInstructions(nextInstructions);
+        setAdjustmentInstructions("");
+        await handleGenerate(effectiveAnalysis, nextInstructions);
+    }
+
+    function handleNavigateImage(nextIndex: number) {
+        if (!onNavigateImage || isBusy) return;
+        const bounded = Math.min(Math.max(0, nextIndex), Math.max(0, imageCount - 1));
+        if (bounded === imageIndex) return;
+        onNavigateImage(bounded);
     }
 
     function handleBackToEdit() {
@@ -910,6 +1013,7 @@ export function PropertyImageEnhanceDialog({
             } : undefined,
         } : undefined;
 
+        skipNextSourceResetRef.current = true;
         onApplyVariant({
             url: generated.generatedImageUrl,
             cloudflareImageId: generated.generatedImageId,
@@ -917,7 +1021,8 @@ export function PropertyImageEnhanceDialog({
             promptProfileUpsert,
         });
         toast.success("Enhanced image added. Click Save Property to persist.");
-        onOpenChange(false);
+        setHasKeptResult(true);
+        setUsageRefreshKey((prev) => prev + 1);
     }
 
     function handleApplyPrecisionIterationAndContinue() {
@@ -973,6 +1078,33 @@ export function PropertyImageEnhanceDialog({
                         );
                     })}
                 </div>
+            </div>
+        );
+    }
+
+    function renderWorkflowSwitcher() {
+        return (
+            <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted/40 p-1">
+                {[
+                    { value: "semi_auto", label: "Semi Auto" },
+                    { value: "full_auto", label: "Full Auto" },
+                ].map((option) => {
+                    const active = workflowMode === option.value;
+                    return (
+                        <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setWorkflowMode(option.value as EnhancementWorkflowMode)}
+                            disabled={isBusy}
+                            className={cn(
+                                "rounded px-2 py-1.5 text-xs font-medium transition-colors",
+                                active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            {option.label}
+                        </button>
+                    );
+                })}
             </div>
         );
     }
@@ -1036,6 +1168,36 @@ export function PropertyImageEnhanceDialog({
     function renderPolishControls() {
         return (
             <>
+                <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                            <Label className="text-sm font-medium">
+                                {workflowMode === "full_auto" ? "Full Auto Enhancement" : "Semi Automatic Enhancement"}
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                                {workflowMode === "full_auto"
+                                    ? "Classification, analysis, and generation run automatically for each photo."
+                                    : "Add comments first, then run classification, analysis, and generation together."}
+                            </p>
+                        </div>
+                        {workflowMode === "full_auto" ? <Badge variant="secondary">Auto runs AI</Badge> : null}
+                    </div>
+                    <Button
+                        type="button"
+                        onClick={() => void handleEnhancePhoto()}
+                        disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || generationModels.length === 0 || !selectedAnalysisModel || !selectedGenerationModel}
+                        className="w-full"
+                    >
+                        {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                        {analysis ? "Generate Enhanced Image" : "Enhance Photo"}
+                    </Button>
+                    {workflowMode === "full_auto" ? (
+                        <p className="text-xs text-amber-700">
+                            Full Auto uses chargeable AI calls for room classification, analysis, and image generation.
+                        </p>
+                    ) : null}
+                </div>
+
                 <div className="space-y-3 rounded-md border p-3">
                     {renderRoomTypeSelector()}
 
@@ -1072,7 +1234,7 @@ export function PropertyImageEnhanceDialog({
                 <div className="space-y-3 rounded-md border p-3">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <Label className="text-sm font-medium">Step 1. Analyze</Label>
+                            <Label className="text-sm font-medium">Analysis</Label>
                             <p className="text-xs text-muted-foreground">
                                 Use a structured vision model to identify issues and prepare fix chips.
                             </p>
@@ -1131,7 +1293,7 @@ export function PropertyImageEnhanceDialog({
                 <div className="space-y-3 rounded-md border p-3">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <Label className="text-sm font-medium">Step 2. Generate</Label>
+                            <Label className="text-sm font-medium">Generation</Label>
                             <p className="text-xs text-muted-foreground">
                                 Choose an image-editing model and create the listing-ready result.
                             </p>
@@ -1197,7 +1359,7 @@ export function PropertyImageEnhanceDialog({
                             <Button
                                 type="button"
                                 variant="secondary"
-                                onClick={handleGenerate}
+                                onClick={() => void handleGenerate()}
                                 disabled={isBusy || modelCatalogLoading || generationModels.length === 0 || !selectedGenerationModel}
                             >
                                 {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -1469,6 +1631,33 @@ export function PropertyImageEnhanceDialog({
 
                 {generated.mode === "polish" ? (
                     <div className="space-y-3 rounded-md border p-3">
+                        <div>
+                            <Label className="text-sm font-medium">Adjust This Result</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Add a short change request and regenerate without restarting the workflow.
+                            </p>
+                        </div>
+                        <Textarea
+                            value={adjustmentInstructions}
+                            onChange={(event) => setAdjustmentInstructions(event.target.value)}
+                            placeholder="Example: make the pool water clearer, but keep the terrace exactly the same."
+                            className="min-h-[84px] text-sm"
+                        />
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => void handleApplyAdjustment()}
+                            disabled={isBusy || !adjustmentInstructions.trim()}
+                            className="w-full"
+                        >
+                            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Apply Adjustment
+                        </Button>
+                    </div>
+                ) : null}
+
+                {generated.mode === "polish" ? (
+                    <div className="space-y-3 rounded-md border p-3">
                         {renderRoomTypeSelector()}
                     </div>
                 ) : null}
@@ -1520,9 +1709,20 @@ export function PropertyImageEnhanceDialog({
                 </div>
 
                 <div className="grid gap-2">
-                    <Button type="button" onClick={handleApplyVariant} disabled={!selectedApplyMode || isBusy}>
-                        Keep Result
+                    {hasKeptResult ? (
+                        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                            Result kept in the gallery. Save the property to persist it.
+                        </div>
+                    ) : null}
+                    <Button type="button" onClick={handleApplyVariant} disabled={!selectedApplyMode || isBusy || hasKeptResult}>
+                        {hasKeptResult ? "Result Kept" : "Keep Result"}
                     </Button>
+                    {hasKeptResult && canGoNext ? (
+                        <Button type="button" variant="secondary" onClick={() => handleNavigateImage(imageIndex + 1)} disabled={isBusy}>
+                            Next Photo
+                            <ChevronRight className="ml-2 h-4 w-4" />
+                        </Button>
+                    ) : null}
                     <Button type="button" variant="secondary" onClick={() => void handleRegenerate()} disabled={isBusy}>
                         {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         Regenerate
@@ -1539,16 +1739,63 @@ export function PropertyImageEnhanceDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="h-[100dvh] max-h-[100dvh] w-screen max-w-none overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[94vh] sm:w-[96vw] sm:max-w-7xl sm:rounded-lg sm:p-6">
                 <div className="flex h-full min-h-0 flex-col sm:block">
-                <DialogHeader className="shrink-0 border-b px-4 py-4 pr-12 sm:border-0 sm:px-0 sm:py-0 sm:pr-0">
-                    <DialogTitle className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4" />
-                        AI Enhance Listing Photo
-                    </DialogTitle>
-                    <DialogDescription>
-                        {stage === "review"
-                            ? "Review the edited result with a before/after comparison."
-                            : "Choose a mode, edit the source photo, and generate a listing-ready variant."}
-                    </DialogDescription>
+                <DialogHeader className="shrink-0 border-b px-3 py-3 pr-12 sm:px-4 sm:pr-12">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0">
+                            <DialogTitle className="flex items-center gap-2 text-base">
+                                <Sparkles className="h-4 w-4 shrink-0" />
+                                <span className="truncate">AI Listing Photo</span>
+                                <Badge variant="outline" className="shrink-0">
+                                    {Math.min(imageIndex + 1, Math.max(1, imageCount))}/{Math.max(1, imageCount)}
+                                </Badge>
+                            </DialogTitle>
+                            <DialogDescription className="mt-1">
+                                {stage === "review"
+                                    ? "Review, adjust, keep this result, or move to the next photo."
+                                    : workflowMode === "full_auto"
+                                        ? "Full Auto runs classification, analysis, and generation for this photo."
+                                        : "Add comments if needed, then enhance the photo in one run."}
+                            </DialogDescription>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="inline-flex overflow-hidden rounded-md border">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleNavigateImage(imageIndex - 1)}
+                                    disabled={!canGoPrevious || isBusy}
+                                    className="rounded-none"
+                                    title="Previous photo"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleNavigateImage(imageIndex + 1)}
+                                    disabled={!canGoNext || isBusy}
+                                    className="rounded-none border-l"
+                                    title="Next photo"
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            </div>
+                            <div className="w-[180px]">
+                                {renderWorkflowSwitcher()}
+                            </div>
+                            <Button
+                                type="button"
+                                variant={showUsage ? "secondary" : "outline"}
+                                size="sm"
+                                onClick={() => setShowUsage((prev) => !prev)}
+                            >
+                                <BarChart3 className="mr-2 h-4 w-4" />
+                                Usage
+                            </Button>
+                        </div>
+                    </div>
                 </DialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:overflow-visible sm:px-0 sm:py-0">
@@ -1564,6 +1811,17 @@ export function PropertyImageEnhanceDialog({
                             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                                 {error}
                             </div>
+                        ) : null}
+
+                        {showUsage && propertyId ? (
+                            <PropertyAiUsageBadge
+                                propertyId={propertyId}
+                                refreshKey={usageRefreshKey}
+                                defaultExpanded
+                                hideWhenEmpty={false}
+                                title="Property AI Usage"
+                                className="shadow-sm"
+                            />
                         ) : null}
 
                         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">

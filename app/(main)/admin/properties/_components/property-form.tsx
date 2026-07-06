@@ -66,6 +66,7 @@ import {
 } from "@/lib/properties/property-media-ai";
 import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
 import { PropertyTranslationPanel } from "./property-translation-panel";
+import { cn } from "@/lib/utils";
 
 interface SortableImageProps {
     id: string;
@@ -1483,6 +1484,8 @@ export default function PropertyForm({
                                     propertyId={property?.id}
                                     image={selectedEnhanceImage}
                                     imageIndex={enhanceImageIndex ?? 0}
+                                    imageCount={visibleImages.length}
+                                    onNavigateImage={setEnhanceImageIndex}
                                     roomPromptProfiles={effectivePromptProfiles}
                                     precisionRemoveEnabled={precisionRemoveEnabled}
                                     canRevertActiveSource={canRevertSelectedEnhanceImage}
