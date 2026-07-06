@@ -19,7 +19,12 @@ export function PropertyImageCompareViewer({
 }: PropertyImageCompareViewerProps) {
     const [position, setPosition] = useState(50);
     const [showOriginal, setShowOriginal] = useState(false);
+    const [aspectRatio, setAspectRatio] = useState(16 / 9);
     const sliderId = useId();
+    const isLandscape = aspectRatio > 1;
+    const frameStyle = isLandscape
+        ? { aspectRatio }
+        : { aspectRatio, width: `min(100%, calc(50dvh * ${aspectRatio}))` };
 
     return (
         <div className={cn("space-y-3", className)}>
@@ -29,12 +34,24 @@ export function PropertyImageCompareViewer({
             </div>
 
             <div className="relative overflow-hidden rounded-lg border bg-black/90">
-                <div className="relative aspect-video w-full">
+                <div
+                    className={cn(
+                        "relative max-w-full",
+                        isLandscape ? "w-full" : "mx-auto max-h-[50dvh]"
+                    )}
+                    style={frameStyle}
+                >
                     <img
                         src={beforeSrc}
                         alt={`${alt} original`}
                         className="absolute inset-0 h-full w-full select-none object-contain"
                         draggable={false}
+                        onLoad={(event) => {
+                            const image = event.currentTarget;
+                            if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                                setAspectRatio(image.naturalWidth / image.naturalHeight);
+                            }
+                        }}
                     />
 
                     {!showOriginal ? (

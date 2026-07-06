@@ -1485,6 +1485,7 @@ export default function PropertyForm({
                                     image={selectedEnhanceImage}
                                     imageIndex={enhanceImageIndex ?? 0}
                                     imageCount={visibleImages.length}
+                                    usageCurrency={property?.currency || "EUR"}
                                     onNavigateImage={setEnhanceImageIndex}
                                     roomPromptProfiles={effectivePromptProfiles}
                                     precisionRemoveEnabled={precisionRemoveEnabled}

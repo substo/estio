@@ -14,9 +14,20 @@ const ACTION_LABELS: Record<string, string> = {
     regenerate_language: "Language Refresh",
 };
 
-function formatCost(cost: number): string {
-    if (cost < 0.01) return `$${cost.toFixed(4)}`;
-    return `$${cost.toFixed(2)}`;
+export function formatAiUsageCost(cost: number, currency = "USD"): string {
+    const normalizedCurrency = String(currency || "USD").trim().toUpperCase();
+    const maximumFractionDigits = cost > 0 && cost < 0.01 ? 4 : 2;
+    try {
+        return new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: normalizedCurrency,
+            minimumFractionDigits: 2,
+            maximumFractionDigits,
+        }).format(cost || 0);
+    } catch {
+        const symbol = normalizedCurrency === "EUR" ? "€" : normalizedCurrency === "GBP" ? "£" : "$";
+        return `${symbol}${(cost || 0).toFixed(maximumFractionDigits)}`;
+    }
 }
 
 function formatTokens(tokens: number): string {
@@ -41,6 +52,8 @@ interface PropertyAiUsageBadgeProps {
     title?: string;
     emptyLabel?: string;
     className?: string;
+    currency?: string;
+    showSummaryHeader?: boolean;
 }
 
 export function PropertyAiUsageBadge({
@@ -51,6 +64,8 @@ export function PropertyAiUsageBadge({
     title = "AI Usage",
     emptyLabel = "No AI usage recorded yet",
     className = "",
+    currency = "USD",
+    showSummaryHeader = true,
 }: PropertyAiUsageBadgeProps) {
     const [data, setData] = useState<AiUsageSummary | null>(null);
     const [expanded, setExpanded] = useState(defaultExpanded);
@@ -62,9 +77,55 @@ export function PropertyAiUsageBadge({
     if (!data) return null;
     if (data.totalCalls === 0 && hideWhenEmpty) return null;
 
+    const details = (
+        <div className={`${showSummaryHeader ? "border-t" : ""} px-4 py-3 space-y-4`}>
+            {data.totalCalls === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                    Classification, analysis, generation, and precision remove usage will appear here after AI runs.
+                </p>
+            ) : null}
+
+            {data.byAction.length > 0 && (
+                <div>
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Breakdown</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {data.byAction.map((item) => (
+                            <div key={item.action} className="bg-muted/30 rounded-md p-2 border border-border/50">
+                                <div className="text-xs text-muted-foreground">{ACTION_LABELS[item.action] || item.action}</div>
+                                <div className="text-sm font-medium">{item.count} calls</div>
+                                <div className="text-xs text-muted-foreground">{formatAiUsageCost(item.costUsd, currency)}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {data.recentRecords.length > 0 && (
+                <div>
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Recent Activity</h4>
+                    <div className="space-y-1">
+                        {data.recentRecords.map((record) => (
+                            <div key={record.id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/30 last:border-0">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span className="font-medium">{ACTION_LABELS[record.action] || record.action}</span>
+                                    <span className="truncate text-muted-foreground">{record.model}</span>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3 text-muted-foreground">
+                                    {record.totalTokens > 0 && <span>{formatTokens(record.totalTokens)} tok</span>}
+                                    <span>{formatAiUsageCost(record.estimatedCostUsd, currency)}</span>
+                                    <span>{timeAgo(record.recordedAt)}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+
     return (
         <div className={`border rounded-lg bg-card overflow-hidden ${className}`}>
-            {/* Compact summary bar */}
+            {showSummaryHeader ? (
             <button
                 onClick={() => setExpanded((prev) => !prev)}
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors text-left"
@@ -78,7 +139,7 @@ export function PropertyAiUsageBadge({
                         <>
                             <span>{data.totalCalls} calls</span>
                             <span>{formatTokens(data.totalTokens)} tokens</span>
-                            <span className="font-medium text-foreground">{formatCost(data.totalEstimatedCostUsd)}</span>
+                            <span className="font-medium text-foreground">{formatAiUsageCost(data.totalEstimatedCostUsd, currency)}</span>
                         </>
                     ) : (
                         <span>{emptyLabel}</span>
@@ -95,55 +156,8 @@ export function PropertyAiUsageBadge({
                     </svg>
                 </div>
             </button>
-
-            {/* Expanded details */}
-            {expanded && (
-                <div className="border-t px-4 py-3 space-y-4">
-                    {data.totalCalls === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                            Classification, analysis, generation, and precision remove usage will appear here after AI runs.
-                        </p>
-                    ) : null}
-
-                    {/* Breakdown by action */}
-                    {data.byAction.length > 0 && (
-                        <div>
-                            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Breakdown</h4>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                {data.byAction.map((item) => (
-                                    <div key={item.action} className="bg-muted/30 rounded-md p-2 border border-border/50">
-                                        <div className="text-xs text-muted-foreground">{ACTION_LABELS[item.action] || item.action}</div>
-                                        <div className="text-sm font-medium">{item.count} calls</div>
-                                        <div className="text-xs text-muted-foreground">{formatCost(item.costUsd)}</div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Recent activity */}
-                    {data.recentRecords.length > 0 && (
-                        <div>
-                            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Recent Activity</h4>
-                            <div className="space-y-1">
-                                {data.recentRecords.map((record) => (
-                                    <div key={record.id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/30 last:border-0">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-medium">{ACTION_LABELS[record.action] || record.action}</span>
-                                            <span className="text-muted-foreground">{record.model}</span>
-                                        </div>
-                                        <div className="flex items-center gap-3 text-muted-foreground">
-                                            {record.totalTokens > 0 && <span>{formatTokens(record.totalTokens)} tok</span>}
-                                            <span>{formatCost(record.estimatedCostUsd)}</span>
-                                            <span>{timeAgo(record.recordedAt)}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
+            ) : null}
+            {showSummaryHeader ? (expanded ? details : null) : details}
         </div>
     );
 }

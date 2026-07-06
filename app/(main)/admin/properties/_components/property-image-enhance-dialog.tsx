@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, Loader2, Sparkles, Edit2, Plus, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+import { getPropertyAiUsageSummary, type AiUsageSummary } from "@/app/(main)/admin/_actions/ai-usage";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { usePropertyImageEnhancementModelCatalog } from "@/components/ai/use-property-image-enhancement-model-catalog";
 import { cn } from "@/lib/utils";
@@ -66,7 +67,7 @@ import {
     type PrecisionMaskSnapshot,
     type PrecisionMaskTool,
 } from "./property-image-mask-editor";
-import { PropertyAiUsageBadge } from "./property-ai-usage-badge";
+import { formatAiUsageCost, PropertyAiUsageBadge } from "./property-ai-usage-badge";
 
 interface PropertyImageLike {
     url: string;
@@ -91,6 +92,7 @@ interface PropertyImageEnhanceDialogProps {
     image: PropertyImageLike | null;
     imageIndex: number;
     imageCount?: number;
+    usageCurrency?: string;
     onNavigateImage?: (nextIndex: number) => void;
     roomPromptProfiles?: PropertyImagePromptProfile[];
     precisionRemoveEnabled?: boolean;
@@ -193,6 +195,7 @@ export function PropertyImageEnhanceDialog({
     image,
     imageIndex,
     imageCount = 1,
+    usageCurrency = "USD",
     onNavigateImage,
     roomPromptProfiles = [],
     precisionRemoveEnabled = false,
@@ -217,6 +220,7 @@ export function PropertyImageEnhanceDialog({
     const [workflowMode, setWorkflowMode] = useState<EnhancementWorkflowMode>("semi_auto");
     const [showUsage, setShowUsage] = useState(false);
     const [usageRefreshKey, setUsageRefreshKey] = useState(0);
+    const [usageSummary, setUsageSummary] = useState<AiUsageSummary | null>(null);
     const [analysis, setAnalysis] = useState<ImageEnhancementAnalysis | null>(null);
     const [selectedFixIds, setSelectedFixIds] = useState<string[]>([]);
     const [removedDetectedElementIds, setRemovedDetectedElementIds] = useState<string[]>([]);
@@ -233,7 +237,11 @@ export function PropertyImageEnhanceDialog({
     const [selectedGenerationModel, setSelectedGenerationModel] = useState("");
     const [persistedModelPreference, setPersistedModelPreference] = useState<PropertyImageEnhancementModelPreference>(EMPTY_MODEL_PREFERENCE);
     const [usedAnalysisModel, setUsedAnalysisModel] = useState<string | null>(null);
-    const [showAnalysisSettings, setShowAnalysisSettings] = useState(true);
+    const [showAnalysisSettings, setShowAnalysisSettings] = useState(false);
+    const [showInstructionEditor, setShowInstructionEditor] = useState(false);
+    const [showAnalysisModelPicker, setShowAnalysisModelPicker] = useState(false);
+    const [showGenerationSettings, setShowGenerationSettings] = useState(false);
+    const [showLivePrompt, setShowLivePrompt] = useState(false);
     const [precisionTool, setPrecisionTool] = useState<PrecisionMaskTool>("brush");
     const [precisionBrushSize, setPrecisionBrushSize] = useState(36);
     const [precisionEraseMode, setPrecisionEraseMode] = useState(false);
@@ -249,6 +257,7 @@ export function PropertyImageEnhanceDialog({
     const [isRemoving, setIsRemoving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [generated, setGenerated] = useState<ImageEnhancementGeneratedResult | null>(null);
+    const [sourceImageAspectRatio, setSourceImageAspectRatio] = useState(16 / 9);
     const [hasKeptResult, setHasKeptResult] = useState(false);
     const [adjustmentInstructions, setAdjustmentInstructions] = useState("");
     const [editingFixId, setEditingFixId] = useState<string | null>(null);
@@ -315,6 +324,12 @@ export function PropertyImageEnhanceDialog({
 
     const stage = generated ? "review" : "edit";
     const isBusy = isAnalyzing || isGenerating || isRemoving || isDetectingPrecisionObjects;
+    const usageCurrencyCode = String(usageCurrency || "USD").trim().toUpperCase();
+    const compactUsageCost = formatAiUsageCost(usageSummary?.totalEstimatedCostUsd || 0, usageCurrencyCode);
+    const sourceImageIsLandscape = sourceImageAspectRatio > 1;
+    const sourceImageFrameStyle = sourceImageIsLandscape
+        ? { aspectRatio: sourceImageAspectRatio }
+        : { aspectRatio: sourceImageAspectRatio, width: `min(100%, calc(50dvh * ${sourceImageAspectRatio}))` };
     const liveFinalPrompt = useMemo(() => {
         if (!effectiveAnalysis) return "";
         return buildGenerationPrompt({
@@ -346,7 +361,11 @@ export function PropertyImageEnhanceDialog({
             analysisModelTouchedRef.current = false;
             generationModelTouchedRef.current = false;
             setUsedAnalysisModel(null);
-            setShowAnalysisSettings(true);
+            setShowAnalysisSettings(false);
+            setShowInstructionEditor(false);
+            setShowAnalysisModelPicker(false);
+            setShowGenerationSettings(false);
+            setShowLivePrompt(false);
             setPrecisionTool("brush");
             setPrecisionBrushSize(36);
             setPrecisionEraseMode(false);
@@ -362,6 +381,7 @@ export function PropertyImageEnhanceDialog({
             setIsRemoving(false);
             setError(null);
             setGenerated(null);
+            setSourceImageAspectRatio(16 / 9);
             setHasKeptResult(false);
             setAdjustmentInstructions("");
             setEditingFixId(null);
@@ -371,6 +391,26 @@ export function PropertyImageEnhanceDialog({
             fullAutoRunKeyRef.current = "";
         }
     }, [open]);
+
+    useEffect(() => {
+        if (!open || !propertyId) {
+            setUsageSummary(null);
+            return;
+        }
+
+        let cancelled = false;
+        getPropertyAiUsageSummary(propertyId)
+            .then((summary) => {
+                if (!cancelled) setUsageSummary(summary);
+            })
+            .catch(() => {
+                if (!cancelled) setUsageSummary(null);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open, propertyId, usageRefreshKey]);
 
     useEffect(() => {
         if (!open) return;
@@ -392,7 +432,11 @@ export function PropertyImageEnhanceDialog({
         fullAutoRunKeyRef.current = "";
         setUserInstructions("");
         setUsedAnalysisModel(null);
-        setShowAnalysisSettings(true);
+        setShowAnalysisSettings(false);
+        setShowInstructionEditor(false);
+        setShowAnalysisModelPicker(false);
+        setShowGenerationSettings(false);
+        setShowLivePrompt(false);
         setPrecisionSelectableRegions([]);
         setPrecisionClickSelectEnabled(false);
         setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
@@ -400,6 +444,7 @@ export function PropertyImageEnhanceDialog({
         setSelectedApplyMode(null);
         setError(null);
         setGenerated(null);
+        setSourceImageAspectRatio(16 / 9);
         setHasKeptResult(false);
         setAdjustmentInstructions("");
     }, [open, sourceIdentity, propertyId]);
@@ -1082,12 +1127,18 @@ export function PropertyImageEnhanceDialog({
         );
     }
 
-    function renderWorkflowSwitcher() {
+    function renderWorkflowSwitcher(variant: "default" | "compact" = "default") {
+        const compact = variant === "compact";
         return (
-            <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted/40 p-1">
+            <div
+                className={cn(
+                    "grid grid-cols-2 gap-1 rounded-md border bg-muted/40 p-1",
+                    compact ? "h-9 w-[118px] shrink-0" : ""
+                )}
+            >
                 {[
-                    { value: "semi_auto", label: "Semi Auto" },
-                    { value: "full_auto", label: "Full Auto" },
+                    { value: "semi_auto", label: compact ? "Semi" : "Semi Auto" },
+                    { value: "full_auto", label: compact ? "Auto" : "Full Auto" },
                 ].map((option) => {
                     const active = workflowMode === option.value;
                     return (
@@ -1097,9 +1148,11 @@ export function PropertyImageEnhanceDialog({
                             onClick={() => setWorkflowMode(option.value as EnhancementWorkflowMode)}
                             disabled={isBusy}
                             className={cn(
-                                "rounded px-2 py-1.5 text-xs font-medium transition-colors",
+                                "rounded px-2 text-xs font-medium transition-colors",
+                                compact ? "py-1" : "py-1.5",
                                 active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                             )}
+                            title={option.value === "full_auto" ? "Full Auto" : "Semi Auto"}
                         >
                             {option.label}
                         </button>
@@ -1166,209 +1219,291 @@ export function PropertyImageEnhanceDialog({
     }
 
     function renderPolishControls() {
-        return (
-            <>
-                <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                            <Label className="text-sm font-medium">
-                                {workflowMode === "full_auto" ? "Full Auto Enhancement" : "Semi Automatic Enhancement"}
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                                {workflowMode === "full_auto"
-                                    ? "Classification, analysis, and generation run automatically for each photo."
-                                    : "Add comments first, then run classification, analysis, and generation together."}
-                            </p>
-                        </div>
-                        {workflowMode === "full_auto" ? <Badge variant="secondary">Auto runs AI</Badge> : null}
-                    </div>
-                    <Button
-                        type="button"
-                        onClick={() => void handleEnhancePhoto()}
-                        disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || generationModels.length === 0 || !selectedAnalysisModel || !selectedGenerationModel}
-                        className="w-full"
-                    >
-                        {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                        {analysis ? "Generate Enhanced Image" : "Enhance Photo"}
-                    </Button>
-                    {workflowMode === "full_auto" ? (
-                        <p className="text-xs text-amber-700">
-                            Full Auto uses chargeable AI calls for room classification, analysis, and image generation.
-                        </p>
-                    ) : null}
-                </div>
+        const selectedFixes = effectiveAnalysis?.suggestedFixes.filter((fix) => selectedFixIds.includes(fix.id)) || [];
+        const removedElements = effectiveAnalysis?.detectedElements.filter((item) => removedDetectedElementIds.includes(item.id)) || [];
 
+        return (
+            <div className="grid gap-3 lg:grid-cols-3">
                 <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <Badge variant="outline">1. Classify</Badge>
+                            <p className="mt-2 text-sm font-medium">{selectedRoomType.label || "Unclassified room"}</p>
+                        </div>
+                        {roomTypePrediction ? (
+                            <Badge variant="secondary">{Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%</Badge>
+                        ) : null}
+                    </div>
+
                     {renderRoomTypeSelector()}
 
-                    <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <Label className="text-sm font-medium">Use Saved Room Profile Prompt</Label>
-                            <p className="text-xs text-muted-foreground">
-                                {hasSelectedRoomPrompt
-                                    ? "Reuses the saved approved prompt for this room type during analysis and generation."
-                                    : "No saved prompt exists for this room type yet."}
-                            </p>
-                        </div>
+                    <div className="flex items-center justify-between gap-3 rounded-md border p-2">
+                        <span className="text-xs font-medium">Reuse saved room prompt</span>
                         <Switch
                             checked={reuseSavedRoomPrompt}
                             onCheckedChange={setReuseSavedRoomPrompt}
                             disabled={!hasSelectedRoomPrompt}
                         />
                     </div>
-                </div>
 
-                <div className="space-y-2">
-                    <Label className="text-sm font-medium">Additional Instructions / Override</Label>
-                    <Textarea
-                        value={userInstructions}
-                        onChange={(event) => setUserInstructions(event.target.value)}
-                        placeholder="Example: Remove the two people near the pool, keep the pool shape and terrace exactly the same, and preserve the natural sky."
-                        className="min-h-[110px] text-sm"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                        Use this when analysis misses something. Your notes are sent to both analysis and generation.
-                    </p>
-                </div>
-
-                <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <Label className="text-sm font-medium">Analysis</Label>
-                            <p className="text-xs text-muted-foreground">
-                                Use a structured vision model to identify issues and prepare fix chips.
-                            </p>
-                        </div>
-                        {analysis ? <Badge variant="outline">Complete</Badge> : null}
+                    <div className="flex flex-wrap gap-2">
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void handlePredictRoomTypeForCurrentImage()}
+                            disabled={isBusy || !selectedAnalysisModel || Boolean(roomTypePrediction)}
+                        >
+                            {isPredictingRoomType ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Classify
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowInstructionEditor((prev) => !prev)}
+                        >
+                            AI request
+                        </Button>
                     </div>
 
-                    {analysis && !showAnalysisSettings ? (
+                    {showInstructionEditor ? (
                         <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">
-                                Last analysis model: {getModelLabel(usedAnalysisModel || selectedAnalysisModel)}
-                            </p>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setShowAnalysisSettings(true)}
-                                disabled={isBusy}
-                            >
-                                Change Analysis Model
-                            </Button>
+                            <Textarea
+                                value={userInstructions}
+                                onChange={(event) => setUserInstructions(event.target.value)}
+                                placeholder="Add a specific request for this photo."
+                                className="min-h-[96px] text-sm"
+                            />
+                            <p className="text-xs text-muted-foreground">These notes are included in analysis and generation.</p>
                         </div>
                     ) : (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <Label className="text-sm font-medium">Analysis Model</Label>
-                                <AiModelSelect
-                                    value={selectedAnalysisModel}
-                                    models={analysisModels}
-                                    onValueChange={handleAnalysisModelChange}
-                                    disabled={isBusy || modelCatalogLoading}
-                                    placeholder={modelCatalogLoading ? "Loading models..." : "Select analysis model"}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Only models compatible with structured image analysis are shown here.
-                                </p>
-                            </div>
-
-                            {analysisModels.length === 0 && !modelCatalogLoading ? (
-                                <p className="text-xs text-amber-700">
-                                    No compatible analysis models are available for this location&apos;s Google AI key.
-                                </p>
-                            ) : null}
-
-                            <Button
-                                type="button"
-                                onClick={handleAnalyze}
-                                disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || !selectedAnalysisModel}
-                            >
-                                {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                {analysis ? "Re-analyze Photo" : "Analyze Photo"}
-                            </Button>
-                        </div>
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                            {userInstructions.trim() || (hasSelectedRoomPrompt ? "Saved prompt memory is available for this room type." : "No extra AI request added.")}
+                        </p>
                     )}
                 </div>
 
                 <div className="space-y-3 rounded-md border p-3">
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <Label className="text-sm font-medium">Generation</Label>
-                            <p className="text-xs text-muted-foreground">
-                                Choose an image-editing model and create the listing-ready result.
+                            <Badge variant="outline">2. Analyze</Badge>
+                            <p className="mt-2 text-sm font-medium">
+                                {effectiveAnalysis ? `${effectiveAnalysis.suggestedFixes.length} feature chips` : "Find editable features"}
+                            </p>
+                        </div>
+                        {analysis ? <Badge variant="secondary">Done</Badge> : null}
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => setShowAnalysisModelPicker((prev) => !prev)}
+                        className="w-full rounded-md border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted"
+                    >
+                        Model: {getModelLabel(usedAnalysisModel || selectedAnalysisModel) || "Select analysis model"}
+                    </button>
+
+                    {showAnalysisModelPicker || showAnalysisSettings ? (
+                        <div className="space-y-2">
+                            <AiModelSelect
+                                value={selectedAnalysisModel}
+                                models={analysisModels}
+                                onValueChange={handleAnalysisModelChange}
+                                disabled={isBusy || modelCatalogLoading}
+                                placeholder={modelCatalogLoading ? "Loading models..." : "Select analysis model"}
+                            />
+                            {analysisModels.length === 0 && !modelCatalogLoading ? (
+                                <p className="text-xs text-amber-700">No compatible analysis models are available.</p>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    <Button
+                        type="button"
+                        onClick={handleAnalyze}
+                        disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || !selectedAnalysisModel}
+                        className="w-full"
+                    >
+                        {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        {analysis ? "Re-analyze" : "Analyze"}
+                    </Button>
+
+                    {effectiveAnalysis ? (
+                        <div className="space-y-2">
+                            <p className="line-clamp-2 text-xs text-muted-foreground">{effectiveAnalysis.sceneSummary}</p>
+                            <div className="flex flex-wrap gap-2">
+                                {effectiveAnalysis.suggestedFixes.map((fix) => {
+                                    const active = selectedFixIds.includes(fix.id);
+                                    if (editingFixId === fix.id) {
+                                        return (
+                                            <Input
+                                                key={fix.id}
+                                                autoFocus
+                                                value={editingFixLabel}
+                                                onChange={(event) => setEditingFixLabel(event.target.value)}
+                                                onKeyDown={(event) => event.key === "Enter" && saveEditingFix()}
+                                                onBlur={saveEditingFix}
+                                                className="h-8 w-44 text-xs"
+                                            />
+                                        );
+                                    }
+                                    return (
+                                        <button
+                                            key={fix.id}
+                                            type="button"
+                                            onClick={() => toggleFix(fix.id)}
+                                            onDoubleClick={() => startEditingFix(fix.id, fix.label)}
+                                            className={cn(
+                                                "rounded-full border px-3 py-1 text-xs transition-colors",
+                                                active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted"
+                                            )}
+                                            title="Click to select. Double-click to edit the feature instruction."
+                                        >
+                                            {fix.label}
+                                        </button>
+                                    );
+                                })}
+                                {isAddingFix ? (
+                                    <Input
+                                        autoFocus
+                                        value={newFixLabel}
+                                        onChange={(event) => setNewFixLabel(event.target.value)}
+                                        onKeyDown={(event) => event.key === "Enter" && saveNewFix()}
+                                        onBlur={saveNewFix}
+                                        placeholder="New feature"
+                                        className="h-8 w-36 text-xs"
+                                    />
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsAddingFix(true)}
+                                        className="rounded-full border border-dashed px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+                                    >
+                                        + Feature
+                                    </button>
+                                )}
+                            </div>
+
+                            {effectiveAnalysis.detectedElements.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {effectiveAnalysis.detectedElements.slice(0, 8).map((item) => {
+                                        const active = removedDetectedElementIds.includes(item.id);
+                                        return (
+                                            <button
+                                                key={item.id}
+                                                type="button"
+                                                onClick={() => toggleDetectedElementRemoval(item.id)}
+                                                className={cn(
+                                                    "rounded-full border px-3 py-1 text-xs transition-colors",
+                                                    active ? "border-destructive bg-destructive text-destructive-foreground" : "border-border bg-background hover:bg-muted"
+                                                )}
+                                            >
+                                                {active ? "Remove " : ""}{item.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground">Analyze once to turn the prompt into selectable feature chips.</p>
+                    )}
+                </div>
+
+                <div className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <Badge variant="outline">3. Generate</Badge>
+                            <p className="mt-2 text-sm font-medium">
+                                {selectedFixes.length + removedElements.length > 0
+                                    ? `${selectedFixes.length + removedElements.length} selected changes`
+                                    : "Ready after analysis"}
                             </p>
                         </div>
                         {effectiveAnalysis ? <Badge variant="secondary">Ready</Badge> : null}
                     </div>
 
-                    {!effectiveAnalysis ? (
-                        <p className="text-xs text-muted-foreground">
-                            Run analysis or use a saved room profile prompt so the next step has context to work from.
-                        </p>
-                    ) : (
-                        <>
-                            <div className="space-y-2">
-                                <Label className="text-sm font-medium">Generation Model</Label>
-                                <AiModelSelect
-                                    value={selectedGenerationModel}
-                                    models={generationModels}
-                                    onValueChange={handleGenerationModelChange}
-                                    disabled={isBusy || modelCatalogLoading}
-                                    placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Only models that look capable of returning edited images are shown here.
-                                </p>
-                            </div>
+                    <button
+                        type="button"
+                        onClick={() => setShowGenerationSettings((prev) => !prev)}
+                        className="w-full rounded-md border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted"
+                    >
+                        Model: {getModelLabel(selectedGenerationModel) || "Select generation model"}
+                    </button>
 
-                            {generationModels.length === 0 && !modelCatalogLoading ? (
-                                <p className="text-xs text-amber-700">
-                                    No compatible image-generation models are available for this location&apos;s Google AI key.
-                                </p>
-                            ) : null}
-
-                            <div className="space-y-2">
-                                <Label className="text-sm font-medium">Enhancement Aggression</Label>
-                                <RadioGroup
-                                    value={aggression}
-                                    onValueChange={(value) => setAggression(value as EnhancementAggression)}
-                                    className="grid gap-3"
-                                >
-                                    {[
-                                        { value: "conservative", label: "Conservative", help: "Minimal correction, strict scene preservation." },
-                                        { value: "balanced", label: "Balanced", help: "Moderate polish with realistic upgrades." },
-                                        { value: "aggressive", label: "Aggressive", help: "Stronger cleanup and visual polish." },
-                                    ].map((option) => (
-                                        <label
-                                            key={option.value}
-                                            className={cn(
-                                                "flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
-                                                aggression === option.value ? "border-primary bg-primary/5" : "border-border"
-                                            )}
-                                        >
-                                            <RadioGroupItem value={option.value} className="mt-0.5" />
-                                            <span>
-                                                <span className="font-medium">{option.label}</span>
-                                                <span className="block text-xs text-muted-foreground">{option.help}</span>
-                                            </span>
-                                        </label>
-                                    ))}
-                                </RadioGroup>
-                            </div>
-
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                onClick={() => void handleGenerate()}
-                                disabled={isBusy || modelCatalogLoading || generationModels.length === 0 || !selectedGenerationModel}
+                    {showGenerationSettings ? (
+                        <div className="space-y-3">
+                            <AiModelSelect
+                                value={selectedGenerationModel}
+                                models={generationModels}
+                                onValueChange={handleGenerationModelChange}
+                                disabled={isBusy || modelCatalogLoading}
+                                placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
+                            />
+                            <RadioGroup
+                                value={aggression}
+                                onValueChange={(value) => setAggression(value as EnhancementAggression)}
+                                className="grid grid-cols-3 gap-2"
                             >
-                                {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                Generate Enhanced Image
-                            </Button>
-                        </>
+                                {[
+                                    { value: "conservative", label: "Light" },
+                                    { value: "balanced", label: "Balanced" },
+                                    { value: "aggressive", label: "Strong" },
+                                ].map((option) => (
+                                    <label
+                                        key={option.value}
+                                        className={cn(
+                                            "flex items-center justify-center rounded-md border px-2 py-2 text-xs font-medium",
+                                            aggression === option.value ? "border-primary bg-primary/5" : "border-border"
+                                        )}
+                                    >
+                                        <RadioGroupItem value={option.value} className="sr-only" />
+                                        {option.label}
+                                    </label>
+                                ))}
+                            </RadioGroup>
+                            {generationModels.length === 0 && !modelCatalogLoading ? (
+                                <p className="text-xs text-amber-700">No compatible generation models are available.</p>
+                            ) : null}
+                        </div>
+                    ) : null}
+
+                    <Button
+                        type="button"
+                        onClick={() => void (effectiveAnalysis ? handleGenerate() : handleEnhancePhoto())}
+                        disabled={isBusy || modelCatalogLoading || analysisModels.length === 0 || generationModels.length === 0 || !selectedAnalysisModel || !selectedGenerationModel}
+                        className="w-full"
+                    >
+                        {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                        {effectiveAnalysis ? "Generate Image" : "Analyze + Generate"}
+                    </Button>
+
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowLivePrompt((prev) => !prev)}
+                        disabled={!effectiveAnalysis}
+                        className="w-full"
+                    >
+                        {showLivePrompt ? "Hide Prompt" : "View Prompt"}
+                    </Button>
+
+                    {showLivePrompt && effectiveAnalysis ? (
+                        <Textarea value={liveFinalPrompt} readOnly className="min-h-[120px] text-xs" />
+                    ) : (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                            {effectiveAnalysis
+                                ? liveFinalPrompt
+                                : "The final prompt will be assembled from the selected feature chips, removed objects, room memory, and user request."}
+                        </p>
                     )}
+
+                    {workflowMode === "full_auto" ? (
+                        <p className="text-xs text-amber-700">Auto runs classification, analysis, and generation for this photo.</p>
+                    ) : null}
                 </div>
-            </>
+            </div>
         );
     }
 
@@ -1575,6 +1710,50 @@ export function PropertyImageEnhanceDialog({
         );
     }
 
+    function renderSourcePhotoPreview() {
+        if (!image) return null;
+
+        return (
+            <div className="space-y-2">
+                <div
+                    className={cn(
+                        "relative overflow-hidden rounded-md border bg-muted",
+                        sourceImageIsLandscape ? "w-full" : "mx-auto max-h-[50dvh] max-w-full"
+                    )}
+                    style={sourceImageFrameStyle}
+                >
+                    {image.cloudflareImageId ? (
+                        <CloudflareImage
+                            imageId={image.cloudflareImageId}
+                            alt={`Source image ${imageIndex + 1}`}
+                            variant="public"
+                            width={1600}
+                            height={900}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            onLoadingComplete={(loadedImage) => {
+                                if (loadedImage.naturalWidth > 0 && loadedImage.naturalHeight > 0) {
+                                    setSourceImageAspectRatio(loadedImage.naturalWidth / loadedImage.naturalHeight);
+                                }
+                            }}
+                        />
+                    ) : (
+                        <img
+                            src={image.url}
+                            alt={`Source image ${imageIndex + 1}`}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            onLoad={(event) => {
+                                const loadedImage = event.currentTarget;
+                                if (loadedImage.naturalWidth > 0 && loadedImage.naturalHeight > 0) {
+                                    setSourceImageAspectRatio(loadedImage.naturalWidth / loadedImage.naturalHeight);
+                                }
+                            }}
+                        />
+                    )}
+                </div>
+            </div>
+        );
+    }
+
     function renderReviewRail() {
         if (!generated) return null;
 
@@ -1739,62 +1918,49 @@ export function PropertyImageEnhanceDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="h-[100dvh] max-h-[100dvh] w-screen max-w-none overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[94vh] sm:w-[96vw] sm:max-w-7xl sm:rounded-lg sm:p-6">
                 <div className="flex h-full min-h-0 flex-col sm:block">
-                <DialogHeader className="shrink-0 border-b px-3 py-3 pr-12 sm:px-4 sm:pr-12">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="min-w-0">
-                            <DialogTitle className="flex items-center gap-2 text-base">
-                                <Sparkles className="h-4 w-4 shrink-0" />
-                                <span className="truncate">AI Listing Photo</span>
-                                <Badge variant="outline" className="shrink-0">
-                                    {Math.min(imageIndex + 1, Math.max(1, imageCount))}/{Math.max(1, imageCount)}
-                                </Badge>
-                            </DialogTitle>
-                            <DialogDescription className="mt-1">
-                                {stage === "review"
-                                    ? "Review, adjust, keep this result, or move to the next photo."
-                                    : workflowMode === "full_auto"
-                                        ? "Full Auto runs classification, analysis, and generation for this photo."
-                                        : "Add comments if needed, then enhance the photo in one run."}
-                            </DialogDescription>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <div className="inline-flex overflow-hidden rounded-md border">
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleNavigateImage(imageIndex - 1)}
-                                    disabled={!canGoPrevious || isBusy}
-                                    className="rounded-none"
-                                    title="Previous photo"
-                                >
-                                    <ChevronLeft className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleNavigateImage(imageIndex + 1)}
-                                    disabled={!canGoNext || isBusy}
-                                    className="rounded-none border-l"
-                                    title="Next photo"
-                                >
-                                    <ChevronRight className="h-4 w-4" />
-                                </Button>
-                            </div>
-                            <div className="w-[180px]">
-                                {renderWorkflowSwitcher()}
-                            </div>
+                <DialogHeader className="shrink-0 border-b px-3 py-2 pr-12 sm:px-4 sm:pr-12">
+                    <DialogTitle className="sr-only">AI Listing Photo</DialogTitle>
+                    <DialogDescription className="sr-only">
+                        Enhance this listing photo and review AI usage for the property.
+                    </DialogDescription>
+                    <div className="flex h-10 items-center justify-between gap-2">
+                        <div className="inline-flex shrink-0 overflow-hidden rounded-md border bg-background">
                             <Button
                                 type="button"
-                                variant={showUsage ? "secondary" : "outline"}
-                                size="sm"
-                                onClick={() => setShowUsage((prev) => !prev)}
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleNavigateImage(imageIndex - 1)}
+                                disabled={!canGoPrevious || isBusy}
+                                className="h-9 w-10 rounded-none"
+                                title="Previous photo"
                             >
-                                <BarChart3 className="mr-2 h-4 w-4" />
-                                Usage
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleNavigateImage(imageIndex + 1)}
+                                disabled={!canGoNext || isBusy}
+                                className="h-9 w-10 rounded-none border-l"
+                                title="Next photo"
+                            >
+                                <ChevronRight className="h-4 w-4" />
                             </Button>
                         </div>
+                        {renderWorkflowSwitcher("compact")}
+                        <button
+                            type="button"
+                            onClick={() => setShowUsage((prev) => !prev)}
+                            className={cn(
+                                "ml-auto inline-flex h-9 shrink-0 items-center rounded-md border px-3 text-sm font-semibold transition-colors",
+                                showUsage ? "border-primary bg-primary/10 text-primary" : "border-border bg-background hover:bg-muted"
+                            )}
+                            aria-expanded={showUsage}
+                            aria-label="Toggle property AI usage"
+                        >
+                            {compactUsageCost}
+                        </button>
                     </div>
                 </DialogHeader>
 
@@ -1821,12 +1987,29 @@ export function PropertyImageEnhanceDialog({
                                 hideWhenEmpty={false}
                                 title="Property AI Usage"
                                 className="shadow-sm"
+                                currency={usageCurrencyCode}
+                                showSummaryHeader={false}
                             />
                         ) : null}
 
-                        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-                            <div className="space-y-4">
-                                <div className={cn(stage === "review" ? "hidden" : "")}>
+                        {stage === "edit" && mode !== "precision_remove" ? renderSourcePhotoPreview() : null}
+
+                        {generated ? (
+                            <PropertyImageCompareViewer
+                                beforeSrc={image.url}
+                                afterSrc={generated.generatedImageUrl}
+                                alt={`Property image ${imageIndex + 1}`}
+                            />
+                        ) : null}
+
+                        {stage === "edit" && mode === "polish" ? (
+                            <div className="space-y-3">
+                                {renderModeSwitcher()}
+                                {renderPolishControls()}
+                            </div>
+                        ) : (
+                            <div className={cn("grid gap-4", stage === "edit" ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "")}>
+                                <div className={cn("space-y-4", stage === "review" ? "hidden" : "")}>
                                     {mode === "precision_remove" ? (
                                         <div className="space-y-2">
                                             <Label>Precision Remove Editor</Label>
@@ -1843,191 +2026,26 @@ export function PropertyImageEnhanceDialog({
                                                 className="max-h-[65dvh] sm:max-h-none"
                                             />
                                         </div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            <div className="space-y-2">
-                                                <Label>Source Photo</Label>
-                                                <div className="relative aspect-video w-full overflow-hidden rounded-md border bg-muted">
-                                                    {image.cloudflareImageId ? (
-                                                        <CloudflareImage
-                                                            imageId={image.cloudflareImageId}
-                                                            alt={`Source image ${imageIndex + 1}`}
-                                                            variant="public"
-                                                            width={1200}
-                                                            height={675}
-                                                            className="h-full w-full object-contain"
-                                                        />
-                                                    ) : (
-                                                        <img
-                                                            src={image.url}
-                                                            alt={`Source image ${imageIndex + 1}`}
-                                                            className="h-full w-full object-contain"
-                                                        />
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {effectiveAnalysis ? (
-                                                <div className="space-y-4 rounded-md border p-3 sm:p-4">
-                                                    <div className="space-y-1">
-                                                        <Label className="text-sm font-medium">Scene Summary</Label>
-                                                        <p className="text-sm text-muted-foreground">{effectiveAnalysis.sceneSummary}</p>
-                                                    </div>
-
-                                                    <div className="space-y-2">
-                                                        <Label className="text-sm font-medium">Suggested Fixes</Label>
-                                                        {effectiveAnalysis.suggestedFixes.length === 0 ? (
-                                                            <p className="text-sm text-muted-foreground">
-                                                                No fixes were suggested. You can still generate with polish mode or use the override instructions.
-                                                            </p>
-                                                        ) : (
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {effectiveAnalysis.suggestedFixes.map((fix) => {
-                                                                    const active = selectedFixIds.includes(fix.id);
-                                                                    if (editingFixId === fix.id) {
-                                                                        return (
-                                                                            <div key={fix.id} className="flex items-center gap-1">
-                                                                                <Input
-                                                                                    autoFocus
-                                                                                    value={editingFixLabel}
-                                                                                    onChange={(e) => setEditingFixLabel(e.target.value)}
-                                                                                    onKeyDown={(e) => e.key === "Enter" && saveEditingFix()}
-                                                                                    onBlur={saveEditingFix}
-                                                                                    className="h-7 px-2 py-1 text-xs w-40"
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    }
-                                                                    return (
-                                                                        <div key={fix.id} className="group relative flex items-center">
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => toggleFix(fix.id)}
-                                                                                className={cn(
-                                                                                    "rounded-full border px-3 py-1 text-xs transition-colors pr-7",
-                                                                                    active
-                                                                                        ? "border-primary bg-primary text-primary-foreground"
-                                                                                        : "border-border bg-background text-foreground hover:bg-muted"
-                                                                                )}
-                                                                            >
-                                                                                {fix.label}
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => startEditingFix(fix.id, fix.label)}
-                                                                                className={cn(
-                                                                                    "absolute right-1 rounded-full p-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100",
-                                                                                    active ? "text-primary-foreground hover:bg-primary/20" : "text-muted-foreground hover:bg-muted-foreground/20"
-                                                                                )}
-                                                                            >
-                                                                                <Edit2 className="h-3 w-3" />
-                                                                            </button>
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                                {isAddingFix ? (
-                                                                    <div className="flex items-center gap-1">
-                                                                        <Input
-                                                                            autoFocus
-                                                                            value={newFixLabel}
-                                                                            onChange={(e) => setNewFixLabel(e.target.value)}
-                                                                            onKeyDown={(e) => e.key === "Enter" && saveNewFix()}
-                                                                            onBlur={saveNewFix}
-                                                                            placeholder="Type fix..."
-                                                                            className="h-7 px-2 py-1 text-xs w-32"
-                                                                        />
-                                                                    </div>
-                                                                ) : (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setIsAddingFix(true)}
-                                                                        className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-transparent px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-                                                                    >
-                                                                        <Plus className="h-3 w-3" />
-                                                                        <span>Add Fix</span>
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    {effectiveAnalysis.detectedElements.length > 0 ? (
-                                                        <div className="space-y-2">
-                                                            <Label className="text-sm font-medium">Detected Elements</Label>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {effectiveAnalysis.detectedElements.slice(0, 12).map((item) => {
-                                                                    const markedForRemoval = removedDetectedElementIds.includes(item.id);
-                                                                    return (
-                                                                        <button
-                                                                            key={item.id}
-                                                                            type="button"
-                                                                            onClick={() => toggleDetectedElementRemoval(item.id)}
-                                                                            className={cn(
-                                                                                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors",
-                                                                                markedForRemoval
-                                                                                    ? "border-destructive bg-destructive text-destructive-foreground"
-                                                                                    : "border-border bg-background text-foreground hover:bg-muted"
-                                                                            )}
-                                                                        >
-                                                                            <span>{item.label}</span>
-                                                                            <span className={cn(
-                                                                                "text-[10px]",
-                                                                                markedForRemoval ? "text-destructive-foreground/90" : "text-muted-foreground"
-                                                                            )}>
-                                                                                {markedForRemoval ? "Will remove" : `Remove (${item.severity})`}
-                                                                            </span>
-                                                                        </button>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                            <p className="text-xs text-muted-foreground">
-                                                                Click a detected element to mark or unmark it for removal in the generated image prompt.
-                                                            </p>
-                                                        </div>
-                                                    ) : null}
-
-                                                    <div className="space-y-2">
-                                                        <Label className="text-sm font-medium">Live Final Prompt</Label>
-                                                        <Textarea value={liveFinalPrompt} readOnly className="min-h-[140px] text-xs" />
-                                                        <p className="text-xs text-muted-foreground">
-                                                            This prompt updates whenever you change fixes, removals, aggression, prompt reuse, or override instructions.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    )}
+                                    ) : null}
                                 </div>
 
-                                {generated ? (
-                                    <div className={cn(stage === "review" ? "" : "hidden")}>
-                                        <PropertyImageCompareViewer
-                                            beforeSrc={image.url}
-                                            afterSrc={generated.generatedImageUrl}
-                                            alt={`Property image ${imageIndex + 1}`}
-                                        />
-                                    </div>
-                                ) : null}
-                            </div>
+                                <div className="space-y-4 rounded-md border p-3 sm:p-4 xl:sticky xl:top-0 xl:max-h-[calc(94vh-9rem)] xl:overflow-y-auto">
+                                    {stage === "edit" ? (
+                                        <>
+                                            <div className="space-y-1">
+                                                <Badge variant="outline">Edit</Badge>
+                                                <p className="text-sm text-muted-foreground">
+                                                    Select an area to remove with a precise mask.
+                                                </p>
+                                            </div>
 
-                            <div className="space-y-4 rounded-md border p-3 sm:p-4 xl:sticky xl:top-0 xl:max-h-[calc(94vh-9rem)] xl:overflow-y-auto">
-                                {stage === "edit" ? (
-                                    <>
-                                        <div className="space-y-1">
-                                            <Badge variant="outline">Edit</Badge>
-                                            <p className="text-sm text-muted-foreground">
-                                                {mode === "precision_remove"
-                                                    ? "Select an area to remove with a precise mask."
-                                                    : "Analyze and polish this listing photo while preserving truthfulness."}
-                                            </p>
-                                        </div>
-
-                                        {renderModeSwitcher()}
-                                        {mode === "precision_remove" ? renderPrecisionControls() : renderPolishControls()}
-                                    </>
-                                ) : renderReviewRail()}
+                                            {renderModeSwitcher()}
+                                            {renderPrecisionControls()}
+                                        </>
+                                    ) : renderReviewRail()}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 ) : null}
 
