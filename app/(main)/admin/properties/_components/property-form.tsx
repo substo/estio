@@ -14,7 +14,7 @@ import { PROPERTY_TYPES } from "@/lib/properties/constants";
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
 import { PROPERTY_CONDITIONS, FEATURE_CATEGORIES, PROPERTY_SOURCES } from "@/lib/properties/filter-constants";
 import { MediaUploader } from "@/components/ui/media-uploader";
-import { X, Plus, Minus, Pencil, Sparkles, ZoomIn, ZoomOut } from "lucide-react";
+import { Grip, Lock, X, Plus, Minus, Pencil, Sparkles, ZoomIn, ZoomOut } from "lucide-react";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { SearchableSelect } from "../../contacts/_components/searchable-select";
 import { MultiPropertySelect } from "../../contacts/_components/multi-property-select";
@@ -73,9 +73,17 @@ interface SortableImageProps {
     onRemove: () => void;
     onOpen?: () => void;
     removeLabel?: string;
+    reorderEnabled?: boolean;
 }
 
-function SortableImage({ id, children, onRemove, onOpen, removeLabel = "Remove image" }: SortableImageProps) {
+function SortableImage({
+    id,
+    children,
+    onRemove,
+    onOpen,
+    removeLabel = "Remove image",
+    reorderEnabled = false,
+}: SortableImageProps) {
     const {
         attributes,
         listeners,
@@ -83,7 +91,7 @@ function SortableImage({ id, children, onRemove, onOpen, removeLabel = "Remove i
         transform,
         transition,
         isDragging
-    } = useSortable({ id });
+    } = useSortable({ id, disabled: !reorderEnabled });
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -96,9 +104,12 @@ function SortableImage({ id, children, onRemove, onOpen, removeLabel = "Remove i
         <div
             ref={setNodeRef}
             style={style}
-            {...attributes}
-            {...listeners}
-            className="relative group aspect-square overflow-hidden rounded-lg border bg-gray-100 touch-none"
+            {...(reorderEnabled ? attributes : {})}
+            {...(reorderEnabled ? listeners : {})}
+            className={cn(
+                "relative group aspect-square overflow-hidden rounded-lg border bg-gray-100",
+                reorderEnabled ? "touch-none cursor-grab active:cursor-grabbing" : "touch-pan-y"
+            )}
             onClick={(event) => {
                 if (!onOpen || isDragging) return;
                 const target = event.target as HTMLElement | null;
@@ -120,6 +131,11 @@ function SortableImage({ id, children, onRemove, onOpen, removeLabel = "Remove i
             >
                 <X className="h-4 w-4" />
             </button>
+            {!reorderEnabled ? (
+                <div className="pointer-events-none absolute bottom-2 right-2 z-10 hidden rounded-full bg-black/60 px-2 py-1 text-[10px] font-medium text-white sm:block">
+                    Locked
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -247,6 +263,7 @@ export default function PropertyForm({
     const [enhanceImageIndex, setEnhanceImageIndex] = useState<number | null>(null);
     const [stagedPromptProfileUpserts, setStagedPromptProfileUpserts] = useState<PropertyImagePromptProfileUpsert[]>([]);
     const [galleryColumns, setGalleryColumns] = useState(4);
+    const [imageReorderEnabled, setImageReorderEnabled] = useState(false);
     const [imageViewerOpen, setImageViewerOpen] = useState(false);
     const [imageViewerIndex, setImageViewerIndex] = useState(0);
     const [persistentOriginalPreview, setPersistentOriginalPreview] = useState(false);
@@ -307,6 +324,12 @@ export default function PropertyForm({
             setHoldOriginalPreview(false);
         }
     }, [imageViewerOpen]);
+
+    useEffect(() => {
+        if (visibleImages.length < 2 && imageReorderEnabled) {
+            setImageReorderEnabled(false);
+        }
+    }, [imageReorderEnabled, visibleImages.length]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -712,8 +735,8 @@ export default function PropertyForm({
             )}
 
             <Tabs defaultValue="details" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="flex flex-col gap-3 px-1 pt-1 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="-mx-1 overflow-x-auto px-1 pb-1">
+                <div className="flex flex-col gap-2 px-0 pt-1 sm:px-1 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="-mx-3 overflow-x-auto px-3 pb-1 sm:-mx-1 sm:px-1">
                     <TabsList className="inline-grid min-w-max grid-cols-8 lg:w-full">
                         <TabsTrigger value="details">Details</TabsTrigger>
                         <TabsTrigger value="pricing">Pricing</TabsTrigger>
@@ -726,10 +749,10 @@ export default function PropertyForm({
                     </TabsList>
                     </div>
                     
-                    <div className="flex items-center gap-2 lg:mr-2">
+                    <div className="flex items-center gap-2 px-1 lg:mr-2">
                         <Label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Editing:</Label>
                         <Select value={activeLanguage} onValueChange={setActiveLanguage}>
-                            <SelectTrigger className="h-8 w-[140px] bg-blue-50 text-xs font-semibold border-blue-200">
+                            <SelectTrigger className="h-9 w-[160px] bg-blue-50 text-xs font-semibold border-blue-200 sm:h-8 sm:w-[140px]">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -741,7 +764,7 @@ export default function PropertyForm({
                     </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-1">
+                <div className="min-h-0 flex-1 overflow-y-auto px-0 sm:px-1">
                     <TabsContent value="details" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
                         
                         {activeLanguage !== "en" && (
@@ -1273,31 +1296,50 @@ export default function PropertyForm({
                         <div className="space-y-6">
                             {/* Images Section */}
                             <div className="space-y-4">
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <Label className="text-lg font-semibold">Images</Label>
-                                    <div className="flex items-center gap-1">
-                                        <span className="text-xs text-muted-foreground mr-1">{visibleImages.length} photos</span>
-                                        <button
+                                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="space-y-0.5">
+                                        <Label className="text-base font-semibold sm:text-lg">Images</Label>
+                                        <p className="text-xs text-muted-foreground">
+                                            {visibleImages.length} photo{visibleImages.length === 1 ? "" : "s"}
+                                            {imageReorderEnabled ? " · Reorder is on" : " · Swipe images to scroll"}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Button
                                             type="button"
-                                            onClick={() => setGalleryColumns((c) => Math.min(c + 1, 8))}
-                                            disabled={galleryColumns >= 8}
-                                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                                            title="Smaller thumbnails (more per row)"
-                                            aria-label="Show more thumbnails per row"
+                                            variant={imageReorderEnabled ? "default" : "outline"}
+                                            size="sm"
+                                            className="h-9 shrink-0"
+                                            onClick={() => setImageReorderEnabled((current) => !current)}
+                                            disabled={visibleImages.length < 2}
+                                            title={visibleImages.length < 2 ? "Add at least two photos to reorder" : "Toggle image reorder mode"}
                                         >
-                                            <ZoomOut className="h-4 w-4" />
-                                        </button>
-                                        <span className="text-xs tabular-nums text-muted-foreground w-6 text-center">{galleryColumns}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setGalleryColumns((c) => Math.max(c - 1, 2))}
-                                            disabled={galleryColumns <= 2}
-                                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                                            title="Larger thumbnails (fewer per row)"
-                                            aria-label="Show fewer thumbnails per row"
-                                        >
-                                            <ZoomIn className="h-4 w-4" />
-                                        </button>
+                                            {imageReorderEnabled ? <Grip className="mr-1 h-4 w-4" /> : <Lock className="mr-1 h-4 w-4" />}
+                                            {imageReorderEnabled ? "Reorder on" : "Locked"}
+                                        </Button>
+                                        <div className="flex items-center gap-1 rounded-md border bg-background p-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setGalleryColumns((c) => Math.min(c + 1, 8))}
+                                                disabled={galleryColumns >= 8}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                                                title="Smaller thumbnails (more per row)"
+                                                aria-label="Show more thumbnails per row"
+                                            >
+                                                <ZoomOut className="h-4 w-4" />
+                                            </button>
+                                            <span className="w-6 text-center text-xs tabular-nums text-muted-foreground">{galleryColumns}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setGalleryColumns((c) => Math.max(c - 1, 2))}
+                                                disabled={galleryColumns <= 2}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                                                title="Larger thumbnails (fewer per row)"
+                                                aria-label="Show fewer thumbnails per row"
+                                            >
+                                                <ZoomIn className="h-4 w-4" />
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                                 {/* Legacy mediaUrls hidden input for backward compat if needed, but we rely on mediaJson now */}
@@ -1313,7 +1355,7 @@ export default function PropertyForm({
                                     <DndContext
                                         sensors={sensors}
                                         collisionDetection={closestCenter}
-                                        onDragEnd={handleDragEnd}
+                                        onDragEnd={imageReorderEnabled ? handleDragEnd : undefined}
                                     >
                                         <SortableContext
                                             items={visibleImages.map((img) => getPropertyMediaIdentity(img))}
@@ -1341,6 +1383,7 @@ export default function PropertyForm({
                                                             onRemove={() => handleRemoveImage(uniqueId)}
                                                             onOpen={() => handleOpenImageViewer(index)}
                                                             removeLabel={`Remove image ${index + 1}`}
+                                                            reorderEnabled={imageReorderEnabled}
                                                         >
                                                             {img.cloudflareImageId ? (
                                                                 <CloudflareImage

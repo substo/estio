@@ -37,19 +37,19 @@ export function PropertyEditDialog({
 }: PropertyEditDialogProps) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
-                <DialogHeader>
-                    <DialogTitle>
+            <DialogContent className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-[92vh] sm:w-[94vw] sm:max-w-6xl sm:rounded-lg">
+                <DialogHeader className="shrink-0 border-b px-4 pb-3 pt-4 pr-12 text-left sm:px-6 sm:pb-4 sm:pt-5 sm:pr-12">
+                    <DialogTitle className="text-xl sm:text-2xl">
                         {property?.id && property.id !== "new"
                             ? `Edit Property${property.reference ? ` - Ref: ${property.reference}` : ''}`
                             : "Add Property"}
                     </DialogTitle>
-                    <DialogDescription>
+                    <DialogDescription className="text-sm sm:text-base">
                         Make changes to the property details below.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-hidden p-1">
+                <div className="min-h-0 flex-1 overflow-hidden px-3 py-2 sm:px-5 sm:py-4">
                     <PropertyForm
                         property={property}
                         locationId={locationId}
