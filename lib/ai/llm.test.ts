@@ -1,7 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { callLLMWithMetadata } from "./llm";
+import { buildGenerationConfig, callLLMWithMetadata } from "./llm";
+
+test("buildGenerationConfig preserves zero Gemini thinking budget", () => {
+    const config = buildGenerationConfig({
+        jsonMode: true,
+        temperature: 0,
+        maxOutputTokens: 512,
+        thinkingBudget: 0,
+    });
+
+    assert.deepEqual(config, {
+        responseMimeType: "application/json",
+        temperature: 0,
+        maxOutputTokens: 512,
+        thinkingConfig: {
+            thinkingBudget: 0,
+        },
+    });
+});
+
+test("buildGenerationConfig omits invalid Gemini thinking budget", () => {
+    const config = buildGenerationConfig({
+        jsonMode: false,
+        thinkingBudget: -1,
+    });
+
+    assert.deepEqual(config, {
+        responseMimeType: "text/plain",
+    });
+});
 
 test("callLLMWithMetadata routes openai-prefixed models through Responses API", async () => {
     const originalFetch = globalThis.fetch;

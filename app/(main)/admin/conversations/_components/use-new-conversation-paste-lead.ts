@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'r
 
 import { useToast } from '@/components/ui/use-toast';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
-import { GEMINI_FLASH_LATEST_ALIAS } from '@/lib/ai/models';
+import { GEMINI_FLASH_LITE_LATEST_ALIAS } from '@/lib/ai/models';
 import {
     createPasteLeadStatus,
     type PasteLeadImportStatus,
@@ -260,7 +260,7 @@ export function useNewConversationPasteLead(args: {
 
     useEffect(() => {
         if (selectedPasteLeadModel) return;
-        setSelectedPasteLeadModel(GEMINI_FLASH_LATEST_ALIAS);
+        setSelectedPasteLeadModel(GEMINI_FLASH_LITE_LATEST_ALIAS);
     }, [selectedPasteLeadModel]);
 
     useEffect(() => {
