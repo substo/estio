@@ -109,6 +109,12 @@ interface AnalyzeApiResponse {
     model: string;
 }
 
+interface AnalyzeRunResult {
+    analysis: ImageEnhancementAnalysis;
+    priorPrompt?: string;
+    selectedFixIds: string[];
+}
+
 interface GenerateApiResponse {
     success: true;
     generatedImageId: string;
@@ -628,6 +634,40 @@ export function PropertyImageEnhanceDialog({
         ));
     };
 
+    const applySavedRoomProfile = () => {
+        if (!hasSelectedRoomPrompt) return;
+        setReuseSavedRoomPrompt(true);
+
+        if (selectedRoomAnalysis) {
+            const defaultFixes = selectedRoomAnalysis.suggestedFixes
+                .filter((fix) => fix.defaultSelected)
+                .map((fix) => fix.id);
+            setAnalysis(selectedRoomAnalysis);
+            setSelectedFixIds(defaultFixes);
+            setRemovedDetectedElementIds([]);
+            setActivePolishTab("analysis");
+        }
+    };
+
+    const mergeSavedProfileFixes = (
+        nextAnalysis: ImageEnhancementAnalysis,
+        savedAnalysis: ImageEnhancementAnalysis | undefined
+    ): ImageEnhancementAnalysis => {
+        if (!savedAnalysis?.suggestedFixes?.length) return nextAnalysis;
+
+        const mergedFixes = [...savedAnalysis.suggestedFixes];
+        for (const fix of nextAnalysis.suggestedFixes || []) {
+            if (!mergedFixes.find((existing) => existing.id === fix.id)) {
+                mergedFixes.push(fix);
+            }
+        }
+
+        return {
+            ...nextAnalysis,
+            suggestedFixes: mergedFixes,
+        };
+    };
+
     const handleRoomTypeSelectChange = (value: string) => {
         setRoomTypeSelectValue(value);
         if (value !== PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY) {
@@ -762,7 +802,7 @@ export function PropertyImageEnhanceDialog({
         }
     }
 
-    async function handleAnalyze(): Promise<ImageEnhancementAnalysis | null> {
+    async function handleAnalyze(): Promise<AnalyzeRunResult | null> {
         if (!canRun || !image || !propertyId) return null;
         if (!selectedAnalysisModel.trim()) {
             const message = "Choose an analysis model before running photo analysis.";
@@ -796,30 +836,75 @@ export function PropertyImageEnhanceDialog({
             }
 
             const payload = json as AnalyzeApiResponse;
+            let nextAnalysis = payload.analysis;
+            let analysisPriorPrompt = effectivePriorPrompt;
+
+            if (nextAnalysis.suggestedRoomType) {
+                const suggested = resolvePropertyImageRoomType(nextAnalysis.suggestedRoomType);
+                const candidates = (Array.isArray(nextAnalysis.roomTypeCandidates) ? nextAnalysis.roomTypeCandidates : [])
+                    .map((candidate) => resolvePropertyImageRoomType(candidate))
+                    .slice(0, 5);
+                const isConfident = Number(suggested.confidence || 0) >= PROPERTY_IMAGE_ROOM_TYPE_PREDICTION_MIN_CONFIDENCE;
+
+                setRoomTypePrediction(suggested);
+                setRoomTypeCandidates(candidates.length > 0 ? candidates : [suggested]);
+                setRoomTypePredictionModel(payload.model || null);
+
+                if (isConfident) {
+                    const nextSelectValue = toRoomTypeSelectValue(suggested.key);
+                    setRoomTypeSelectValue(nextSelectValue);
+                    setCustomRoomTypeLabel(nextSelectValue === PROPERTY_IMAGE_ROOM_TYPE_CUSTOM_KEY ? suggested.label : "");
+
+                    const detectedPrompt = resolvePromptProfileContext({
+                        profiles: roomPromptProfiles,
+                        roomTypeKey: suggested.key,
+                    });
+                    const detectedSavedAnalysis = resolvePromptProfileAnalysisData({
+                        profiles: roomPromptProfiles,
+                        roomTypeKey: suggested.key,
+                    });
+
+                    if (detectedPrompt) {
+                        setReuseSavedRoomPrompt(true);
+                        analysisPriorPrompt = detectedPrompt;
+                        nextAnalysis = mergeSavedProfileFixes(nextAnalysis, detectedSavedAnalysis);
+                    }
+                } else {
+                    setRoomTypeSelectValue(PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY);
+                    setCustomRoomTypeLabel("");
+                }
+            }
             
             // Merge with previously preserved fixes if reusing prompt to retain old custom chips
             if (effectiveAnalysis && effectiveAnalysis.suggestedFixes.length > 0) {
-                const newFixes = payload.analysis.suggestedFixes;
+                const newFixes = nextAnalysis.suggestedFixes;
                 const mergedFixes = [...effectiveAnalysis.suggestedFixes];
                 for (const n of newFixes) {
                     if (!mergedFixes.find(o => o.id === n.id)) {
                         mergedFixes.push(n);
                     }
                 }
-                payload.analysis.suggestedFixes = mergedFixes;
+                nextAnalysis = {
+                    ...nextAnalysis,
+                    suggestedFixes: mergedFixes,
+                };
             }
 
-            const defaults = payload.analysis.suggestedFixes
+            const defaults = nextAnalysis.suggestedFixes
                 .filter((item) => item.defaultSelected)
                 .map((item) => item.id);
 
-            setAnalysis(payload.analysis);
+            setAnalysis(nextAnalysis);
             setSelectedFixIds(defaults);
             setRemovedDetectedElementIds([]);
             setUsedAnalysisModel(payload.model);
             setShowAnalysisSettings(false);
             setUsageRefreshKey((prev) => prev + 1);
-            return payload.analysis;
+            return {
+                analysis: nextAnalysis,
+                priorPrompt: analysisPriorPrompt,
+                selectedFixIds: defaults,
+            };
         } catch (err) {
             console.error("[PropertyImageEnhanceDialog] analyze error:", err);
             const message = err instanceof Error ? err.message : "Failed to analyze image.";
@@ -831,7 +916,11 @@ export function PropertyImageEnhanceDialog({
         }
     }
 
-    async function handleGenerate(analysisOverride?: ImageEnhancementAnalysis | null, instructionsOverride?: string): Promise<ImageEnhancementGeneratedResult | null> {
+    async function handleGenerate(
+        analysisOverride?: ImageEnhancementAnalysis | null,
+        instructionsOverride?: string,
+        options?: { priorPrompt?: string; selectedFixIds?: string[] }
+    ): Promise<ImageEnhancementGeneratedResult | null> {
         const analysisForGeneration = analysisOverride || effectiveAnalysis;
         if (!canRun || !image || !propertyId || !analysisForGeneration) return null;
         if (!selectedGenerationModel.trim()) {
@@ -854,11 +943,11 @@ export function PropertyImageEnhanceDialog({
                     cloudflareImageId: image.cloudflareImageId,
                     sourceUrl: image.url,
                     analysis: analysisForGeneration,
-                    selectedFixIds,
+                    selectedFixIds: options?.selectedFixIds ?? selectedFixIds,
                     removedDetectedElementIds,
                     aggression,
                     generationModel: selectedGenerationModel,
-                    priorPrompt: effectivePriorPrompt,
+                    priorPrompt: options?.priorPrompt ?? effectivePriorPrompt,
                     userInstructions: instructionsOverride ?? userInstructions,
                 }),
             });
@@ -992,10 +1081,14 @@ export function PropertyImageEnhanceDialog({
         if (mode !== "polish") return;
         if (!canRun || !image || !propertyId) return;
 
-        await handlePredictRoomTypeForCurrentImage();
-        const analysisForGeneration = effectiveAnalysis || await handleAnalyze();
-        if (!analysisForGeneration) return;
-        await handleGenerate(analysisForGeneration);
+        const analysisRun = effectiveAnalysis
+            ? { analysis: effectiveAnalysis, priorPrompt: effectivePriorPrompt, selectedFixIds }
+            : await handleAnalyze();
+        if (!analysisRun) return;
+        await handleGenerate(analysisRun.analysis, undefined, {
+            priorPrompt: analysisRun.priorPrompt,
+            selectedFixIds: analysisRun.selectedFixIds,
+        });
     }
 
     async function handleApplyAdjustment() {
@@ -1179,8 +1272,8 @@ export function PropertyImageEnhanceDialog({
                     />
                 ) : null}
 
-                {isPredictingRoomType ? (
-                    <p className="text-xs text-muted-foreground">Detecting room type from the source image...</p>
+                {isAnalyzing ? (
+                    <p className="text-xs text-muted-foreground">Analyzing photo and detecting room type...</p>
                 ) : roomTypePrediction ? (
                     <p className="text-xs text-muted-foreground">
                         Suggested: {roomTypePrediction.label} ({Math.round(Number(roomTypePrediction.confidence || 0) * 100)}%)
@@ -1202,7 +1295,7 @@ export function PropertyImageEnhanceDialog({
 
                 {roomTypePredictionModel ? (
                     <p className="text-xs text-muted-foreground">
-                        Prediction model: {getModelLabel(roomTypePredictionModel)}
+                        Analysis model: {getModelLabel(roomTypePredictionModel)}
                     </p>
                 ) : null}
             </div>
@@ -1239,7 +1332,7 @@ export function PropertyImageEnhanceDialog({
                                 <div>
                                     <Label className="text-sm font-medium">Classification & Prompt Memory</Label>
                                     <p className="text-xs text-muted-foreground">
-                                        Classify the room, then reuse saved prompt context for matching room types.
+                                        Review the detected room type and reuse saved prompt context for matching room types.
                                     </p>
                                 </div>
                                 {roomTypePrediction ? (
@@ -1250,11 +1343,11 @@ export function PropertyImageEnhanceDialog({
                             <Button
                                 type="button"
                                 variant="secondary"
-                                onClick={() => void handlePredictRoomTypeForCurrentImage()}
-                                disabled={isBusy || !selectedAnalysisModel || Boolean(roomTypePrediction)}
+                                onClick={() => void handleAnalyze()}
+                                disabled={isBusy || !selectedAnalysisModel}
                             >
-                                {isPredictingRoomType ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                Classify Photo
+                                {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                Analyze & Classify
                             </Button>
                         </div>
 
@@ -1274,6 +1367,17 @@ export function PropertyImageEnhanceDialog({
                                     disabled={!hasSelectedRoomPrompt}
                                 />
                             </div>
+                            {hasSelectedRoomPrompt ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={applySavedRoomProfile}
+                                    disabled={isBusy}
+                                    className="w-full justify-center"
+                                >
+                                    Apply Saved Room Profile
+                                </Button>
+                            ) : null}
 
                             <div className="space-y-2">
                                 <Label className="text-sm font-medium">Additional Instructions / Override</Label>

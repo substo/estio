@@ -42,6 +42,8 @@ export interface ImageEnhancementSuggestedFix {
 export interface ImageEnhancementAnalysis {
     sceneSummary: string;
     sceneContext: string;
+    suggestedRoomType?: PropertyImageRoomType;
+    roomTypeCandidates?: PropertyImageRoomType[];
     detectedElements: ImageEnhancementDetectedElement[];
     suggestedFixes: ImageEnhancementSuggestedFix[];
     actionLogDraft: string[];

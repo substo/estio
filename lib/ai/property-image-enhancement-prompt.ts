@@ -4,6 +4,10 @@ import type {
     ImageEnhancementDetectedElement,
     ImageEnhancementSuggestedFix,
 } from "@/lib/ai/property-image-enhancement-types";
+import {
+    PROPERTY_IMAGE_ROOM_TYPE_PRESETS,
+    PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY,
+} from "@/lib/ai/property-image-room-types";
 
 const ENHANCEMENT_BASE_POLICY_PROMPT = `
 Role: You are an Expert AI Image Enhancer and Photoshop Specialist focused on real-estate listing photos.
@@ -78,19 +82,35 @@ function buildDetectedElementRemovalInstruction(element: ImageEnhancementDetecte
 export function buildAnalysisPrompt(input?: { priorPrompt?: string; userInstructions?: string }): string {
     const priorPrompt = String(input?.priorPrompt || "").trim();
     const userInstructions = String(input?.userInstructions || "").trim();
+    const roomTypePresetList = PROPERTY_IMAGE_ROOM_TYPE_PRESETS
+        .map((preset) => `- ${preset.key}: ${preset.label}`)
+        .join("\n");
     return `
 ${ENHANCEMENT_BASE_POLICY_PROMPT}
 
 Task:
 1) Analyze the input property photo.
-2) Identify scene elements and concrete listing-quality issues.
-3) Propose practical fixes users can toggle on/off in UI chips.
-4) Produce neutral scene context for the generation step.
+2) Classify the room or scene type.
+3) Identify scene elements and concrete listing-quality issues.
+4) Propose practical fixes users can toggle on/off in UI chips.
+5) Produce neutral scene context for the generation step.
 
 Output strict JSON only:
 {
   "sceneSummary": "string",
   "sceneContext": "string",
+  "suggestedRoomType": {
+    "key": "string",
+    "label": "string",
+    "confidence": 0.0
+  },
+  "roomTypeCandidates": [
+    {
+      "key": "string",
+      "label": "string",
+      "confidence": 0.0
+    }
+  ],
   "detectedElements": [
     {
       "id": "string",
@@ -121,6 +141,10 @@ Rules:
 - Always return at least 3 and ideally 5-8 "suggestedFixes" for ordinary property photos, even if the photo is acceptable. Include technical quality, lighting/color, composition/crop, cleanup/clutter, and lens/perspective fixes where relevant.
 - Return suggestedFixes as user-facing feature chips, not as prose. Each chip must have a specific imperative promptInstruction that can be selected independently.
 - Return detectedElements for visible objects or areas a user may want to preserve, improve, or remove, such as furniture, windows, lights, floor, walls, clutter, reflections, people, vehicles, sky, pool, garden, or balcony.
+- Always return suggestedRoomType and up to 5 roomTypeCandidates.
+- Prefer these room/scene preset keys when possible:
+${roomTypePresetList}
+- If uncertain, use key "${PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY}" with confidence <= 0.55.
 - Focus on real-estate listing improvements (composition, cleanup, lighting, clarity, realism).
 - Do not suggest changes that misrepresent property structure.
 - "sceneContext" must stay neutral and descriptive. Do not embed optional fixes, removals, or edit instructions in it.

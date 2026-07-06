@@ -35,6 +35,39 @@ test("normalizeImageEnhancementAnalysis falls back safely for malformed model ou
     assert.deepEqual(normalized.suggestedFixes, []);
 });
 
+test("normalizeImageEnhancementAnalysis keeps combined room classification output", () => {
+    const normalized = normalizeImageEnhancementAnalysis({
+        sceneSummary: "Living room with a sofa and balcony doors.",
+        sceneContext: "Residential living room with seating, floor tiles, and balcony light.",
+        suggestedRoomType: {
+            key: "living_room",
+            label: "Living Room",
+            confidence: 0.88,
+        },
+        roomTypeCandidates: [
+            { key: "living_room", label: "Living Room", confidence: 0.88 },
+            { key: "dining_room", label: "Dining Room", confidence: 0.24 },
+        ],
+        detectedElements: [],
+        suggestedFixes: [
+            {
+                id: "improve_lighting",
+                label: "Improve lighting",
+                description: "Balance the exposure.",
+                impact: "high",
+                defaultSelected: true,
+                promptInstruction: "Improve lighting while preserving the natural scene.",
+            },
+        ],
+        actionLogDraft: [],
+    });
+
+    assert.equal(normalized.suggestedRoomType?.key, "living_room");
+    assert.equal(normalized.suggestedRoomType?.label, "Living Room");
+    assert.equal(normalized.roomTypeCandidates?.[0]?.key, "living_room");
+    assert.equal(normalized.roomTypeCandidates?.[1]?.key, "dining_room");
+});
+
 test("buildGenerationPrompt includes selected fixes and aggression constraints without leaking deselected fixes", () => {
     const analysis: ImageEnhancementAnalysis = {
         sceneSummary: "Living room shot with mild clutter and flat lighting.",

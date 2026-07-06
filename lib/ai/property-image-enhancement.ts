@@ -3,6 +3,7 @@ import type {
     ImageEnhancementAnalysis,
     ImageEnhancementDetectedElement,
     ImageEnhancementSuggestedFix,
+    PropertyImageRoomType,
 } from "@/lib/ai/property-image-enhancement-types";
 import {
     buildAnalysisPrompt,
@@ -11,6 +12,7 @@ import {
     getRemovedDetectedElements,
     getSelectedFixes,
 } from "@/lib/ai/property-image-enhancement-prompt";
+import { resolvePropertyImageRoomType } from "@/lib/ai/property-image-room-types";
 
 export {
     buildAnalysisPrompt,
@@ -47,9 +49,17 @@ const SuggestedFixSchema = z.object({
     promptInstruction: z.string().trim().min(1).max(400),
 }).strict();
 
+const RoomTypeSchema = z.object({
+    key: z.string().trim().min(1).max(120).optional(),
+    label: z.string().trim().min(1).max(120).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+}).strict();
+
 const AnalysisSchema = z.object({
     sceneSummary: z.string().trim().min(1).max(600).default("Property listing photo ready for technical enhancement."),
     sceneContext: z.string().trim().min(1).max(2000).optional(),
+    suggestedRoomType: RoomTypeSchema.optional(),
+    roomTypeCandidates: z.array(RoomTypeSchema).max(8).default([]),
     promptPolish: z.string().trim().min(1).max(4000).optional(),
     detectedElements: z.array(DetectedElementSchema).max(40).default([]),
     suggestedFixes: z.array(SuggestedFixSchema).max(40).default([]),
@@ -58,6 +68,7 @@ const AnalysisSchema = z.object({
 
 type ParsedDetectedElement = z.infer<typeof DetectedElementSchema>;
 type ParsedSuggestedFix = z.infer<typeof SuggestedFixSchema>;
+type ParsedRoomType = z.infer<typeof RoomTypeSchema>;
 
 type GeminiGenerateContentResponse = {
     candidates?: Array<{
@@ -155,6 +166,20 @@ function normalizeFix(
         impact: fix.impact || "medium",
         defaultSelected: fix.defaultSelected !== false,
         promptInstruction: toSingleLine(fix.promptInstruction) || `Improve ${label.toLowerCase()}.`,
+    };
+}
+
+function normalizeRoomTypeCandidate(input: ParsedRoomType | undefined): PropertyImageRoomType | null {
+    if (!input) return null;
+    const resolved = resolvePropertyImageRoomType({
+        key: input.key || "",
+        label: input.label || "",
+        confidence: Number(input.confidence),
+    });
+    return {
+        key: resolved.key,
+        label: resolved.label,
+        confidence: clamp01(Number(resolved.confidence || 0)),
     };
 }
 
@@ -260,6 +285,19 @@ export function normalizeImageEnhancementAnalysis(raw: unknown): ImageEnhancemen
 
     const normalizedElements = parsed.data.detectedElements.map(normalizeElement);
     const normalizedFixes = parsed.data.suggestedFixes.map(normalizeFix);
+    const suggestedRoomType = normalizeRoomTypeCandidate(parsed.data.suggestedRoomType);
+    const roomTypeCandidates = new Map<string, PropertyImageRoomType>();
+    for (const candidate of parsed.data.roomTypeCandidates) {
+        const normalized = normalizeRoomTypeCandidate(candidate);
+        if (!normalized) continue;
+        if (!roomTypeCandidates.has(normalized.key)) {
+            roomTypeCandidates.set(normalized.key, normalized);
+        }
+        if (roomTypeCandidates.size >= 5) break;
+    }
+    if (suggestedRoomType && !roomTypeCandidates.has(suggestedRoomType.key)) {
+        roomTypeCandidates.set(suggestedRoomType.key, suggestedRoomType);
+    }
     const uniqueFixes = new Map<string, ImageEnhancementSuggestedFix>();
     for (const fix of normalizedFixes) {
         if (!uniqueFixes.has(fix.id)) uniqueFixes.set(fix.id, fix);
@@ -268,6 +306,9 @@ export function normalizeImageEnhancementAnalysis(raw: unknown): ImageEnhancemen
     const normalizedAnalysis = {
         sceneSummary: toSingleLine(parsed.data.sceneSummary),
         sceneContext: toSingleLine(parsed.data.sceneContext || parsed.data.promptPolish || parsed.data.sceneSummary),
+        suggestedRoomType: suggestedRoomType || undefined,
+        roomTypeCandidates: Array.from(roomTypeCandidates.values())
+            .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0)),
         detectedElements: normalizedElements,
         suggestedFixes: Array.from(uniqueFixes.values()),
         actionLogDraft: parsed.data.actionLogDraft.map((line) => toSingleLine(line)).filter(Boolean),
