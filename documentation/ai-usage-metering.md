@@ -87,34 +87,23 @@ Located in `prisma/schema.prisma`.
 
 Centralizes cost calculation so pricing changes are applied in one place.
 
-### Token-Based Models (Gemini)
+### Provider-Sourced Pricing
 
-Costs are calculated per 1 million tokens using published Google pricing:
+Costs are calculated from provider-sourced pricing metadata, not hardcoded static rate tables.
 
-| Model | Input (per 1M) | Output (per 1M) |
-|---|---|---|
-| `gemini-1.5-flash` (and variants) | $0.075 | $0.30 |
-| `gemini-1.5-pro` (and variants) | $1.25 | $5.00 |
-| `gemini-1.0-pro` | $0.50 | $1.50 |
-
-The function `normalizeModelName()` handles version suffixes (e.g., `gemini-1.5-flash-001` → `gemini-1.5-flash`). Unknown Gemini models fall back to Flash pricing.
-
-### Flat-Rate Models (Vertex Imagen)
-
-| Model | Cost per Image |
-|---|---|
-| `imagen-3.0-capability-001` | $0.03 |
-| `imagen-3.0-generate-001` | $0.03 |
-
-For Imagen, the caller passes `quantity: 1` instead of token counts.
+- Google Gemini model availability is refreshed from the Google models endpoint.
+- Google Gemini pricing is refreshed from Google's official Gemini API pricing page and stored on provider catalog records as `raw_metadata.providerPricing`.
+- Runtime metering reads stored catalog pricing only. It does not fetch provider pricing during user-facing AI calls.
+- Image-generation calls must pass `outputTokenType: "image"` so Gemini image output tokens use the provider's image-output rate instead of the text-output rate.
+- Unknown or unavailable provider pricing resolves to `$0` rather than silently applying a stale fallback rate.
 
 ### Updating Prices
 
-To update pricing when Google changes rates:
+To refresh pricing when providers change rates:
 
-1. Edit the `GEMINI_PRICING` or `IMAGEN_PRICING` maps in `lib/ai/pricing-engine.ts`.
-2. Changes apply to all new `AiUsage` records going forward.
-3. Existing records retain their original `estimatedCostUsd` (historical accuracy).
+1. Run the AI provider catalog refresh job.
+2. Confirm refreshed catalog records include `raw_metadata.providerPricing`.
+3. Existing `AiUsage` records retain their original `estimatedCostUsd` unless a separate audited backfill is run.
 
 ## Usage Recording Service
 

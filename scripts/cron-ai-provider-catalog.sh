@@ -2,8 +2,11 @@
 # =============================================================================
 # AI Provider Catalog Refresh Cron Job
 # =============================================================================
-# Refreshes dynamic AI provider catalogs such as OpenAI text model names and
-# official organization cost telemetry. Intended to run once per day.
+# Refreshes dynamic AI provider catalogs, including Google Gemini model
+# availability and official Gemini pricing metadata. Also refreshes OpenAI
+# model names and official organization cost telemetry when configured.
+# Intended to run once per day so user-facing AI calls do not fetch provider
+# pricing or model catalogs on the hot path.
 # =============================================================================
 
 set -e

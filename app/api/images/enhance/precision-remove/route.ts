@@ -122,6 +122,9 @@ export async function POST(req: Request) {
             action: "precision_remove",
             provider: "google_gemini",
             model: result.model,
+            inputTokens: result.usageMetadata?.promptTokenCount,
+            outputTokens: result.usageMetadata?.candidatesTokenCount,
+            outputTokenType: "image",
             quantity: 1,
             metadata: {
                 sourceCloudflareImageId: ownedMedia.cloudflareImageId,

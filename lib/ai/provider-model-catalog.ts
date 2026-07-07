@@ -19,6 +19,7 @@ export type DiscoveredProviderModel = {
     capabilities: AiModelCapability[];
     source?: string | null;
     rawMetadata?: unknown;
+    pricing?: unknown;
 };
 
 export type StoredProviderModel = DiscoveredProviderModel & {
@@ -88,6 +89,11 @@ function normalizeStatus(value: unknown): AiProviderModelStatus {
 }
 
 function toStoredProviderModel(row: RawProviderModelRow): StoredProviderModel {
+    const rawMetadata = row.rawMetadata;
+    const metadataRecord = rawMetadata && typeof rawMetadata === "object" && !Array.isArray(rawMetadata)
+        ? rawMetadata as Record<string, unknown>
+        : {};
+
     return {
         id: row.id,
         provider: row.provider as AiProviderModelProvider,
@@ -99,11 +105,27 @@ function toStoredProviderModel(row: RawProviderModelRow): StoredProviderModel {
         capabilities: normalizeCapabilities(row.capabilities),
         status: normalizeStatus(row.status),
         source: row.source,
-        rawMetadata: row.rawMetadata,
+        rawMetadata,
+        pricing: metadataRecord.providerPricing || null,
         firstSeenAt: row.firstSeenAt,
         lastSeenAt: row.lastSeenAt,
         lastCheckedAt: row.lastCheckedAt,
         unavailableSince: row.unavailableSince,
+    };
+}
+
+function mergeRawMetadataWithPricing(rawMetadata: unknown, pricing: unknown): unknown {
+    const base = rawMetadata && typeof rawMetadata === "object" && !Array.isArray(rawMetadata)
+        ? rawMetadata as Record<string, unknown>
+        : rawMetadata === undefined || rawMetadata === null
+            ? {}
+            : { providerRawMetadata: rawMetadata };
+
+    if (pricing === undefined || pricing === null) return base;
+
+    return {
+        ...base,
+        providerPricing: pricing,
     };
 }
 
@@ -250,6 +272,7 @@ export async function refreshProviderModelCatalog(input: {
             scopeId,
             modelId,
             capabilities: normalizeCapabilities(model.capabilities),
+            rawMetadata: mergeRawMetadataWithPricing(model.rawMetadata, model.pricing),
         });
     }
 

@@ -12,6 +12,7 @@ export interface RecordAiUsageInput {
     model: string;
     inputTokens?: number;
     outputTokens?: number;
+    outputTokenType?: "text" | "image";
     quantity?: number;
     metadata?: Record<string, unknown>;
 }
@@ -43,11 +44,13 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
         const outputTokens = Math.max(0, input.outputTokens || 0);
         const totalTokens = inputTokens + outputTokens;
 
-        const estimatedCostUsd = calculateAiCost({
+        const estimatedCostUsd = await calculateAiCost({
             provider: input.provider,
             model: input.model,
+            locationId: input.locationId,
             inputTokens,
             outputTokens,
+            outputTokenType: input.outputTokenType,
             quantity: input.quantity,
         });
 

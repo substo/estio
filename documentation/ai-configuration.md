@@ -124,11 +124,11 @@ That cost endpoint returns historical billed cost buckets, not a per-model token
 
 ### Provider Catalog Refresh
 
-OpenAI model discovery is cached for 24 hours. The cron route below invalidates and warms the OpenAI text-model cache for every location and enabled user with an encrypted OpenAI key. It also attempts to refresh OpenAI organization cost telemetry for the last day when a deployment-level OpenAI key is configured:
+Provider catalog discovery is refreshed by cron so user-facing AI calls do not fetch provider pricing or model lists on the hot path. The cron route below refreshes Google Gemini model availability and official Gemini pricing metadata, invalidates and warms the OpenAI text-model cache for every location and enabled user with an encrypted OpenAI key, and attempts to refresh OpenAI organization cost telemetry for the last day when a deployment-level OpenAI key is configured:
 
 - `GET /api/cron/ai-provider-catalog`
 
-This route intentionally does **not** scrape or invent OpenAI token-rate pricing. Its response includes `pricingRefresh` metadata showing whether official OpenAI cost telemetry was refreshed and the source URL used.
+This route intentionally does **not** scrape or invent OpenAI token-rate pricing. Gemini pricing is read from Google's official Gemini API pricing page and stored on provider catalog records. Runtime AI usage metering reads stored catalog pricing only; if pricing is missing, numeric cost remains `0` rather than blocking generation on a provider pricing fetch or applying stale hardcoded rates. The route response includes `pricingRefresh` metadata showing whether official provider pricing/cost telemetry was refreshed and the source URL used.
 
 Deployment scheduling:
 

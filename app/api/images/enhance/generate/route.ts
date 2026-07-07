@@ -124,6 +124,8 @@ export async function POST(req: Request) {
             model: generated.model,
             inputTokens: generated.usageMetadata?.promptTokenCount,
             outputTokens: generated.usageMetadata?.candidatesTokenCount,
+            outputTokenType: "image",
+            quantity: 1,
             metadata: {
                 sourceCloudflareImageId: ownedMedia.cloudflareImageId,
                 resultCloudflareImageId: upload.imageId,

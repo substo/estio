@@ -24,6 +24,11 @@ import {
     resolveOpenAiCostsApiKey,
     type OpenAiOrganizationCostsSummary,
 } from "@/lib/ai/openai-costs";
+import {
+    fetchGoogleGeminiPricingCatalog,
+    GOOGLE_GEMINI_PRICING_URL,
+    type GoogleGeminiModelPricing,
+} from "@/lib/ai/google-pricing";
 
 export type AiProviderCatalogRefreshStats = {
     googleLocationsFound: number;
@@ -40,18 +45,38 @@ export type AiProviderCatalogRefreshStats = {
     pricingRefresh: {
         refreshed: boolean;
         configured: boolean;
-        source: "openai_organization_costs_api";
+        source: "provider_catalog";
         reason: string;
         sourceUrl: string;
+        googleModels?: number;
         costs?: OpenAiOrganizationCostsSummary;
     };
     failures: Array<{ scopeType: AiProviderModelScopeType | "PROVIDER"; scopeId: string; error: string }>;
 };
 
+function normalizeGooglePricingLookupKey(modelId: string): string {
+    return String(modelId || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^models\//, "")
+        .replace(/-image-preview$/, "-image")
+        .replace(/-preview$/, "");
+}
+
+function buildGooglePricingMap(pricing: GoogleGeminiModelPricing[]): Map<string, GoogleGeminiModelPricing> {
+    const map = new Map<string, GoogleGeminiModelPricing>();
+    for (const price of pricing) {
+        const key = normalizeGooglePricingLookupKey(price.modelId);
+        if (key && !map.has(key)) map.set(key, price);
+    }
+    return map;
+}
+
 function toGoogleDiscoveredModels(input: {
     scopeType: AiProviderModelScopeType;
     scopeId: string;
     models: NonNullable<Awaited<ReturnType<typeof fetchGoogleModels>>>;
+    pricingByModel?: Map<string, GoogleGeminiModelPricing>;
 }): DiscoveredProviderModel[] {
     const discovered: DiscoveredProviderModel[] = [];
     for (const model of input.models) {
@@ -77,6 +102,7 @@ function toGoogleDiscoveredModels(input: {
             capabilities,
             source: "google_models_list",
             rawMetadata: model,
+            pricing: input.pricingByModel?.get(normalizeGooglePricingLookupKey(modelId)) || null,
         });
     }
     return discovered;
@@ -170,13 +196,27 @@ export async function runAiProviderCatalogRefresh(): Promise<AiProviderCatalogRe
         providerCatalogRefreshes: [],
         pricingRefresh: {
             refreshed: false,
-            configured: Boolean(resolveOpenAiCostsApiKey()),
-            source: "openai_organization_costs_api",
-            reason: "OpenAI model discovery does not include token price rates. Organization cost refresh uses OpenAI's official costs API when OPENAI_ADMIN_API_KEY or OPENAI_API_KEY has access.",
-            sourceUrl: OPENAI_ORGANIZATION_COSTS_REFERENCE_URL,
+            configured: true,
+            source: "provider_catalog",
+            reason: "Google pricing is refreshed from Google's official Gemini API pricing page. OpenAI model discovery does not include token price rates; OpenAI organization costs still use the official costs API when configured.",
+            sourceUrl: GOOGLE_GEMINI_PRICING_URL,
         },
         failures: [],
     };
+
+    let googlePricingByModel = new Map<string, GoogleGeminiModelPricing>();
+    try {
+        const googlePricing = await fetchGoogleGeminiPricingCatalog();
+        googlePricingByModel = buildGooglePricingMap(googlePricing);
+        stats.pricingRefresh.refreshed = true;
+        stats.pricingRefresh.googleModels = googlePricingByModel.size;
+    } catch (error: any) {
+        stats.failures.push({
+            scopeType: "PROVIDER",
+            scopeId: "google_gemini_pricing",
+            error: error?.message || "Unknown Google pricing refresh failure",
+        });
+    }
 
     async function refreshGoogleScope(scopeType: AiProviderModelScopeType, scopeId: string, apiKey: string) {
         const models = await fetchGoogleModels(apiKey);
@@ -187,7 +227,7 @@ export async function runAiProviderCatalogRefresh(): Promise<AiProviderCatalogRe
             provider: "google_gemini",
             scopeType,
             scopeId,
-            models: toGoogleDiscoveredModels({ scopeType, scopeId, models }),
+            models: toGoogleDiscoveredModels({ scopeType, scopeId, models, pricingByModel: googlePricingByModel }),
         });
         stats.providerCatalogRefreshes.push(result);
     }
@@ -305,13 +345,14 @@ export async function runAiProviderCatalogRefresh(): Promise<AiProviderCatalogRe
         }
     }
 
-    if (stats.pricingRefresh.configured) {
+    if (resolveOpenAiCostsApiKey()) {
         try {
             const costs = await fetchOpenAiOrganizationCostsSummary({ days: 1 });
             stats.pricingRefresh = {
                 ...stats.pricingRefresh,
                 refreshed: true,
-                reason: "Fetched official OpenAI organization cost telemetry for the last day. This is historical cost data, not a per-model token-rate table.",
+                sourceUrl: `${GOOGLE_GEMINI_PRICING_URL} | ${OPENAI_ORGANIZATION_COSTS_REFERENCE_URL}`,
+                reason: "Google pricing was fetched from the official Gemini API pricing page. OpenAI organization cost telemetry was fetched for reconciliation; it is historical cost data, not a per-model token-rate table.",
                 costs,
             };
         } catch (error: any) {

@@ -29,6 +29,7 @@ type PrecisionRemoveResult = {
     actionLog: string[];
     model: string;
     maskCoverage?: number;
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 };
 
 type GeminiGenerateContentResponse = {
@@ -41,6 +42,11 @@ type GeminiGenerateContentResponse = {
             }>;
         };
     }>;
+    usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        totalTokenCount?: number;
+    };
 };
 
 function normalizeMaskBase64(input: string): string {
@@ -263,7 +269,12 @@ async function callGeminiPrecisionRemove(input: {
     sourceImageMimeType: string;
     maskImageBase64?: string;
     prompt: string;
-}): Promise<{ imageBuffer: Buffer; mimeType: string; textParts: string[] }> {
+}): Promise<{
+    imageBuffer: Buffer;
+    mimeType: string;
+    textParts: string[];
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
+}> {
     const endpoint = `${GEMINI_API_BASE_URL}/${input.model}:generateContent`;
 
     const parts: Array<Record<string, unknown>> = [
@@ -338,6 +349,7 @@ async function callGeminiPrecisionRemove(input: {
         imageBuffer: Buffer.from(imageData, "base64"),
         mimeType,
         textParts,
+        usageMetadata: parsed.usageMetadata,
     };
 }
 
@@ -480,5 +492,6 @@ export async function removeImageContentWithPrecisionMask(
         actionLog,
         model: String(input.generationModel || "").trim() || GEMINI_PRECISION_REMOVE_MODEL,
         maskCoverage,
+        usageMetadata: geminiResult.usageMetadata,
     };
 }
