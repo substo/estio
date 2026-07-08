@@ -4,6 +4,7 @@ import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
+import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
 import {
   evaluateStructuredPropertyMatch,
   type MatchVerdict,
@@ -335,6 +336,7 @@ function propertySnapshot(property: AnyRecord) {
     status: property.status,
     publicationStatus: property.publicationStatus,
     slug: property.slug,
+    sourceUrl: property.sourceUrl || property.externalPublicUrl || null,
     description: normalizeText(property.description, 1600),
   };
 }
@@ -1196,7 +1198,11 @@ export async function createPropertyMatchCampaign(args: {
   });
   if (!property) return { success: false as const, error: "Property not found." };
 
-  const snapshot = propertySnapshot(property as any);
+  const sourceUrl = await resolvePropertyPublicUrl({
+    locationId: args.locationId,
+    property,
+  });
+  const snapshot = propertySnapshot({ ...(property as any), sourceUrl });
   const campaign = await db.propertyMatchCampaign.create({
     data: {
       locationId: args.locationId,

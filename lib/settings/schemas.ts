@@ -151,6 +151,8 @@ const locationCrmSchema = z.object({
     crmUrl: nullableTrimmedString,
     crmEditUrlPattern: nullableTrimmedString,
     crmLeadUrlPattern: nullableTrimmedString,
+    publicListingUrlMode: z.enum(["ESTIO", "LEGACY_EXTERNAL"]).default("ESTIO"),
+    legacyPublicListingUrlPattern: nullableTrimmedString,
     crmSchema: z.unknown().nullable().optional(),
     crmLeadSchema: z.unknown().nullable().optional(),
     legacyCrmLeadEmailEnabled: z.boolean().default(false),

@@ -1785,6 +1785,26 @@ export default function PropertyForm({
                             </div>
                         </div>
 
+                        <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
+                            <Label className="text-lg font-semibold text-gray-700">Customer Public Listing URL</Label>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2 md:col-span-2">
+                                    <Label htmlFor="externalPublicUrl">External Public URL Override</Label>
+                                    <Input
+                                        id="externalPublicUrl"
+                                        name="externalPublicUrl"
+                                        defaultValue={property?.externalPublicUrl || ""}
+                                        placeholder="https://www.downtowncyprus.com/properties/..."
+                                    />
+                                    <input type="hidden" name="externalPublicUrlSource" value={property?.externalPublicUrlSource || "manual"} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="legacyCrmPropertyId">Old CRM Property ID</Label>
+                                    <Input id="legacyCrmPropertyId" name="legacyCrmPropertyId" defaultValue={property?.legacyCrmPropertyId || ""} />
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Project / Development Details */}
                         <div className="space-y-2 p-4 bg-gray-50 rounded-lg border">
                             <Label className="text-lg font-semibold text-gray-700">Project / Development Details</Label>

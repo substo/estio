@@ -113,6 +113,8 @@ model Location {
   crmLeadUrlPattern String?
   crmSchema         Json?
   crmLeadSchema     Json?
+  publicListingUrlMode       String  @default("ESTIO") // ESTIO | LEGACY_EXTERNAL
+  legacyPublicListingUrlPattern String?
 
   // Legacy CRM Lead Email Notification (Old CRM -> Outlook -> Estio)
   legacyCrmLeadEmailEnabled               Boolean  @default(false)
@@ -320,6 +322,9 @@ model Property {
   floor               Int?
   agentRef            String?
   agentUrl            String?
+  externalPublicUrl   String?
+  externalPublicUrlSource String?
+  legacyCrmPropertyId String?
   estimatedValue      Int?
   internalNotes       String?
   keyHolder           String?

@@ -9,6 +9,7 @@ import {
     ViewingDateTimeValidationError,
 } from "@/lib/viewings/datetime";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
+import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
 
 type GoogleMapsLinkResult = {
     url: string | null;
@@ -109,20 +110,6 @@ function buildPropertyAddressLabel(property: {
 
     if (parts.length === 0) return null;
     return Array.from(new Set(parts)).join(", ");
-}
-
-async function getPropertyPublicBaseUrl(locationId: string): Promise<string | null> {
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: { domain: true }
-    });
-    if (siteConfig?.domain) {
-        const normalized = siteConfig.domain.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-        if (normalized) return `https://${normalized}`;
-    }
-
-    if (locationId === "substo_estio") return "https://estio.co";
-    return null;
 }
 
 /**
@@ -237,7 +224,9 @@ export async function searchProperties(
             viewingNotes: true,
             internalNotes: true,
             metadata: true,
-            slug: true
+            slug: true,
+            externalPublicUrl: true,
+            legacyCrmPropertyId: true
         }
     });
 
@@ -250,11 +239,14 @@ export async function searchProperties(
         properties = await runSearch(relaxedWhere);
     }
 
-    const publicBaseUrl = await getPropertyPublicBaseUrl(locationId);
+    const resolvedUrls = await Promise.all(properties.map((property) => resolvePropertyPublicUrl({
+        locationId,
+        property,
+    })));
 
     return {
         count: properties.length,
-        properties: properties.map(p => ({
+        properties: properties.map((p, index) => ({
             id: p.id,
             reference: p.reference,
             title: p.title,
@@ -268,7 +260,7 @@ export async function searchProperties(
             longitude: p.longitude,
             locationAddress: buildPropertyAddressLabel(p),
             googleMapsLink: deriveGoogleMapsLink(p).url,
-            url: publicBaseUrl ? `${publicBaseUrl}/property/${p.slug}` : null
+            url: resolvedUrls[index] || null
         }))
     };
 }

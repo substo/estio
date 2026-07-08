@@ -115,6 +115,9 @@ test("sanitizeOldCrmPropertyData keeps allowed fields and coerces numeric values
         latitude: "34.772",
         longitude: "not a number",
         sortOrder: "",
+        externalPublicUrl: "https://www.downtowncyprus.com/properties/apartment-ref-dt3327",
+        externalPublicUrlSource: "old_crm_import",
+        legacyCrmPropertyId: "2327",
         ownerContactId: "contact_123",
     });
 
@@ -126,6 +129,9 @@ test("sanitizeOldCrmPropertyData keeps allowed fields and coerces numeric values
         latitude: 34.772,
         longitude: null,
         sortOrder: 0,
+        externalPublicUrl: "https://www.downtowncyprus.com/properties/apartment-ref-dt3327",
+        externalPublicUrlSource: "old_crm_import",
+        legacyCrmPropertyId: "2327",
     });
     assert.deepEqual(sanitized.warnings, [
         'Coerced numeric field "price" from "€250,000" to 250000.',

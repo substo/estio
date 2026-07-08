@@ -342,6 +342,8 @@ async function backfillLocation(location: any) {
         crmUrl: location.crmUrl ?? null,
         crmEditUrlPattern: location.crmEditUrlPattern ?? null,
         crmLeadUrlPattern: location.crmLeadUrlPattern ?? null,
+        publicListingUrlMode: (location as any).publicListingUrlMode ?? "ESTIO",
+        legacyPublicListingUrlPattern: (location as any).legacyPublicListingUrlPattern ?? null,
         crmSchema: location.crmSchema ?? null,
         crmLeadSchema: location.crmLeadSchema ?? null,
         legacyCrmLeadEmailEnabled: location.legacyCrmLeadEmailEnabled ?? false,

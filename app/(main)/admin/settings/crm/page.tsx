@@ -20,6 +20,8 @@ type CrmSettingsFormValues = {
     hasCrmPassword: boolean;
     crmEditUrlPattern: string;
     crmLeadUrlPattern: string;
+    publicListingUrlMode: string;
+    legacyPublicListingUrlPattern: string;
     legacyCrmLeadEmailEnabled: boolean;
     legacyCrmLeadEmailSenders: string;
     legacyCrmLeadEmailSenderDomains: string;
@@ -38,6 +40,8 @@ const DEFAULT_CRM_SETTINGS: CrmSettingsFormValues = {
     hasCrmPassword: false,
     crmEditUrlPattern: "",
     crmLeadUrlPattern: "",
+    publicListingUrlMode: "ESTIO",
+    legacyPublicListingUrlPattern: "",
     legacyCrmLeadEmailEnabled: false,
     legacyCrmLeadEmailSenders: "info@downtowncyprus.com",
     legacyCrmLeadEmailSenderDomains: "mg.downtowncyprus.com",
@@ -61,6 +65,8 @@ function normalizeCrmSettings(settings: any): CrmSettingsFormValues {
         hasCrmPassword: Boolean(settings.hasCrmPassword),
         crmEditUrlPattern: settings.crmEditUrlPattern || DEFAULT_CRM_SETTINGS.crmEditUrlPattern,
         crmLeadUrlPattern: settings.crmLeadUrlPattern || DEFAULT_CRM_SETTINGS.crmLeadUrlPattern,
+        publicListingUrlMode: settings.publicListingUrlMode || DEFAULT_CRM_SETTINGS.publicListingUrlMode,
+        legacyPublicListingUrlPattern: settings.legacyPublicListingUrlPattern || DEFAULT_CRM_SETTINGS.legacyPublicListingUrlPattern,
         legacyCrmLeadEmailEnabled: !!settings.legacyCrmLeadEmailEnabled,
         legacyCrmLeadEmailSenders: listToTextareaValue(
             settings.legacyCrmLeadEmailSenders,
@@ -265,6 +271,34 @@ export default function CrmSettingsPage() {
                                 Use <code>{'{id}'}</code> as a placeholder for the lead ID.
                                 Defaults to <code>{`.../leads/{id}/edit`}</code>
                             </p>
+                        </div>
+
+                        <div className="space-y-2 rounded-md border bg-muted/20 p-4">
+                            <Label htmlFor="publicListingUrlMode">Customer Listing Link Mode</Label>
+                            <select
+                                id="publicListingUrlMode"
+                                name="publicListingUrlMode"
+                                defaultValue={defaultValues.publicListingUrlMode}
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            >
+                                <option value="ESTIO">Use Estio public listing URLs</option>
+                                <option value="LEGACY_EXTERNAL">Use old CRM public listing URLs</option>
+                            </select>
+                            <p className="text-xs text-muted-foreground">
+                                Admin preview links still open Estio. This only controls customer/outbound links used by AI and sharing flows.
+                            </p>
+                            <div className="space-y-2 pt-2">
+                                <Label htmlFor="legacyPublicListingUrlPattern">Old CRM Public URL Pattern (Optional)</Label>
+                                <Input
+                                    id="legacyPublicListingUrlPattern"
+                                    name="legacyPublicListingUrlPattern"
+                                    defaultValue={defaultValues.legacyPublicListingUrlPattern}
+                                    placeholder="https://www.downtowncyprus.com/properties/{slug}"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Supports <code>{'{slug}'}</code>, <code>{'{reference}'}</code>, and <code>{'{oldCrmId}'}</code>. Imports auto-fill each property URL from the old CRM slug.
+                                </p>
+                            </div>
                         </div>
 
                         <div className="space-y-2">

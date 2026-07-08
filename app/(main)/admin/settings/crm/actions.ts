@@ -290,6 +290,8 @@ export async function saveCrmCredentials(data: any) {
             crmUrl: data.crmUrl || null,
             crmEditUrlPattern: data.crmEditUrlPattern || null,
             crmLeadUrlPattern: data.crmLeadUrlPattern || null,
+            publicListingUrlMode: data.publicListingUrlMode === "LEGACY_EXTERNAL" ? "LEGACY_EXTERNAL" : "ESTIO",
+            legacyPublicListingUrlPattern: data.legacyPublicListingUrlPattern || null,
             crmSchema: existingLocationPayload.crmSchema || null,
             crmLeadSchema: existingLocationPayload.crmLeadSchema || null,
             legacyCrmLeadEmailEnabled: existingLocationPayload.legacyCrmLeadEmailEnabled ?? false,
@@ -355,6 +357,8 @@ export async function saveCrmCredentials(data: any) {
                     crmUrl: locationPayload.crmUrl || undefined,
                     crmEditUrlPattern: locationPayload.crmEditUrlPattern || undefined,
                     crmLeadUrlPattern: locationPayload.crmLeadUrlPattern || undefined,
+                    publicListingUrlMode: locationPayload.publicListingUrlMode,
+                    legacyPublicListingUrlPattern: locationPayload.legacyPublicListingUrlPattern || null,
                 }
             });
         }
@@ -400,6 +404,8 @@ export async function getCrmSettings(locationId?: string | null) {
                     crmLeadUrlPattern: true,
                     crmSchema: true,
                     crmLeadSchema: true,
+                    publicListingUrlMode: true,
+                    legacyPublicListingUrlPattern: true,
                     legacyCrmLeadEmailEnabled: true,
                     legacyCrmLeadEmailSenders: true,
                     legacyCrmLeadEmailSenderDomains: true,
@@ -431,6 +437,8 @@ export async function getCrmSettings(locationId?: string | null) {
             crmLeadUrlPattern: locationPayload.crmLeadUrlPattern ?? location?.crmLeadUrlPattern ?? null,
             crmSchema: locationPayload.crmSchema ?? location?.crmSchema ?? null,
             crmLeadSchema: locationPayload.crmLeadSchema ?? location?.crmLeadSchema ?? null,
+            publicListingUrlMode: locationPayload.publicListingUrlMode ?? ((location as any)?.publicListingUrlMode ?? "ESTIO"),
+            legacyPublicListingUrlPattern: locationPayload.legacyPublicListingUrlPattern ?? ((location as any)?.legacyPublicListingUrlPattern ?? null),
             legacyCrmLeadEmailEnabled: locationPayload.legacyCrmLeadEmailEnabled ?? ((location as any)?.legacyCrmLeadEmailEnabled ?? false),
             legacyCrmLeadEmailSenders: locationPayload.legacyCrmLeadEmailSenders ?? ((location as any)?.legacyCrmLeadEmailSenders || []),
             legacyCrmLeadEmailSenderDomains: locationPayload.legacyCrmLeadEmailSenderDomains ?? ((location as any)?.legacyCrmLeadEmailSenderDomains || []),

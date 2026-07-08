@@ -13,25 +13,37 @@ import {
     normalizePropertyPrintLanguages,
     resolvePrintImageUrl,
 } from "@/lib/properties/print-designer";
+import { buildEstioPropertyPublicUrl, resolvePropertyPublicUrlFromSettings } from "@/lib/properties/public-url";
 
 export async function getLocationPrintBranding(locationId: string) {
-    const [settingsDoc, siteConfig, location] = await Promise.all([
+    const [settingsDoc, crmSettingsDoc, siteConfig, location] = await Promise.all([
         settingsService.getDocument<any>({
             scopeType: "LOCATION",
             scopeId: locationId,
             domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
         }),
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_CRM,
+        }).catch(() => null),
         db.siteConfig.findUnique({
             where: { locationId },
             select: { theme: true, contactInfo: true, domain: true },
         }),
         db.location.findUnique({
             where: { id: locationId },
-            select: { domain: true, name: true },
+            select: {
+                domain: true,
+                name: true,
+                publicListingUrlMode: true,
+                legacyPublicListingUrlPattern: true,
+            },
         }),
     ]);
 
     const payload = settingsDoc?.payload || {};
+    const crmPayload = crmSettingsDoc?.payload || {};
     const theme = (payload.theme || siteConfig?.theme || {}) as Record<string, any>;
     const contactInfo = (payload.contactInfo || siteConfig?.contactInfo || {}) as Record<string, any>;
     const domain = String(payload.domain || siteConfig?.domain || location?.domain || "").trim() || null;
@@ -39,6 +51,8 @@ export async function getLocationPrintBranding(locationId: string) {
     return {
         domain,
         locationName: String(payload.locationName || location?.name || "").trim() || null,
+        publicListingUrlMode: crmPayload.publicListingUrlMode || location?.publicListingUrlMode || "ESTIO",
+        legacyPublicListingUrlPattern: crmPayload.legacyPublicListingUrlPattern || location?.legacyPublicListingUrlPattern || null,
         theme,
         contactInfo,
     };
@@ -48,7 +62,7 @@ export function buildPropertyPublicUrl(domain: string | null | undefined, slug: 
     const normalizedDomain = String(domain || "").trim();
     const normalizedSlug = String(slug || "").trim();
     if (!normalizedDomain || !normalizedSlug) return null;
-    return `https://${normalizedDomain}/properties/${normalizedSlug}`;
+    return buildEstioPropertyPublicUrl(normalizedDomain, normalizedSlug);
 }
 
 export function buildPropertyPrintPreviewData({
@@ -84,7 +98,14 @@ export function buildPropertyPrintPreviewData({
         url: resolvePrintImageUrl(image),
     }));
 
-    const publicUrl = buildPropertyPublicUrl(branding.domain, property.slug);
+    const publicUrl = resolvePropertyPublicUrlFromSettings({
+        property,
+        location: {
+            domain: branding.domain,
+            publicListingUrlMode: branding.publicListingUrlMode,
+            legacyPublicListingUrlPattern: branding.legacyPublicListingUrlPattern,
+        },
+    });
 
     return {
         draft: {

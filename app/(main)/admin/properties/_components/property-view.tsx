@@ -256,6 +256,16 @@ export default function PropertyView({
                 {/* 5. PUBLISH / SEO */}
                 <DisplaySection title="SEO & Publishing">
                     <DisplayField label="Slug" value={property.slug} />
+                    <DisplayField
+                        label="Customer Public URL"
+                        value={property.externalPublicUrl ? (
+                            <a href={property.externalPublicUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline-offset-4 hover:underline break-all">
+                                {property.externalPublicUrl}
+                            </a>
+                        ) : null}
+                        className="col-span-2"
+                    />
+                    <DisplayField label="Old CRM Property ID" value={property.legacyCrmPropertyId} />
                     <DisplayField label="Meta Title" value={property.metaTitle} />
                     <DisplayField label="Meta Keywords" value={property.metaKeywords} />
                     <DisplayField label="Meta Description" value={property.metaDescription} className="col-span-2" />

@@ -10,6 +10,7 @@ import { buildStructuredLeadDisplayName } from '@/lib/contacts/name-builder';
 import { resolveImportedOwner } from '@/lib/crm/owner-import';
 import { registerTemporaryMediaAssets } from '@/lib/media/media-assets';
 import { ensureConversationForImportedContact } from '@/lib/conversations/imported-contact-bootstrap';
+import { buildLegacyPublicListingUrl } from '@/lib/properties/public-url';
 
 function getLocationLabels(areaKey: string | null | undefined, districtKey: string | null | undefined) {
     const district = PROPERTY_LOCATIONS.find((item) => item.district_key === districtKey) || null;
@@ -597,6 +598,21 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
         // Clean up text
         if (extractedData.title) extractedData.title = extractedData.title.trim();
         if (extractedData.originalCreatorName) extractedData.originalCreatorName = extractedData.originalCreatorName.trim();
+        if (extractedData.slug) {
+            extractedData.slug = String(extractedData.slug).trim();
+            const legacyPublicUrl = buildLegacyPublicListingUrl({
+                crmUrl,
+                slug: extractedData.slug,
+                reference: extractedData.reference,
+                legacyCrmPropertyId: oldPropertyId,
+                preview: extractedData.publicationStatus && extractedData.publicationStatus !== 'PUBLISHED',
+            });
+            if (legacyPublicUrl) {
+                extractedData.externalPublicUrl = legacyPublicUrl;
+                extractedData.externalPublicUrlSource = 'old_crm_import';
+            }
+        }
+        extractedData.legacyCrmPropertyId = oldPropertyId;
 
         console.log("--------------------------------------------------");
         console.log("[CRM PULL] EXTRACTED DATA:");
