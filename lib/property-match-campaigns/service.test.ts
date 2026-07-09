@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  attachPropertyMatchAiRunEvidence,
   buildAiReviewClaimWhere,
   buildPriorPropertyShareSearchTerms,
   buildPropertyMatchContactWhere,
@@ -45,6 +46,27 @@ test("AI match normalizer preserves high-confidence yes", () => {
 
   assert.equal(result.verdict, "yes");
   assert.equal(result.confidence, 0.86);
+});
+
+test("AI run evidence preserves candidate evidence and records requested and used model", () => {
+  const evidence = attachPropertyMatchAiRunEvidence({
+    structured: { verdict: "yes" },
+    warnings: ["Requirement is sparse."],
+  }, {
+    modelRequested: "gemini-2.5-pro",
+    modelUsed: "gemini-2.5-pro-20260601",
+    provider: "google",
+    scoredAt: "2026-07-09T10:00:00.000Z",
+  });
+
+  assert.deepEqual(evidence.structured, { verdict: "yes" });
+  assert.deepEqual(evidence.warnings, ["Requirement is sparse."]);
+  assert.deepEqual(evidence.aiRun, {
+    modelRequested: "gemini-2.5-pro",
+    modelUsed: "gemini-2.5-pro-20260601",
+    provider: "google",
+    scoredAt: "2026-07-09T10:00:00.000Z",
+  });
 });
 
 test("AI match normalizer downgrades yes when structured evidence lacks concrete anchors", () => {
@@ -194,7 +216,7 @@ test("completed or failed AI candidates can enter human review when verdict is s
   }), false);
 });
 
-test("unverified legacy candidates cannot enter review or draft flow", () => {
+test("unverified lead-like candidates can enter review and draft flow", () => {
   const candidate = {
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -202,8 +224,8 @@ test("unverified legacy candidates cannot enter review or draft flow", () => {
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(canCandidateEnterHumanReview(candidate), false);
-  assert.equal(canCandidateDraftOrSend(candidate), false);
+  assert.equal(canCandidateEnterHumanReview(candidate), true);
+  assert.equal(canCandidateDraftOrSend(candidate), true);
 });
 
 test("property match contact filter leaves identity to profile verification", () => {
@@ -228,7 +250,7 @@ test("AI review claim filter reclaims stale processing locks", () => {
 
   assert.deepEqual(where.id, { in: ["cand_1", "cand_2"] });
   assert.equal(where.reviewerStatus, "pending");
-  assert.deepEqual(where.contact, { profileVerificationStatus: "verified_lead" });
+  assert.equal("contact" in where, false);
   assert.deepEqual(where.OR, [
     { aiReviewStatus: "pending" },
     {
@@ -267,7 +289,7 @@ test("property match queue classifier separates campaign work outcomes", () => {
   });
 });
 
-test("property match queue blocks unverified legacy yes candidates from review", () => {
+test("property match queue allows unverified lead-like yes candidates into review", () => {
   const candidate = {
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -275,7 +297,7 @@ test("property match queue blocks unverified legacy yes candidates from review",
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(propertyMatchCandidateQueue(candidate), "needs_profile_verification");
+  assert.equal(propertyMatchCandidateQueue(candidate), "review");
 });
 
 test("property match queue separates profile verification blockers from not matches", () => {

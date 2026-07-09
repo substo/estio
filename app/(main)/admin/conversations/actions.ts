@@ -138,6 +138,7 @@ import {
     deletePropertyMatchCampaign,
     findPriorPropertyShareForCandidate,
     getPropertyMatchCampaignDetail,
+    listContactPropertyRecommendations,
     listPropertyMatchCampaigns,
     markPropertyMatchCandidateAlreadyShared,
     markPropertyMatchCandidateSent,
@@ -7386,8 +7387,62 @@ function serializePropertyMatchCandidate(row: any) {
     };
 }
 
+function serializeContactPropertyRecommendation(row: any) {
+    return {
+        ...row,
+        sentAt: row.sentAt?.toISOString?.() || null,
+        reviewedAt: row.reviewedAt?.toISOString?.() || null,
+    };
+}
+
 const DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT = 12;
 const MAX_PROPERTY_MATCH_SEARCH_LIMIT = 25;
+
+export async function getPropertyMatchCampaignModelPreferenceAction() {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess || !actor.userId) return { model: null as string | null };
+        const doc = await settingsService.getDocument<{ propertyMatchCampaignModel?: string | null }>({
+            scopeType: "USER",
+            scopeId: actor.userId,
+            domain: SETTINGS_DOMAINS.USER_AI_PREFERENCES,
+        });
+        const model = String(doc?.payload?.propertyMatchCampaignModel || "").trim();
+        return { model: model || null };
+    } catch (error) {
+        console.error("[property-match-campaigns] model preference load failed", error);
+        return { model: null as string | null };
+    }
+}
+
+export async function savePropertyMatchCampaignModelPreferenceAction(model: string) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess || !actor.userId) return { success: false as const, error: "Unauthorized" };
+        const normalizedModel = String(model || "").trim();
+        const existing = await settingsService.getDocument<Record<string, unknown>>({
+            scopeType: "USER",
+            scopeId: actor.userId,
+            domain: SETTINGS_DOMAINS.USER_AI_PREFERENCES,
+        });
+        await settingsService.upsertDocument({
+            scopeType: "USER",
+            scopeId: actor.userId,
+            domain: SETTINGS_DOMAINS.USER_AI_PREFERENCES,
+            actorUserId: actor.userId,
+            payload: {
+                ...(existing?.payload || {}),
+                propertyMatchCampaignModel: normalizedModel || null,
+            },
+        });
+        return { success: true as const, model: normalizedModel || null };
+    } catch (error) {
+        console.error("[property-match-campaigns] model preference save failed", error);
+        return { success: false as const, error: "Could not save model preference." };
+    }
+}
 
 export async function searchPropertyMatchCampaignPropertiesAction(query?: string, limit = DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT) {
     const trimmed = String(query || "").trim();
@@ -7520,9 +7575,23 @@ export async function listPropertyMatchCampaignsAction() {
     return rows.map(serializePropertyMatchCampaign);
 }
 
+export async function listContactPropertyRecommendationsAction(contactId: string, conversationId?: string | null) {
+    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const actor = await resolveLocationActorContext(location.id);
+    if (!actor.hasAccess) return [];
+    const normalizedContactId = String(contactId || "").trim();
+    if (!normalizedContactId) return [];
+    const rows = await listContactPropertyRecommendations({
+        locationId: location.id,
+        contactId: normalizedContactId,
+        conversationId: conversationId ? String(conversationId).trim() : null,
+    });
+    return rows.map(serializeContactPropertyRecommendation);
+}
+
 export async function getPropertyMatchCampaignDetailAction(
     campaignId: string,
-    queue?: "review" | "approved" | "sent" | "skipped" | "rejected" | "not_match" | "already_shared" | "all",
+    queue?: "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "not_match" | "already_shared" | "all",
 ) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -7585,7 +7654,7 @@ export async function deletePropertyMatchCampaignAction(campaignId: string) {
     }
 }
 
-export async function processPropertyMatchCampaignBatchAction(campaignId: string, limit?: number) {
+export async function processPropertyMatchCampaignBatchAction(campaignId: string, limit?: number, modelOverride?: string | null) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7594,6 +7663,7 @@ export async function processPropertyMatchCampaignBatchAction(campaignId: string
             locationId: location.id,
             campaignId: String(campaignId || "").trim(),
             limit,
+            model: String(modelOverride || "").trim() || null,
             actorUserId: actor.userId || null,
         });
         revalidatePath("/admin/conversations");

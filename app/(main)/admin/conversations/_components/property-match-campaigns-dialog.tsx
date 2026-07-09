@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { Check, ChevronLeft, Link2, List, Loader2, Megaphone, Pencil, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { AiModelSelect } from "@/components/ai/ai-model-select";
+import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
+import { usePersistentAiModelSelection } from "@/components/ai/use-persistent-ai-model-selection";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -22,11 +25,13 @@ import {
     createPropertyMatchCampaignFromSourceAction,
     deletePropertyMatchCampaignAction,
     generatePropertyMatchCandidateDraftAction,
+    getPropertyMatchCampaignModelPreferenceAction,
     getPropertyMatchCampaignDetailAction,
     listPropertyMatchCampaignsAction,
     processPropertyMatchCampaignBatchAction,
     reviewPropertyMatchCandidateAction,
     savePropertyMatchCandidateDraftAction,
+    savePropertyMatchCampaignModelPreferenceAction,
     searchPropertyMatchCampaignPropertiesAction,
     sendPropertyMatchCandidateAction,
     updatePropertyMatchCampaignAction,
@@ -99,6 +104,12 @@ type Candidate = {
             disqualifiers?: string[];
             hardMismatches?: string[];
         };
+        aiRun?: {
+            modelRequested?: string | null;
+            modelUsed?: string | null;
+            provider?: string | null;
+            scoredAt?: string | null;
+        };
     } | null;
     preferredChannel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | string | null;
     draftBody?: string;
@@ -146,7 +157,7 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
     { value: "sent", label: "Sent", countKey: "sentCount" },
     { value: "skipped", label: "Skipped", countKey: "skippedCount" },
     { value: "rejected", label: "Rejected", countKey: "rejectedCount" },
-    { value: "needs_profile_verification", label: "Profile check", countKey: "needsProfileVerificationCount" },
+    { value: "needs_profile_verification", label: "Needs info", countKey: "needsProfileVerificationCount" },
     { value: "not_match", label: "Not match", countKey: "notMatchCount" },
     { value: "already_shared", label: "Already shared", countKey: "alreadySharedCount" },
     { value: "all", label: "All", countKey: "allCount" },
@@ -156,6 +167,7 @@ const PROPERTY_SEARCH_LIMIT = 12;
 const MIN_PROPERTY_SEARCH_LENGTH = 2;
 const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
 const LIVE_BATCH_LIMIT = 20;
+const PROPERTY_MATCH_MODEL_USAGE_KEY = "property-match-campaigns";
 
 function formatMoney(value?: number | null) {
     return Number.isFinite(Number(value)) ? `€${Number(value).toLocaleString()}` : "No price";
@@ -233,7 +245,7 @@ function queueEmptyLabel(queue: Queue) {
     if (queue === "sent") return "No sent contacts yet.";
     if (queue === "skipped") return "No skipped contacts yet.";
     if (queue === "rejected") return "No rejected contacts yet.";
-    if (queue === "needs_profile_verification") return "No contacts are waiting on profile verification.";
+    if (queue === "needs_profile_verification") return "No contacts are waiting on profile or requirement info.";
     if (queue === "not_match") return "No contacts were marked as not a match.";
     if (queue === "already_shared") return "No contacts already had this property shared.";
     return "No candidates in this campaign.";
@@ -294,6 +306,43 @@ export function PropertyMatchCampaignsDialog({
     const detailRequestIdRef = useRef(0);
     const campaignPrefetchStartedRef = useRef(false);
     const processingRunRef = useRef(0);
+    const { models: availableModels, resolveModelForKind, loading: modelCatalogLoading } = useAiModelCatalog();
+    const defaultCampaignModel = resolveModelForKind("general");
+    const {
+        selectedModel: selectedCampaignModel,
+        handleModelChange: handleCampaignModelChange,
+    } = usePersistentAiModelSelection({
+        usageKey: PROPERTY_MATCH_MODEL_USAGE_KEY,
+        models: availableModels,
+        defaultModel: defaultCampaignModel,
+    });
+    const modelValues = useMemo(() => new Set(availableModels.map((model) => model.value)), [availableModels]);
+
+    useEffect(() => {
+        if (!open || availableModels.length === 0) return;
+        let cancelled = false;
+        getPropertyMatchCampaignModelPreferenceAction()
+            .then((result) => {
+                if (cancelled) return;
+                const model = String(result?.model || "").trim();
+                if (model && modelValues.has(model)) {
+                    handleCampaignModelChange(model);
+                }
+            })
+            .catch((error) => {
+                console.error("Failed to load property campaign model preference", error);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [availableModels.length, handleCampaignModelChange, modelValues, open]);
+
+    const handlePersistentCampaignModelChange = useCallback((model: string) => {
+        handleCampaignModelChange(model);
+        void savePropertyMatchCampaignModelPreferenceAction(model).catch((error) => {
+            console.error("Failed to save property campaign model preference", error);
+        });
+    }, [handleCampaignModelChange]);
 
     const selectedProperty = useMemo(
         () => properties.find((property) => property.id === selectedPropertyId) || null,
@@ -453,7 +502,7 @@ export function PropertyMatchCampaignsDialog({
 
         try {
             for (;;) {
-                const res = await processPropertyMatchCampaignBatchAction(campaignId, LIVE_BATCH_LIMIT);
+                const res = await processPropertyMatchCampaignBatchAction(campaignId, LIVE_BATCH_LIMIT, selectedCampaignModel || defaultCampaignModel || null);
                 if (processingRunRef.current !== runId) return;
                 if (!res.success) {
                     setError(res.error || "Batch processing failed.");
@@ -508,7 +557,7 @@ export function PropertyMatchCampaignsDialog({
                 setProcessingCampaignId(null);
             }
         }
-    }, [queue, refreshCampaigns, refreshDetail]);
+    }, [defaultCampaignModel, queue, refreshCampaigns, refreshDetail, selectedCampaignModel]);
 
     const createCampaignFromProperty = () => {
         if (!selectedPropertyId) return;
@@ -949,7 +998,7 @@ export function PropertyMatchCampaignsDialog({
                                                     <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
                                                     <span>{campaignQueueCounts(campaign).reviewCount} review</span>
                                                     {campaignQueueCounts(campaign).needsProfileVerificationCount ? (
-                                                        <span>{campaignQueueCounts(campaign).needsProfileVerificationCount} profile</span>
+                                                        <span>{campaignQueueCounts(campaign).needsProfileVerificationCount} info</span>
                                                     ) : null}
                                                     <span>{campaignQueueCounts(campaign).sentCount} sent</span>
                                                     <span>{campaignQueueCounts(campaign).notMatchCount} no</span>
@@ -988,7 +1037,7 @@ export function PropertyMatchCampaignsDialog({
                                             <div className="mt-1 text-xs text-slate-500">
                                                 {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
                                                 {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
-                                                {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} waiting on profile checks` : ""}
+                                                {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs info` : ""}
                                             </div>
                                             <div className="mt-2 flex flex-wrap gap-1">
                                                 {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
@@ -1002,6 +1051,15 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                         </div>
                                         <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex">
+                                            <AiModelSelect
+                                                value={selectedCampaignModel || defaultCampaignModel}
+                                                models={availableModels}
+                                                onValueChange={handlePersistentCampaignModelChange}
+                                                disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling || modelCatalogLoading}
+                                                triggerClassName="h-8 min-w-0 text-xs sm:w-56"
+                                                itemClassName="text-xs"
+                                                placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
+                                            />
                                             <Button
                                                 type="button"
                                                 size="sm"
@@ -1059,7 +1117,7 @@ export function PropertyMatchCampaignsDialog({
                                                     <span>{campaignQueueCounts(activeCampaign).pendingAiCount} pending AI</span>
                                                 ) : null}
                                                 {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? (
-                                                    <span>{campaignQueueCounts(activeCampaign).needsProfileVerificationCount} waiting on profile verification</span>
+                                                    <span>{campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs contact info</span>
                                                 ) : null}
                                             </div>
                                         </div>
@@ -1126,6 +1184,7 @@ export function PropertyMatchCampaignsDialog({
                                             const savedDraft = candidate.draftBody || "";
                                             const dimensions = candidateStructuredDimensions(candidate);
                                             const needsProfileVerification = candidateNeedsProfileVerification(candidate);
+                                            const aiRun = candidate.evidence?.aiRun || null;
                                             const canSend = candidate.reviewerStatus === "approved"
                                                 && !!savedDraft.trim()
                                                 && draft.trim() === savedDraft.trim();
@@ -1150,7 +1209,7 @@ export function PropertyMatchCampaignsDialog({
                                                                 {candidate.aiReviewStatus ? <Badge variant="outline" className="h-5 text-[10px]">AI {candidate.aiReviewStatus}</Badge> : null}
                                                                 {needsProfileVerification ? (
                                                                     <Badge variant="outline" className="h-5 border-amber-200 bg-amber-50 text-[10px] text-amber-800">
-                                                                        Waiting on profile
+                                                                        Needs info
                                                                     </Badge>
                                                                 ) : null}
                                                                 {candidate.contact?.profileVerificationStatus ? (
@@ -1166,6 +1225,13 @@ export function PropertyMatchCampaignsDialog({
                                                             {decisionDate ? (
                                                                 <div className="mt-1 text-[11px] text-slate-500">
                                                                     {candidate.sentAt ? "Sent" : "Reviewed"} {formatDecisionDate(decisionDate)}
+                                                                </div>
+                                                            ) : null}
+                                                            {aiRun?.modelUsed ? (
+                                                                <div className="mt-1 text-[11px] text-slate-500">
+                                                                    AI model: {aiRun.modelUsed}
+                                                                    {aiRun.modelRequested && aiRun.modelRequested !== aiRun.modelUsed ? ` (requested ${aiRun.modelRequested})` : ""}
+                                                                    {aiRun.provider ? ` · ${aiRun.provider}` : ""}
                                                                 </div>
                                                             ) : null}
                                                         </div>
@@ -1211,7 +1277,7 @@ export function PropertyMatchCampaignsDialog({
                                                     ) : null}
                                                     {needsProfileVerification ? (
                                                         <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
-                                                            This contact has not entered matching yet. The campaign is waiting for global contact profile verification; once verified as a buyer/renter lead, the next batch will score the property fit.
+                                                            This is an older blocked candidate. Refresh contact requirements or rerun the batch to score the property fit with profile uncertainty shown as a warning.
                                                         </div>
                                                     ) : null}
 

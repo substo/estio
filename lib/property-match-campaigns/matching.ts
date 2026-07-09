@@ -340,9 +340,13 @@ export function evaluateStructuredPropertyMatch(
   const recentIntent = detectRecentIntent(contact);
   const combinedRequirementText = requirementText(contact);
   const qualificationAnchors = new Set<string>();
+  const normalizedContactType = normalize(contact.contactType);
 
   if (recentIntent.stoppedSearch) {
     disqualifiers.push("lead has clearly indicated they are no longer searching");
+  }
+  if (["owner", "agent", "partner", "associate", "maintenance", "whatsappgroup"].includes(normalizedContactType)) {
+    disqualifiers.push(`contact appears to be ${contact.contactType}, not a buyer or renter lead`);
   }
   if (contact.profileVerificationStatus === "verified_lead") {
     qualificationAnchors.add("globally verified lead");

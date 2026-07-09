@@ -1,9 +1,20 @@
+"use client";
+
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Home, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Home, Loader2, Send, Sparkles, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+    generatePropertyMatchCandidateDraftAction,
+    listContactPropertyRecommendationsAction,
+    savePropertyMatchCandidateDraftAction,
+    sendPropertyMatchCandidateAction,
+} from "../actions";
 import { DEFAULT_CONTACT_TYPE } from "../../contacts/_components/contact-types";
 import type { ContactIdentityPatch } from "../../contacts/_components/contact-form";
 import { GroupMembersList } from "./group-members-list";
@@ -92,6 +103,276 @@ function getBriefRequirementItems(contact: any): Array<{ label: string; value: s
     }
 
     return items;
+}
+
+type ContactPropertyRecommendation = {
+    candidateId: string;
+    campaignId: string;
+    property?: {
+        id?: string | null;
+        title?: string | null;
+        reference?: string | null;
+        price?: number | null;
+        currency?: string | null;
+        city?: string | null;
+        propertyLocation?: string | null;
+    } | null;
+    aiVerdict?: string | null;
+    aiReviewStatus?: string | null;
+    reviewerStatus?: string | null;
+    confidence?: number | null;
+    matchSummary?: string | null;
+    reasoning?: string | null;
+    draftBody?: string | null;
+    sentAt?: string | null;
+    reviewedAt?: string | null;
+    warnings?: string[];
+};
+
+function formatRecommendationPrice(property?: ContactPropertyRecommendation["property"]) {
+    if (!Number.isFinite(Number(property?.price))) return "";
+    return `${property?.currency || "EUR"} ${Number(property?.price).toLocaleString()}`;
+}
+
+function formatConfidence(value: unknown) {
+    const confidence = Number(value);
+    if (!Number.isFinite(confidence)) return "";
+    return `${Math.round(confidence * 100)}%`;
+}
+
+function RecommendedPropertiesSection({
+    contactId,
+    conversationId,
+}: {
+    contactId: string;
+    conversationId: string;
+}) {
+    const [items, setItems] = useState<ContactPropertyRecommendation[]>([]);
+    const [drafts, setDrafts] = useState<Record<string, string>>({});
+    const [loading, setLoading] = useState(false);
+    const [busyCandidateId, setBusyCandidateId] = useState<string | null>(null);
+    const [error, setError] = useState("");
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        setError("");
+        listContactPropertyRecommendationsAction(contactId, conversationId)
+            .then((rows) => {
+                if (cancelled) return;
+                const nextItems = (Array.isArray(rows) ? rows : []) as ContactPropertyRecommendation[];
+                setItems(nextItems);
+                setDrafts((current) => {
+                    const next = { ...current };
+                    for (const item of nextItems) {
+                        if (item.draftBody && next[item.candidateId] === undefined) {
+                            next[item.candidateId] = item.draftBody;
+                        }
+                    }
+                    return next;
+                });
+            })
+            .catch((error) => {
+                console.error("Failed to load property recommendations", error);
+                if (!cancelled) setItems([]);
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [contactId, conversationId]);
+
+    async function reloadRecommendations() {
+        const rows = await listContactPropertyRecommendationsAction(contactId, conversationId);
+        const nextItems = (Array.isArray(rows) ? rows : []) as ContactPropertyRecommendation[];
+        setItems(nextItems);
+        setDrafts((current) => {
+            const next = { ...current };
+            for (const item of nextItems) {
+                if (item.draftBody) next[item.candidateId] = item.draftBody;
+            }
+            return next;
+        });
+    }
+
+    async function generateDraft(item: ContactPropertyRecommendation) {
+        setBusyCandidateId(item.candidateId);
+        setError("");
+        try {
+            const result = await generatePropertyMatchCandidateDraftAction(item.candidateId);
+            if (!result.success) {
+                setError(result.error || "Could not generate draft.");
+                return;
+            }
+            setDrafts((current) => ({ ...current, [item.candidateId]: result.draft || "" }));
+            await reloadRecommendations();
+        } finally {
+            setBusyCandidateId(null);
+        }
+    }
+
+    async function approveDraft(item: ContactPropertyRecommendation) {
+        const draft = String(drafts[item.candidateId] ?? item.draftBody ?? "").trim();
+        if (!draft) {
+            setError("Draft cannot be empty.");
+            return;
+        }
+        setBusyCandidateId(item.candidateId);
+        setError("");
+        try {
+            const result = await savePropertyMatchCandidateDraftAction(item.candidateId, draft);
+            if (!result.success) {
+                setError(result.error || "Could not approve draft.");
+                return;
+            }
+            await reloadRecommendations();
+        } finally {
+            setBusyCandidateId(null);
+        }
+    }
+
+    async function sendDraft(item: ContactPropertyRecommendation) {
+        const draft = String(drafts[item.candidateId] ?? item.draftBody ?? "").trim();
+        setBusyCandidateId(item.candidateId);
+        setError("");
+        try {
+            const result = await sendPropertyMatchCandidateAction(item.candidateId, draft);
+            if (!result.success) {
+                setError(result.error || "Could not send recommendation.");
+                return;
+            }
+            await reloadRecommendations();
+        } finally {
+            setBusyCandidateId(null);
+        }
+    }
+
+    if (!loading && items.length === 0) return null;
+
+    return (
+        <div className="pt-1.5 border-t">
+            <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Recommended Properties</span>
+            {loading && items.length === 0 ? (
+                <div className="rounded border border-dashed border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
+                    Loading recommendations...
+                </div>
+            ) : (
+                <div className="space-y-1.5">
+                    {error ? (
+                        <div className="rounded border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
+                            {error}
+                        </div>
+                    ) : null}
+                    {items.map((item) => {
+                        const property = item.property || {};
+                        const title = property.reference || property.title || "Property";
+                        const price = formatRecommendationPrice(property);
+                        const location = [property.propertyLocation, property.city].filter(Boolean).join(", ");
+                        const warnings = Array.isArray(item.warnings) ? item.warnings.filter(Boolean) : [];
+                        const draft = drafts[item.candidateId] ?? item.draftBody ?? "";
+                        const savedDraft = String(item.draftBody || "").trim();
+                        const draftChanged = draft.trim() !== savedDraft;
+                        const isBusy = busyCandidateId === item.candidateId;
+                        const canReview = (item.aiVerdict === "yes" || item.aiVerdict === "maybe")
+                            && (item.aiReviewStatus === "done" || item.aiReviewStatus === "failed" || !item.aiReviewStatus)
+                            && item.reviewerStatus !== "sent";
+                        const canSend = item.reviewerStatus === "approved" && !!savedDraft && !draftChanged;
+                        return (
+                            <div key={item.candidateId} className="rounded-md border border-emerald-100 bg-emerald-50/40 p-2 text-[11px] text-foreground">
+                                <div className="flex min-w-0 items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                        {property.id ? (
+                                            <Link
+                                                href={`/admin/properties/${encodeURIComponent(property.id)}/view`}
+                                                className="block truncate font-medium text-primary hover:underline"
+                                                title={property.title || title}
+                                            >
+                                                {title}
+                                            </Link>
+                                        ) : (
+                                            <div className="truncate font-medium">{title}</div>
+                                        )}
+                                        <div className="mt-0.5 truncate text-muted-foreground">
+                                            {[price, location].filter(Boolean).join(" · ") || property.title || "Campaign property"}
+                                        </div>
+                                    </div>
+                                    <div className="flex shrink-0 flex-col items-end gap-1">
+                                        <Badge variant={item.aiVerdict === "yes" ? "default" : "secondary"} className="h-4 px-1 text-[9px]">
+                                            {item.aiVerdict || "maybe"} {formatConfidence(item.confidence)}
+                                        </Badge>
+                                        {item.reviewerStatus ? (
+                                            <Badge variant="outline" className="h-4 px-1 text-[9px]">
+                                                {item.reviewerStatus}
+                                            </Badge>
+                                        ) : null}
+                                    </div>
+                                </div>
+                                {item.matchSummary ? (
+                                    <div className="mt-1 leading-snug text-slate-700">{item.matchSummary}</div>
+                                ) : null}
+                                {warnings.length > 0 ? (
+                                    <div className="mt-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] leading-snug text-amber-800">
+                                        {warnings[0]}
+                                    </div>
+                                ) : null}
+                                {canReview || draft ? (
+                                    <div className="mt-2 space-y-1.5">
+                                        <Textarea
+                                            value={draft}
+                                            onChange={(event) => setDrafts((current) => ({
+                                                ...current,
+                                                [item.candidateId]: event.target.value,
+                                            }))}
+                                            rows={3}
+                                            className="min-h-16 bg-white text-[11px]"
+                                            placeholder="Generate or edit the recommendation draft"
+                                            disabled={item.reviewerStatus === "sent" || isBusy}
+                                        />
+                                        <div className="grid grid-cols-3 gap-1.5">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-7 px-1 text-[10px]"
+                                                onClick={() => generateDraft(item)}
+                                                disabled={!canReview || isBusy}
+                                            >
+                                                {isBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1 h-3 w-3" />}
+                                                Draft
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-7 px-1 text-[10px]"
+                                                onClick={() => approveDraft(item)}
+                                                disabled={!canReview || !draft.trim() || isBusy}
+                                            >
+                                                <Check className="mr-1 h-3 w-3" />
+                                                Approve
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                className="h-7 px-1 text-[10px]"
+                                                onClick={() => sendDraft(item)}
+                                                disabled={!canSend || isBusy}
+                                            >
+                                                <Send className="mr-1 h-3 w-3" />
+                                                Send
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
 }
 
 export function CoordinatorContactOverviewCard({
@@ -367,6 +648,10 @@ export function CoordinatorContactOverviewCard({
                                                             </p>
                                                         )}
                                                     </ContactRequirementProposals>
+                                                    <RecommendedPropertiesSection
+                                                        contactId={contact.id}
+                                                        conversationId={conversationId}
+                                                    />
                                                 </div>
                                             )}
                                         </>

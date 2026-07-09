@@ -113,3 +113,11 @@ test("user ChatGPT subscription settings schema trims preferred text model", () 
     assert.equal(payload.enabled, true);
     assert.equal(payload.defaultTextModel, "chatgpt_subscription:gpt-5.4-mini");
 });
+
+test("user AI preferences schema trims property campaign model", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.USER_AI_PREFERENCES, {
+        propertyMatchCampaignModel: "  google:gemini-2.5-pro  ",
+    }) as any;
+
+    assert.equal(payload.propertyMatchCampaignModel, "google:gemini-2.5-pro");
+});

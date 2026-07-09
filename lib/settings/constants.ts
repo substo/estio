@@ -10,6 +10,7 @@ export const SETTINGS_DOMAINS = {
     USER_MICROSOFT_INTEGRATIONS: "user.integrations.microsoft",
     USER_OPENAI_INTEGRATIONS: "user.integrations.openai",
     USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS: "user.integrations.chatgpt_subscription",
+    USER_AI_PREFERENCES: "user.ai_preferences",
 } as const;
 
 export type SettingsDomain = typeof SETTINGS_DOMAINS[keyof typeof SETTINGS_DOMAINS];

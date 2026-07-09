@@ -202,6 +202,10 @@ const userChatGptSubscriptionSchema = z.object({
     defaultTextModel: nullableTrimmedString,
 }).passthrough();
 
+const userAiPreferencesSchema = z.object({
+    propertyMatchCampaignModel: nullableTrimmedString,
+}).passthrough();
+
 export const SETTINGS_DOMAIN_SCHEMAS: Record<SettingsDomain, z.ZodTypeAny> = {
     [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE]: publicSiteSchema,
     [SETTINGS_DOMAINS.LOCATION_AI]: aiSchema,
@@ -214,6 +218,7 @@ export const SETTINGS_DOMAIN_SCHEMAS: Record<SettingsDomain, z.ZodTypeAny> = {
     [SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS]: userMicrosoftSchema,
     [SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS]: userOpenAiSchema,
     [SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS]: userChatGptSubscriptionSchema,
+    [SETTINGS_DOMAINS.USER_AI_PREFERENCES]: userAiPreferencesSchema,
 };
 
 export function validateSettingsPayload<T>(domain: SettingsDomain, payload: T): T {
