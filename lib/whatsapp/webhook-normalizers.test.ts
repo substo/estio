@@ -9,6 +9,7 @@ import {
     parseWhatsAppWebhookTimestamp,
 } from "@/lib/whatsapp/webhook-normalizers";
 import {
+    hasWebBridgeIdentityNameConflict,
     selectPreferredWhatsAppLidContact,
     shouldRejectWebBridgeOutboundLidForOwnContact,
     shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
@@ -97,6 +98,51 @@ test("selectPreferredWhatsAppLidContact prefers phone contact for outbound dupli
             { id: "real", phone: "+972526145279", contactType: "Lead" },
         ])?.id,
         "real"
+    );
+});
+
+test("hasWebBridgeIdentityNameConflict blocks LID metadata from another named contact", () => {
+    assert.equal(
+        hasWebBridgeIdentityNameConflict({
+            source: "whatsapp_web_bridge",
+            identity: {
+                displayName: "Abdul Tareel",
+                rawContactIdentity: {
+                    displayName: "Abdul Tareel",
+                    phoneJid: "35796926123@c.us",
+                    lidJid: "256310847225967@lid",
+                },
+            },
+            contact: {
+                id: "dimitra",
+                name: "Dimitra Lead Sale 2Bdr Apt Geroskipou",
+                firstName: "Dimitra",
+                lastName: "Tareel",
+                email: "dimitrastam1@gmail.com",
+                phone: "+35796926123",
+                contactType: "Lead",
+            },
+        }),
+        true
+    );
+});
+
+test("hasWebBridgeIdentityNameConflict allows matching established contact names", () => {
+    assert.equal(
+        hasWebBridgeIdentityNameConflict({
+            source: "whatsapp_web_bridge",
+            identity: {
+                displayName: "Nicolas White Lead Sale DT4771 Studio Kato Paphos",
+            },
+            contact: {
+                id: "nicolas",
+                name: "Nicolas White Lead Sale DT4771 Studio Kato Paphos",
+                firstName: "Nicolas",
+                phone: "+353870972075",
+                contactType: "Lead",
+            },
+        }),
+        false
     );
 });
 

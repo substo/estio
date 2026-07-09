@@ -66,6 +66,59 @@ type WhatsAppLidContactCandidate = {
     phone?: string | null;
 };
 
+type WhatsAppIdentityNamedContact = WhatsAppLidContactCandidate & {
+    name?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+};
+
+function normalizeNameToken(value: unknown) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .split(/[^a-z0-9]+/i)
+        .find((token) => token.length >= 2 && !["lead", "sale", "rent", "rental", "owner", "agent", "whatsapp", "contact", "user"].includes(token))
+        || "";
+}
+
+function getWebBridgeIdentityName(identity: any) {
+    return String(
+        identity?.displayName
+        || identity?.verifiedName
+        || identity?.rawContactIdentity?.displayName
+        || identity?.rawContactIdentity?.verifiedName
+        || identity?.rawContactIdentity?.name
+        || identity?.rawContactIdentity?.pushname
+        || identity?.name
+        || identity?.pushname
+        || ""
+    ).trim();
+}
+
+function isEstablishedNamedContact(contact: WhatsAppIdentityNamedContact) {
+    const name = String(contact.name || "").trim();
+    if (!name) return false;
+    if (/^(whatsapp contact|whatsapp user|group member)\b/i.test(name)) return false;
+    return Boolean(contact.email || contact.firstName || contact.lastName || contact.contactType !== "Lead");
+}
+
+export function hasWebBridgeIdentityNameConflict(args: {
+    source: NormalizedMessage["source"];
+    isGroup?: boolean;
+    identity?: any;
+    contact?: WhatsAppIdentityNamedContact | null;
+}) {
+    if (args.source !== "whatsapp_web_bridge" || args.isGroup || !args.contact) return false;
+    if (!isEstablishedNamedContact(args.contact)) return false;
+
+    const identityToken = normalizeNameToken(getWebBridgeIdentityName(args.identity));
+    const contactToken = normalizeNameToken(args.contact.firstName || args.contact.name);
+    return Boolean(identityToken && contactToken && identityToken !== contactToken);
+}
+
 function isRefGroupMemberContact(candidate: WhatsAppLidContactCandidate) {
     return candidate.contactType === "Ref-GroupMember";
 }
@@ -1240,10 +1293,26 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     const phoneMatchCandidate =
         phoneMatches.find((candidate) => candidate.contactType !== "Ref-GroupMember")
         || phoneMatches[0];
+    const phoneMatchIdentityConflict = Boolean(phoneMatchCandidate && normalizedMsgLid && hasWebBridgeIdentityNameConflict({
+        source,
+        isGroup,
+        identity: msg.webBridgeIdentity,
+        contact: phoneMatchCandidate,
+    }));
+    const safePhoneMatchCandidate = phoneMatchIdentityConflict ? undefined : phoneMatchCandidate;
+    if (phoneMatchIdentityConflict && phoneMatchCandidate) {
+        console.warn(`[WhatsApp Sync] Refusing Web Bridge LID ${normalizedMsgLid} phone match to contact ${phoneMatchCandidate.id} (${phoneMatchCandidate.name || phoneMatchCandidate.phone || "unnamed"}) because contact metadata name conflicts`);
+    }
 
     let matchedByLid = false;
     const lidMatches = candidates.filter((c: any) => {
         if (!msg.lid) return false;
+        if (hasWebBridgeIdentityNameConflict({
+            source,
+            isGroup,
+            identity: msg.webBridgeIdentity,
+            contact: c,
+        })) return false;
         if (mappedLidContact?.id && c.id === mappedLidContact.id) return true;
         if (isUnsafeWebBridgeInboundLidOnly && c.phone) return false;
         if (shouldRejectWebBridgeOutboundLidForOwnContact({
@@ -1265,7 +1334,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     let isNewContact = false;
     if (!contact) {
-        contact = phoneMatchCandidate;
+        contact = safePhoneMatchCandidate;
     } else if (matchedByLid && rawInputPhone.length >= 9) {
         const lidContactPhoneDigits = normalizeDigits(contact.phone);
         const lidPhoneMatchesResolvedPhone = !!lidContactPhoneDigits && (
@@ -1273,10 +1342,12 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             || lidContactPhoneDigits.endsWith(rawInputPhone)
             || rawInputPhone.endsWith(lidContactPhoneDigits)
         );
-        if (!lidPhoneMatchesResolvedPhone) {
-            if (phoneMatchCandidate) {
-                console.warn(`[WhatsApp Sync] Ignoring stale LID match ${contact.id}; resolved phone matched contact ${phoneMatchCandidate.id}`);
-                contact = phoneMatchCandidate;
+        if (!lidPhoneMatchesResolvedPhone && phoneMatchIdentityConflict && !lidContactPhoneDigits) {
+            console.warn(`[WhatsApp Sync] Keeping LID-only contact ${contact.id} for ${normalizedMsgLid}; resolved phone +${rawInputPhone} matched a conflicting named contact.`);
+        } else if (!lidPhoneMatchesResolvedPhone) {
+            if (safePhoneMatchCandidate) {
+                console.warn(`[WhatsApp Sync] Ignoring stale LID match ${contact.id}; resolved phone matched contact ${safePhoneMatchCandidate.id}`);
+                contact = safePhoneMatchCandidate;
                 matchedByLid = false;
             } else {
                 console.warn(`[WhatsApp Sync] Ignoring stale LID match ${contact.id}; resolved phone +${rawInputPhone} conflicts with contact phone ${contact.phone || "(none)"}`);
@@ -1306,7 +1377,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
 
     // If we matched by LID placeholder but now have a real phone (e.g. payload has previousRemoteJid),
     // backfill phone directly or merge into existing phone contact if one already exists.
-    if (contact && matchedByLid && !isGroup && !contact.phone && !contactPhone.includes('@lid') && rawInputPhone.length >= 7) {
+    if (contact && matchedByLid && !isGroup && !contact.phone && !contactPhone.includes('@lid') && rawInputPhone.length >= 7 && !phoneMatchIdentityConflict) {
         const normalizedPhone = contactPhone.startsWith('+') ? contactPhone : `+${rawInputPhone}`;
         const shouldRename = !!nameToUse && (
             (contact.name || '').startsWith('WhatsApp User')
@@ -1325,7 +1396,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             });
             console.log(`[WhatsApp Sync] Backfilled phone ${normalizedPhone} on LID contact ${contact.id}`);
         } catch (err: any) {
-            const targetPhoneContact = phoneMatchCandidate && phoneMatchCandidate.id !== contact.id ? phoneMatchCandidate : null;
+            const targetPhoneContact = safePhoneMatchCandidate && safePhoneMatchCandidate.id !== contact.id ? safePhoneMatchCandidate : null;
 
             if (!targetPhoneContact) {
                 console.error(`[WhatsApp Sync] Failed to backfill phone on LID contact ${contact.id}:`, err?.message || err);
@@ -1415,6 +1486,14 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         } else {
             console.warn(`[WhatsApp Sync] Refusing to overwrite existing LID ${contact.lid} on contact ${contact.id} with unrelated LID ${msg.lid}`);
         }
+    }
+
+    if (!contact && phoneMatchIdentityConflict && normalizedMsgLid) {
+        console.warn(`[WhatsApp Sync] Deferred Web Bridge message ${wamId}: LID ${normalizedMsgLid} resolved to phone +${rawInputPhone}, but the matched contact identity name conflicts. Manual review required.`);
+        return {
+            status: 'deferred_unresolved_lid',
+            reason: 'web_bridge_identity_name_conflict'
+        };
     }
 
     if (!contact) {
@@ -1620,7 +1699,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
 
     if (source === "whatsapp_web_bridge" && contact?.id) {
-        const resolvedMappedPhone = msg.resolvedPhone && isHighConfidenceResolvedPhone(normalizeDigits(msg.resolvedPhone))
+        const resolvedMappedPhone = !phoneMatchIdentityConflict && msg.resolvedPhone && isHighConfidenceResolvedPhone(normalizeDigits(msg.resolvedPhone))
             ? `+${normalizeDigits(msg.resolvedPhone)}`
             : null;
         const mappedPhone = resolvedMappedPhone || contact?.phone || null;
