@@ -4,6 +4,7 @@ import {
     Activity,
     Blocks,
     Bot,
+    DatabaseZap,
     Mail,
     MessageSquare,
     Smartphone,
@@ -19,62 +20,94 @@ type IntegrationSection = {
     iconClassName: string;
 };
 
-const INTEGRATION_SECTIONS: IntegrationSection[] = [
+type IntegrationGroup = {
+    title: string;
+    description: string;
+    sections: IntegrationSection[];
+};
+
+const INTEGRATION_GROUPS: IntegrationGroup[] = [
     {
-        title: "WhatsApp Business",
-        description: "Connect your WhatsApp Business Account to send and receive messages directly from the dashboard.",
-        href: "/admin/settings/integrations/whatsapp",
-        cta: "Configure Integration",
-        icon: MessageSquare,
-        iconClassName: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400",
+        title: "CRM and property data",
+        description: "Systems that provide listing, lead, and provider data.",
+        sections: [
+            {
+                title: "Old CRM",
+                description: "Connect legacy CRM credentials, imported listing links, lead email detection, and schema tools.",
+                href: "/admin/settings/integrations/old-crm",
+                cta: "Configure Old CRM",
+                icon: DatabaseZap,
+                iconClassName: "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300",
+            },
+            {
+                title: "GoHighLevel",
+                description: "Manage the connection to your GoHighLevel location, specific tokens, and syncing preferences.",
+                href: "/admin/settings/integrations/ghl",
+                cta: "Configure Integration",
+                icon: Blocks,
+                iconClassName: "bg-violet-100 text-violet-700 dark:bg-violet-900/20 dark:text-violet-300",
+            },
+            {
+                title: "Provider Sync Operations",
+                description: "Monitor async provider queues, retry failed mirror jobs, and inspect sync alias health.",
+                href: "/admin/settings/integrations/provider-sync",
+                cta: "Open Operations",
+                icon: Activity,
+                iconClassName: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400",
+            },
+        ],
     },
     {
-        title: "GoHighLevel",
-        description: "Manage the connection to your GoHighLevel location, specific tokens, and syncing preferences.",
-        href: "/admin/settings/integrations/ghl",
-        cta: "Configure Integration",
-        icon: Blocks,
-        iconClassName: "bg-purple-100 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400",
+        title: "Messaging and workspace",
+        description: "Channels used for customer conversations, email, contacts, and SMS.",
+        sections: [
+            {
+                title: "WhatsApp Business",
+                description: "Connect your WhatsApp Business Account to send and receive messages directly from the dashboard.",
+                href: "/admin/settings/integrations/whatsapp",
+                cta: "Configure Integration",
+                icon: MessageSquare,
+                iconClassName: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400",
+            },
+            {
+                title: "Google Workspace",
+                description: "Sync Contacts and Gmail (Two-Way) to manage leads and communication.",
+                href: "/admin/settings/integrations/google",
+                cta: "Configure Integration",
+                icon: Users,
+                iconClassName: "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
+            },
+            {
+                title: "Microsoft Outlook",
+                description: "Sync Emails and Contacts with Outlook (Personal or Office 365).",
+                href: "/admin/settings/integrations/microsoft",
+                cta: "Configure Integration",
+                icon: Mail,
+                iconClassName: "bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400",
+            },
+            {
+                title: "SIM Relay",
+                description: "Connect physical Android phones as native SMS gateways using the Estio Companion app.",
+                href: "/admin/settings/integrations/sms-relay",
+                cta: "Configure Integration",
+                icon: Smartphone,
+                iconClassName: "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300",
+            },
+        ],
     },
     {
-        title: "SIM Relay",
-        description: "Connect physical Android phones as native SMS gateways using the Estio Companion app.",
-        href: "/admin/settings/integrations/sms-relay",
-        cta: "Configure Integration",
-        icon: Smartphone,
-        iconClassName: "bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400",
-    },
-    {
-        title: "Google Workspace",
-        description: "Sync Contacts and Gmail (Two-Way) to manage leads and communication.",
-        href: "/admin/settings/integrations/google",
-        cta: "Configure Integration",
-        icon: Users,
-        iconClassName: "bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
-    },
-    {
-        title: "OpenAI",
-        description: "Connect ChatGPT subscription access and OpenAI API keys. Default model selection lives in AI Configuration.",
-        href: "/admin/settings/integrations/openai",
-        cta: "Configure OpenAI",
-        icon: Bot,
-        iconClassName: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-    },
-    {
-        title: "Microsoft Outlook",
-        description: "Sync Emails and Contacts with Outlook (Personal or Office 365).",
-        href: "/admin/settings/integrations/microsoft",
-        cta: "Configure Integration",
-        icon: Mail,
-        iconClassName: "bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400",
-    },
-    {
-        title: "Provider Sync Operations",
-        description: "Monitor async provider queues, retry failed mirror jobs, and inspect sync alias health.",
-        href: "/admin/settings/integrations/provider-sync",
-        cta: "Open Operations",
-        icon: Activity,
-        iconClassName: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400",
+        title: "AI services",
+        description: "Model providers and AI account connections.",
+        sections: [
+            {
+                title: "OpenAI",
+                description: "Connect ChatGPT subscription access and OpenAI API keys. Default model selection lives in AI Configuration.",
+                href: "/admin/settings/integrations/openai",
+                cta: "Configure OpenAI",
+                icon: Bot,
+                iconClassName: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+            },
+        ],
     },
 ];
 
@@ -103,17 +136,25 @@ function IntegrationCard({ section }: { section: IntegrationSection }) {
 
 export default function IntegrationsPage() {
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             <div>
                 <h1 className="text-2xl font-bold tracking-tight">Integrations</h1>
-                <p className="text-muted-foreground">Manage your external service connections.</p>
+                <p className="text-muted-foreground">Manage external systems by workflow area.</p>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {INTEGRATION_SECTIONS.map((section) => (
-                    <IntegrationCard key={section.href} section={section} />
-                ))}
-            </div>
+            {INTEGRATION_GROUPS.map((group) => (
+                <section key={group.title} className="space-y-3">
+                    <div>
+                        <h2 className="text-base font-semibold">{group.title}</h2>
+                        <p className="text-sm text-muted-foreground">{group.description}</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {group.sections.map((section) => (
+                            <IntegrationCard key={section.href} section={section} />
+                        ))}
+                    </div>
+                </section>
+            ))}
         </div>
     );
 }

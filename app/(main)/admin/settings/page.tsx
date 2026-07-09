@@ -32,12 +32,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     requiresAdmin: true,
   },
   {
-    title: "CRM Integration",
-    description: "Connect to the old CRM to enable property imports.",
-    href: "/admin/settings/crm",
-    actionLabel: "Manage Credentials",
-  },
-  {
     title: "AI Configuration",
     description: "Manage AI models, API keys, and brand voice settings.",
     href: "/admin/settings/ai",
@@ -63,7 +57,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     title: "Integrations",
-    description: "Manage external connections like WhatsApp Business.",
+    description: "Manage CRM, messaging, workspace, and AI service connections.",
     href: "/admin/settings/integrations",
     actionLabel: "Manage Integrations",
   },

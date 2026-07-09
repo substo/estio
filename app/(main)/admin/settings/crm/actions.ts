@@ -19,6 +19,12 @@ import { SettingsVersionConflictError } from '@/lib/settings/errors';
 
 const MASKED_SECRET = "********";
 
+function revalidateOldCrmSettingsPaths() {
+    revalidatePath('/admin/settings/crm');
+    revalidatePath('/admin/settings/integrations/old-crm');
+    revalidatePath('/admin/settings/integrations');
+}
+
 function parseStringList(input: unknown, { lower = false }: { lower?: boolean } = {}) {
     if (input === null || input === undefined) return [];
     const value = String(input);
@@ -152,7 +158,7 @@ export async function addLeadSource(name: string, locationId?: string | null) {
             }
         });
 
-        revalidatePath('/admin/settings/crm');
+        revalidateOldCrmSettingsPaths();
         return { success: true, source };
     } catch (e) {
         console.error('Failed to add lead source:', e);
@@ -170,7 +176,7 @@ export async function toggleLeadSource(id: string, isActive: boolean) {
             data: { isActive }
         });
 
-        revalidatePath('/admin/settings/crm');
+        revalidateOldCrmSettingsPaths();
         return { success: true };
     } catch (e) {
         console.error('Failed to toggle source:', e);
@@ -259,7 +265,7 @@ export async function saveLegacyCrmLeadEmailSettings(data: any) {
             });
         }
 
-        revalidatePath('/admin/settings/crm');
+        revalidateOldCrmSettingsPaths();
         return { success: true };
     } catch (error: any) {
         if (error instanceof SettingsVersionConflictError) {
@@ -380,7 +386,7 @@ export async function saveCrmCredentials(data: any) {
             });
         }
 
-        revalidatePath('/admin/settings/crm');
+        revalidateOldCrmSettingsPaths();
         return { success: true };
     } catch (error) {
         if (error instanceof SettingsVersionConflictError) {
