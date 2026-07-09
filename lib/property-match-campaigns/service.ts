@@ -6,6 +6,7 @@ import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
+import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
 import {
   evaluateStructuredPropertyMatch,
   type MatchVerdict,
@@ -47,6 +48,8 @@ const PROPERTY_TYPE_HINTS = [
   "Plot",
   "Land",
 ];
+const PROFILE_VERIFICATION_BLOCK_SUMMARY = "Needs contact info before campaign matching.";
+const PROFILE_VERIFICATION_BLOCK_REASON = "Contact profile is not verified as a buyer/renter lead; skipped campaign AI review.";
 
 export function hasPriorPropertyShareEvidence(candidate: {
   evidence?: unknown;
@@ -92,6 +95,7 @@ export function propertyMatchCandidateQueue(candidate: {
   if (hasProfileVerificationBlock(candidate)) return "needs_profile_verification";
   if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
   if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
+  if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe") && !candidateProfileIsVerified(candidate)) return "needs_profile_verification";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
   return "not_match";
 }
@@ -392,7 +396,19 @@ function extractGoalFromSource(text: string): string | null {
 
 function extractLocationFromSource(text: string): string | null {
   const match = text.match(/\b(?:location|area|city)\s*[:#-]\s*([^\n,;|]{2,80})/i);
-  return normalizeText(match?.[1], 120);
+  const explicit = normalizeText(match?.[1], 120);
+  if (explicit) return explicit;
+  const candidates = PROPERTY_LOCATIONS.flatMap((district) => [
+    { label: district.district_label, priority: 1 },
+    ...district.locations.map((location) => ({ label: location.label, priority: 2 })),
+  ]).sort((a, b) => b.priority - a.priority || b.label.length - a.label.length);
+  for (const candidate of candidates) {
+    const escaped = candidate.label.replace(/\s*\([^)]*\)\s*/g, " ").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (escaped && new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text)) {
+      return candidate.label;
+    }
+  }
+  return null;
 }
 
 export function propertySourceSnapshot(args: {
@@ -569,7 +585,8 @@ export function canCandidateEnterHumanReview(candidate: {
 }) {
   return candidate.reviewerStatus === "pending"
     && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-    && isAiReviewTerminal(candidate.aiReviewStatus);
+    && isAiReviewTerminal(candidate.aiReviewStatus)
+    && candidateProfileIsVerified(candidate);
 }
 
 export function canCandidateDraftOrSend(candidate: {
@@ -579,13 +596,56 @@ export function canCandidateDraftOrSend(candidate: {
   profileVerificationStatus?: unknown;
 }) {
   return (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-    && isAiReviewTerminal(candidate.aiReviewStatus);
+    && isAiReviewTerminal(candidate.aiReviewStatus)
+    && candidateProfileIsVerified(candidate);
+}
+
+function candidateProfileIsVerified(candidate: {
+  contact?: { profileVerificationStatus?: unknown } | null;
+  profileVerificationStatus?: unknown;
+}) {
+  return candidate.contact?.profileVerificationStatus === "verified_lead"
+    || candidate.profileVerificationStatus === "verified_lead";
+}
+
+type PropertyMatchContactCursor = {
+  createdAt: string;
+  id: string;
+};
+
+function encodePropertyMatchContactCursor(contact: { createdAt?: Date | string | null; id?: string | null }): string | null {
+  const id = normalizeText(contact.id, 120);
+  const createdAt = contact.createdAt instanceof Date
+    ? contact.createdAt.toISOString()
+    : normalizeText(contact.createdAt, 80);
+  if (!id || !createdAt) return null;
+  return JSON.stringify({ createdAt, id } satisfies PropertyMatchContactCursor);
+}
+
+function decodePropertyMatchContactCursor(cursor?: string | null): PropertyMatchContactCursor | null {
+  const text = normalizeText(cursor, 300);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as Partial<PropertyMatchContactCursor>;
+    const id = normalizeText(parsed.id, 120);
+    const createdAt = normalizeText(parsed.createdAt, 80);
+    if (!id || !createdAt || Number.isNaN(new Date(createdAt).getTime())) return null;
+    return { id, createdAt };
+  } catch {
+    return null;
+  }
 }
 
 export function buildPropertyMatchContactWhere(locationId: string, cursor?: string | null) {
+  const decodedCursor = decodePropertyMatchContactCursor(cursor);
   return {
     locationId,
-    ...(cursor ? { id: { gt: cursor } } : {}),
+    ...(decodedCursor ? {
+      OR: [
+        { createdAt: { lt: new Date(decodedCursor.createdAt) } },
+        { createdAt: new Date(decodedCursor.createdAt), id: { lt: decodedCursor.id } },
+      ],
+    } : cursor ? { id: { lt: cursor } } : {}),
     NOT: [
       { matchingEmailMatchedProperties: { startsWith: "No" } },
     ],
@@ -595,6 +655,43 @@ export function buildPropertyMatchContactWhere(locationId: string, cursor?: stri
 
 function buildVerifiedPropertyMatchContactWhere(locationId: string) {
   return buildPropertyMatchContactWhere(locationId);
+}
+
+function profileVerificationBlockCandidateData(args: {
+  locationId: string;
+  campaignId: string;
+  contact: AnyRecord;
+}) {
+  const conversation = args.contact.conversations?.[0];
+  if (!conversation?.id) return null;
+  return {
+    locationId: args.locationId,
+    campaignId: args.campaignId,
+    contactId: args.contact.id,
+    conversationId: conversation.id,
+    structuredVerdict: "no",
+    aiVerdict: "no",
+    aiReviewStatus: "done",
+    aiReviewLockedAt: null,
+    aiReviewLockedBy: null,
+    reviewerStatus: "pending",
+    score: -1,
+    confidence: 0.95,
+    evidence: {
+      profileVerificationBlock: {
+        status: args.contact.profileVerificationStatus || "unknown",
+        summary: args.contact.profileVerificationSummary || null,
+        source: args.contact.profileVerificationSource || "campaign_preflight",
+      },
+      structured: {
+        needsAi: false,
+      },
+    },
+    reasoning: PROFILE_VERIFICATION_BLOCK_REASON,
+    matchSummary: PROFILE_VERIFICATION_BLOCK_SUMMARY,
+    preferredChannel: deriveComposerInitialChannel(conversation as any),
+    lastError: null,
+  };
 }
 
 async function ensureCampaignContactProfileVerified(args: {
@@ -626,6 +723,7 @@ export function buildAiReviewClaimWhere(args: {
     campaignId: args.campaignId,
     locationId: args.locationId,
     reviewerStatus: "pending",
+    contact: { profileVerificationStatus: "verified_lead" },
     OR: [
       { aiReviewStatus: "pending" },
       {
@@ -695,6 +793,8 @@ async function reopenVerifiedProfileBlockedCandidates(args: {
       contact: {
         select: {
           id: true,
+          createdAt: true,
+          updatedAt: true,
           name: true,
           email: true,
           phone: true,
@@ -1297,6 +1397,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
     where: buildPropertyMatchContactWhere(args.locationId, args.campaign.collectionCursor),
     select: {
       id: true,
+      createdAt: true,
       name: true,
       email: true,
       phone: true,
@@ -1332,22 +1433,35 @@ async function collectPropertyMatchCandidatesBatch(args: {
         },
       },
     },
-    orderBy: { id: "asc" },
+    orderBy: [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ],
     take: limit,
   });
 
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
   const candidateContacts: AnyRecord[] = [];
+  const blockerData: AnyRecord[] = [];
   for (const contact of contacts as AnyRecord[]) {
     const conversation = contact.conversations[0];
     if (!conversation?.id) continue;
-    await ensureCampaignContactProfileVerified({
+    const verifiedLead = await ensureCampaignContactProfileVerified({
       locationId: args.locationId,
       contact,
       conversationId: conversation.id,
     });
-    candidateContacts.push(contact);
+    if (verifiedLead) {
+      candidateContacts.push(contact);
+    } else {
+      const blocker = profileVerificationBlockCandidateData({
+        locationId: args.locationId,
+        campaignId: args.campaign.id,
+        contact,
+      });
+      if (blocker) blockerData.push(blocker);
+    }
   }
 
   const baseCandidateData = candidateContacts.flatMap((contact: any) => {
@@ -1410,6 +1524,12 @@ async function collectPropertyMatchCandidatesBatch(args: {
       skipDuplicates: true,
     });
   }
+  if (blockerData.length > 0) {
+    await db.propertyMatchCandidate.createMany({
+      data: blockerData,
+      skipDuplicates: true,
+    });
+  }
   if (priorShareEvidence.size > 0) {
     const existingSharedCandidates = await db.propertyMatchCandidate.findMany({
       where: {
@@ -1451,7 +1571,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
     }
   }
 
-  const lastCursor = contacts[contacts.length - 1]?.id || args.campaign.collectionCursor || null;
+  const lastCursor = encodePropertyMatchContactCursor(contacts[contacts.length - 1] as any) || args.campaign.collectionCursor || null;
   const done = contacts.length < limit;
   const finished = await db.propertyMatchCampaign.updateMany({
     where: {
@@ -1471,10 +1591,10 @@ async function collectPropertyMatchCandidatesBatch(args: {
     },
   });
   if (finished.count === 0) {
-    return { collected: candidateData.length, done: true, stopped: true };
+    return { collected: candidateData.length + blockerData.length, done: true, stopped: true };
   }
 
-  return { collected: candidateData.length, done };
+  return { collected: candidateData.length + blockerData.length, done };
 }
 
 async function isPropertyMatchCampaignStopRequested(args: {
@@ -2100,12 +2220,13 @@ export async function getPropertyMatchCampaignDetail(args: {
           requirementSummary: true,
         },
       },
-      conversation: { select: { id: true, ghlConversationId: true } },
+      conversation: { select: { id: true, ghlConversationId: true, lastMessageAt: true, updatedAt: true } },
     },
     orderBy: [
-      { aiVerdict: "asc" },
+      { score: "desc" },
       { confidence: "desc" },
-      { createdAt: "asc" },
+      { contact: { createdAt: "desc" } },
+      { conversation: { lastMessageAt: "desc" } },
     ],
     take: 100,
   });
@@ -2121,6 +2242,7 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
       reviewerStatus: "pending",
       aiVerdict: { in: ["yes", "maybe"] },
       aiReviewStatus: { in: ["done", "failed"] },
+      contact: { profileVerificationStatus: "verified_lead" },
     };
   }
   if (queue === "approved") return { reviewerStatus: "approved" };

@@ -7367,6 +7367,8 @@ function serializePropertyMatchCandidate(row: any) {
         lastError: row.lastError || null,
         contact: row.contact ? {
             id: row.contact.id,
+            createdAt: row.contact.createdAt?.toISOString?.() || null,
+            updatedAt: row.contact.updatedAt?.toISOString?.() || null,
             name: row.contact.name,
             email: row.contact.email,
             phone: row.contact.phone,
@@ -7383,6 +7385,8 @@ function serializePropertyMatchCandidate(row: any) {
         conversation: row.conversation ? {
             id: row.conversation.id,
             ghlConversationId: row.conversation.ghlConversationId,
+            lastMessageAt: row.conversation.lastMessageAt?.toISOString?.() || null,
+            updatedAt: row.conversation.updatedAt?.toISOString?.() || null,
         } : null,
     };
 }

@@ -327,6 +327,10 @@ function statusMatches(requirementStatus: unknown, goal: unknown): boolean | nul
   return null;
 }
 
+function primaryGoalRequirement(contact: ContactRequirementInput): unknown {
+  return !isAny(contact.leadGoal) ? contact.leadGoal : contact.requirementStatus;
+}
+
 export function evaluateStructuredPropertyMatch(
   property: PropertyMatchInput,
   contact: ContactRequirementInput,
@@ -351,21 +355,28 @@ export function evaluateStructuredPropertyMatch(
   if (contact.profileVerificationStatus === "verified_lead") {
     qualificationAnchors.add("globally verified lead");
   }
-  const status = statusMatches(contact.requirementStatus, property.goal);
-  if (status === true && !isAny(contact.requirementStatus)) {
-    matches.push("listing goal matches requirement status");
+  const goalRequirement = primaryGoalRequirement(contact);
+  const status = statusMatches(goalRequirement, property.goal);
+  const statusSource = !isAny(contact.leadGoal) ? "lead goal" : "requirement status";
+  if (status === true && !isAny(goalRequirement)) {
+    matches.push(`listing goal matches ${statusSource}`);
     qualificationAnchors.add("sale/rent intent matches");
   }
   if (status === false) {
-    mismatches.push("listing goal does not match requirement status");
-    hardMismatches.push("listing goal does not match requirement status");
+    mismatches.push(`listing goal does not match ${statusSource}`);
+    hardMismatches.push(`listing goal does not match ${statusSource}`);
   }
-  if (status == null) unknowns.push("requirement status is unclear");
+  if (status == null) unknowns.push(`${statusSource} is unclear`);
   addDimension(dimensions, {
     key: "goal",
     label: "Goal",
     propertyValue: display(property.goal),
-    requirementValue: display(contact.requirementStatus),
+    requirementValue: [
+      display(goalRequirement),
+      !isAny(contact.leadGoal) && !isAny(contact.requirementStatus) && normalize(contact.leadGoal) !== normalize(contact.requirementStatus)
+        ? `profile: ${display(contact.leadGoal)} / requirement: ${display(contact.requirementStatus)}`
+        : null,
+    ].filter(Boolean).join(" | ") || null,
     status: status == null ? "unknown" : status ? "yes" : "no",
     weight: 3,
     reason: status === true ? "Sale/rent intent matches." : status === false ? "Sale/rent intent conflicts." : "Sale/rent intent is unclear.",
@@ -624,7 +635,7 @@ export function evaluateStructuredPropertyMatch(
     qualificationAnchors.add("specific written or recent interest");
   }
   const concreteRequirementCount = [
-    !isAny(contact.requirementStatus),
+    !isAny(goalRequirement),
     requiredTypes.length > 0,
     !isAny(contact.requirementBedrooms),
     minPrice != null || maxPrice != null,

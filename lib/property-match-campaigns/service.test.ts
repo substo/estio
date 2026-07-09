@@ -216,7 +216,7 @@ test("completed or failed AI candidates can enter human review when verdict is s
   }), false);
 });
 
-test("unverified lead-like candidates can enter review and draft flow", () => {
+test("unverified lead-like candidates cannot enter review and draft flow", () => {
   const candidate = {
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -224,19 +224,22 @@ test("unverified lead-like candidates can enter review and draft flow", () => {
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(canCandidateEnterHumanReview(candidate), true);
-  assert.equal(canCandidateDraftOrSend(candidate), true);
+  assert.equal(canCandidateEnterHumanReview(candidate), false);
+  assert.equal(canCandidateDraftOrSend(candidate), false);
 });
 
 test("property match contact filter leaves identity to profile verification", () => {
-  const where = buildPropertyMatchContactWhere("loc_1", "contact_10") as any;
+  const cursor = JSON.stringify({ createdAt: "2026-07-09T12:00:00.000Z", id: "contact_10" });
+  const where = buildPropertyMatchContactWhere("loc_1", cursor) as any;
 
   assert.deepEqual(where.NOT, [
     { matchingEmailMatchedProperties: { startsWith: "No" } },
   ]);
   assert.deepEqual(where.conversations, { some: { locationId: "loc_1", deletedAt: null } });
-  assert.deepEqual(where.id, { gt: "contact_10" });
-  assert.equal("OR" in where, false);
+  assert.deepEqual(where.OR, [
+    { createdAt: { lt: new Date("2026-07-09T12:00:00.000Z") } },
+    { createdAt: new Date("2026-07-09T12:00:00.000Z"), id: { lt: "contact_10" } },
+  ]);
 });
 
 test("AI review claim filter reclaims stale processing locks", () => {
@@ -250,7 +253,7 @@ test("AI review claim filter reclaims stale processing locks", () => {
 
   assert.deepEqual(where.id, { in: ["cand_1", "cand_2"] });
   assert.equal(where.reviewerStatus, "pending");
-  assert.equal("contact" in where, false);
+  assert.deepEqual(where.contact, { profileVerificationStatus: "verified_lead" });
   assert.deepEqual(where.OR, [
     { aiReviewStatus: "pending" },
     {
@@ -289,7 +292,7 @@ test("property match queue classifier separates campaign work outcomes", () => {
   });
 });
 
-test("property match queue allows unverified lead-like yes candidates into review", () => {
+test("property match queue sends unverified lead-like yes candidates to needs info", () => {
   const candidate = {
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -297,7 +300,7 @@ test("property match queue allows unverified lead-like yes candidates into revie
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(propertyMatchCandidateQueue(candidate), "review");
+  assert.equal(propertyMatchCandidateQueue(candidate), "needs_profile_verification");
 });
 
 test("property match queue separates profile verification blockers from not matches", () => {
@@ -336,6 +339,17 @@ test("property source snapshot extracts usable facts from URL and pasted text", 
   assert.equal(snapshot.price, 125000);
   assert.equal(snapshot.propertyLocation, "Peia");
   assert.equal(snapshot.sourceUrl, "https://agency.example/properties/dt4930");
+});
+
+test("property source snapshot extracts known Cyprus location from title text", () => {
+  const snapshot = propertySourceSnapshot({
+    url: "https://agency.example/properties/dt5098",
+    title: "Peyia, Paphos Traditional House For Sale | DT5098",
+    sourceText: "Available for sale is a two-storey, three-bedroom house with a swimming pool.",
+  });
+
+  assert.equal(snapshot.reference, "DT5098");
+  assert.equal(snapshot.propertyLocation, "Peyia");
 });
 
 test("prior property share terms include exact reference and URL variants", () => {

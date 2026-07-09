@@ -118,6 +118,8 @@ type Candidate = {
     rejectedReason?: string | null;
     lastError?: string | null;
     contact?: {
+        createdAt?: string | null;
+        updatedAt?: string | null;
         name?: string | null;
         phone?: string | null;
         email?: string | null;
@@ -131,6 +133,12 @@ type Candidate = {
         requirementPropertyLocations?: string[];
         requirementSummary?: string | null;
     } | null;
+    conversation?: {
+        id: string;
+        ghlConversationId?: string | null;
+        lastMessageAt?: string | null;
+        updatedAt?: string | null;
+    } | null;
 };
 
 type CampaignDetail = {
@@ -140,6 +148,7 @@ type CampaignDetail = {
 
 type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "not_match" | "already_shared" | "all";
 type MobileCampaignView = "campaigns" | "review";
+type CampaignDetailMode = "overview" | "review";
 type BatchProgress = {
     campaignId: string;
     phase: "collecting" | "analyzing" | "stopped" | "done" | "failed";
@@ -301,6 +310,8 @@ export function PropertyMatchCampaignsDialog({
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
     const [error, setError] = useState("");
     const [mobileView, setMobileView] = useState<MobileCampaignView>("campaigns");
+    const [detailMode, setDetailMode] = useState<CampaignDetailMode>("overview");
+    const [focusedCandidateIndex, setFocusedCandidateIndex] = useState(0);
     const [isPending, startTransition] = useTransition();
     const propertySearchRequestIdRef = useRef(0);
     const detailRequestIdRef = useRef(0);
@@ -380,6 +391,7 @@ export function PropertyMatchCampaignsDialog({
         candidates: unknown[];
     }) => {
         setDetail({ campaign: res.campaign as Campaign, candidates: res.candidates as Candidate[] });
+        setFocusedCandidateIndex(0);
         setDrafts((current) => {
             const next = { ...current };
             for (const candidate of res.candidates as Candidate[]) {
@@ -687,10 +699,13 @@ export function PropertyMatchCampaignsDialog({
     const selectCampaign = (campaignId: string) => {
         setSelectedCampaignId(campaignId);
         setMobileView("review");
+        setDetailMode("overview");
     };
 
     const setQueueAndReload = (nextQueue: Queue) => {
         setQueue(nextQueue);
+        setFocusedCandidateIndex(0);
+        if (nextQueue === "review") setDetailMode("review");
     };
 
     const generateDraft = (candidate: Candidate) => {
@@ -845,6 +860,13 @@ export function PropertyMatchCampaignsDialog({
     const activeCampaignIsBatchBusy = processingCampaignId === activeCampaign?.id;
     const activeBatchProgress = batchProgress?.campaignId === activeCampaign?.id ? batchProgress : null;
     const activeProgressPercent = progressPercent(activeCampaign);
+    const activeCandidates = activeDetail?.candidates || [];
+    const normalizedFocusedCandidateIndex = activeCandidates.length
+        ? Math.min(Math.max(focusedCandidateIndex, 0), activeCandidates.length - 1)
+        : 0;
+    const visibleCandidates = detailMode === "review" && queue === "review" && activeCandidates.length > 0
+        ? [activeCandidates[normalizedFocusedCandidateIndex]]
+        : activeCandidates;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1034,21 +1056,53 @@ export function PropertyMatchCampaignsDialog({
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="min-w-0">
                                             <div className="truncate text-sm font-semibold text-slate-900">{campaignLabel(activeCampaign)}</div>
-                                            <div className="mt-1 text-xs text-slate-500">
-                                                {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
-                                                {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
-                                                {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs info` : ""}
+                                            <div className="mt-2 inline-flex rounded-md border bg-white p-0.5">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={detailMode === "overview" ? "default" : "ghost"}
+                                                    className="h-7 px-2 text-xs"
+                                                    onClick={() => setDetailMode("overview")}
+                                                >
+                                                    Campaign
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={detailMode === "review" ? "default" : "ghost"}
+                                                    className="h-7 px-2 text-xs"
+                                                    onClick={() => {
+                                                        setQueue("review");
+                                                        setDetailMode("review");
+                                                        setFocusedCandidateIndex(0);
+                                                    }}
+                                                >
+                                                    Review
+                                                </Button>
                                             </div>
-                                            <div className="mt-2 flex flex-wrap gap-1">
-                                                {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
-                                                    const count = campaignQueueCounts(activeCampaign)[item.countKey];
-                                                    return (
-                                                        <Badge key={item.value} variant="outline" className="h-5 px-1.5 text-[10px]">
-                                                            {item.label} {count}
-                                                        </Badge>
-                                                    );
-                                                })}
-                                            </div>
+                                            {detailMode === "overview" ? (
+                                                <>
+                                                    <div className="mt-2 text-xs text-slate-500">
+                                                        {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
+                                                        {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
+                                                        {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs info` : ""}
+                                                    </div>
+                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                        {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
+                                                            const count = campaignQueueCounts(activeCampaign)[item.countKey];
+                                                            return (
+                                                                <Badge key={item.value} variant="outline" className="h-5 px-1.5 text-[10px]">
+                                                                    {item.label} {count}
+                                                                </Badge>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="mt-2 text-xs text-slate-500">
+                                                    Contact {activeCandidates.length ? normalizedFocusedCandidateIndex + 1 : 0} of {activeCandidates.length} ready for review
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex">
                                             <AiModelSelect
@@ -1149,6 +1203,7 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                         </div>
                                     ) : null}
+                                    {detailMode === "overview" ? (
                                     <div className="-mx-4 mt-2 overflow-x-auto px-4">
                                         <div className="flex min-w-max gap-1">
                                             {QUEUE_OPTIONS.map((item) => (
@@ -1165,6 +1220,33 @@ export function PropertyMatchCampaignsDialog({
                                             ))}
                                         </div>
                                     </div>
+                                    ) : activeCandidates.length > 0 ? (
+                                        <div className="mt-3 flex items-center justify-between gap-2 rounded-md border bg-slate-50 px-2 py-1.5">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 text-xs"
+                                                onClick={() => setFocusedCandidateIndex((current) => Math.max(0, current - 1))}
+                                                disabled={normalizedFocusedCandidateIndex <= 0}
+                                            >
+                                                Previous
+                                            </Button>
+                                            <span className="text-xs text-slate-600">
+                                                {normalizedFocusedCandidateIndex + 1} / {activeCandidates.length}
+                                            </span>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 text-xs"
+                                                onClick={() => setFocusedCandidateIndex((current) => Math.min(activeCandidates.length - 1, current + 1))}
+                                                disabled={normalizedFocusedCandidateIndex >= activeCandidates.length - 1}
+                                            >
+                                                Next
+                                            </Button>
+                                        </div>
+                                    ) : null}
                                     {error ? <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">{error}</div> : null}
                                 </div>
 
@@ -1175,11 +1257,11 @@ export function PropertyMatchCampaignsDialog({
                                             Loading campaign contacts...
                                         </div>
                                     ) : null}
-                                    {!detailLoading && activeDetail?.candidates.length === 0 ? (
+                                    {!detailLoading && visibleCandidates.length === 0 ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">{queueEmptyLabel(queue)}</div>
                                     ) : null}
                                     <div className="space-y-3">
-                                        {activeDetail?.candidates.map((candidate) => {
+                                        {visibleCandidates.map((candidate) => {
                                             const draft = drafts[candidate.id] ?? candidate.draftBody ?? "";
                                             const savedDraft = candidate.draftBody || "";
                                             const dimensions = candidateStructuredDimensions(candidate);
@@ -1234,6 +1316,11 @@ export function PropertyMatchCampaignsDialog({
                                                                     {aiRun.provider ? ` · ${aiRun.provider}` : ""}
                                                                 </div>
                                                             ) : null}
+                                                            <div className="mt-2 grid gap-1 text-[11px] text-slate-500 sm:grid-cols-3">
+                                                                {candidate.contact?.createdAt ? <span>Created {formatDecisionDate(candidate.contact.createdAt)}</span> : null}
+                                                                {candidate.conversation?.lastMessageAt ? <span>Last message {formatDecisionDate(candidate.conversation.lastMessageAt)}</span> : null}
+                                                                {candidate.contact?.updatedAt ? <span>Updated {formatDecisionDate(candidate.contact.updatedAt)}</span> : null}
+                                                            </div>
                                                         </div>
                                                         <div className="grid grid-cols-1 items-center gap-1 sm:flex">
                                                             {candidate.conversationId ? (

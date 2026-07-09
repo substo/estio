@@ -513,3 +513,29 @@ test("structured matcher compares requested features", () => {
   assert.equal(missingRequired.verdict, "no");
   assert.match(missingRequired.hardMismatches?.join(" ") || "", /required feature/);
 });
+
+test("structured matcher treats lead goal as primary when requirement status is stale", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "Sale",
+      type: "House",
+      price: 350000,
+      bedrooms: 3,
+      propertyLocation: "Peyia",
+      city: "Paphos",
+    },
+    {
+      contactType: "Lead",
+      profileVerificationStatus: "verified_lead",
+      leadGoal: "To Rent",
+      requirementStatus: "For Sale",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMaxPrice: "Any",
+      requirementSummary: "Looking for an apartment to rent, budget below 1000 euro.",
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.match(result.hardMismatches?.join(" ") || "", /lead goal/);
+  assert.equal(result.dimensions?.find((dimension) => dimension.key === "goal")?.status, "no");
+});
