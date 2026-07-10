@@ -24,6 +24,26 @@ test("buildComposerSuggestionBubbles dedupes suggestions case-insensitively", ()
     );
 });
 
+test("buildComposerSuggestionBubbles expands serialized suggestion arrays", () => {
+    assert.deepEqual(
+        buildComposerSuggestionBubbles(
+            ['["Confirm stopping Facebook ads", "Clarify building instruction"]'],
+            ["Best next reply"],
+        ),
+        ["Confirm stopping Facebook ads", "Clarify building instruction", "Best next reply"],
+    );
+});
+
+test("buildComposerSuggestionBubbles cleans fragmented serialized suggestion tokens", () => {
+    assert.deepEqual(
+        buildComposerSuggestionBubbles(
+            ["[", '"Confirm stopping Facebook ads"', '"Clarify building instruction";'],
+            ["Best next reply"],
+        ),
+        ["Confirm stopping Facebook ads", "Clarify building instruction", "Best next reply"],
+    );
+});
+
 test("buildComposerSuggestionBubbles caps visible bubbles", () => {
     assert.deepEqual(
         buildComposerSuggestionBubbles(

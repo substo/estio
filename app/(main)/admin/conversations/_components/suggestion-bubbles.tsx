@@ -28,7 +28,7 @@ export function SuggestionBubbles({ suggestions, onSelect, className }: Suggesti
     return (
         <TooltipProvider delayDuration={200}>
             <div className={cn(
-                "flex items-center gap-1.5 bg-gradient-to-r from-purple-50/60 to-transparent border-t border-purple-100/40 animate-in slide-in-from-bottom-2 fade-in duration-300",
+                "flex min-w-0 items-center gap-1.5 bg-gradient-to-r from-purple-50/60 to-transparent border-t border-purple-100/40 animate-in slide-in-from-bottom-2 fade-in duration-300",
                 className || "px-2 py-1"
             )}>
                 {/* Single sparkle icon with tooltip */}
@@ -54,14 +54,14 @@ export function SuggestionBubbles({ suggestions, onSelect, className }: Suggesti
 
                 {/* Suggestion bubbles */}
                 {!collapsed && (
-                    <div className="flex flex-wrap gap-1 overflow-hidden">
+                    <div className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         {suggestions.map((suggestion, index) => (
                             <button
                                 key={index}
                                 onClick={() => onSelect(suggestion)}
-                                className="text-[11px] bg-white/80 hover:bg-purple-50 border border-purple-200/60 text-slate-600 px-2.5 py-1 rounded-full transition-colors hover:border-purple-300 max-w-[180px]"
+                                className="max-w-[180px] shrink-0 rounded-full border border-purple-200/60 bg-white/80 px-2.5 py-1 text-[11px] text-slate-600 transition-colors hover:border-purple-300 hover:bg-purple-50"
                             >
-                                <span className="line-clamp-1">{suggestion}</span>
+                                <span className="block truncate">{suggestion}</span>
                             </button>
                         ))}
                     </div>
