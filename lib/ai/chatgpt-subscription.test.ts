@@ -8,6 +8,7 @@ import {
     buildCodexTextPrompt,
     callChatGptSubscriptionWithMetadata,
     getChatGptSubscriptionSetupGuide,
+    hasChatGptSubscriptionAuth,
     isChatGptSubscriptionModelId,
     resolveChatGptSubscriptionDefaultModel,
     stripChatGptSubscriptionModelPrefix,
@@ -105,6 +106,21 @@ test("getChatGptSubscriptionSetupGuide reports Codex auth commands and transport
         else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;
         if (originalCliPath === undefined) delete process.env.CODEX_CLI_PATH;
         else process.env.CODEX_CLI_PATH = originalCliPath;
+    }
+});
+
+test("hasChatGptSubscriptionAuth requires enabled server transport", async () => {
+    const originalTransport = process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
+
+    try {
+        delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
+        assert.equal(await hasChatGptSubscriptionAuth(), false);
+
+        process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = "codex_cli";
+        assert.equal(await hasChatGptSubscriptionAuth(), true);
+    } finally {
+        if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
+        else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;
     }
 });
 

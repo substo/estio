@@ -1591,7 +1591,10 @@ async function collectPropertyMatchCandidatesBatch(args: {
     }
   }
 
-  const lastCursor = encodePropertyMatchContactCursor(contacts[contacts.length - 1] as any) || args.campaign.collectionCursor || null;
+  const lastContact = contacts.length > 0 ? contacts[contacts.length - 1] : null;
+  const lastCursor = lastContact
+    ? encodePropertyMatchContactCursor(lastContact as any) || args.campaign.collectionCursor || null
+    : args.campaign.collectionCursor || null;
   const done = contacts.length < limit;
   const finished = await db.propertyMatchCampaign.updateMany({
     where: {

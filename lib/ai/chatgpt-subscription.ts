@@ -154,7 +154,7 @@ export async function resolveChatGptSubscriptionAccessToken(): Promise<string | 
 }
 
 export async function hasChatGptSubscriptionAuth(): Promise<boolean> {
-    return Boolean(await resolveChatGptSubscriptionAccessToken()) || isChatGptSubscriptionTransportEnabled();
+    return isChatGptSubscriptionTransportEnabled();
 }
 
 export async function getChatGptSubscriptionModelPickerState(configured?: string | null): Promise<{
