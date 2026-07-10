@@ -342,6 +342,7 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
     Boolean(qualificationEvidence.sparseLead)
     || Number(qualificationEvidence.anchorCount || 0) < Number(qualificationEvidence.minimumAnchorsForYes || 2)
     || Number(qualificationEvidence.concreteFitAnchorCount || 0) < Number(qualificationEvidence.minimumConcreteFitAnchorsForYes || 2)
+    || Number(qualificationEvidence.groundingFitAnchorCount || 0) < 1
   );
   const verdict = hasStructuredBlocker
     ? "no"
@@ -1814,6 +1815,7 @@ Rules:
 - Treat the structured dimension rows as useful evidence for goal, location, price, bedrooms, type, and stopped-search intent, but prefer newer explicit conversation evidence when stored fields are stale.
 - Absence of conflicts is not a match. Broad values like "Any District", "Any Bedrooms", "Any price", empty locations/types, or missing details are neutral, not positive evidence.
 - Choose yes only when there are at least two concrete positive fit anchors from the contact's requirements or recent messages, such as matching location, type, bedrooms, budget, required features, size, or a clearly similar prior enquiry. Matching sale/rent intent, verified-lead status, and broad "Any" fields are eligibility signals, not fit anchors.
+- A definite yes must include at least one grounding fit anchor: location, bedrooms, budget, or size. Type/feature overlap alone is a maybe unless the conversation explicitly says the client is open-ended.
 - If the contact recently asked for land/plots and this listing is a house/villa/apartment, verdict must be no unless the conversation also clearly says they are open to this listing type.
 - Do not use property facts alone as proof. Evidence for yes must quote or reference the contact-side requirement/message that makes the property a close fit.
 - Use unstructured requirements and summary to decide yes vs maybe.

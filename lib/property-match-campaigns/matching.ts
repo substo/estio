@@ -70,6 +70,8 @@ export type QualificationEvidence = {
   anchors: string[];
   concreteFitAnchorCount: number;
   concreteFitAnchors: string[];
+  groundingFitAnchorCount: number;
+  groundingFitAnchors: string[];
   sparseLead: boolean;
   broadOnly: boolean;
   minimumAnchorsForYes: number;
@@ -376,6 +378,7 @@ export function evaluateStructuredPropertyMatch(
   const combinedRequirementText = requirementText(contact);
   const qualificationAnchors = new Set<string>();
   const concreteFitAnchors = new Set<string>();
+  const groundingFitAnchors = new Set<string>();
   const normalizedContactType = normalize(contact.contactType);
 
   if (recentIntent.stoppedSearch) {
@@ -478,6 +481,7 @@ export function evaluateStructuredPropertyMatch(
     matches.push("bedrooms match");
     qualificationAnchors.add("bedroom requirement matches");
     concreteFitAnchors.add("bedroom requirement matches");
+    groundingFitAnchors.add("bedroom requirement matches");
   }
   if (bedroomMatch === false) {
     mismatches.push("bedrooms do not match");
@@ -512,6 +516,7 @@ export function evaluateStructuredPropertyMatch(
       matches.push("price is above minimum budget");
       qualificationAnchors.add("budget matches");
       concreteFitAnchors.add("budget matches");
+      groundingFitAnchors.add("budget matches");
       priceReasons.push("above minimum budget");
     }
 
@@ -524,6 +529,7 @@ export function evaluateStructuredPropertyMatch(
       matches.push("price is within maximum budget");
       qualificationAnchors.add("budget matches");
       concreteFitAnchors.add("budget matches");
+      groundingFitAnchors.add("budget matches");
       priceReasons.push("within maximum budget");
     }
   } else if (minPrice != null || maxPrice != null) {
@@ -563,6 +569,7 @@ export function evaluateStructuredPropertyMatch(
       matches.push("location matches");
       qualificationAnchors.add("location matches");
       concreteFitAnchors.add("location matches");
+      groundingFitAnchors.add("location matches");
     }
     else {
       mismatches.push("location does not match");
@@ -646,6 +653,7 @@ export function evaluateStructuredPropertyMatch(
         matches.push("covered area matches");
         qualificationAnchors.add("size requirement matches");
         concreteFitAnchors.add("size requirement matches");
+        groundingFitAnchors.add("size requirement matches");
         areaReasons.push("Covered area fits the stated size requirement.");
       }
     }
@@ -725,21 +733,26 @@ export function evaluateStructuredPropertyMatch(
   const minimumConcreteFitAnchorsForYes = 2;
   const anchorCount = qualificationAnchors.size;
   const concreteFitAnchorCount = concreteFitAnchors.size;
+  const groundingFitAnchorCount = groundingFitAnchors.size;
   const sparseLead = concreteRequirementCount <= 1
     || anchorCount < minimumAnchorsForYes
-    || concreteFitAnchorCount < minimumConcreteFitAnchorsForYes;
+    || concreteFitAnchorCount < minimumConcreteFitAnchorsForYes
+    || groundingFitAnchorCount < 1;
   const broadOnly = concreteFitAnchorCount === 0 && anchorCount <= 1 && concreteRequirementCount <= 1;
   const qualificationEvidence: QualificationEvidence = {
     anchorCount,
     anchors: Array.from(qualificationAnchors),
     concreteFitAnchorCount,
     concreteFitAnchors: Array.from(concreteFitAnchors),
+    groundingFitAnchorCount,
+    groundingFitAnchors: Array.from(groundingFitAnchors),
     sparseLead,
     broadOnly,
     minimumAnchorsForYes,
     minimumConcreteFitAnchorsForYes,
     reason: anchorCount >= minimumAnchorsForYes
       && concreteFitAnchorCount >= minimumConcreteFitAnchorsForYes
+      && groundingFitAnchorCount >= 1
       ? "Enough concrete positive evidence for a confident recommendation."
       : broadOnly
         ? "Only broad or missing requirements are available; absence of mismatches is not proof of fit."

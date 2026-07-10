@@ -415,6 +415,38 @@ test("structured matcher keeps one concrete fit anchor as AI review instead of y
   assert.equal(result.qualificationEvidence?.concreteFitAnchorCount, 1);
 });
 
+test("structured matcher keeps type and feature overlap as AI review without grounding fit", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "Sale",
+      type: "House",
+      price: 350000,
+      bedrooms: 3,
+      city: "Paphos",
+      propertyArea: "Pegeia",
+      description: "Three-bedroom house with swimming pool and sea views.",
+    },
+    {
+      contactType: "Lead",
+      profileVerificationStatus: "verified_lead",
+      leadGoal: "To Buy",
+      requirementStatus: "For Sale",
+      requirementDistrict: "Any District",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMinPrice: "Any",
+      requirementMaxPrice: "Any",
+      requirementPropertyTypes: [],
+      requirementPropertyLocations: [],
+      recentMessagesText: "Looking for a house with pool or sea view.",
+    },
+  );
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.needsAi, true);
+  assert.deepEqual(result.qualificationEvidence?.concreteFitAnchors, ["recent property type intent matches", "requested features match"]);
+  assert.equal(result.qualificationEvidence?.groundingFitAnchorCount, 0);
+});
+
 test("structured matcher returns yes when verified lead has multiple concrete anchors", () => {
   const result = evaluateStructuredPropertyMatch(
     {
