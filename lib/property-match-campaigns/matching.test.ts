@@ -352,6 +352,38 @@ test("structured matcher rejects land or plot intent for a house campaign", () =
   assert.equal(result.dimensions?.find((dimension) => dimension.key === "recent_type_intent")?.status, "no");
 });
 
+test("structured matcher rejects ground-floor apartment or townhouse intent for a detached house", () => {
+  const result = evaluateStructuredPropertyMatch(
+    {
+      goal: "Sale",
+      type: "House",
+      price: 350000,
+      bedrooms: 3,
+      city: "Paphos",
+      propertyArea: "Pegeia",
+      description: "Available for sale is a two-storey, three-bedroom house. The ground floor consists of a living room and kitchen, with bedrooms on the first floor.",
+    },
+    {
+      contactType: "Lead",
+      profileVerificationStatus: "verified_lead",
+      leadGoal: "To Buy",
+      requirementStatus: "For Sale",
+      requirementDistrict: "Any District",
+      requirementBedrooms: "Any Bedrooms",
+      requirementMinPrice: "Any",
+      requirementMaxPrice: "Any",
+      requirementPropertyTypes: [],
+      requirementPropertyLocations: [],
+      recentMessagesText: "Unfortunately, we need a ground floor apartment or town house.",
+    },
+  );
+
+  assert.equal(result.verdict, "no");
+  assert.equal(result.dimensions?.find((dimension) => dimension.key === "recent_type_intent")?.status, "no");
+  assert.equal(result.dimensions?.find((dimension) => dimension.key === "features")?.status, "no");
+  assert.match(result.hardMismatches?.join(" ") || "", /property type intent/);
+});
+
 test("structured matcher keeps one concrete fit anchor as AI review instead of yes", () => {
   const result = evaluateStructuredPropertyMatch(
     {

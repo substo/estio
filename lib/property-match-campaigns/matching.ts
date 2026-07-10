@@ -262,16 +262,14 @@ function propertyTypeCategory(value: unknown): string | null {
   const text = normalize(value);
   if (!text) return null;
   if (/\b(plot|plots|land|parcel)\b/.test(text)) return "land";
-  if (/\b(villa|house|detached|bungalow)\b/.test(text)) return "house";
   if (/\b(townhouse|maisonette)\b/.test(text)) return "townhouse";
+  if (/\b(villa|house|detached|bungalow)\b/.test(text)) return "house";
   if (/\b(apartment|flat|studio|penthouse)\b/.test(text)) return "apartment";
   return null;
 }
 
 function propertyTypeCategoryMatches(requiredCategory: string, propertyCategory: string): boolean {
   if (requiredCategory === propertyCategory) return true;
-  if (requiredCategory === "house" && propertyCategory === "townhouse") return true;
-  if (requiredCategory === "townhouse" && propertyCategory === "house") return true;
   if (requiredCategory === "apartment" && propertyCategory === "apartment") return true;
   return false;
 }
@@ -281,8 +279,9 @@ function detectUnstructuredPropertyTypeIntent(text: string): { categories: strin
   if (!normalized) return { categories: [], source: null };
   const categories = new Set<string>();
   if (/\b(plot|plots|land|parcel)\b/.test(normalized)) categories.add("land");
-  if (/\b(villa|house|detached|bungalow)\b/.test(normalized)) categories.add("house");
-  if (/\b(townhouse|maisonette)\b/.test(normalized)) categories.add("townhouse");
+  const withoutTownhouse = normalized.replace(/\b(town\s*house|townhouse|maisonette)\b/g, " ");
+  if (/\b(town\s*house|townhouse|maisonette)\b/.test(normalized)) categories.add("townhouse");
+  if (/\b(villa|house|detached|bungalow)\b/.test(withoutTownhouse)) categories.add("house");
   if (/\b(apartment|flat|studio|penthouse)\b/.test(normalized)) categories.add("apartment");
   return { categories: Array.from(categories), source: text.slice(0, 300) };
 }
@@ -668,7 +667,12 @@ export function evaluateStructuredPropertyMatch(
     const missing: string[] = [];
     const requiredMissing: string[] = [];
     for (const feature of requestedFeatures) {
-      const hasFeature = feature.propertyHints.some((hint) => featureText.includes(hint));
+      let hasFeature = feature.propertyHints.some((hint) => featureText.includes(hint));
+      if (feature.key === "ground_floor" && hasFeature) {
+        const isClearlyGroundFloorUnit = /\bground\s*floor\s+(apartment|flat|unit|maisonette|town\s*house|townhouse|house)\b|\b(on|at)\s+the\s+ground\s*floor\b/i.test(featureText);
+        const isClearlyMultiLevel = /\b(two|2)[-\s]*(storey|story)|first\s+floor|upper\s+floor|staircase|stairs\b/i.test(featureText);
+        hasFeature = isClearlyGroundFloorUnit && !isClearlyMultiLevel;
+      }
       if (hasFeature) present.push(feature.label);
       else {
         missing.push(feature.label);
