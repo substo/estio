@@ -657,6 +657,57 @@ function buildVerifiedPropertyMatchContactWhere(locationId: string) {
   return buildPropertyMatchContactWhere(locationId);
 }
 
+function campaignContactSelect(locationId: string) {
+  return {
+    id: true,
+    createdAt: true,
+    name: true,
+    email: true,
+    phone: true,
+    contactType: true,
+    leadGoal: true,
+    profileVerificationStatus: true,
+    profileVerifiedAt: true,
+    profileVerificationSource: true,
+    profileVerificationConfidence: true,
+    profileVerificationSummary: true,
+    requirementStatus: true,
+    requirementDistrict: true,
+    requirementBedrooms: true,
+    requirementMinPrice: true,
+    requirementMaxPrice: true,
+    requirementCondition: true,
+    requirementPropertyTypes: true,
+    requirementPropertyLocations: true,
+    requirementOtherDetails: true,
+    requirementSummary: true,
+    conversations: {
+      where: { locationId, deletedAt: null },
+      orderBy: { lastMessageAt: "desc" as const },
+      take: 1,
+      select: {
+        id: true,
+        lastMessageType: true,
+        messages: {
+          orderBy: { createdAt: "desc" as const },
+          take: 8,
+          select: { body: true },
+        },
+      },
+    },
+  };
+}
+
+async function getCampaignContactSnapshot(args: {
+  locationId: string;
+  contactId: string;
+}) {
+  return db.contact.findFirst({
+    where: { id: args.contactId, locationId: args.locationId },
+    select: campaignContactSelect(args.locationId),
+  });
+}
+
 function profileVerificationBlockCandidateData(args: {
   locationId: string;
   campaignId: string;
@@ -699,7 +750,7 @@ async function ensureCampaignContactProfileVerified(args: {
   contact: AnyRecord;
   conversationId?: string | null;
 }) {
-  if (args.contact.profileVerificationStatus === "verified_lead") return true;
+  if (args.contact.profileVerificationStatus === "verified_lead") return args.contact;
   const result = await verifyContactProfile({
     locationId: args.locationId,
     contactId: args.contact.id,
@@ -707,9 +758,15 @@ async function ensureCampaignContactProfileVerified(args: {
     sourceType: "campaign_preflight",
     contactSnapshot: args.contact,
   });
-  if (!result.success) return false;
-  if (result.created) return false;
-  return result.assessment?.status === "verified_lead" && result.assessment?.hasChanges === false;
+  if (!result.success) return null;
+  if (result.created) return null;
+  if (result.assessment?.status !== "verified_lead") return null;
+
+  const refreshed = await getCampaignContactSnapshot({
+    locationId: args.locationId,
+    contactId: args.contact.id,
+  });
+  return refreshed?.profileVerificationStatus === "verified_lead" ? refreshed : null;
 }
 
 export function buildAiReviewClaimWhere(args: {
@@ -1395,44 +1452,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
 
   const contacts = await db.contact.findMany({
     where: buildPropertyMatchContactWhere(args.locationId, args.campaign.collectionCursor),
-    select: {
-      id: true,
-      createdAt: true,
-      name: true,
-      email: true,
-      phone: true,
-      contactType: true,
-      leadGoal: true,
-      profileVerificationStatus: true,
-      profileVerifiedAt: true,
-      profileVerificationSource: true,
-      profileVerificationConfidence: true,
-      profileVerificationSummary: true,
-      requirementStatus: true,
-      requirementDistrict: true,
-      requirementBedrooms: true,
-      requirementMinPrice: true,
-      requirementMaxPrice: true,
-      requirementCondition: true,
-      requirementPropertyTypes: true,
-      requirementPropertyLocations: true,
-      requirementOtherDetails: true,
-      requirementSummary: true,
-      conversations: {
-        where: { locationId: args.locationId, deletedAt: null },
-        orderBy: { lastMessageAt: "desc" },
-        take: 1,
-        select: {
-          id: true,
-          lastMessageType: true,
-          messages: {
-            orderBy: { createdAt: "desc" },
-            take: 8,
-            select: { body: true },
-          },
-        },
-      },
-    },
+    select: campaignContactSelect(args.locationId),
     orderBy: [
       { createdAt: "desc" },
       { id: "desc" },
@@ -1447,13 +1467,13 @@ async function collectPropertyMatchCandidatesBatch(args: {
   for (const contact of contacts as AnyRecord[]) {
     const conversation = contact.conversations[0];
     if (!conversation?.id) continue;
-    const verifiedLead = await ensureCampaignContactProfileVerified({
+    const verifiedContact = await ensureCampaignContactProfileVerified({
       locationId: args.locationId,
       contact,
       conversationId: conversation.id,
     });
-    if (verifiedLead) {
-      candidateContacts.push(contact);
+    if (verifiedContact) {
+      candidateContacts.push(verifiedContact);
     } else {
       const blocker = profileVerificationBlockCandidateData({
         locationId: args.locationId,

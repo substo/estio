@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Check, ChevronLeft, Link2, List, Loader2, Megaphone, Pencil, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
+import { Check, Link2, List, Loader2, Megaphone, Pencil, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
@@ -147,7 +147,7 @@ type CampaignDetail = {
 };
 
 type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "not_match" | "already_shared" | "all";
-type MobileCampaignView = "campaigns" | "review";
+type MobileCampaignView = "campaigns" | "campaign" | "review";
 type CampaignDetailMode = "overview" | "review";
 type BatchProgress = {
     campaignId: string;
@@ -584,7 +584,8 @@ export function PropertyMatchCampaignsDialog({
                 return;
             }
             setSelectedCampaignId(res.campaignId);
-            setMobileView("review");
+            setMobileView("campaign");
+            setDetailMode("overview");
             setPriorityNote("");
             await refreshCampaigns();
             await runCampaignBatchLive(res.campaignId, "review");
@@ -605,7 +606,8 @@ export function PropertyMatchCampaignsDialog({
                 return;
             }
             setSelectedCampaignId(res.campaignId);
-            setMobileView("review");
+            setMobileView("campaign");
+            setDetailMode("overview");
             setPriorityNote("");
             setPropertyUrl("");
             setPropertyText("");
@@ -698,14 +700,13 @@ export function PropertyMatchCampaignsDialog({
 
     const selectCampaign = (campaignId: string) => {
         setSelectedCampaignId(campaignId);
-        setMobileView("review");
+        setMobileView("campaign");
         setDetailMode("overview");
     };
 
     const setQueueAndReload = (nextQueue: Queue) => {
         setQueue(nextQueue);
         setFocusedCandidateIndex(0);
-        if (nextQueue === "review") setDetailMode("review");
     };
 
     const generateDraft = (candidate: Candidate) => {
@@ -864,53 +865,67 @@ export function PropertyMatchCampaignsDialog({
     const normalizedFocusedCandidateIndex = activeCandidates.length
         ? Math.min(Math.max(focusedCandidateIndex, 0), activeCandidates.length - 1)
         : 0;
-    const visibleCandidates = detailMode === "review" && queue === "review" && activeCandidates.length > 0
+    const visibleCandidates = detailMode === "review" && activeCandidates.length > 0
         ? [activeCandidates[normalizedFocusedCandidateIndex]]
         : activeCandidates;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="flex h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-[min(92dvh,820px)] sm:w-[calc(100vw-2rem)] sm:max-w-6xl sm:rounded-lg">
-                <DialogHeader className="border-b px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3">
-                    <div className="flex items-center gap-2 pr-8">
-                        {mobileView === "review" ? (
-                            <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 md:hidden"
-                                onClick={() => setMobileView("campaigns")}
-                                aria-label="Back to campaigns"
-                            >
-                                <ChevronLeft className="h-4 w-4" />
-                            </Button>
-                        ) : null}
-                        <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
-                            <Megaphone className="h-4 w-4 shrink-0" />
-                            <span className="truncate">Property campaigns</span>
-                        </DialogTitle>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 md:hidden">
+                <DialogHeader className="border-b px-3 pb-2 pt-[calc(0.55rem+env(safe-area-inset-top))] sm:px-4 sm:pt-3">
+                    <DialogTitle className="sr-only">Property campaigns</DialogTitle>
+                    <div className={`grid gap-2 pr-8 ${activeCampaign ? "grid-cols-3" : "grid-cols-1"}`}>
                         <Button
                             type="button"
                             size="sm"
                             variant={mobileView === "campaigns" ? "default" : "outline"}
-                            className="h-9 text-xs"
-                            onClick={() => setMobileView("campaigns")}
+                            className="h-9 min-w-0 px-2 text-xs"
+                            onClick={() => {
+                                setMobileView("campaigns");
+                                setDetailMode("overview");
+                            }}
                         >
                             <List className="mr-1.5 h-3.5 w-3.5" />
                             Campaigns
                         </Button>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant={mobileView === "review" ? "default" : "outline"}
-                            className="h-9 text-xs"
-                            onClick={() => setMobileView("review")}
-                        >
-                            <Users className="mr-1.5 h-3.5 w-3.5" />
-                            Review
-                        </Button>
+                        {activeCampaign ? (
+                            <>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={mobileView === "campaign" ? "default" : "outline"}
+                                    className="h-9 min-w-0 px-2 text-xs"
+                                    onClick={() => {
+                                        setMobileView("campaign");
+                                        setDetailMode("overview");
+                                    }}
+                                >
+                                    <Megaphone className="mr-1.5 h-3.5 w-3.5" />
+                                    Campaign
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={mobileView === "review" ? "default" : "outline"}
+                                    className="h-9 min-w-0 px-2 text-xs"
+                                    onClick={() => {
+                                        setMobileView("review");
+                                        setDetailMode("review");
+                                        setQueue("review");
+                                        setFocusedCandidateIndex(0);
+                                    }}
+                                >
+                                    <Users className="mr-1.5 h-3.5 w-3.5" />
+                                    Review
+                                </Button>
+                            </>
+                        ) : null}
+                    </div>
+                    <div className="hidden items-center gap-2 pr-8 md:flex">
+                        <div className="flex min-w-0 items-center gap-2 text-base font-semibold">
+                            <Megaphone className="h-4 w-4 shrink-0" />
+                            <span className="truncate">Property campaigns</span>
+                        </div>
                     </div>
                 </DialogHeader>
 
@@ -1047,42 +1062,18 @@ export function PropertyMatchCampaignsDialog({
                         </div>
                     </aside>
 
-                    <main className={`${mobileView === "review" ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
+                    <main className={`${mobileView !== "campaigns" ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
                         {!activeCampaign ? (
                             <div className="flex h-full items-center justify-center text-sm text-slate-500">Create or select a campaign.</div>
                         ) : (
                             <div className="flex h-full min-h-0 flex-col">
-                                <div className="border-b px-4 py-3">
+                                <div className="border-b px-3 py-2 sm:px-4 sm:py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="min-w-0">
                                             <div className="truncate text-sm font-semibold text-slate-900">{campaignLabel(activeCampaign)}</div>
-                                            <div className="mt-2 inline-flex rounded-md border bg-white p-0.5">
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant={detailMode === "overview" ? "default" : "ghost"}
-                                                    className="h-7 px-2 text-xs"
-                                                    onClick={() => setDetailMode("overview")}
-                                                >
-                                                    Campaign
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant={detailMode === "review" ? "default" : "ghost"}
-                                                    className="h-7 px-2 text-xs"
-                                                    onClick={() => {
-                                                        setQueue("review");
-                                                        setDetailMode("review");
-                                                        setFocusedCandidateIndex(0);
-                                                    }}
-                                                >
-                                                    Review
-                                                </Button>
-                                            </div>
                                             {detailMode === "overview" ? (
                                                 <>
-                                                    <div className="mt-2 text-xs text-slate-500">
+                                                    <div className="mt-1 text-xs text-slate-500">
                                                         {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
                                                         {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
                                                         {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs info` : ""}
@@ -1099,11 +1090,12 @@ export function PropertyMatchCampaignsDialog({
                                                     </div>
                                                 </>
                                             ) : (
-                                                <div className="mt-2 text-xs text-slate-500">
+                                                <div className="mt-1 text-xs text-slate-500">
                                                     Contact {activeCandidates.length ? normalizedFocusedCandidateIndex + 1 : 0} of {activeCandidates.length} ready for review
                                                 </div>
                                             )}
                                         </div>
+                                        {detailMode === "overview" ? (
                                         <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex">
                                             <AiModelSelect
                                                 value={selectedCampaignModel || defaultCampaignModel}
@@ -1143,8 +1135,27 @@ export function PropertyMatchCampaignsDialog({
                                                 </Button>
                                             ) : null}
                                         </div>
+                                        ) : null}
                                     </div>
-                                    {activeBatchProgress ? (
+                                    {detailMode === "review" ? (
+                                        <div className="-mx-3 mt-2 overflow-x-auto px-3 sm:-mx-4 sm:px-4">
+                                            <div className="flex min-w-max gap-1">
+                                                {QUEUE_OPTIONS.map((item) => (
+                                                    <Button
+                                                        key={item.value}
+                                                        type="button"
+                                                        size="sm"
+                                                        variant={queue === item.value ? "default" : "outline"}
+                                                        className="h-7 shrink-0 px-2 text-xs"
+                                                        onClick={() => setQueueAndReload(item.value)}
+                                                    >
+                                                        {item.label} {campaignQueueCounts(activeCampaign)[item.countKey]}
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                    {detailMode === "overview" && activeBatchProgress ? (
                                         <div className="mt-3 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2">
                                             <div className="flex flex-wrap items-center justify-between gap-2">
                                                 <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-indigo-900">
@@ -1203,25 +1214,8 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                         </div>
                                     ) : null}
-                                    {detailMode === "overview" ? (
-                                    <div className="-mx-4 mt-2 overflow-x-auto px-4">
-                                        <div className="flex min-w-max gap-1">
-                                            {QUEUE_OPTIONS.map((item) => (
-                                                <Button
-                                                    key={item.value}
-                                                    type="button"
-                                                    size="sm"
-                                                    variant={queue === item.value ? "default" : "outline"}
-                                                    className="h-7 px-2 text-xs"
-                                                    onClick={() => setQueueAndReload(item.value)}
-                                                >
-                                                    {item.label} {campaignQueueCounts(activeCampaign)[item.countKey]}
-                                                </Button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    ) : activeCandidates.length > 0 ? (
-                                        <div className="mt-3 flex items-center justify-between gap-2 rounded-md border bg-slate-50 px-2 py-1.5">
+                                    {detailMode === "review" && activeCandidates.length > 0 ? (
+                                        <div className="mt-2 flex items-center justify-between gap-2 rounded-md border bg-slate-50 px-2 py-1.5">
                                             <Button
                                                 type="button"
                                                 size="sm"
@@ -1257,10 +1251,36 @@ export function PropertyMatchCampaignsDialog({
                                             Loading campaign contacts...
                                         </div>
                                     ) : null}
+                                    {detailMode === "overview" ? (
+                                        <div className="space-y-3">
+                                            <div className="rounded-md border bg-white p-3">
+                                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                                    {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => (
+                                                        <div key={item.value} className="rounded-md border bg-slate-50 px-2 py-2">
+                                                            <div className="text-[11px] text-slate-500">{item.label}</div>
+                                                            <div className="mt-1 text-lg font-semibold text-slate-900">
+                                                                {campaignQueueCounts(activeCampaign)[item.countKey]}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span>Processed</span>
+                                                        <span className="font-medium text-slate-900">{activeCampaign.processedCandidates}/{activeCampaign.totalCandidates}</span>
+                                                    </div>
+                                                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
+                                                        <div className="h-full rounded-full bg-indigo-600" style={{ width: `${activeProgressPercent}%` }} />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                    <>
                                     {!detailLoading && visibleCandidates.length === 0 ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">{queueEmptyLabel(queue)}</div>
                                     ) : null}
-                                    <div className="space-y-3">
+                                    <div className="space-y-2">
                                         {visibleCandidates.map((candidate) => {
                                             const draft = drafts[candidate.id] ?? candidate.draftBody ?? "";
                                             const savedDraft = candidate.draftBody || "";
@@ -1316,16 +1336,16 @@ export function PropertyMatchCampaignsDialog({
                                                                     {aiRun.provider ? ` · ${aiRun.provider}` : ""}
                                                                 </div>
                                                             ) : null}
-                                                            <div className="mt-2 grid gap-1 text-[11px] text-slate-500 sm:grid-cols-3">
+                                                            <div className="mt-1 grid gap-1 text-[11px] text-slate-500 sm:grid-cols-3">
                                                                 {candidate.contact?.createdAt ? <span>Created {formatDecisionDate(candidate.contact.createdAt)}</span> : null}
                                                                 {candidate.conversation?.lastMessageAt ? <span>Last message {formatDecisionDate(candidate.conversation.lastMessageAt)}</span> : null}
                                                                 {candidate.contact?.updatedAt ? <span>Updated {formatDecisionDate(candidate.contact.updatedAt)}</span> : null}
                                                             </div>
                                                         </div>
-                                                        <div className="grid grid-cols-1 items-center gap-1 sm:flex">
+                                                        <div className="grid grid-cols-3 items-center gap-1 sm:flex">
                                                             {candidate.conversationId ? (
                                                                 <Button type="button" size="sm" variant="outline" className="h-8 px-2 text-xs sm:h-7" onClick={() => openCandidateConversation(candidate)}>
-                                                                    Open conversation
+                                                                    Open
                                                                 </Button>
                                                             ) : null}
                                                             {canReview ? (
@@ -1340,7 +1360,7 @@ export function PropertyMatchCampaignsDialog({
                                                                         title="Skip keeps this out of sending for now without marking the match as wrong."
                                                                     >
                                                                         <X className="mr-1.5 h-3.5 w-3.5" />
-                                                                        Skip for now
+                                                                        Skip
                                                                     </Button>
                                                                     <Button
                                                                         type="button"
@@ -1351,17 +1371,12 @@ export function PropertyMatchCampaignsDialog({
                                                                         disabled={isBusy}
                                                                         title="Reject marks this candidate as not a suitable match."
                                                                     >
-                                                                        Reject match
+                                                                        Reject
                                                                     </Button>
                                                                 </>
                                                             ) : null}
                                                         </div>
                                                     </div>
-                                                    {canReview ? (
-                                                        <div className="mt-1 text-[11px] text-slate-500">
-                                                            Skip keeps it out of this send for now. Reject marks it as a bad match.
-                                                        </div>
-                                                    ) : null}
                                                     {needsProfileVerification ? (
                                                         <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
                                                             This is an older blocked candidate. Refresh contact requirements or rerun the batch to score the property fit with profile uncertainty shown as a warning.
@@ -1389,7 +1404,7 @@ export function PropertyMatchCampaignsDialog({
                                                                 ))}
                                                             </div>
                                                         ) : null}
-                                                        {candidate.reasoning ? <div className="mt-1 text-slate-600">{candidate.reasoning}</div> : null}
+                                                        {candidate.reasoning ? <div className="mt-1 line-clamp-3 text-slate-600 sm:line-clamp-none">{candidate.reasoning}</div> : null}
                                                         {candidate.rejectedReason ? <div className="mt-1 text-slate-600">Decision note: {candidate.rejectedReason}</div> : null}
                                                         {candidate.lastError ? <div className="mt-1 text-red-600">{candidate.lastError}</div> : null}
                                                     </div>
@@ -1399,14 +1414,14 @@ export function PropertyMatchCampaignsDialog({
                                                             <Textarea
                                                                 value={draft}
                                                                 onChange={(event) => setDrafts((current) => ({ ...current, [candidate.id]: event.target.value }))}
-                                                                rows={4}
-                                                                className="min-h-24 text-sm"
+                                                                rows={3}
+                                                                className="min-h-20 text-sm"
                                                                 placeholder="Generate or write the message draft"
                                                             />
-                                                            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                                                            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
                                                                 <Button type="button" size="sm" variant="outline" className="h-9 text-xs sm:h-8" onClick={() => generateDraft(candidate)} disabled={isBusy || isPending}>
                                                                     {isBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
-                                                                    Generate draft
+                                                                    Generate
                                                                 </Button>
                                                                 <Button type="button" size="sm" variant="outline" className="h-9 text-xs sm:h-8" onClick={() => saveDraft(candidate)} disabled={!draft.trim() || isBusy}>
                                                                     <Check className="mr-1.5 h-3 w-3" />
@@ -1423,6 +1438,8 @@ export function PropertyMatchCampaignsDialog({
                                             );
                                         })}
                                     </div>
+                                    </>
+                                    )}
                                 </div>
                             </div>
                         )}
