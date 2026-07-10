@@ -341,6 +341,7 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
   const lacksPositiveEvidence = Boolean(qualificationEvidence) && (
     Boolean(qualificationEvidence.sparseLead)
     || Number(qualificationEvidence.anchorCount || 0) < Number(qualificationEvidence.minimumAnchorsForYes || 2)
+    || Number(qualificationEvidence.concreteFitAnchorCount || 0) < Number(qualificationEvidence.minimumConcreteFitAnchorsForYes || 2)
   );
   const verdict = hasStructuredBlocker
     ? "no"
@@ -522,7 +523,14 @@ function contactRequirementInput(contact: AnyRecord): ContactRequirementInput {
     contactName: contact.name,
     profileVerificationStatus: contact.profileVerificationStatus,
     recentMessagesText: Array.isArray(contact.recentMessages)
-      ? contact.recentMessages.map((message: AnyRecord) => message.body).filter(Boolean).join("\n")
+      ? contact.recentMessages
+        .filter((message: AnyRecord) => {
+          const direction = String(message.direction || "").toLowerCase();
+          return direction ? direction === "inbound" : true;
+        })
+        .map((message: AnyRecord) => message.body)
+        .filter(Boolean)
+        .join("\n")
       : contact.recentMessagesText,
   };
 }
@@ -1805,7 +1813,8 @@ Rules:
 - If warnings say requirement fields are stale or never assessed, use the contact profile and conversation as the source of truth; do not reject only because old structured fields conflict.
 - Treat the structured dimension rows as useful evidence for goal, location, price, bedrooms, type, and stopped-search intent, but prefer newer explicit conversation evidence when stored fields are stale.
 - Absence of conflicts is not a match. Broad values like "Any District", "Any Bedrooms", "Any price", empty locations/types, or missing details are neutral, not positive evidence.
-- Choose yes only when there are at least two concrete positive anchors from the contact's requirements or recent messages, such as matching intent, location, type, bedrooms, budget, features, or a similar prior enquiry.
+- Choose yes only when there are at least two concrete positive fit anchors from the contact's requirements or recent messages, such as matching location, type, bedrooms, budget, required features, size, or a clearly similar prior enquiry. Matching sale/rent intent, verified-lead status, and broad "Any" fields are eligibility signals, not fit anchors.
+- If the contact recently asked for land/plots and this listing is a house/villa/apartment, verdict must be no unless the conversation also clearly says they are open to this listing type.
 - Do not use property facts alone as proof. Evidence for yes must quote or reference the contact-side requirement/message that makes the property a close fit.
 - Use unstructured requirements and summary to decide yes vs maybe.
 - Choose yes only when sending is clearly reasonable.

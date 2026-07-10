@@ -68,9 +68,12 @@ export type StructuredMatchResult = {
 export type QualificationEvidence = {
   anchorCount: number;
   anchors: string[];
+  concreteFitAnchorCount: number;
+  concreteFitAnchors: string[];
   sparseLead: boolean;
   broadOnly: boolean;
   minimumAnchorsForYes: number;
+  minimumConcreteFitAnchorsForYes: number;
   reason: string;
 };
 
@@ -255,6 +258,35 @@ function hasSpecificPropertyInterest(text: string): boolean {
   return /\b(ref(?:erence)?\.?\s*(?:no\.?)?\s*[:#-]?\s*[a-z]{1,6}\s*-?\s*\d{2,8}|https?:\/\/|view(?:ing)?|appointment|interested|looking\s+for|budget|bed(?:room|s)?|studio|apartment|villa|house|townhouse|maisonette|penthouse|plot|land)\b/i.test(text);
 }
 
+function propertyTypeCategory(value: unknown): string | null {
+  const text = normalize(value);
+  if (!text) return null;
+  if (/\b(plot|plots|land|parcel)\b/.test(text)) return "land";
+  if (/\b(villa|house|detached|bungalow)\b/.test(text)) return "house";
+  if (/\b(townhouse|maisonette)\b/.test(text)) return "townhouse";
+  if (/\b(apartment|flat|studio|penthouse)\b/.test(text)) return "apartment";
+  return null;
+}
+
+function propertyTypeCategoryMatches(requiredCategory: string, propertyCategory: string): boolean {
+  if (requiredCategory === propertyCategory) return true;
+  if (requiredCategory === "house" && propertyCategory === "townhouse") return true;
+  if (requiredCategory === "townhouse" && propertyCategory === "house") return true;
+  if (requiredCategory === "apartment" && propertyCategory === "apartment") return true;
+  return false;
+}
+
+function detectUnstructuredPropertyTypeIntent(text: string): { categories: string[]; source: string | null } {
+  const normalized = normalize(text);
+  if (!normalized) return { categories: [], source: null };
+  const categories = new Set<string>();
+  if (/\b(plot|plots|land|parcel)\b/.test(normalized)) categories.add("land");
+  if (/\b(villa|house|detached|bungalow)\b/.test(normalized)) categories.add("house");
+  if (/\b(townhouse|maisonette)\b/.test(normalized)) categories.add("townhouse");
+  if (/\b(apartment|flat|studio|penthouse)\b/.test(normalized)) categories.add("apartment");
+  return { categories: Array.from(categories), source: text.slice(0, 300) };
+}
+
 function parseAreaRequirement(text: string): { min: number | null; max: number | null; raw: string | null } {
   const matches = Array.from(text.matchAll(/\b(?:min(?:imum)?|at\s+least|from|over|above|around|approx(?:imately)?|up\s+to|under|below|max(?:imum)?|less\s+than)?\s*(\d{2,4})\s*(?:m2|m²|sqm|sq\.?\s*m|square\s*(?:met(?:er|re)s?))\b/gi));
   if (matches.length === 0) return { min: null, max: null, raw: null };
@@ -304,7 +336,7 @@ function detectFeatureRequirements(text: string) {
 }
 
 function bedroomRequirementMatches(requirement: unknown, bedrooms: number | null | undefined): boolean | null {
-  if (isAny(requirement)) return true;
+  if (isAny(requirement)) return null;
   const source = normalize(requirement);
   const propertyBedrooms = typeof bedrooms === "number" ? bedrooms : null;
   if (propertyBedrooms == null) return null;
@@ -344,6 +376,7 @@ export function evaluateStructuredPropertyMatch(
   const recentIntent = detectRecentIntent(contact);
   const combinedRequirementText = requirementText(contact);
   const qualificationAnchors = new Set<string>();
+  const concreteFitAnchors = new Set<string>();
   const normalizedContactType = normalize(contact.contactType);
 
   if (recentIntent.stoppedSearch) {
@@ -383,11 +416,13 @@ export function evaluateStructuredPropertyMatch(
   });
 
   const propertyType = normalize(property.type);
+  const propertyCategory = propertyTypeCategory(property.type);
   const requiredTypes = normalizeList(contact.requirementPropertyTypes);
   if (requiredTypes.length > 0 && propertyType) {
     if (includesLoose(requiredTypes, propertyType)) {
       matches.push("property type matches");
       qualificationAnchors.add("property type matches");
+      concreteFitAnchors.add("property type matches");
     }
     else {
       mismatches.push("property type does not match");
@@ -408,11 +443,42 @@ export function evaluateStructuredPropertyMatch(
       reason: typeMatches === true ? "Property type matches." : typeMatches === false ? "Property type conflicts." : "Property type is incomplete.",
     });
   }
+  const unstructuredTypeIntent = requiredTypes.length === 0
+    ? detectUnstructuredPropertyTypeIntent([
+      contact.requirementSummary,
+      contact.requirementOtherDetails,
+      contact.recentMessagesText,
+      contact.contactName,
+    ].map((item) => display(item)).filter(Boolean).join("\n"))
+    : { categories: [], source: null };
+  if (requiredTypes.length === 0 && unstructuredTypeIntent.categories.length > 0 && propertyCategory) {
+    const unstructuredTypeMatches = unstructuredTypeIntent.categories.some((category) => propertyTypeCategoryMatches(category, propertyCategory));
+    if (unstructuredTypeMatches) {
+      matches.push("recent property type intent matches");
+      qualificationAnchors.add("recent property type intent matches");
+      concreteFitAnchors.add("recent property type intent matches");
+    } else {
+      mismatches.push("recent property type intent does not match");
+      hardMismatches.push("recent property type intent does not match");
+    }
+    addDimension(dimensions, {
+      key: "recent_type_intent",
+      label: "Recent Type Intent",
+      propertyValue: display(property.type),
+      requirementValue: unstructuredTypeIntent.categories.join(", "),
+      status: unstructuredTypeMatches ? "yes" : "no",
+      weight: 3,
+      reason: unstructuredTypeMatches
+        ? "Recent conversation/profile type intent fits this listing type."
+        : "Recent conversation/profile type intent points to a different listing type.",
+    });
+  }
 
   const bedroomMatch = bedroomRequirementMatches(contact.requirementBedrooms, property.bedrooms);
   if (bedroomMatch === true && !isAny(contact.requirementBedrooms)) {
     matches.push("bedrooms match");
     qualificationAnchors.add("bedroom requirement matches");
+    concreteFitAnchors.add("bedroom requirement matches");
   }
   if (bedroomMatch === false) {
     mismatches.push("bedrooms do not match");
@@ -446,6 +512,7 @@ export function evaluateStructuredPropertyMatch(
     } else if (minPrice != null) {
       matches.push("price is above minimum budget");
       qualificationAnchors.add("budget matches");
+      concreteFitAnchors.add("budget matches");
       priceReasons.push("above minimum budget");
     }
 
@@ -457,6 +524,7 @@ export function evaluateStructuredPropertyMatch(
     } else if (maxPrice != null) {
       matches.push("price is within maximum budget");
       qualificationAnchors.add("budget matches");
+      concreteFitAnchors.add("budget matches");
       priceReasons.push("within maximum budget");
     }
   } else if (minPrice != null || maxPrice != null) {
@@ -495,6 +563,7 @@ export function evaluateStructuredPropertyMatch(
     if (structuredLocationMatches) {
       matches.push("location matches");
       qualificationAnchors.add("location matches");
+      concreteFitAnchors.add("location matches");
     }
     else {
       mismatches.push("location does not match");
@@ -538,6 +607,7 @@ export function evaluateStructuredPropertyMatch(
     if (propertyCondition.includes(requiredCondition) || requiredCondition.includes(propertyCondition)) {
       matches.push("condition matches");
       qualificationAnchors.add("condition preference matches");
+      concreteFitAnchors.add("condition preference matches");
     } else {
       unknowns.push("condition preference needs review");
     }
@@ -576,6 +646,7 @@ export function evaluateStructuredPropertyMatch(
       if (areaReasons.length === 0) {
         matches.push("covered area matches");
         qualificationAnchors.add("size requirement matches");
+        concreteFitAnchors.add("size requirement matches");
         areaReasons.push("Covered area fits the stated size requirement.");
       }
     }
@@ -607,6 +678,7 @@ export function evaluateStructuredPropertyMatch(
     if (present.length > 0) {
       matches.push("requested features match");
       qualificationAnchors.add("requested features match");
+      concreteFitAnchors.add("requested features match");
     }
     if (missing.length > 0) unknowns.push("some requested features need review");
     if (requiredMissing.length > 0) {
@@ -646,16 +718,24 @@ export function evaluateStructuredPropertyMatch(
     hasUnstructuredRequirements,
   ].filter(Boolean).length;
   const minimumAnchorsForYes = 2;
+  const minimumConcreteFitAnchorsForYes = 2;
   const anchorCount = qualificationAnchors.size;
-  const sparseLead = concreteRequirementCount <= 1 || anchorCount < minimumAnchorsForYes;
-  const broadOnly = anchorCount <= 1 && concreteRequirementCount <= 1;
+  const concreteFitAnchorCount = concreteFitAnchors.size;
+  const sparseLead = concreteRequirementCount <= 1
+    || anchorCount < minimumAnchorsForYes
+    || concreteFitAnchorCount < minimumConcreteFitAnchorsForYes;
+  const broadOnly = concreteFitAnchorCount === 0 && anchorCount <= 1 && concreteRequirementCount <= 1;
   const qualificationEvidence: QualificationEvidence = {
     anchorCount,
     anchors: Array.from(qualificationAnchors),
+    concreteFitAnchorCount,
+    concreteFitAnchors: Array.from(concreteFitAnchors),
     sparseLead,
     broadOnly,
     minimumAnchorsForYes,
+    minimumConcreteFitAnchorsForYes,
     reason: anchorCount >= minimumAnchorsForYes
+      && concreteFitAnchorCount >= minimumConcreteFitAnchorsForYes
       ? "Enough concrete positive evidence for a confident recommendation."
       : broadOnly
         ? "Only broad or missing requirements are available; absence of mismatches is not proof of fit."
