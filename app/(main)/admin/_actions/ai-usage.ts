@@ -93,6 +93,13 @@ export interface LocationAiUsageSummary {
         tokens: number;
         costUsd: number;
     }>;
+    byAction: Array<{
+        featureArea: string;
+        action: string;
+        count: number;
+        tokens: number;
+        costUsd: number;
+    }>;
     byModel: Array<{
         provider: string;
         model: string;
@@ -145,6 +152,7 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
     ]);
 
     const featureMap = new Map<string, { count: number; tokens: number; costUsd: number }>();
+    const actionMap = new Map<string, { featureArea: string; action: string; count: number; tokens: number; costUsd: number }>();
     const modelMap = new Map<string, { provider: string; model: string; count: number; tokens: number; costUsd: number }>();
 
     let totalTokens = 0;
@@ -162,6 +170,20 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
         fe.tokens += tokens;
         fe.costUsd += cost;
         featureMap.set(r.featureArea, fe);
+
+        // By feature/action, i.e. the actual API-call purpose.
+        const actionKey = `${r.featureArea}::${r.action}`;
+        const ae = actionMap.get(actionKey) || {
+            featureArea: r.featureArea,
+            action: r.action,
+            count: 0,
+            tokens: 0,
+            costUsd: 0,
+        };
+        ae.count += 1;
+        ae.tokens += tokens;
+        ae.costUsd += cost;
+        actionMap.set(actionKey, ae);
 
         // By model
         const modelKey = `${r.provider}::${r.model}`;
@@ -185,7 +207,9 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
         byFeatureArea: Array.from(featureMap.entries()).map(([featureArea, data]) => ({
             featureArea,
             ...data,
-        })),
+        })).sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens || b.count - a.count),
+        byAction: Array.from(actionMap.values())
+            .sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens || b.count - a.count),
         byModel: Array.from(modelMap.values()),
     };
 }

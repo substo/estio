@@ -112,6 +112,24 @@ test("AI match normalizer cannot override structured blockers", () => {
   assert.equal(result.evidence.structured.needsAi, false);
 });
 
+test("AI match normalizer can override stale structured requirement blockers", () => {
+  const result = normalizeAiMatchAssessment({
+    verdict: "yes",
+    confidence: 0.9,
+    reasoning: "Recent conversation confirms this is now a fit.",
+  }, {
+    warnings: ["Requirement fields are stale or have never been assessed; campaign AI must verify against conversation context."],
+    structured: {
+      verdict: "no",
+      hardMismatches: ["stored location does not match"],
+      needsAi: true,
+    },
+  });
+
+  assert.equal(result.verdict, "yes");
+  assert.equal(result.evidence.structured.needsAi, false);
+});
+
 test("AI match normalizer cannot override inferred non-lead disqualifiers", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "yes",

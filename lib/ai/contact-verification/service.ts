@@ -560,6 +560,8 @@ async function buildModelBackedContactVerificationAssessment(args: {
   const result = await callLLMWithMetadata(modelName, prompt, undefined, {
     jsonMode: true,
     temperature: 0.1,
+    maxOutputTokens: 900,
+    thinkingBudget: 0,
     locationId: args.locationId,
   });
   const parsed = extractJsonObject(result.text);
@@ -876,34 +878,37 @@ export async function verifyContactProfile(args: {
   });
   const assessmentMs = Date.now() - assessmentStartedAt;
 
-  void securelyRecordAiUsage({
-    locationId: args.locationId,
-    userId: args.actorUserId || null,
-    resourceType: "contact",
-    resourceId: contact.id,
-    featureArea: "contact_verification",
-    action: "profile_scan",
-    provider: metadata.provider,
-    model: metadata.model,
-    inputTokens: metadata.promptTokens,
-    outputTokens: metadata.completionTokens,
-    metadata: {
-      conversationId: args.conversationId || null,
-      sourceType: args.sourceType || "manual_verification",
-      status: assessment.status,
-      inferredRole: assessment.inferredRole,
-      hasChanges: assessment.hasChanges,
-      recentMessageCount: recentMessages.length,
-      totalTokens: metadata.totalTokens,
-      estimatedCostUsd: metadata.estimatedCostUsd,
-      fallbackReason: metadata.fallbackReason || null,
-      durationMs: Date.now() - startedAt,
-      contactLookupMs,
-      pendingMs,
-      messagesMs,
-      assessmentMs,
-    },
-  });
+  if (metadata.provider !== CONTACT_VERIFICATION_PROVIDER || metadata.totalTokens > 0) {
+    const sourceType = args.sourceType || "manual_verification";
+    void securelyRecordAiUsage({
+      locationId: args.locationId,
+      userId: args.actorUserId || null,
+      resourceType: "contact",
+      resourceId: contact.id,
+      featureArea: sourceType === "campaign_preflight" ? "property_match_campaigns" : "contact_verification",
+      action: sourceType === "campaign_preflight" ? "verify_contact_profile" : "profile_scan",
+      provider: metadata.provider,
+      model: metadata.model,
+      inputTokens: metadata.promptTokens,
+      outputTokens: metadata.completionTokens,
+      metadata: {
+        conversationId: args.conversationId || null,
+        sourceType,
+        status: assessment.status,
+        inferredRole: assessment.inferredRole,
+        hasChanges: assessment.hasChanges,
+        recentMessageCount: recentMessages.length,
+        totalTokens: metadata.totalTokens,
+        estimatedCostUsd: metadata.estimatedCostUsd,
+        fallbackReason: metadata.fallbackReason || null,
+        durationMs: Date.now() - startedAt,
+        contactLookupMs,
+        pendingMs,
+        messagesMs,
+        assessmentMs,
+      },
+    });
+  }
 
   if (!assessment.hasChanges) {
     await db.contact.update({

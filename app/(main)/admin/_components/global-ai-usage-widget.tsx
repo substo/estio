@@ -5,17 +5,43 @@ import { getLocationAiUsageSummary, type LocationAiUsageSummary } from "@/app/(m
 import { Sparkles, TrendingUp, Cpu, DollarSign } from "lucide-react";
 
 const FEATURE_LABELS: Record<string, string> = {
+    conversational_ai: "Conversations",
+    property_match_campaigns: "Property Campaigns",
+    contact_verification: "Contact Verification",
+    requirements_intelligence: "Requirements Intelligence",
     property_image_enhancement: "Image Enhancement",
+    property_printing: "Property Printing",
+    property_translation: "Property Translation",
+    audio_transcription: "Audio Transcription",
     viewing_translation: "Viewing Translation",
     viewing_insights: "Viewing Insights",
+    viewing_session: "Viewing Sessions",
     smart_reply: "Smart Reply",
+    smart_agent: "Smart Agent",
     prospect_classification: "Prospect Classification",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+    generate_draft: "Generate conversation draft",
+    generate_draft_error: "Conversation draft error",
+    score_candidate: "Score campaign contact",
+    verify_contact_profile: "Verify campaign contact",
+    profile_scan: "Verify contact profile",
+    generate_requirement_proposal: "Extract requirements",
+    assess_no_change: "Assess requirements",
+    generate_print_copy: "Generate property print copy",
+    translate_property: "Translate property",
+    analyze: "Analyze",
+    generate: "Generate",
+    precision_remove: "Precision remove",
+    predict_room_type: "Predict room type",
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
     google_gemini: "Gemini",
     vertex_imagen: "Imagen",
     openai: "OpenAI",
+    chatgpt_subscription: "ChatGPT Subscription",
 };
 
 function formatCost(cost: number): string {
@@ -123,6 +149,26 @@ export function GlobalAiUsageWidget() {
                                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                                         <span>{f.count} calls</span>
                                         <span className="font-medium text-foreground">{formatCost(f.costUsd)}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {data.byAction?.length > 0 && (
+                    <div>
+                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">By API Call</h3>
+                        <div className="border rounded-md divide-y">
+                            {data.byAction.slice(0, 10).map((item) => (
+                                <div key={`${item.featureArea}::${item.action}`} className="flex items-center justify-between px-3 py-2 text-sm">
+                                    <div className="min-w-0">
+                                        <div className="truncate font-medium">{ACTION_LABELS[item.action] || item.action}</div>
+                                        <div className="truncate text-xs text-muted-foreground">{FEATURE_LABELS[item.featureArea] || item.featureArea}</div>
+                                    </div>
+                                    <div className="ml-3 flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                                        <span>{item.count} calls</span>
+                                        <span className="font-medium text-foreground">{formatCost(item.costUsd)}</span>
                                     </div>
                                 </div>
                             ))}

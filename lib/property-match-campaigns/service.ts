@@ -1,6 +1,6 @@
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
-import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
@@ -33,6 +33,9 @@ const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "s
 const LOW_CONFIDENCE_YES_THRESHOLD = 0.65;
 const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const CONTACT_COLLECTION_BATCH_SIZE = 200;
+const PROFILE_VERIFICATION_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_PROFILE_VERIFICATION_CONCURRENCY || 4)));
+const AI_SCORING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_AI_SCORING_CONCURRENCY || 4)));
+const PROPERTY_MATCH_FAST_MODEL = String(process.env.PROPERTY_MATCH_FAST_MODEL || GEMINI_FLASH_LITE_LATEST_ALIAS).trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
 const CAMPAIGN_STOPPED_STATUS = "canceled";
 const CAMPAIGN_STOPPED_ERROR = "Processing stopped by user.";
 const PROPERTY_TYPE_HINTS = [
@@ -50,6 +53,34 @@ const PROPERTY_TYPE_HINTS = [
 ];
 const PROFILE_VERIFICATION_BLOCK_SUMMARY = "Needs contact info before campaign matching.";
 const PROFILE_VERIFICATION_BLOCK_REASON = "Contact profile is not verified as a buyer/renter lead; skipped campaign AI review.";
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+
+  return results;
+}
+
+function logPropertyMatchCampaignTiming(event: string, fields: Record<string, unknown> = {}) {
+  console.info("[Property Match Campaign Timing]", JSON.stringify({
+    event,
+    ts: new Date().toISOString(),
+    ...fields,
+  }));
+}
 
 export function hasPriorPropertyShareEvidence(candidate: {
   evidence?: unknown;
@@ -295,10 +326,18 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
     : 0.5;
   const requestedVerdict = normalizeVerdict(raw.verdict);
   const structuredEvidence = fallbackEvidence?.structured || {};
+  const warnings = Array.isArray(fallbackEvidence?.warnings)
+    ? fallbackEvidence.warnings.map((warning: unknown) => String(warning || "").toLowerCase())
+    : [];
+  const hasStaleRequirementWarning = warnings.some((warning: string) =>
+    warning.includes("requirement fields are stale") || warning.includes("never been assessed")
+  );
   const qualificationEvidence = structuredEvidence.qualificationEvidence || null;
-  const hasStructuredBlocker = structuredEvidence.verdict === "no"
-    || (Array.isArray(structuredEvidence.hardMismatches) && structuredEvidence.hardMismatches.length > 0)
-    || (Array.isArray(structuredEvidence.disqualifiers) && structuredEvidence.disqualifiers.length > 0);
+  const hasHardMismatch = Array.isArray(structuredEvidence.hardMismatches) && structuredEvidence.hardMismatches.length > 0;
+  const hasDisqualifier = Array.isArray(structuredEvidence.disqualifiers) && structuredEvidence.disqualifiers.length > 0;
+  const hasStructuredBlocker = hasDisqualifier
+    || (hasHardMismatch && !hasStaleRequirementWarning)
+    || (structuredEvidence.verdict === "no" && !hasStaleRequirementWarning);
   const lacksPositiveEvidence = Boolean(qualificationEvidence) && (
     Boolean(qualificationEvidence.sparseLead)
     || Number(qualificationEvidence.anchorCount || 0) < Number(qualificationEvidence.minimumAnchorsForYes || 2)
@@ -488,6 +527,12 @@ function contactRequirementInput(contact: AnyRecord): ContactRequirementInput {
   };
 }
 
+function contactRequirementsAreStaleForCampaign(contact: AnyRecord): boolean {
+  if (!contact.requirementsLastAssessedAt) return true;
+  const dueAt = contact.requirementsAssessmentDueAt ? new Date(contact.requirementsAssessmentDueAt) : null;
+  return Boolean(dueAt && !Number.isNaN(dueAt.getTime()) && dueAt <= new Date());
+}
+
 function evidenceForStructuredMatch(result: StructuredMatchResult) {
   return {
     structured: {
@@ -519,6 +564,13 @@ function structuredCandidateData(args: {
     ...args.contact,
     recentMessages,
   }));
+  const requirementsAreStale = contactRequirementsAreStaleForCampaign(args.contact);
+  const structuredNeedsConversationReview = requirementsAreStale
+    && structured.verdict === "no"
+    && (structured.hardMismatches?.length || 0) > 0
+    && (structured.disqualifiers?.length || 0) === 0;
+  const effectiveVerdict = structuredNeedsConversationReview ? "maybe" : structured.verdict;
+  const effectiveNeedsAi = structuredNeedsConversationReview ? true : structured.needsAi;
   const preferredChannel = deriveComposerInitialChannel(conversation as any);
   return {
     locationId: args.locationId,
@@ -526,18 +578,32 @@ function structuredCandidateData(args: {
     contactId: args.contact.id,
     conversationId: conversation.id,
     structuredVerdict: structured.verdict,
-    aiVerdict: structured.verdict,
-    aiReviewStatus: structured.needsAi ? "pending" : "done",
+    aiVerdict: effectiveVerdict,
+    aiReviewStatus: effectiveNeedsAi ? "pending" : "done",
     aiReviewLockedAt: null,
     aiReviewLockedBy: null,
     reviewerStatus: "pending",
-    score: structured.score,
-    confidence: structured.needsAi ? 0.5 : structured.verdict === "yes" ? 0.9 : 0.85,
-    evidence: evidenceForStructuredMatch(structured),
-    reasoning: structured.mismatches.length
+    score: structuredNeedsConversationReview ? Math.max(structured.score, -0.5) : structured.score,
+    confidence: effectiveNeedsAi ? 0.5 : effectiveVerdict === "yes" ? 0.9 : 0.85,
+    evidence: {
+      ...evidenceForStructuredMatch({
+        ...structured,
+        needsAi: effectiveNeedsAi,
+      }),
+      ...(requirementsAreStale ? {
+        warnings: [
+          "Requirement fields are stale or have never been assessed; campaign AI must verify against conversation context.",
+        ],
+      } : {}),
+    },
+    reasoning: structuredNeedsConversationReview
+      ? `Stored requirement fields may be stale, so AI must verify the conversation before rejecting. Structured blockers: ${structured.mismatches.join("; ") || "none"}.`
+      : structured.mismatches.length
       ? structured.mismatches.join("; ")
       : structured.matches.join("; ") || "Needs requirement review.",
-    matchSummary: structured.verdict === "yes"
+    matchSummary: structuredNeedsConversationReview
+      ? "Needs fast AI review because stored requirements may be stale."
+      : structured.verdict === "yes"
       ? "Structured requirements match."
       : structured.verdict === "no"
         ? "Hard structured mismatch."
@@ -681,6 +747,8 @@ function campaignContactSelect(locationId: string) {
     requirementPropertyLocations: true,
     requirementOtherDetails: true,
     requirementSummary: true,
+    requirementsLastAssessedAt: true,
+    requirementsAssessmentDueAt: true,
     conversations: {
       where: { locationId, deletedAt: null },
       orderBy: { lastMessageAt: "desc" as const },
@@ -757,6 +825,8 @@ async function ensureCampaignContactProfileVerified(args: {
     conversationId: args.conversationId || null,
     sourceType: "campaign_preflight",
     contactSnapshot: args.contact,
+    reprocessCampaignBlocks: false,
+    modelOverride: PROPERTY_MATCH_FAST_MODEL,
   });
   if (!result.success) return null;
   if (result.created) return null;
@@ -1462,27 +1532,43 @@ async function collectPropertyMatchCandidatesBatch(args: {
 
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
-  const candidateContacts: AnyRecord[] = [];
-  const blockerData: AnyRecord[] = [];
-  for (const contact of contacts as AnyRecord[]) {
+  const verificationStartedAt = Date.now();
+  const verificationResults = await mapWithConcurrency(contacts as AnyRecord[], PROFILE_VERIFICATION_CONCURRENCY, async (contact) => {
     const conversation = contact.conversations[0];
-    if (!conversation?.id) continue;
+    if (!conversation?.id) return { verifiedContact: null, blocker: null };
     const verifiedContact = await ensureCampaignContactProfileVerified({
       locationId: args.locationId,
       contact,
       conversationId: conversation.id,
     });
     if (verifiedContact) {
-      candidateContacts.push(verifiedContact);
-    } else {
-      const blocker = profileVerificationBlockCandidateData({
+      return { verifiedContact, blocker: null };
+    }
+    return {
+      verifiedContact: null,
+      blocker: profileVerificationBlockCandidateData({
         locationId: args.locationId,
         campaignId: args.campaign.id,
         contact,
-      });
-      if (blocker) blockerData.push(blocker);
-    }
-  }
+      }),
+    };
+  });
+  const candidateContacts = verificationResults
+    .map((result) => result.verifiedContact)
+    .filter(Boolean) as AnyRecord[];
+  const blockerData = verificationResults
+    .map((result) => result.blocker)
+    .filter(Boolean) as AnyRecord[];
+  logPropertyMatchCampaignTiming("collection_verified_contacts", {
+    locationId: args.locationId,
+    campaignId: args.campaign.id,
+    contactsScanned: contacts.length,
+    verifiedContacts: candidateContacts.length,
+    blockedContacts: blockerData.length,
+    concurrency: PROFILE_VERIFICATION_CONCURRENCY,
+    model: PROPERTY_MATCH_FAST_MODEL,
+    elapsedMs: Date.now() - verificationStartedAt,
+  });
 
   const baseCandidateData = candidateContacts.flatMap((contact: any) => {
     const candidate = structuredCandidateData({
@@ -1698,6 +1784,7 @@ async function scoreCandidateWithAi(args: {
   actorUserId?: string | null;
 }) {
   const modelName = normalizeText(args.model, 120)
+    || PROPERTY_MATCH_FAST_MODEL
     || await resolveAiModelDefault(args.locationId, "general")
     || GEMINI_FLASH_STABLE_FALLBACK;
   const prompt = `You review whether a real-estate lead should receive a new listing.
@@ -1712,9 +1799,11 @@ Return JSON only:
 }
 
 Rules:
-- Use structured requirements as hard filters. Do not override a hard mismatch.
-- If structured.disqualifiers or structured.hardMismatches are present, verdict must be no.
-- Treat the structured dimension rows as the source of truth for goal, location, price, bedrooms, type, and stopped-search intent.
+- Use structured requirements as hard filters only when they are current and supported by the contact conversation.
+- If structured.disqualifiers are present, verdict must be no.
+- If structured.hardMismatches are present and warnings do not say requirement fields are stale, verdict must be no.
+- If warnings say requirement fields are stale or never assessed, use the contact profile and conversation as the source of truth; do not reject only because old structured fields conflict.
+- Treat the structured dimension rows as useful evidence for goal, location, price, bedrooms, type, and stopped-search intent, but prefer newer explicit conversation evidence when stored fields are stale.
 - Absence of conflicts is not a match. Broad values like "Any District", "Any Bedrooms", "Any price", empty locations/types, or missing details are neutral, not positive evidence.
 - Choose yes only when there are at least two concrete positive anchors from the contact's requirements or recent messages, such as matching intent, location, type, bedrooms, budget, features, or a similar prior enquiry.
 - Do not use property facts alone as proof. Evidence for yes must quote or reference the contact-side requirement/message that makes the property a close fit.
@@ -1758,6 +1847,8 @@ ${messageText || "No recent messages."}`;
   const result = await callLLMWithMetadata(modelName, prompt, userContent, {
     jsonMode: true,
     temperature: 0.1,
+    maxOutputTokens: 900,
+    thinkingBudget: 0,
     locationId: args.locationId,
   });
   const parsed = extractJsonObject(result.text);
@@ -1884,7 +1975,12 @@ export async function processPropertyMatchCampaignBatch(args: {
       locationId: args.locationId,
       staleLockedBefore,
     }),
-    orderBy: { createdAt: "asc" },
+    orderBy: [
+      { score: "desc" },
+      { confidence: "desc" },
+      { contact: { createdAt: "desc" } },
+      { createdAt: "desc" },
+    ],
     select: { id: true },
     take: limit,
   });
@@ -1914,32 +2010,24 @@ export async function processPropertyMatchCampaignBatch(args: {
         aiReviewLockedBy: workerId,
       },
       include: { contact: true },
-      orderBy: { createdAt: "asc" },
+      orderBy: [
+        { score: "desc" },
+        { confidence: "desc" },
+        { contact: { createdAt: "desc" } },
+        { createdAt: "desc" },
+      ],
     })
     : [];
 
   let processed = finalizedUnverified.count + reopenedProfileBlocked;
   let failed = 0;
-  for (const candidate of candidates) {
+  const aiScoringStartedAt = Date.now();
+  const aiResults = await mapWithConcurrency(candidates as AnyRecord[], Math.min(AI_SCORING_CONCURRENCY, limit), async (candidate) => {
     if (await isPropertyMatchCampaignStopRequested({
       locationId: args.locationId,
       campaignId: args.campaignId,
     })) {
-      await releasePropertyMatchAiLocks({
-        locationId: args.locationId,
-        campaignId: args.campaignId,
-        workerId,
-      });
-      const stopped = await refreshCampaignCounts(campaign.id);
-      return {
-        success: true as const,
-        collected: collection.collected,
-        processed,
-        failed,
-        remaining: false,
-        stopped: true,
-        status: stopped.status,
-      };
+      return { processed: 0, failed: 0, stopped: true };
     }
     try {
       const ai = await scoreCandidateWithAi({
@@ -1969,25 +2057,10 @@ export async function processPropertyMatchCampaignBatch(args: {
         },
       });
       if (updatedCandidate.count === 0) {
-        await releasePropertyMatchAiLocks({
-          locationId: args.locationId,
-          campaignId: args.campaignId,
-          workerId,
-        });
-        const stopped = await refreshCampaignCounts(campaign.id);
-        return {
-          success: true as const,
-          collected: collection.collected,
-          processed,
-          failed,
-          remaining: false,
-          stopped: stopped.status === CAMPAIGN_STOPPED_STATUS,
-          status: stopped.status,
-        };
+        return { processed: 0, failed: 0, stopped: false };
       }
-      processed += 1;
+      return { processed: 1, failed: 0, stopped: false };
     } catch (error: any) {
-      failed += 1;
       await db.propertyMatchCandidate.updateMany({
         where: {
           id: candidate.id,
@@ -2012,7 +2085,42 @@ export async function processPropertyMatchCampaignBatch(args: {
           lastError: error?.message || "AI review failed.",
         },
       });
+      return { processed: 0, failed: 1, stopped: false };
     }
+  });
+  for (const result of aiResults) {
+    processed += result.processed;
+    failed += result.failed;
+  }
+  if (candidates.length > 0) {
+    logPropertyMatchCampaignTiming("ai_scored_candidates", {
+      locationId: args.locationId,
+      campaignId: args.campaignId,
+      candidates: candidates.length,
+      processed: aiResults.reduce((sum, result) => sum + result.processed, 0),
+      failed: aiResults.reduce((sum, result) => sum + result.failed, 0),
+      stopped: aiResults.some((result) => result.stopped),
+      concurrency: Math.min(AI_SCORING_CONCURRENCY, limit),
+      model: normalizeText(args.model, 120) || PROPERTY_MATCH_FAST_MODEL,
+      elapsedMs: Date.now() - aiScoringStartedAt,
+    });
+  }
+  if (aiResults.some((result) => result.stopped)) {
+    await releasePropertyMatchAiLocks({
+      locationId: args.locationId,
+      campaignId: args.campaignId,
+      workerId,
+    });
+    const stopped = await refreshCampaignCounts(campaign.id);
+    return {
+      success: true as const,
+      collected: collection.collected,
+      processed,
+      failed,
+      remaining: false,
+      stopped: true,
+      status: stopped.status,
+    };
   }
 
   const updated = await refreshCampaignCounts(campaign.id);
@@ -2090,6 +2198,8 @@ export async function listContactPropertyRecommendations(args: {
     },
     orderBy: [
       { reviewerStatus: "asc" },
+      { aiVerdict: "desc" },
+      { score: "desc" },
       { confidence: "desc" },
       { updatedAt: "desc" },
     ],
@@ -2246,6 +2356,7 @@ export async function getPropertyMatchCampaignDetail(args: {
       conversation: { select: { id: true, ghlConversationId: true, lastMessageAt: true, updatedAt: true } },
     },
     orderBy: [
+      { aiVerdict: "desc" },
       { score: "desc" },
       { confidence: "desc" },
       { contact: { createdAt: "desc" } },
