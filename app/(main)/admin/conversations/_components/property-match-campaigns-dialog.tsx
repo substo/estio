@@ -70,6 +70,8 @@ type Campaign = {
 type QueueCounts = {
     allCount: number;
     pendingAiCount: number;
+    queuedAiCount?: number;
+    processingAiCount?: number;
     reviewCount: number;
     approvedCount: number;
     sentCount: number;
@@ -157,6 +159,9 @@ type BatchProgress = {
     failed: number;
     lastProcessed: number;
     lastCollected: number;
+    startedAt: number;
+    lastUpdatedAt: number;
+    pollCount: number;
     message: string;
 };
 
@@ -177,6 +182,7 @@ const MIN_PROPERTY_SEARCH_LENGTH = 2;
 const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
 const LIVE_BATCH_LIMIT = 20;
 const PROPERTY_MATCH_MODEL_USAGE_KEY = "property-match-campaigns";
+const LIVE_BATCH_POLL_MS = 3500;
 
 function formatMoney(value?: number | null) {
     return Number.isFinite(Number(value)) ? `€${Number(value).toLocaleString()}` : "No price";
@@ -228,6 +234,8 @@ function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
     return {
         allCount: campaign?.queueCounts?.allCount ?? campaign?.totalCandidates ?? 0,
         pendingAiCount: campaign?.queueCounts?.pendingAiCount ?? Math.max(0, Number(campaign?.totalCandidates || 0) - Number(campaign?.processedCandidates || 0)),
+        queuedAiCount: campaign?.queueCounts?.queuedAiCount ?? campaign?.queueCounts?.pendingAiCount ?? Math.max(0, Number(campaign?.totalCandidates || 0) - Number(campaign?.processedCandidates || 0)),
+        processingAiCount: campaign?.queueCounts?.processingAiCount ?? 0,
         reviewCount: campaign?.queueCounts?.reviewCount ?? Math.max(0, Number(campaign?.yesCount || 0) + Number(campaign?.maybeCount || 0) - Number(campaign?.approvedCount || 0) - Number(campaign?.sentCount || 0)),
         approvedCount: campaign?.queueCounts?.approvedCount ?? campaign?.approvedCount ?? 0,
         sentCount: campaign?.queueCounts?.sentCount ?? campaign?.sentCount ?? 0,
@@ -278,6 +286,27 @@ function progressPercent(campaign?: Campaign | null) {
     return Math.round((processed / total) * 100);
 }
 
+function formatElapsedTime(startedAt?: number | null, now = Date.now()) {
+    if (!startedAt) return "0s";
+    const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    if (minutes <= 0) return `${remainder}s`;
+    return `${minutes}m ${remainder.toString().padStart(2, "0")}s`;
+}
+
+function campaignProcessingStage(campaign?: Campaign | null, progress?: BatchProgress | null) {
+    const counts = campaignQueueCounts(campaign);
+    if (progress?.phase === "failed") return "Failed";
+    if (progress?.phase === "stopped" || campaignIsStopped(campaign)) return "Stopped";
+    if (progress?.phase === "done") return "Complete";
+    if (campaign?.collectionStatus === "processing") return "Scanning and verifying contacts";
+    if (Number(counts.processingAiCount || 0) > 0) return `AI scoring ${counts.processingAiCount} contact${counts.processingAiCount === 1 ? "" : "s"}`;
+    if (Number(counts.pendingAiCount || 0) > 0) return "Waiting to score AI candidates";
+    if (campaign?.status === "processing") return "Refreshing campaign totals";
+    return "Ready";
+}
+
 export function PropertyMatchCampaignsDialog({
     open,
     onOpenChange,
@@ -308,6 +337,7 @@ export function PropertyMatchCampaignsDialog({
     const [processingCampaignId, setProcessingCampaignId] = useState<string | null>(null);
     const [cancelingCampaignId, setCancelingCampaignId] = useState<string | null>(null);
     const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+    const [progressNow, setProgressNow] = useState(() => Date.now());
     const [error, setError] = useState("");
     const [mobileView, setMobileView] = useState<MobileCampaignView>("campaigns");
     const [detailMode, setDetailMode] = useState<CampaignDetailMode>("overview");
@@ -473,6 +503,44 @@ export function PropertyMatchCampaignsDialog({
     }, [loadDetail, open, queue, selectedCampaignId]);
 
     useEffect(() => {
+        if (!open || !processingCampaignId) return;
+        const tick = async () => {
+            try {
+                const [rows, refreshed] = await Promise.all([
+                    refreshCampaigns(),
+                    refreshDetail(processingCampaignId, queue),
+                ]);
+                const campaign = refreshed?.campaign || rows.find((item) => item.id === processingCampaignId) || null;
+                setProgressNow(Date.now());
+                setBatchProgress((current) => {
+                    if (!current || current.campaignId !== processingCampaignId) return current;
+                    const stage = campaignProcessingStage(campaign, current);
+                    return {
+                        ...current,
+                        phase: campaign?.collectionStatus === "processing" ? "collecting" : current.phase,
+                        lastUpdatedAt: Date.now(),
+                        pollCount: current.pollCount + 1,
+                        message: stage,
+                    };
+                });
+            } catch (error) {
+                console.error("Failed to refresh campaign progress", error);
+            }
+        };
+        const interval = window.setInterval(() => {
+            void tick();
+        }, LIVE_BATCH_POLL_MS);
+        void tick();
+        return () => window.clearInterval(interval);
+    }, [open, processingCampaignId, queue, refreshCampaigns, refreshDetail]);
+
+    useEffect(() => {
+        if (!open || !processingCampaignId) return;
+        const interval = window.setInterval(() => setProgressNow(Date.now()), 1000);
+        return () => window.clearInterval(interval);
+    }, [open, processingCampaignId]);
+
+    useEffect(() => {
         if (!open) return;
         const trimmed = propertyQuery.trim();
         if (trimmed.length < MIN_PROPERTY_SEARCH_LENGTH) {
@@ -495,7 +563,9 @@ export function PropertyMatchCampaignsDialog({
     const runCampaignBatchLive = useCallback(async (campaignId: string, nextQueue = queue) => {
         const runId = processingRunRef.current + 1;
         processingRunRef.current = runId;
+        const startedAt = Date.now();
         setProcessingCampaignId(campaignId);
+        setProgressNow(startedAt);
         setBatchProgress({
             campaignId,
             phase: "collecting",
@@ -504,7 +574,10 @@ export function PropertyMatchCampaignsDialog({
             failed: 0,
             lastCollected: 0,
             lastProcessed: 0,
-            message: "Collecting matching leads...",
+            startedAt,
+            lastUpdatedAt: startedAt,
+            pollCount: 0,
+            message: "Starting batch...",
         });
         setError("");
 
@@ -543,10 +616,22 @@ export function PropertyMatchCampaignsDialog({
                 const counts = campaignQueueCounts(refreshedCampaign);
                 const pending = counts.pendingAiCount;
                 const phase = res.stopped ? "stopped" : res.remaining ? "analyzing" : "done";
-                const message = res.stopped
+                const baseMessage = res.stopped
                     ? "Processing stopped."
                     : res.remaining
-                        ? `Analyzing leads... ${Math.max(0, Number(refreshedCampaign?.processedCandidates || 0))}/${Math.max(0, Number(refreshedCampaign?.totalCandidates || 0))} processed`
+                        ? campaignProcessingStage(refreshedCampaign, {
+                            campaignId,
+                            phase,
+                            collected,
+                            analyzed,
+                            failed,
+                            lastCollected: stepCollected,
+                            lastProcessed: stepProcessed,
+                            startedAt,
+                            lastUpdatedAt: Date.now(),
+                            pollCount: 0,
+                            message: "",
+                        })
                         : "Analysis complete.";
 
                 setBatchProgress({
@@ -557,7 +642,10 @@ export function PropertyMatchCampaignsDialog({
                     failed,
                     lastCollected: stepCollected,
                     lastProcessed: stepProcessed,
-                    message: pending > 0 && !res.stopped ? `${message} · ${pending} AI pending` : message,
+                    startedAt,
+                    lastUpdatedAt: Date.now(),
+                    pollCount: 0,
+                    message: pending > 0 && !res.stopped ? `${baseMessage} · ${pending} AI pending` : baseMessage,
                 });
 
                 if (res.stopped || !res.remaining) return;
@@ -860,7 +948,10 @@ export function PropertyMatchCampaignsDialog({
     const activeCampaignIsStopped = campaignIsStopped(activeCampaign);
     const activeCampaignIsBatchBusy = processingCampaignId === activeCampaign?.id;
     const activeBatchProgress = batchProgress?.campaignId === activeCampaign?.id ? batchProgress : null;
+    const activeQueueCounts = campaignQueueCounts(activeCampaign);
     const activeProgressPercent = progressPercent(activeCampaign);
+    const activeProcessingStage = campaignProcessingStage(activeCampaign, activeBatchProgress);
+    const activeElapsedTime = formatElapsedTime(activeBatchProgress?.startedAt, progressNow);
     const activeCandidates = activeDetail?.candidates || [];
     const normalizedFocusedCandidateIndex = activeCandidates.length
         ? Math.min(Math.max(focusedCandidateIndex, 0), activeCandidates.length - 1)
@@ -1075,8 +1166,8 @@ export function PropertyMatchCampaignsDialog({
                                                 <>
                                                     <div className="mt-1 text-xs text-slate-500">
                                                         {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
-                                                        {campaignQueueCounts(activeCampaign).pendingAiCount ? ` · ${campaignQueueCounts(activeCampaign).pendingAiCount} AI pending` : ""}
-                                                        {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? ` · ${campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs info` : ""}
+                                                        {activeQueueCounts.pendingAiCount ? ` · ${activeQueueCounts.pendingAiCount} AI pending` : ""}
+                                                        {activeQueueCounts.needsProfileVerificationCount ? ` · ${activeQueueCounts.needsProfileVerificationCount} needs info` : ""}
                                                     </div>
                                                     <div className="mt-2 flex flex-wrap gap-1">
                                                         {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
@@ -1115,7 +1206,7 @@ export function PropertyMatchCampaignsDialog({
                                                 disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling}
                                             >
                                                 {activeCampaignIsBatchBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
-                                                {activeCampaignIsStopped ? "Resume batch" : "Process batch"}
+                                                {activeCampaignIsBatchBusy ? "Processing..." : activeCampaignIsStopped ? "Resume batch" : "Process batch"}
                                             </Button>
                                             {activeCampaignIsProcessing ? (
                                                 <Button
@@ -1162,10 +1253,10 @@ export function PropertyMatchCampaignsDialog({
                                                     {activeBatchProgress.phase === "analyzing" || activeBatchProgress.phase === "collecting" ? (
                                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                                     ) : null}
-                                                    <span className="truncate">{activeBatchProgress.message}</span>
+                                                    <span className="truncate">{activeProcessingStage}</span>
                                                 </div>
-                                                <div className="shrink-0 text-[11px] text-indigo-700">
-                                                    {activeProgressPercent}% complete
+                                                <div className="shrink-0 text-[11px] text-indigo-700 tabular-nums">
+                                                    {activeElapsedTime} · {activeProgressPercent}%
                                                 </div>
                                             </div>
                                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
@@ -1174,16 +1265,28 @@ export function PropertyMatchCampaignsDialog({
                                                     style={{ width: `${activeProgressPercent}%` }}
                                                 />
                                             </div>
+                                            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-indigo-900 sm:grid-cols-4">
+                                                <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
+                                                    <div className="text-[10px] uppercase text-indigo-500">This batch</div>
+                                                    <div className="font-medium tabular-nums">+{activeBatchProgress.lastCollected} contacts · +{activeBatchProgress.lastProcessed} AI</div>
+                                                </div>
+                                                <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
+                                                    <div className="text-[10px] uppercase text-indigo-500">Run total</div>
+                                                    <div className="font-medium tabular-nums">{activeBatchProgress.collected} contacts · {activeBatchProgress.analyzed} AI</div>
+                                                </div>
+                                                <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
+                                                    <div className="text-[10px] uppercase text-indigo-500">Waiting</div>
+                                                    <div className="font-medium tabular-nums">{activeQueueCounts.queuedAiCount ?? activeQueueCounts.pendingAiCount} queued · {activeQueueCounts.processingAiCount ?? 0} scoring</div>
+                                                </div>
+                                                <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
+                                                    <div className="text-[10px] uppercase text-indigo-500">Needs info</div>
+                                                    <div className="font-medium tabular-nums">{activeQueueCounts.needsProfileVerificationCount} contacts</div>
+                                                </div>
+                                            </div>
                                             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-indigo-800">
-                                                <span>{activeBatchProgress.collected} collected this run</span>
-                                                <span>{activeBatchProgress.analyzed} analyzed this run</span>
+                                                <span>{activeBatchProgress.message}</span>
+                                                <span>refreshed {activeBatchProgress.pollCount}x</span>
                                                 {activeBatchProgress.failed ? <span>{activeBatchProgress.failed} failed</span> : null}
-                                                {campaignQueueCounts(activeCampaign).pendingAiCount ? (
-                                                    <span>{campaignQueueCounts(activeCampaign).pendingAiCount} pending AI</span>
-                                                ) : null}
-                                                {campaignQueueCounts(activeCampaign).needsProfileVerificationCount ? (
-                                                    <span>{campaignQueueCounts(activeCampaign).needsProfileVerificationCount} needs contact info</span>
-                                                ) : null}
                                             </div>
                                         </div>
                                     ) : null}

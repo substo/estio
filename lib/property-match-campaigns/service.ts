@@ -144,6 +144,8 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
   const counts = {
     allCount: rows.length,
     pendingAiCount: 0,
+    queuedAiCount: 0,
+    processingAiCount: 0,
     reviewCount: 0,
     approvedCount: 0,
     sentCount: 0,
@@ -156,7 +158,11 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
 
   for (const row of rows) {
     const queue = propertyMatchCandidateQueue(row);
-    if (queue === "processing") counts.pendingAiCount += 1;
+    if (queue === "processing") {
+      counts.pendingAiCount += 1;
+      if (row.aiReviewStatus === "processing") counts.processingAiCount += 1;
+      else counts.queuedAiCount += 1;
+    }
     else if (queue === "review") counts.reviewCount += 1;
     else if (queue === "approved") counts.approvedCount += 1;
     else if (queue === "sent") counts.sentCount += 1;

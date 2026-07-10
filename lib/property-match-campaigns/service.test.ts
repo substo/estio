@@ -299,6 +299,8 @@ test("property match queue classifier separates campaign work outcomes", () => {
   assert.deepEqual(summarizePropertyMatchCandidateQueues(rows), {
     allCount: 8,
     pendingAiCount: 1,
+    queuedAiCount: 0,
+    processingAiCount: 1,
     reviewCount: 1,
     approvedCount: 1,
     sentCount: 1,
