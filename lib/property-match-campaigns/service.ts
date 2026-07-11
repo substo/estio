@@ -32,7 +32,7 @@ const CAMPAIGN_STATUSES = new Set(["draft", "processing", "review", "completed",
 const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "skipped"]);
 const LOW_CONFIDENCE_YES_THRESHOLD = 0.65;
 const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
-const CONTACT_COLLECTION_BATCH_SIZE = 200;
+const CONTACT_COLLECTION_BATCH_SIZE = 40;
 const PROFILE_VERIFICATION_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_PROFILE_VERIFICATION_CONCURRENCY || 4)));
 const AI_SCORING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_AI_SCORING_CONCURRENCY || 4)));
 const PROPERTY_MATCH_FAST_MODEL = String(process.env.PROPERTY_MATCH_FAST_MODEL || GEMINI_FLASH_LITE_LATEST_ALIAS).trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
@@ -1945,11 +1945,24 @@ export async function processPropertyMatchCampaignBatch(args: {
     })
     : campaign;
 
-  const collection = await collectPropertyMatchCandidatesBatch({
-    locationId: args.locationId,
-    campaign: campaignForProcessing,
-    workerId,
+  const staleLockedBefore = new Date(Date.now() - AI_REVIEW_LOCK_TIMEOUT_MS);
+  const pendingAiBeforeCollection = await db.propertyMatchCandidate.findFirst({
+    where: buildAiReviewClaimWhere({
+      campaignId: campaign.id,
+      locationId: args.locationId,
+      staleLockedBefore,
+    }),
+    select: { id: true },
   });
+
+  const collection = pendingAiBeforeCollection
+    ? { collected: 0, done: campaignForProcessing.collectionStatus === "done" }
+    : await collectPropertyMatchCandidatesBatch({
+      locationId: args.locationId,
+      campaign: campaignForProcessing,
+      workerId,
+      limit: Math.max(20, limit * 2),
+    });
   if (collection.stopped || await isPropertyMatchCampaignStopRequested({
     locationId: args.locationId,
     campaignId: args.campaignId,
@@ -1985,7 +1998,6 @@ export async function processPropertyMatchCampaignBatch(args: {
     campaignId: args.campaignId,
   });
 
-  const staleLockedBefore = new Date(Date.now() - AI_REVIEW_LOCK_TIMEOUT_MS);
   const claimable = await db.propertyMatchCandidate.findMany({
     where: buildAiReviewClaimWhere({
       campaignId: campaign.id,
