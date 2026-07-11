@@ -1163,23 +1163,11 @@ export function PropertyMatchCampaignsDialog({
                                         <div className="min-w-0">
                                             <div className="truncate text-sm font-semibold text-slate-900">{campaignLabel(activeCampaign)}</div>
                                             {detailMode === "overview" ? (
-                                                <>
-                                                    <div className="mt-1 text-xs text-slate-500">
-                                                        {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
-                                                        {activeQueueCounts.pendingAiCount ? ` · ${activeQueueCounts.pendingAiCount} AI pending` : ""}
-                                                        {activeQueueCounts.needsProfileVerificationCount ? ` · ${activeQueueCounts.needsProfileVerificationCount} needs info` : ""}
-                                                    </div>
-                                                    <div className="mt-2 flex flex-wrap gap-1">
-                                                        {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => {
-                                                            const count = campaignQueueCounts(activeCampaign)[item.countKey];
-                                                            return (
-                                                                <Badge key={item.value} variant="outline" className="h-5 px-1.5 text-[10px]">
-                                                                    {item.label} {count}
-                                                                </Badge>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </>
+                                                <div className="mt-1 text-xs text-slate-500">
+                                                    {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
+                                                    {activeQueueCounts.pendingAiCount ? ` · ${activeQueueCounts.pendingAiCount} AI pending` : ""}
+                                                    {activeQueueCounts.needsProfileVerificationCount ? ` · ${activeQueueCounts.needsProfileVerificationCount} needs info` : ""}
+                                                </div>
                                             ) : (
                                                 <div className="mt-1 text-xs text-slate-500">
                                                     Contact {activeCandidates.length ? normalizedFocusedCandidateIndex + 1 : 0} of {activeCandidates.length} ready for review
@@ -1348,7 +1336,7 @@ export function PropertyMatchCampaignsDialog({
                                 </div>
 
                                 <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-                                    {detailLoading && !activeDetail ? (
+                                    {detailMode === "review" && detailLoading && !activeDetail ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">
                                             <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
                                             Loading campaign contacts...
@@ -1356,25 +1344,16 @@ export function PropertyMatchCampaignsDialog({
                                     ) : null}
                                     {detailMode === "overview" ? (
                                         <div className="space-y-3">
-                                            <div className="rounded-md border bg-white p-3">
-                                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                            <div className="rounded-md border bg-white p-2">
+                                                <div className="grid grid-cols-4 gap-1.5">
                                                     {QUEUE_OPTIONS.filter((item) => item.value !== "all").map((item) => (
-                                                        <div key={item.value} className="rounded-md border bg-slate-50 px-2 py-2">
-                                                            <div className="text-[11px] text-slate-500">{item.label}</div>
-                                                            <div className="mt-1 text-lg font-semibold text-slate-900">
+                                                        <div key={item.value} className="rounded-md border bg-slate-50 px-1.5 py-1.5">
+                                                            <div className="truncate text-[9px] uppercase text-slate-500">{item.label}</div>
+                                                            <div className="mt-0.5 text-base font-semibold leading-none text-slate-900">
                                                                 {campaignQueueCounts(activeCampaign)[item.countKey]}
                                                             </div>
                                                         </div>
                                                     ))}
-                                                </div>
-                                                <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <span>Processed</span>
-                                                        <span className="font-medium text-slate-900">{activeCampaign.processedCandidates}/{activeCampaign.totalCandidates}</span>
-                                                    </div>
-                                                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
-                                                        <div className="h-full rounded-full bg-indigo-600" style={{ width: `${activeProgressPercent}%` }} />
-                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
