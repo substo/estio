@@ -166,13 +166,13 @@ type BatchProgress = {
 };
 
 const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueCounts }> = [
-    { value: "review", label: "Review", countKey: "reviewCount" },
+    { value: "review", label: "Prospects", countKey: "reviewCount" },
     { value: "approved", label: "Approved", countKey: "approvedCount" },
     { value: "sent", label: "Sent", countKey: "sentCount" },
     { value: "skipped", label: "Skipped", countKey: "skippedCount" },
     { value: "rejected", label: "Rejected", countKey: "rejectedCount" },
-    { value: "needs_profile_verification", label: "Needs info", countKey: "needsProfileVerificationCount" },
-    { value: "not_match", label: "Not match", countKey: "notMatchCount" },
+    { value: "needs_profile_verification", label: "Missing info", countKey: "needsProfileVerificationCount" },
+    { value: "not_match", label: "Not suitable", countKey: "notMatchCount" },
     { value: "already_shared", label: "Already shared", countKey: "alreadySharedCount" },
     { value: "all", label: "All", countKey: "allCount" },
 ];
@@ -300,10 +300,10 @@ function campaignProcessingStage(campaign?: Campaign | null, progress?: BatchPro
     if (progress?.phase === "failed") return "Failed";
     if (progress?.phase === "stopped" || campaignIsStopped(campaign)) return "Stopped";
     if (progress?.phase === "done") return "Complete";
-    if (campaign?.collectionStatus === "processing") return "Scanning and verifying contacts";
-    if (Number(counts.processingAiCount || 0) > 0) return `AI scoring ${counts.processingAiCount} contact${counts.processingAiCount === 1 ? "" : "s"}`;
-    if (Number(counts.pendingAiCount || 0) > 0) return "Waiting to score AI candidates";
-    if (campaign?.status === "processing") return "Refreshing campaign totals";
+    if (campaign?.collectionStatus === "processing") return "Checking contacts for this property";
+    if (Number(counts.processingAiCount || 0) > 0) return `Scoring ${counts.processingAiCount} possible prospect${counts.processingAiCount === 1 ? "" : "s"}`;
+    if (Number(counts.pendingAiCount || 0) > 0) return "Preparing possible prospects to score";
+    if (campaign?.status === "processing") return "Updating prospect results";
     return "Ready";
 }
 
@@ -645,7 +645,7 @@ export function PropertyMatchCampaignsDialog({
                     startedAt,
                     lastUpdatedAt: Date.now(),
                     pollCount: 0,
-                    message: pending > 0 && !res.stopped ? `${baseMessage} · ${pending} AI pending` : baseMessage,
+                    message: pending > 0 && !res.stopped ? `${baseMessage} · ${pending} still checking` : baseMessage,
                 });
 
                 if (res.stopped || !res.remaining) return;
@@ -1164,9 +1164,9 @@ export function PropertyMatchCampaignsDialog({
                                             <div className="truncate text-sm font-semibold text-slate-900">{campaignLabel(activeCampaign)}</div>
                                             {detailMode === "overview" ? (
                                                 <div className="mt-1 text-xs text-slate-500">
-                                                    {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} processed
-                                                    {activeQueueCounts.pendingAiCount ? ` · ${activeQueueCounts.pendingAiCount} AI pending` : ""}
-                                                    {activeQueueCounts.needsProfileVerificationCount ? ` · ${activeQueueCounts.needsProfileVerificationCount} needs info` : ""}
+                                                    {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} contacts checked
+                                                    {activeQueueCounts.reviewCount ? ` · ${activeQueueCounts.reviewCount} prospects ready` : ""}
+                                                    {activeQueueCounts.pendingAiCount ? ` · ${activeQueueCounts.pendingAiCount} still checking` : ""}
                                                 </div>
                                             ) : (
                                                 <div className="mt-1 text-xs text-slate-500">
@@ -1247,6 +1247,9 @@ export function PropertyMatchCampaignsDialog({
                                                     {activeElapsedTime} · {activeProgressPercent}%
                                                 </div>
                                             </div>
+                                            <div className="mt-1 text-[11px] leading-snug text-indigo-800">
+                                                Checking recent contacts first. Good prospects go to Review; unclear contacts go to Missing info; poor fits go to Not suitable.
+                                            </div>
                                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
                                                 <div
                                                     className="h-full rounded-full bg-indigo-600 transition-all"
@@ -1255,25 +1258,25 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                             <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-indigo-900 sm:grid-cols-4">
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
-                                                    <div className="text-[10px] uppercase text-indigo-500">This batch</div>
-                                                    <div className="font-medium tabular-nums">+{activeBatchProgress.lastCollected} contacts · +{activeBatchProgress.lastProcessed} AI</div>
+                                                    <div className="text-[10px] uppercase text-indigo-500">Found prospects</div>
+                                                    <div className="font-medium tabular-nums">{activeQueueCounts.reviewCount} to review</div>
                                                 </div>
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
-                                                    <div className="text-[10px] uppercase text-indigo-500">Run total</div>
-                                                    <div className="font-medium tabular-nums">{activeBatchProgress.collected} contacts · {activeBatchProgress.analyzed} AI</div>
+                                                    <div className="text-[10px] uppercase text-indigo-500">This run</div>
+                                                    <div className="font-medium tabular-nums">+{activeBatchProgress.lastCollected} checked · +{activeBatchProgress.lastProcessed} scored</div>
                                                 </div>
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
-                                                    <div className="text-[10px] uppercase text-indigo-500">Waiting</div>
-                                                    <div className="font-medium tabular-nums">{activeQueueCounts.queuedAiCount ?? activeQueueCounts.pendingAiCount} queued · {activeQueueCounts.processingAiCount ?? 0} scoring</div>
+                                                    <div className="text-[10px] uppercase text-indigo-500">Still checking</div>
+                                                    <div className="font-medium tabular-nums">{activeQueueCounts.queuedAiCount ?? activeQueueCounts.pendingAiCount} waiting · {activeQueueCounts.processingAiCount ?? 0} scoring</div>
                                                 </div>
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
-                                                    <div className="text-[10px] uppercase text-indigo-500">Needs info</div>
+                                                    <div className="text-[10px] uppercase text-indigo-500">Missing info</div>
                                                     <div className="font-medium tabular-nums">{activeQueueCounts.needsProfileVerificationCount} contacts</div>
                                                 </div>
                                             </div>
                                             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-indigo-800">
                                                 <span>{activeBatchProgress.message}</span>
-                                                <span>refreshed {activeBatchProgress.pollCount}x</span>
+                                                <span>updated {activeBatchProgress.pollCount}x</span>
                                                 {activeBatchProgress.failed ? <span>{activeBatchProgress.failed} failed</span> : null}
                                             </div>
                                         </div>
