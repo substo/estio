@@ -6,6 +6,7 @@ import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import {
     analyzeImageForEnhancement,
+    analyzeImageForEnhancementWithChatGptSubscription,
     fetchImageAsInlineData,
 } from "@/lib/ai/property-image-enhancement";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
@@ -57,14 +58,6 @@ export async function POST(req: Request) {
             sourceUrl: parsed.data.sourceUrl,
         });
 
-        const apiKey = await resolveLocationGoogleAiApiKey(parsed.data.locationId);
-        if (!apiKey) {
-            return NextResponse.json(
-                { error: "Google AI API key is not configured for this location." },
-                { status: 400 }
-            );
-        }
-
         const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
         const availableAnalysisModels = new Set(modelCatalog.analysisModels.map((model) => model.value));
         const requestedAnalysisModel = String(parsed.data.analysisModel || "").trim();
@@ -85,14 +78,28 @@ export async function POST(req: Request) {
         }
 
         const sourceImage = await fetchImageAsInlineData(ownedMedia.sourceUrl);
-        const result = await analyzeImageForEnhancement({
-            apiKey,
-            model: analysisModel,
-            sourceImageBase64: sourceImage.base64,
-            sourceImageMimeType: sourceImage.mimeType,
-            priorPrompt: parsed.data.priorPrompt,
-            userInstructions: parsed.data.userInstructions,
-        });
+        const provider = analysisModel.startsWith("chatgpt_subscription:")
+            ? "chatgpt_subscription"
+            : "google_gemini";
+        const result = provider === "chatgpt_subscription"
+            ? await analyzeImageForEnhancementWithChatGptSubscription({
+                model: analysisModel,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+                priorPrompt: parsed.data.priorPrompt,
+                userInstructions: parsed.data.userInstructions,
+            })
+            : await analyzeImageForEnhancement({
+                apiKey: await resolveLocationGoogleAiApiKey(parsed.data.locationId).then((key) => {
+                    if (!key) throw new Error("Google AI API key is not configured for this location.");
+                    return key;
+                }),
+                model: analysisModel,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+                priorPrompt: parsed.data.priorPrompt,
+                userInstructions: parsed.data.userInstructions,
+            });
 
         // Blocking AI usage telemetry to ensure it is not cancelled by the Next.js runtime.
         await securelyRecordAiUsage({
@@ -102,7 +109,7 @@ export async function POST(req: Request) {
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",
             action: "analyze",
-            provider: "google_gemini",
+            provider,
             model: result.model,
             inputTokens: result.usageMetadata?.promptTokenCount,
             outputTokens: result.usageMetadata?.candidatesTokenCount,
@@ -118,9 +125,10 @@ export async function POST(req: Request) {
         });
     } catch (error) {
         console.error("[/api/images/enhance/analyze] Error:", error);
+        const message = error instanceof Error ? error.message : "Internal server error.";
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : "Internal server error." },
-            { status: 500 }
+            { error: message },
+            { status: /api key is not configured/i.test(message) ? 400 : 500 }
         );
     }
 }

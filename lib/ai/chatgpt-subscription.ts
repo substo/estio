@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { settingsService } from "@/lib/settings/service";
@@ -54,6 +54,8 @@ export type ChatGptSubscriptionResult = {
     model: string;
     usage: ChatGptSubscriptionUsage;
 };
+
+export type ChatGptSubscriptionImageTextResult = ChatGptSubscriptionResult;
 
 export type ChatGptSubscriptionConnectionStatus = {
     ok: boolean;
@@ -322,6 +324,88 @@ export async function callChatGptSubscriptionWithMetadata(
                 raw: JSON.stringify({
                     source: "codex_cli_estimate",
                     promptChars: prompt.length,
+                    completionChars: text.length,
+                }),
+            },
+        };
+    } finally {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+}
+
+export async function callChatGptSubscriptionWithImageMetadata(
+    modelId: string,
+    prompt: string,
+    image: { base64: string; mimeType?: string | null },
+    options: { accessToken?: string | null; runner?: CodexCliRunner } = {}
+): Promise<ChatGptSubscriptionImageTextResult> {
+    if (!isChatGptSubscriptionTransportEnabled()) {
+        throw new Error("ChatGPT subscription transport is disabled. Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli on a trusted server with Codex CLI installed.");
+    }
+
+    const imageBytes = Buffer.from(String(image.base64 || ""), "base64");
+    if (!imageBytes.length) {
+        throw new Error("Source image is empty.");
+    }
+
+    const accessToken = String(options.accessToken || await resolveChatGptSubscriptionAccessToken() || "").trim();
+    const tempDir = await mkdtemp(path.join(tmpdir(), "estio-chatgpt-subscription-image-"));
+    const imageFile = path.join(tempDir, String(image.mimeType || "").includes("png") ? "source-image.png" : "source-image.jpg");
+    const outputFile = path.join(tempDir, "last-message.txt");
+    const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
+    const model = stripChatGptSubscriptionModelPrefix(modelId) || CHATGPT_SUBSCRIPTION_DEFAULT_MODEL;
+    const cwd = String(process.env.CHATGPT_SUBSCRIPTION_CODEX_CWD || tempDir).trim() || tempDir;
+    const env = { ...process.env };
+    if (accessToken) {
+        env.CODEX_ACCESS_TOKEN = accessToken;
+    } else {
+        delete env.CODEX_ACCESS_TOKEN;
+    }
+
+    try {
+        await writeFile(imageFile, imageBytes);
+        await (options.runner || runCodexCli)(command, [
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "--ephemeral",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "-C",
+            cwd,
+            "-m",
+            model,
+            "-i",
+            imageFile,
+            "--output-last-message",
+            outputFile,
+            prompt,
+        ], {
+            env,
+            maxBuffer: 1024 * 1024 * 4,
+            timeout: Number(process.env.CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS || 120000),
+        });
+
+        const text = (await readFile(outputFile, "utf8")).trim();
+        if (!text) {
+            throw new Error("ChatGPT subscription Codex image transport returned an empty response.");
+        }
+
+        const promptTokens = Math.ceil((prompt.length + imageBytes.length / 4) / 4);
+        const completionTokens = Math.ceil(text.length / 4);
+        return {
+            text,
+            model,
+            usage: {
+                promptTokens,
+                completionTokens,
+                totalTokens: promptTokens + completionTokens,
+                raw: JSON.stringify({
+                    source: "codex_cli_image_estimate",
+                    promptChars: prompt.length,
+                    imageBytes: imageBytes.length,
                     completionChars: text.length,
                 }),
             },

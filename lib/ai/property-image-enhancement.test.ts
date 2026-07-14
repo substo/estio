@@ -299,11 +299,15 @@ test("model capability registry keeps text providers out of audio and image task
         filterModelsForTask(models, "property.image.generation").map((model) => model.value),
         ["chatgpt_subscription:gpt-image-2", "gemini-3.1-flash-lite-image", "gemini-2.5-flash-image"]
     );
+    assert.deepEqual(
+        filterModelsForTask(models, "property.image.analysis").map((model) => model.value),
+        ["chatgpt_subscription:gpt-5.4-mini", "gemini-2.5-flash"]
+    );
 });
 
 test("model capability registry describes provider capabilities", () => {
     assert.deepEqual(getModelCapabilities({ value: "openai:gpt-4o-mini" }), ["text", "json", "streaming"]);
-    assert.deepEqual(getModelCapabilities({ value: "chatgpt_subscription:gpt-5.4-mini" }), ["text", "json", "streaming"]);
+    assert.deepEqual(getModelCapabilities({ value: "chatgpt_subscription:gpt-5.4-mini" }), ["text", "json", "vision", "streaming"]);
     assert.equal(getModelCapabilities({ value: "openai:gpt-image-2" }).includes("imageGeneration"), true);
     assert.equal(getModelCapabilities({ value: "chatgpt_subscription:gpt-image-2" }).includes("imageGeneration"), true);
     assert.equal(getModelCapabilities({ value: "gemini-2.5-flash" }).includes("audioInput"), true);

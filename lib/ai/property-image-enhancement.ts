@@ -20,6 +20,7 @@ import {
 import { resolvePropertyImageRoomType } from "@/lib/ai/property-image-room-types";
 import { stripOpenAiModelPrefix } from "@/lib/ai/openai-models";
 import {
+    callChatGptSubscriptionWithImageMetadata,
     isChatGptSubscriptionImageGenerationEnabled,
     resolveChatGptSubscriptionAccessToken,
     stripChatGptSubscriptionModelPrefix,
@@ -148,6 +149,8 @@ type GenerateEnhancedImageResult = {
 type GenerateEnhancedImageWithOpenAiInput = GenerateEnhancedImageInput;
 
 type GenerateEnhancedImageWithChatGptSubscriptionInput = Omit<GenerateEnhancedImageInput, "apiKey">;
+
+type AnalyzeImageWithChatGptSubscriptionInput = Omit<AnalyzeImageForEnhancementInput, "apiKey">;
 
 function toSingleLine(text: string): string {
     return String(text || "").replace(/\s+/g, " ").trim();
@@ -521,6 +524,38 @@ export async function analyzeImageForEnhancement(input: AnalyzeImageForEnhanceme
     const analysis = normalizeImageEnhancementAnalysis(parsedJson);
 
     return { analysis, model, usageMetadata: response.usageMetadata };
+}
+
+export async function analyzeImageForEnhancementWithChatGptSubscription(input: AnalyzeImageWithChatGptSubscriptionInput): Promise<{
+    analysis: ImageEnhancementAnalysis;
+    model: string;
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
+}> {
+    const model = requireSelectedModel(input.model, "analysis");
+    const prompt = [
+        "Analyze the attached property listing photo.",
+        "Return strict JSON only. Do not include markdown fences or commentary.",
+        buildAnalysisPrompt({
+            priorPrompt: input.priorPrompt,
+            userInstructions: input.userInstructions,
+        }),
+    ].join("\n\n");
+    const result = await callChatGptSubscriptionWithImageMetadata(model, prompt, {
+        base64: input.sourceImageBase64,
+        mimeType: input.sourceImageMimeType || DEFAULT_IMAGE_MIME_TYPE,
+    });
+
+    const parsedJson = parseJsonObjectFromModelText(result.text);
+    const analysis = normalizeImageEnhancementAnalysis(parsedJson);
+    return {
+        analysis,
+        model: result.model,
+        usageMetadata: {
+            promptTokenCount: result.usage.promptTokens,
+            candidatesTokenCount: result.usage.completionTokens,
+            totalTokenCount: result.usage.totalTokens,
+        },
+    };
 }
 
 function normalizeActionLog(lines: string[]): string[] {

@@ -1531,11 +1531,11 @@ export function PropertyImageEnhanceDialog({
                                         </p>
                                     </div>
 
-                                    {analysisModels.length === 0 && !modelCatalogLoading ? (
-                                        <p className="text-xs text-amber-700">
-                                            No compatible analysis models are available for this location&apos;s Google AI key.
-                                        </p>
-                                    ) : null}
+                            {analysisModels.length === 0 && !modelCatalogLoading ? (
+                                <p className="text-xs text-amber-700">
+                                    No compatible image analysis models are available for this location or connected subscription.
+                                </p>
+                            ) : null}
                                 </div>
                             )}
 

@@ -575,5 +575,8 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
 
 export async function getPropertyImageEnhancementModelCatalog(locationId?: string) {
     const { models, defaults } = await getAiModelPickerDefaults(locationId);
-    return buildPropertyImageModelCatalog(models, defaults);
+    // Stored provider catalogs can be partial (for example, only image-generation
+    // models). Merge curated Gemini fallbacks so analysis does not disappear when
+    // the database catalog is stale or incomplete.
+    return buildPropertyImageModelCatalog(dedupeModelOptions([...models, ...FALLBACK_MODELS]), defaults);
 }

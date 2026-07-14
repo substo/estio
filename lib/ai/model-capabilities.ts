@@ -118,6 +118,7 @@ export function isLikelyPropertyImageGenerationModel(model: AiModelDescriptor): 
 }
 
 export function isLikelyPropertyImageAnalysisModel(model: AiModelDescriptor): boolean {
+    if (isChatGptSubscriptionTextModel(model)) return true;
     if (!isGeminiFamilyModel(model) || isExcludedUtilityModel(model)) return false;
     return !isLikelyPropertyImageGenerationModel(model);
 }
@@ -129,6 +130,9 @@ export function getModelCapabilities(model: AiModelDescriptor): AiModelCapabilit
     if (isOpenAiTextModel(model) || isChatGptSubscriptionTextModel(model)) {
         capabilities.add("text");
         capabilities.add("json");
+        if (isChatGptSubscriptionTextModel(model)) {
+            capabilities.add("vision");
+        }
         capabilities.add("streaming");
         return [...capabilities];
     }

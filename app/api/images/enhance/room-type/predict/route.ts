@@ -5,7 +5,10 @@ import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { fetchImageAsInlineData } from "@/lib/ai/property-image-enhancement";
-import { predictPropertyImageRoomType } from "@/lib/ai/property-image-room-type";
+import {
+    predictPropertyImageRoomType,
+    predictPropertyImageRoomTypeWithChatGptSubscription,
+} from "@/lib/ai/property-image-room-type";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveOwnedPropertyImageSource } from "../../_helpers";
 
@@ -53,14 +56,6 @@ export async function POST(req: Request) {
             sourceUrl: parsed.data.sourceUrl,
         });
 
-        const apiKey = await resolveLocationGoogleAiApiKey(parsed.data.locationId);
-        if (!apiKey) {
-            return NextResponse.json(
-                { error: "Google AI API key is not configured for this location." },
-                { status: 400 }
-            );
-        }
-
         const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
         const availableAnalysisModels = new Set(modelCatalog.analysisModels.map((model) => model.value));
         const requestedAnalysisModel = String(parsed.data.analysisModel || "").trim();
@@ -81,12 +76,24 @@ export async function POST(req: Request) {
         }
 
         const sourceImage = await fetchImageAsInlineData(ownedMedia.sourceUrl);
-        const prediction = await predictPropertyImageRoomType({
-            apiKey,
-            model: analysisModel,
-            sourceImageBase64: sourceImage.base64,
-            sourceImageMimeType: sourceImage.mimeType,
-        });
+        const provider = analysisModel.startsWith("chatgpt_subscription:")
+            ? "chatgpt_subscription"
+            : "google_gemini";
+        const prediction = provider === "chatgpt_subscription"
+            ? await predictPropertyImageRoomTypeWithChatGptSubscription({
+                model: analysisModel,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+            })
+            : await predictPropertyImageRoomType({
+                apiKey: await resolveLocationGoogleAiApiKey(parsed.data.locationId).then((key) => {
+                    if (!key) throw new Error("Google AI API key is not configured for this location.");
+                    return key;
+                }),
+                model: analysisModel,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+            });
 
         // Blocking AI usage telemetry to ensure it is not cancelled by the Next.js runtime.
         await securelyRecordAiUsage({
@@ -96,7 +103,7 @@ export async function POST(req: Request) {
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",
             action: "room_type_predict",
-            provider: "google_gemini",
+            provider,
             model: prediction.model,
             inputTokens: prediction.usageMetadata?.promptTokenCount,
             outputTokens: prediction.usageMetadata?.candidatesTokenCount,
@@ -114,9 +121,10 @@ export async function POST(req: Request) {
         });
     } catch (error) {
         console.error("[/api/images/enhance/room-type/predict] Error:", error);
+        const message = error instanceof Error ? error.message : "Internal server error.";
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : "Internal server error." },
-            { status: 500 }
+            { error: message },
+            { status: /api key is not configured/i.test(message) ? 400 : 500 }
         );
     }
 }

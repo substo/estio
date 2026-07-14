@@ -4,6 +4,10 @@ import {
     resolvePropertyImageRoomType,
 } from "@/lib/ai/property-image-room-types";
 import type { PropertyImageRoomType } from "@/lib/ai/property-image-enhancement-types";
+import {
+    callChatGptSubscriptionWithImageMetadata,
+    stripChatGptSubscriptionModelPrefix,
+} from "@/lib/ai/chatgpt-subscription";
 
 const DEFAULT_IMAGE_MIME_TYPE = "image/jpeg";
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -225,5 +229,71 @@ export async function predictPropertyImageRoomType(input: {
         candidates,
         model,
         usageMetadata: response.usageMetadata,
+    };
+}
+
+export async function predictPropertyImageRoomTypeWithChatGptSubscription(input: {
+    model: string;
+    sourceImageBase64: string;
+    sourceImageMimeType?: string;
+}): Promise<{
+    suggestedRoomType: PropertyImageRoomType;
+    candidates: PropertyImageRoomType[];
+    model: string;
+    usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
+}> {
+    const model = stripChatGptSubscriptionModelPrefix(String(input.model || "").trim());
+    if (!model) {
+        throw new Error("A compatible analysis model is required.");
+    }
+
+    const result = await callChatGptSubscriptionWithImageMetadata(
+        model,
+        [
+            "Classify the attached real-estate listing photo.",
+            "Return strict JSON only. Do not include markdown fences or commentary.",
+            buildRoomTypePredictionPrompt(),
+        ].join("\n\n"),
+        {
+            base64: input.sourceImageBase64,
+            mimeType: input.sourceImageMimeType || DEFAULT_IMAGE_MIME_TYPE,
+        }
+    );
+
+    const parsedJson = parseJsonObjectFromModelText(result.text) || {};
+    const rawSuggested = normalizeRoomTypeCandidate(parsedJson.suggestedRoomType) || resolvePropertyImageRoomType();
+    const rawCandidates = Array.isArray(parsedJson.candidates) ? parsedJson.candidates : [];
+    const deduped = new Map<string, PropertyImageRoomType>();
+
+    for (const item of rawCandidates) {
+        const candidate = normalizeRoomTypeCandidate(item);
+        if (!candidate) continue;
+        if (!deduped.has(candidate.key)) {
+            deduped.set(candidate.key, candidate);
+        }
+        if (deduped.size >= 5) break;
+    }
+
+    if (!deduped.has(rawSuggested.key)) {
+        deduped.set(rawSuggested.key, {
+            ...rawSuggested,
+            confidence: clamp01(Number(rawSuggested.confidence)),
+        });
+    }
+
+    return {
+        suggestedRoomType: {
+            ...rawSuggested,
+            confidence: clamp01(Number(rawSuggested.confidence || 0)),
+        },
+        candidates: Array.from(deduped.values())
+            .sort((a, b) => (Number(b.confidence || 0) - Number(a.confidence || 0)))
+            .slice(0, 5),
+        model: result.model,
+        usageMetadata: {
+            promptTokenCount: result.usage.promptTokens,
+            candidatesTokenCount: result.usage.completionTokens,
+            totalTokenCount: result.usage.totalTokens,
+        },
     };
 }
