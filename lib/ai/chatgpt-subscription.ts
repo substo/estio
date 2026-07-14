@@ -179,21 +179,14 @@ export async function getChatGptSubscriptionModelPickerState(configured?: string
 }
 
 export function isChatGptSubscriptionImageGenerationEnabled(): boolean {
-    return isChatGptSubscriptionTransportEnabled();
+    return false;
 }
 
 export async function getChatGptSubscriptionImageModelPickerState(): Promise<{
     models: ChatGptSubscriptionModelOption[];
     defaultModel: string;
 }> {
-    if (!isChatGptSubscriptionImageGenerationEnabled()) {
-        return { models: [], defaultModel: "" };
-    }
-
-    return {
-        models: CHATGPT_SUBSCRIPTION_IMAGE_MODELS,
-        defaultModel: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_IMAGE_MODEL}`,
-    };
+    return { models: [], defaultModel: "" };
 }
 
 export function buildCodexTextPrompt(systemPrompt: string, userContent?: string): string {

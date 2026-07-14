@@ -87,8 +87,7 @@ function isOpenAiImageModel(model: AiModelDescriptor): boolean {
 }
 
 function isChatGptSubscriptionImageModel(model: AiModelDescriptor): boolean {
-    const value = normalizeModelValue(model.value).toLowerCase();
-    return value.startsWith("chatgpt_subscription:") && value.includes("image");
+    return false;
 }
 
 function isExcludedUtilityModel(model: AiModelDescriptor): boolean {

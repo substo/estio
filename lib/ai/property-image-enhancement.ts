@@ -744,7 +744,7 @@ export async function generateEnhancedImageWithChatGptSubscription(
     input: GenerateEnhancedImageWithChatGptSubscriptionInput
 ): Promise<GenerateEnhancedImageResult> {
     if (!isChatGptSubscriptionImageGenerationEnabled()) {
-        throw new Error("ChatGPT subscription image generation is disabled. Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli on a trusted server with Codex CLI installed.");
+        throw new Error("ChatGPT subscription image generation is not supported by Codex with a ChatGPT account. Use Gemini image generation with the location Google AI key or an OpenAI API image model.");
     }
 
     const model = requireSelectedModel(stripChatGptSubscriptionModelPrefix(input.model), "generation");

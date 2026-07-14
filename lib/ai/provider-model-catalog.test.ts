@@ -26,7 +26,7 @@ test("classifyProviderModelCapabilities keeps ChatGPT subscription image guesses
     assert.deepEqual(capabilities, []);
 });
 
-test("classifyProviderModelCapabilities allows experimental ChatGPT subscription image models", () => {
+test("classifyProviderModelCapabilities rejects ChatGPT subscription image models even with legacy experimental flag", () => {
     const original = process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION;
     process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION = "codex_imagegen_experimental";
     try {
@@ -36,7 +36,7 @@ test("classifyProviderModelCapabilities allows experimental ChatGPT subscription
             label: "ChatGPT Subscription GPT Image 2",
         });
 
-        assert.deepEqual(capabilities, ["imageGeneration", "imageEdit"]);
+        assert.deepEqual(capabilities, []);
     } finally {
         if (original === undefined) delete process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION;
         else process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION = original;
