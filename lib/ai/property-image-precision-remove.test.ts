@@ -7,31 +7,6 @@ import {
     buildPrecisionRemovePrompt,
     preparePrecisionRemoveMaskAlpha,
 } from "@/lib/ai/property-image-precision-remove";
-import { isPrecisionRemoveInfrastructureReady } from "@/lib/ai/property-image-precision-remove-config";
-
-function withEnv(overrides: Record<string, string | undefined>, fn: () => void) {
-    const previous: Record<string, string | undefined> = {};
-    for (const [key, value] of Object.entries(overrides)) {
-        previous[key] = process.env[key];
-        if (value === undefined) {
-            delete process.env[key];
-        } else {
-            process.env[key] = value;
-        }
-    }
-
-    try {
-        fn();
-    } finally {
-        for (const [key, value] of Object.entries(previous)) {
-            if (value === undefined) {
-                delete process.env[key];
-            } else {
-                process.env[key] = value;
-            }
-        }
-    }
-}
 
 async function createSolidPng(width: number, height: number, rgba: [number, number, number, number]) {
     return sharp({
@@ -119,14 +94,4 @@ test("blendEditedImageWithMask preserves pixels outside the mask", async () => {
 
     assert.ok(raw.data[leftOffset + 1] > raw.data[leftOffset + 2], "left side should favor edited green pixels");
     assert.ok(raw.data[rightOffset + 2] > raw.data[rightOffset + 1], "right side should preserve original blue pixels");
-});
-
-test("isPrecisionRemoveInfrastructureReady uses shared Google Cloud env", () => {
-    withEnv({
-        GOOGLE_CLOUD_PROJECT_ID: "demo-project",
-        GOOGLE_CLOUD_LOCATION: "us-central1",
-        GOOGLE_APPLICATION_CREDENTIALS: "/tmp/fake-service-account.json",
-    }, () => {
-        assert.equal(isPrecisionRemoveInfrastructureReady(), true);
-    });
 });

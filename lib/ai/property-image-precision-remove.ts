@@ -4,6 +4,7 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import {
     assertPrecisionRemoveEnabledForLocation,
 } from "@/lib/ai/property-image-precision-remove-config";
+import type { ImageOutputIntent } from "@/lib/ai/property-image-enhancement-types";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_PRECISION_REMOVE_MODEL = "gemini-2.5-flash-image";
@@ -21,6 +22,7 @@ type PrecisionRemoveInput = {
     maskMode?: PrecisionRemoveMaskMode;
     semanticMaskClassIds?: number[];
     generationModel?: string;
+    outputIntent?: ImageOutputIntent;
 };
 
 type PrecisionRemoveResult = {
@@ -64,10 +66,42 @@ export function buildPrecisionRemovePrompt(guidance?: string): string {
     return String(guidance || "").trim();
 }
 
+function hasOutputCanvasChange(outputIntent?: ImageOutputIntent): boolean {
+    if (!outputIntent) return false;
+    return Boolean(
+        outputIntent.aspectRatio && outputIntent.aspectRatio !== "original"
+        || outputIntent.upscaleFactor && outputIntent.upscaleFactor !== "off"
+    );
+}
+
+function buildOutputIntentInstructions(outputIntent?: ImageOutputIntent): string {
+    if (!outputIntent) return "";
+
+    const lines: string[] = [];
+    if (outputIntent.aspectRatio && outputIntent.aspectRatio !== "original") {
+        const ratioLabel = outputIntent.aspectRatio === "custom"
+            ? String(outputIntent.customAspectRatio || "custom ratio").trim()
+            : outputIntent.aspectRatio;
+        lines.push(outputIntent.aspectRatioStrategy === "crop"
+            ? `Output aspect ratio: ${ratioLabel}. Crop only the minimum needed while preserving the main property subject.`
+            : `Output aspect ratio: ${ratioLabel}. Expand/outpaint edges naturally while preserving the real property.`
+        );
+    }
+    if (outputIntent.upscaleFactor && outputIntent.upscaleFactor !== "off") {
+        lines.push(`Upscale/detail recovery target: ${outputIntent.upscaleFactor}. Improve clarity without changing real materials, layout, or fixtures.`);
+    }
+    if (outputIntent.quality === "high") {
+        lines.push("Use high quality output with clean edges and natural detail.");
+    }
+
+    return lines.join("\n");
+}
+
 function buildPromptForMaskMode(input: {
     maskMode: PrecisionRemoveMaskMode;
     guidance?: string;
     semanticMaskClassIds?: number[];
+    outputIntent?: ImageOutputIntent;
 }): string {
     const guidance = buildPrecisionRemovePrompt(input.guidance);
 
@@ -109,6 +143,7 @@ function buildPromptForMaskMode(input: {
     return [
         ...sharedInstructions,
         modeInstructions,
+        buildOutputIntentInstructions(input.outputIntent) || null,
         guidance ? `Additional guidance: ${guidance}` : null,
     ].filter(Boolean).join("\n");
 }
@@ -453,6 +488,7 @@ export async function removeImageContentWithPrecisionMask(
         maskMode,
         guidance: input.guidance,
         semanticMaskClassIds: input.semanticMaskClassIds,
+        outputIntent: input.outputIntent,
     });
 
     const geminiResult = await callGeminiPrecisionRemove({
@@ -465,7 +501,8 @@ export async function removeImageContentWithPrecisionMask(
     });
 
     let outputBuffer: Buffer;
-    if (maskMode === "user_provided" && featheredMaskRawBuffer) {
+    const outputCanvasChanged = hasOutputCanvasChange(input.outputIntent);
+    if (maskMode === "user_provided" && featheredMaskRawBuffer && !outputCanvasChanged) {
         outputBuffer = await blendEditedImageWithMask({
             originalImageBuffer: preparedSource.imageBuffer,
             editedImageBuffer: geminiResult.imageBuffer,
@@ -473,6 +510,10 @@ export async function removeImageContentWithPrecisionMask(
             width: resolvedEditor.width,
             height: resolvedEditor.height,
         });
+    } else if (outputCanvasChanged) {
+        outputBuffer = await sharp(geminiResult.imageBuffer)
+            .png()
+            .toBuffer();
     } else {
         outputBuffer = await sharp(geminiResult.imageBuffer)
             .resize(resolvedEditor.width, resolvedEditor.height, { fit: "fill" })
@@ -483,6 +524,7 @@ export async function removeImageContentWithPrecisionMask(
     const actionLog = normalizeActionLog([
         defaultActionForMaskMode(maskMode),
         input.guidance ? "Applied optional removal guidance." : null,
+        outputCanvasChanged ? "Generated a full-frame result to apply output size settings." : null,
         ...geminiResult.textParts,
     ]);
 

@@ -13,6 +13,50 @@ export const ENHANCEMENT_MODES = [
 
 export type EnhancementMode = typeof ENHANCEMENT_MODES[number];
 
+export const IMAGE_TRANSFORM_ASPECT_RATIOS = [
+    "original",
+    "1:1",
+    "4:3",
+    "3:2",
+    "16:9",
+    "9:16",
+    "2:3",
+    "custom",
+] as const;
+
+export type ImageTransformAspectRatio = typeof IMAGE_TRANSFORM_ASPECT_RATIOS[number];
+
+export const IMAGE_TRANSFORM_ASPECT_RATIO_STRATEGIES = [
+    "expand",
+    "crop",
+] as const;
+
+export type ImageTransformAspectRatioStrategy = typeof IMAGE_TRANSFORM_ASPECT_RATIO_STRATEGIES[number];
+
+export const IMAGE_UPSCALE_FACTORS = [
+    "off",
+    "2x",
+    "3x",
+    "4x",
+] as const;
+
+export type ImageUpscaleFactor = typeof IMAGE_UPSCALE_FACTORS[number];
+
+export const IMAGE_TRANSFORM_QUALITIES = [
+    "standard",
+    "high",
+] as const;
+
+export type ImageTransformQuality = typeof IMAGE_TRANSFORM_QUALITIES[number];
+
+export interface ImageOutputIntent {
+    aspectRatio?: ImageTransformAspectRatio;
+    customAspectRatio?: string;
+    aspectRatioStrategy?: ImageTransformAspectRatioStrategy;
+    upscaleFactor?: ImageUpscaleFactor;
+    quality?: ImageTransformQuality;
+}
+
 export interface ImageEnhancementBoundingBox {
     x: number;
     y: number;
@@ -77,6 +121,7 @@ export interface ImageEnhancementGenerateRequest {
     generationModel?: string;
     priorPrompt?: string;
     userInstructions?: string;
+    outputIntent?: ImageOutputIntent;
 }
 
 export interface ImageEnhancementGenerateResponse {
@@ -98,6 +143,7 @@ export interface ImageEnhancementGeneratedResult {
     finalPrompt?: string;
     reusablePrompt?: string;
     maskCoverage?: number;
+    outputIntent?: ImageOutputIntent;
 }
 
 export interface PropertyImageRoomType {
@@ -149,6 +195,7 @@ export interface ImagePrecisionRemoveRequest {
     semanticMaskClassIds?: number[];
     guidance?: string;
     generationModel?: string;
+    outputIntent?: ImageOutputIntent;
 }
 
 export interface ImagePrecisionRemoveResponse {

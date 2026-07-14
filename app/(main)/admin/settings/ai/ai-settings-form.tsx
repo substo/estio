@@ -1205,10 +1205,10 @@ function ModelConfigurationSection({
 
 function PropertyImageEditingSection({
     initialData,
-    precisionRemoveInfrastructureReady,
+    hasGoogleAiApiKey,
 }: {
     initialData: AiSettingsInitialData;
-    precisionRemoveInfrastructureReady: boolean;
+    hasGoogleAiApiKey: boolean;
 }) {
     return (
         <div className="space-y-4">
@@ -1228,9 +1228,9 @@ function PropertyImageEditingSection({
                             Allows admins for this location to use manual mask-based object removal inside the property media editor.
                         </span>
                         <span className="block text-[11px] text-muted-foreground">
-                            Infrastructure status: {precisionRemoveInfrastructureReady
-                                ? "Google Cloud image editing is configured on this server."
-                                : "Google Cloud image editing is not fully configured on this server yet."}
+                            Provider status: {hasGoogleAiApiKey
+                                ? "Gemini image editing is configured for this location."
+                                : "Add a Google Gemini AI API key before using image editing."}
                         </span>
                     </span>
                 </label>
@@ -1487,14 +1487,12 @@ export function AiSettingsForm({
     locationId,
     settingsVersion,
     hasGoogleAiApiKey,
-    precisionRemoveInfrastructureReady,
     runtimeSummary,
 }: {
     initialData: AiSettingsInitialData;
     locationId: string;
     settingsVersion: number;
     hasGoogleAiApiKey: boolean;
-    precisionRemoveInfrastructureReady: boolean;
     runtimeSummary?: AiRuntimeSummary | null;
 }) {
     const [state, action] = useActionState(updateAiSettings, initialState);
@@ -1858,7 +1856,7 @@ export function AiSettingsForm({
 
                 <PropertyImageEditingSection
                     initialData={initialData}
-                    precisionRemoveInfrastructureReady={precisionRemoveInfrastructureReady}
+                    hasGoogleAiApiKey={hasGoogleAiApiKey}
                 />
 
                 <Separator />

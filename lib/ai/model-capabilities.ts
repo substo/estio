@@ -108,7 +108,6 @@ export function isLikelyPropertyImageGenerationModel(model: AiModelDescriptor): 
 
     if (value.includes("-image")) return true;
     if (value.includes("image-preview")) return true;
-    if (value.includes("imagen")) return true;
 
     return /\bimage preview\b/.test(haystack)
         || /\bimage generation\b/.test(haystack)

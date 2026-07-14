@@ -6,6 +6,7 @@ import {
     buildReusablePromptContext,
     normalizeImageEnhancementAnalysis,
     parseJsonObjectFromModelText,
+    resolveOpenAiImageOutputSize,
 } from "@/lib/ai/property-image-enhancement";
 import { resolveNeutralSceneContext } from "@/lib/ai/property-image-enhancement-prompt";
 import { resolvePreferredPropertyImageEnhancementModel } from "@/lib/ai/property-image-enhancement-model-preferences";
@@ -117,6 +118,43 @@ test("buildGenerationPrompt includes selected fixes and aggression constraints w
     assert.doesNotMatch(prompt, /remove structure/i);
     assert.match(prompt, /Remove the people reflected in the window if present\./);
     assert.match(prompt, /preserv.*scene identity/i);
+});
+
+test("buildGenerationPrompt composes output intent into the same image request", () => {
+    const analysis: ImageEnhancementAnalysis = {
+        sceneSummary: "Exterior pool terrace with flat light.",
+        sceneContext: "Pool terrace with paving, garden edge, and sky.",
+        detectedElements: [],
+        suggestedFixes: [],
+        actionLogDraft: [],
+    };
+
+    const prompt = buildGenerationPrompt({
+        analysis,
+        selectedFixIds: [],
+        removedDetectedElementIds: [],
+        aggression: "balanced",
+        outputIntent: {
+            aspectRatio: "16:9",
+            aspectRatioStrategy: "expand",
+            upscaleFactor: "2x",
+            quality: "high",
+        },
+    });
+
+    assert.match(prompt, /Output requirements:/);
+    assert.match(prompt, /Output aspect ratio: 16:9/i);
+    assert.match(prompt, /Expand\/outpaint edges naturally/i);
+    assert.match(prompt, /Upscale\/detail recovery target: 2x/i);
+    assert.match(prompt, /Use high quality output/i);
+});
+
+test("resolveOpenAiImageOutputSize maps output intent ratios to supported edit sizes", () => {
+    assert.equal(resolveOpenAiImageOutputSize({ aspectRatio: "1:1" }), "1024x1024");
+    assert.equal(resolveOpenAiImageOutputSize({ aspectRatio: "16:9" }), "1536x1024");
+    assert.equal(resolveOpenAiImageOutputSize({ aspectRatio: "9:16" }), "1024x1536");
+    assert.equal(resolveOpenAiImageOutputSize({ aspectRatio: "custom", customAspectRatio: "5:4" }), "auto");
+    assert.equal(resolveOpenAiImageOutputSize({ aspectRatio: "original", upscaleFactor: "2x" }), "auto");
 });
 
 test("buildAnalysisPrompt includes operator override instructions when provided", () => {
@@ -271,6 +309,15 @@ test("model capability registry describes provider capabilities", () => {
     assert.equal(getModelCapabilities({ value: "gemini-2.5-flash" }).includes("audioInput"), true);
     assert.equal(getModelCapabilities({ value: "gemini-3.1-flash-lite-image" }).includes("imageGeneration"), true);
     assert.equal(getModelCapabilities({ value: "gemini-2.5-flash-image" }).includes("imageGeneration"), true);
+});
+
+test("model capability registry does not treat Imagen ids as active property image models", () => {
+    const catalog = buildPropertyImageModelCatalog([
+        { value: "imagen-4.0-generate-preview-06-06", label: "Imagen 4 Preview" },
+        { value: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image" },
+    ]);
+
+    assert.deepEqual(catalog.generationModels.map((model) => model.value), ["gemini-3.1-flash-image"]);
 });
 
 test("parseJsonObjectFromModelText extracts JSON from fenced output", () => {

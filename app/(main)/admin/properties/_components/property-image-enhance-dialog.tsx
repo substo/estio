@@ -29,6 +29,10 @@ import type {
     EnhancementMode,
     ImageEnhancementAnalysis,
     ImageEnhancementGeneratedResult,
+    ImageTransformAspectRatio,
+    ImageTransformAspectRatioStrategy,
+    ImageTransformQuality,
+    ImageUpscaleFactor,
     PropertyImagePromptProfile,
     PropertyImagePromptProfileUpsert,
     PropertyImageRoomType,
@@ -167,6 +171,19 @@ const EMPTY_MODEL_PREFERENCE: PropertyImageEnhancementModelPreference = {
     generation: "",
 };
 
+const ASPECT_RATIO_OPTIONS: Array<{ value: ImageTransformAspectRatio; label: string; hint: string }> = [
+    { value: "original", label: "Original", hint: "Keep" },
+    { value: "1:1", label: "Square", hint: "1:1" },
+    { value: "4:3", label: "Classic", hint: "4:3" },
+    { value: "3:2", label: "Photo", hint: "3:2" },
+    { value: "16:9", label: "Wide", hint: "16:9" },
+    { value: "9:16", label: "Story", hint: "9:16" },
+    { value: "2:3", label: "Portrait", hint: "2:3" },
+    { value: "custom", label: "Custom", hint: "A:B" },
+];
+
+const UPSCALE_FACTOR_OPTIONS: ImageUpscaleFactor[] = ["off", "2x", "3x", "4x"];
+
 function resolvePrecisionSelectableRegions(analysis: ImageEnhancementAnalysis | null): PrecisionMaskSelectableRegion[] {
     if (!analysis) return [];
 
@@ -254,6 +271,11 @@ export function PropertyImageEnhanceDialog({
     const [isDetectingPrecisionObjects, setIsDetectingPrecisionObjects] = useState(false);
     const [precisionEditorState, setPrecisionEditorState] = useState<PrecisionMaskEditorState>(EMPTY_PRECISION_EDITOR_STATE);
     const [lastPrecisionRequest, setLastPrecisionRequest] = useState<PrecisionRemoveRunOptions | null>(null);
+    const [targetAspectRatio, setTargetAspectRatio] = useState<ImageTransformAspectRatio>("original");
+    const [customAspectRatio, setCustomAspectRatio] = useState("");
+    const [aspectRatioStrategy, setAspectRatioStrategy] = useState<ImageTransformAspectRatioStrategy>("expand");
+    const [upscaleFactor, setUpscaleFactor] = useState<ImageUpscaleFactor>("off");
+    const [transformQuality, setTransformQuality] = useState<ImageTransformQuality>("standard");
     const [selectedApplyMode, setSelectedApplyMode] = useState<PropertyImageAiApplyMode | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -342,8 +364,35 @@ export function PropertyImageEnhanceDialog({
             aggression,
             priorPrompt: effectivePriorPrompt,
             userInstructions,
+            outputIntent: {
+                aspectRatio: targetAspectRatio,
+                customAspectRatio: customAspectRatio.trim() || undefined,
+                aspectRatioStrategy,
+                upscaleFactor,
+                quality: transformQuality,
+            },
         });
-    }, [effectiveAnalysis, selectedFixIds, removedDetectedElementIds, aggression, effectivePriorPrompt, userInstructions]);
+    }, [effectiveAnalysis, selectedFixIds, removedDetectedElementIds, aggression, effectivePriorPrompt, userInstructions, targetAspectRatio, customAspectRatio, aspectRatioStrategy, upscaleFactor, transformQuality]);
+
+    const outputIntent = useMemo(() => ({
+        aspectRatio: targetAspectRatio,
+        customAspectRatio: customAspectRatio.trim() || undefined,
+        aspectRatioStrategy,
+        upscaleFactor,
+        quality: transformQuality,
+    }), [targetAspectRatio, customAspectRatio, aspectRatioStrategy, upscaleFactor, transformQuality]);
+
+    const outputSummary = useMemo(() => {
+        const ratio = targetAspectRatio === "custom"
+            ? (customAspectRatio.trim() || "Custom")
+            : targetAspectRatio === "original"
+                ? "Original"
+                : targetAspectRatio;
+        const fit = aspectRatioStrategy === "crop" ? "Crop" : "Expand";
+        const upscale = upscaleFactor === "off" ? "No upscale" : upscaleFactor;
+        const quality = transformQuality === "high" ? "High" : "Standard";
+        return `${ratio} · ${fit} · ${upscale} · ${quality}`;
+    }, [aspectRatioStrategy, customAspectRatio, targetAspectRatio, transformQuality, upscaleFactor]);
 
     useEffect(() => {
         if (!open) {
@@ -375,6 +424,11 @@ export function PropertyImageEnhanceDialog({
             setIsDetectingPrecisionObjects(false);
             setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
             setLastPrecisionRequest(null);
+            setTargetAspectRatio("original");
+            setCustomAspectRatio("");
+            setAspectRatioStrategy("expand");
+            setUpscaleFactor("off");
+            setTransformQuality("standard");
             setSelectedApplyMode(null);
             setIsAnalyzing(false);
             setIsGenerating(false);
@@ -438,6 +492,11 @@ export function PropertyImageEnhanceDialog({
         setPrecisionClickSelectEnabled(false);
         setPrecisionEditorState(EMPTY_PRECISION_EDITOR_STATE);
         setLastPrecisionRequest(null);
+        setTargetAspectRatio("original");
+        setCustomAspectRatio("");
+        setAspectRatioStrategy("expand");
+        setUpscaleFactor("off");
+        setTransformQuality("standard");
         setSelectedApplyMode(null);
         setError(null);
         setGenerated(null);
@@ -617,6 +676,19 @@ export function PropertyImageEnhanceDialog({
         setIsAddingFix(false);
         setNewFixLabel("");
     };
+
+    const buildDirectPolishAnalysis = (): ImageEnhancementAnalysis => ({
+        sceneSummary: `${selectedRoomType.label || "Property"} listing photo ready for direct enhancement.`,
+        sceneContext: effectivePriorPrompt
+            || "Property listing photo. Preserve the true layout, architecture, materials, fixtures, furniture placement, lighting direction, and camera perspective.",
+        suggestedRoomType: selectedRoomType.key !== PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY ? selectedRoomType : undefined,
+        roomTypeCandidates: selectedRoomType.key !== PROPERTY_IMAGE_ROOM_TYPE_UNCLASSIFIED_KEY ? [selectedRoomType] : [],
+        detectedElements: [],
+        suggestedFixes: [],
+        actionLogDraft: [
+            "Applied direct polish from operator guidance and output settings.",
+        ],
+    });
 
     const toggleFix = (fixId: string) => {
         setSelectedFixIds((prev) => (
@@ -921,7 +993,7 @@ export function PropertyImageEnhanceDialog({
         instructionsOverride?: string,
         options?: { priorPrompt?: string; selectedFixIds?: string[] }
     ): Promise<ImageEnhancementGeneratedResult | null> {
-        const analysisForGeneration = analysisOverride || effectiveAnalysis;
+        const analysisForGeneration = analysisOverride || effectiveAnalysis || buildDirectPolishAnalysis();
         if (!canRun || !image || !propertyId || !analysisForGeneration) return null;
         if (!selectedGenerationModel.trim()) {
             const message = "Choose a generation model before creating the enhanced image.";
@@ -949,6 +1021,7 @@ export function PropertyImageEnhanceDialog({
                     generationModel: selectedGenerationModel,
                     priorPrompt: options?.priorPrompt ?? effectivePriorPrompt,
                     userInstructions: instructionsOverride ?? userInstructions,
+                    outputIntent,
                 }),
             });
 
@@ -966,6 +1039,7 @@ export function PropertyImageEnhanceDialog({
                 model: payload.model,
                 finalPrompt: payload.finalPrompt,
                 reusablePrompt: payload.reusablePrompt,
+                outputIntent,
             };
             setSelectedApplyMode(null);
             setGenerated(nextGenerated);
@@ -1029,6 +1103,7 @@ export function PropertyImageEnhanceDialog({
                     semanticMaskClassIds: options?.semanticMaskClassIds,
                     guidance: precisionGuidance.trim() || undefined,
                     generationModel,
+                    outputIntent,
                 }),
             });
 
@@ -1053,6 +1128,7 @@ export function PropertyImageEnhanceDialog({
                 model: payload.model,
                 maskCoverage: payload.maskCoverage,
                 reusablePrompt: "",
+                outputIntent,
             });
             setHasKeptResult(false);
             setUsageRefreshKey((prev) => prev + 1);
@@ -1081,13 +1157,9 @@ export function PropertyImageEnhanceDialog({
         if (mode !== "polish") return;
         if (!canRun || !image || !propertyId) return;
 
-        const analysisRun = effectiveAnalysis
-            ? { analysis: effectiveAnalysis, priorPrompt: effectivePriorPrompt, selectedFixIds }
-            : await handleAnalyze();
-        if (!analysisRun) return;
-        await handleGenerate(analysisRun.analysis, undefined, {
-            priorPrompt: analysisRun.priorPrompt,
-            selectedFixIds: analysisRun.selectedFixIds,
+        await handleGenerate(effectiveAnalysis || buildDirectPolishAnalysis(), undefined, {
+            priorPrompt: effectivePriorPrompt,
+            selectedFixIds,
         });
     }
 
@@ -1177,16 +1249,16 @@ export function PropertyImageEnhanceDialog({
     }
 
     function renderModeSwitcher() {
-        if (!precisionRemoveEnabled) return null;
+        const modes = [
+            { value: "polish", label: "Polish" },
+            ...(precisionRemoveEnabled ? [{ value: "precision_remove", label: "Remove" }] : []),
+        ];
 
         return (
             <div className="space-y-2">
                 <Label className="text-sm font-medium">Mode</Label>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {[
-                        { value: "polish", label: "Polish" },
-                        { value: "precision_remove", label: "Precision Remove" },
-                    ].map((option) => {
+                <div className={cn("grid gap-2", modes.length >= 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1 sm:grid-cols-3")}>
+                    {modes.map((option) => {
                         const active = mode === option.value;
                         return (
                             <button
@@ -1207,6 +1279,27 @@ export function PropertyImageEnhanceDialog({
                         );
                     })}
                 </div>
+            </div>
+        );
+    }
+
+    function renderGenerationModelSelector(help: string) {
+        return (
+            <div className="space-y-2">
+                <Label className="text-sm font-medium">Generation Model</Label>
+                <AiModelSelect
+                    value={selectedGenerationModel}
+                    models={generationModels}
+                    onValueChange={handleGenerationModelChange}
+                    disabled={isBusy || modelCatalogLoading}
+                    placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
+                />
+                <p className="text-xs text-muted-foreground">{help}</p>
+                {generationModels.length === 0 && !modelCatalogLoading ? (
+                    <p className="text-xs text-amber-700">
+                        No compatible image-generation models are available for this location&apos;s Google AI key.
+                    </p>
+                ) : null}
             </div>
         );
     }
@@ -1347,7 +1440,7 @@ export function PropertyImageEnhanceDialog({
                                 disabled={isBusy || !selectedAnalysisModel}
                             >
                                 {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                Analyze & Classify
+                                Suggest Fixes
                             </Button>
                         </div>
 
@@ -1453,7 +1546,7 @@ export function PropertyImageEnhanceDialog({
                                 className="w-full"
                             >
                                 {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                {analysis ? "Re-analyze Photo" : "Analyze Photo"}
+                                {analysis ? "Refresh Suggestions" : "Suggest Fixes"}
                             </Button>
                         </div>
 
@@ -1605,7 +1698,7 @@ export function PropertyImageEnhanceDialog({
 
                             {!effectiveAnalysis ? (
                                 <p className="text-xs text-muted-foreground">
-                                    Run analysis or use a saved room profile prompt so the next step has context to work from.
+                                    Generate directly from your guidance and output settings, or run analysis first if you want suggested fix chips.
                                 </p>
                             ) : null}
 
@@ -1623,6 +1716,8 @@ export function PropertyImageEnhanceDialog({
                                 </p>
                             </div>
 
+                            {renderOutputSettings()}
+
                             {generationModels.length === 0 && !modelCatalogLoading ? (
                                 <p className="text-xs text-amber-700">
                                     No compatible image-generation models are available for this location&apos;s Google AI key.
@@ -1633,11 +1728,11 @@ export function PropertyImageEnhanceDialog({
                                 type="button"
                                 variant="secondary"
                                 onClick={() => void handleGenerate()}
-                                disabled={!effectiveAnalysis || isBusy || modelCatalogLoading || generationModels.length === 0 || !selectedGenerationModel}
+                                disabled={isBusy || modelCatalogLoading || generationModels.length === 0 || !selectedGenerationModel}
                                 className="w-full"
                             >
                                 {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                Generate Enhanced Image
+                                Generate
                             </Button>
                         </div>
 
@@ -1685,24 +1780,15 @@ export function PropertyImageEnhanceDialog({
     function renderPrecisionControls() {
         return (
             <>
-                <div className="space-y-2">
-                    <Label className="text-sm font-medium">Generation Model</Label>
-                    <AiModelSelect
-                        value={selectedGenerationModel}
-                        models={generationModels}
-                        onValueChange={handleGenerationModelChange}
-                        disabled={isBusy || modelCatalogLoading}
-                        placeholder={modelCatalogLoading ? "Loading models..." : "Select generation model"}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                        Select the image-editing model used for object removal.
-                    </p>
-                    {generationModels.length === 0 && !modelCatalogLoading ? (
-                        <p className="text-xs text-amber-700">
-                            No compatible image-generation models are available for this location&apos;s Google AI key.
-                        </p>
-                    ) : null}
-                </div>
+                {renderGenerationModelSelector("Select the image-editing model used for object removal.")}
+
+                {renderOutputSettings()}
+
+                {targetAspectRatio !== "original" || upscaleFactor !== "off" ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                        Full image may be regenerated to apply output size.
+                    </div>
+                ) : null}
 
                 <div className="space-y-2">
                     <Label className="text-sm font-medium">Selection Tool</Label>
@@ -1885,6 +1971,133 @@ export function PropertyImageEnhanceDialog({
         );
     }
 
+    function renderOutputSettings() {
+        return (
+            <details className="rounded-md border p-3">
+                <summary className="cursor-pointer list-none">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <Label className="text-sm font-medium">Output</Label>
+                            <p className="text-xs text-muted-foreground">{outputSummary}</p>
+                        </div>
+                        <Badge variant="outline">Settings</Badge>
+                    </div>
+                </summary>
+                <div className="mt-3 space-y-4">
+                        <div className="space-y-2">
+                            <Label className="text-sm font-medium">Target Ratio</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {ASPECT_RATIO_OPTIONS.map((option) => {
+                                    const active = targetAspectRatio === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setTargetAspectRatio(option.value)}
+                                            className={cn(
+                                                "rounded-md border px-3 py-2 text-left transition-colors",
+                                                active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted"
+                                            )}
+                                        >
+                                            <span className="block text-sm font-medium">{option.label}</span>
+                                            <span className={cn("block text-xs", active ? "text-primary-foreground/80" : "text-muted-foreground")}>
+                                                {option.hint}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {targetAspectRatio === "custom" ? (
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Custom Ratio</Label>
+                                <Input
+                                    value={customAspectRatio}
+                                    onChange={(event) => setCustomAspectRatio(event.target.value)}
+                                    placeholder="Example: 5:4"
+                                />
+                            </div>
+                        ) : null}
+
+                        <div className="space-y-2">
+                            <Label className="text-sm font-medium">Fit Strategy</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {[
+                                    { value: "expand", label: "Expand edges", help: "Outpaint around the source." },
+                                    { value: "crop", label: "Crop to fit", help: "Trim only what is needed." },
+                                ].map((option) => {
+                                    const active = aspectRatioStrategy === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setAspectRatioStrategy(option.value as ImageTransformAspectRatioStrategy)}
+                                            className={cn(
+                                                "rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                                                active ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-muted"
+                                            )}
+                                        >
+                                            <span className="font-medium">{option.label}</span>
+                                            <span className="block text-xs text-muted-foreground">{option.help}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                    <div className="space-y-2">
+                        <Label className="text-sm font-medium">Upscale Factor</Label>
+                        <div className="grid grid-cols-4 gap-2">
+                            {UPSCALE_FACTOR_OPTIONS.map((factor) => (
+                                <button
+                                    key={factor}
+                                    type="button"
+                                    onClick={() => setUpscaleFactor(factor)}
+                                    className={cn(
+                                        "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                                        upscaleFactor === factor
+                                            ? "border-primary bg-primary text-primary-foreground"
+                                            : "border-border bg-background hover:bg-muted"
+                                    )}
+                                >
+                                    {factor === "off" ? "Off" : factor}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Higher factors cost more and may take longer. Use 2x unless a larger print/export is needed.
+                        </p>
+                    </div>
+
+                <div className="space-y-2">
+                    <Label className="text-sm font-medium">Quality</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                        {[
+                            { value: "standard", label: "Standard" },
+                            { value: "high", label: "High" },
+                        ].map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setTransformQuality(option.value as ImageTransformQuality)}
+                                className={cn(
+                                    "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                                    transformQuality === option.value
+                                        ? "border-primary bg-primary text-primary-foreground"
+                                        : "border-border bg-background hover:bg-muted"
+                                )}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                </div>
+            </details>
+        );
+    }
+
     function renderSourcePhotoPreview() {
         if (!image) return null;
 
@@ -1962,6 +2175,14 @@ export function PropertyImageEnhanceDialog({
                     </p>
                 ) : null}
 
+                {generated.outputIntent ? (
+                    <p className="text-xs text-muted-foreground">
+                        Output: {generated.outputIntent.aspectRatio === "custom"
+                            ? generated.outputIntent.customAspectRatio || "Custom"
+                            : generated.outputIntent.aspectRatio || "Original"} · {generated.outputIntent.aspectRatioStrategy === "crop" ? "Crop" : "Expand"} · {generated.outputIntent.upscaleFactor === "off" ? "No upscale" : generated.outputIntent.upscaleFactor || "No upscale"} · {generated.outputIntent.quality || "standard"}
+                    </p>
+                ) : null}
+
                 {generated.mode === "precision_remove" ? (
                     <div className="space-y-2 rounded-md border p-3">
                         <div>
@@ -1976,7 +2197,7 @@ export function PropertyImageEnhanceDialog({
                     </div>
                 ) : null}
 
-                {generated.mode === "polish" && generated.finalPrompt ? (
+                {generated.finalPrompt && generated.mode !== "precision_remove" ? (
                     <div className="space-y-2">
                         <Label>Final Prompt Used</Label>
                         <Textarea value={generated.finalPrompt} readOnly className="min-h-[120px] text-xs" />

@@ -14,11 +14,17 @@ import {
 import { resolveOpenAiApiKey } from "@/lib/ai/openai-models";
 import {
     ENHANCEMENT_AGGRESSION_LEVELS,
+    IMAGE_TRANSFORM_ASPECT_RATIOS,
+    IMAGE_TRANSFORM_ASPECT_RATIO_STRATEGIES,
+    IMAGE_TRANSFORM_QUALITIES,
+    IMAGE_UPSCALE_FACTORS,
 } from "@/lib/ai/property-image-enhancement-types";
 import { resolvePropertyImageGenerationModel } from "@/lib/ai/property-image-model-routing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
+
+const ratioPattern = /^\d{1,2}(?:\.\d{1,2})?:\d{1,2}(?:\.\d{1,2})?$/;
 
 const generateRequestSchema = z.object({
     locationId: z.string().trim().min(1),
@@ -32,6 +38,13 @@ const generateRequestSchema = z.object({
     generationModel: z.string().trim().min(1).max(200).optional(),
     priorPrompt: z.string().trim().max(8000).optional(),
     userInstructions: z.string().trim().max(4000).optional(),
+    outputIntent: z.object({
+        aspectRatio: z.enum(IMAGE_TRANSFORM_ASPECT_RATIOS).default("original"),
+        customAspectRatio: z.string().trim().max(16).optional(),
+        aspectRatioStrategy: z.enum(IMAGE_TRANSFORM_ASPECT_RATIO_STRATEGIES).default("expand"),
+        upscaleFactor: z.enum(IMAGE_UPSCALE_FACTORS).default("off"),
+        quality: z.enum(IMAGE_TRANSFORM_QUALITIES).default("standard"),
+    }).optional(),
 }).superRefine((value, ctx) => {
     if (!value.cloudflareImageId && !value.sourceUrl) {
         ctx.addIssue({
@@ -39,6 +52,17 @@ const generateRequestSchema = z.object({
             path: ["cloudflareImageId"],
             message: "Provide cloudflareImageId or sourceUrl.",
         });
+    }
+
+    if (value.outputIntent?.aspectRatio === "custom") {
+        const custom = String(value.outputIntent.customAspectRatio || "").trim();
+        if (!ratioPattern.test(custom)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["outputIntent", "customAspectRatio"],
+                message: "Custom aspect ratio must look like 5:4 or 1.91:1.",
+            });
+        }
     }
 });
 
@@ -97,6 +121,7 @@ export async function POST(req: Request) {
                 aggression: parsed.data.aggression,
                 priorPrompt: parsed.data.priorPrompt,
                 userInstructions: parsed.data.userInstructions,
+                outputIntent: parsed.data.outputIntent,
             })
             : modelResolution.provider === "openai_api"
             ? await generateEnhancedImageWithOpenAi({
@@ -113,6 +138,7 @@ export async function POST(req: Request) {
                 aggression: parsed.data.aggression,
                 priorPrompt: parsed.data.priorPrompt,
                 userInstructions: parsed.data.userInstructions,
+                outputIntent: parsed.data.outputIntent,
             })
             : await generateEnhancedImage({
                 apiKey: await resolveLocationGoogleAiApiKey(parsed.data.locationId).then((key) => {
@@ -128,6 +154,7 @@ export async function POST(req: Request) {
                 aggression: parsed.data.aggression,
                 priorPrompt: parsed.data.priorPrompt,
                 userInstructions: parsed.data.userInstructions,
+                outputIntent: parsed.data.outputIntent,
             });
 
         const bytes = Buffer.from(generated.imageBase64, "base64");
@@ -156,6 +183,7 @@ export async function POST(req: Request) {
                 sourceCloudflareImageId: ownedMedia.cloudflareImageId,
                 resultCloudflareImageId: upload.imageId,
                 aggression: parsed.data.aggression,
+                outputIntent: parsed.data.outputIntent,
                 modelWarning: modelResolution.warning,
             },
         });

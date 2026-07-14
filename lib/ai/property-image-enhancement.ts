@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type {
+    ImageOutputIntent,
     ImageEnhancementAnalysis,
     ImageEnhancementDetectedElement,
     ImageEnhancementSuggestedFix,
@@ -131,6 +132,7 @@ type GenerateEnhancedImageInput = {
     aggression: "conservative" | "balanced" | "aggressive";
     priorPrompt?: string;
     userInstructions?: string;
+    outputIntent?: ImageOutputIntent;
 };
 
 type GenerateEnhancedImageResult = {
@@ -143,9 +145,7 @@ type GenerateEnhancedImageResult = {
     usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 };
 
-type GenerateEnhancedImageWithOpenAiInput = Omit<GenerateEnhancedImageInput, "apiKey"> & {
-    apiKey: string;
-};
+type GenerateEnhancedImageWithOpenAiInput = GenerateEnhancedImageInput;
 
 type GenerateEnhancedImageWithChatGptSubscriptionInput = Omit<GenerateEnhancedImageInput, "apiKey">;
 
@@ -458,6 +458,24 @@ export async function fetchImageAsInlineData(imageUrl: string): Promise<{ mimeTy
     };
 }
 
+export function resolveOpenAiImageOutputSize(outputIntent?: ImageOutputIntent): string {
+    switch (outputIntent?.aspectRatio) {
+        case "1:1":
+            return "1024x1024";
+        case "9:16":
+        case "2:3":
+            return "1024x1536";
+        case "4:3":
+        case "3:2":
+        case "16:9":
+            return "1536x1024";
+        case "original":
+        case "custom":
+        default:
+            return "auto";
+    }
+}
+
 async function fetchImageUrlAsBase64(imageUrl: string): Promise<{ mimeType: string; base64: string }> {
     const source = await fetchImageBuffer(imageUrl);
     return {
@@ -523,6 +541,7 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
         aggression: input.aggression,
         priorPrompt: input.priorPrompt,
         userInstructions: input.userInstructions,
+        outputIntent: input.outputIntent,
     });
     const reusablePrompt = buildReusablePromptContext({
         analysis: input.analysis,
@@ -530,6 +549,7 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
         removedDetectedElementIds: input.removedDetectedElementIds,
         aggression: input.aggression,
         userInstructions: input.userInstructions,
+        outputIntent: input.outputIntent,
     });
 
     const response = await callGeminiGenerateContent({
@@ -597,6 +617,7 @@ export async function generateEnhancedImageWithOpenAi(input: GenerateEnhancedIma
         aggression: input.aggression,
         priorPrompt: input.priorPrompt,
         userInstructions: input.userInstructions,
+        outputIntent: input.outputIntent,
     });
     const reusablePrompt = buildReusablePromptContext({
         analysis: input.analysis,
@@ -604,6 +625,7 @@ export async function generateEnhancedImageWithOpenAi(input: GenerateEnhancedIma
         removedDetectedElementIds: input.removedDetectedElementIds,
         aggression: input.aggression,
         userInstructions: input.userInstructions,
+        outputIntent: input.outputIntent,
     });
 
     const sourceBytes = Buffer.from(input.sourceImageBase64, "base64");
@@ -615,8 +637,8 @@ export async function generateEnhancedImageWithOpenAi(input: GenerateEnhancedIma
     formData.set("model", model);
     formData.set("prompt", prompt);
     formData.set("image", new Blob([new Uint8Array(sourceBytes)], { type: input.sourceImageMimeType || DEFAULT_IMAGE_MIME_TYPE }), "source-image");
-    formData.set("size", "auto");
-    formData.set("quality", "auto");
+    formData.set("size", resolveOpenAiImageOutputSize(input.outputIntent));
+    formData.set("quality", input.outputIntent?.quality === "high" ? "high" : "auto");
     formData.set("output_format", "png");
 
     const response = await fetch("https://api.openai.com/v1/images/edits", {
@@ -698,6 +720,7 @@ export async function generateEnhancedImageWithChatGptSubscription(
         aggression: input.aggression,
         priorPrompt: input.priorPrompt,
         userInstructions: input.userInstructions,
+        outputIntent: input.outputIntent,
     });
     const reusablePrompt = buildReusablePromptContext({
         analysis: input.analysis,
@@ -705,6 +728,7 @@ export async function generateEnhancedImageWithChatGptSubscription(
         removedDetectedElementIds: input.removedDetectedElementIds,
         aggression: input.aggression,
         userInstructions: input.userInstructions,
+        outputIntent: input.outputIntent,
     });
 
     const sourceBytes = Buffer.from(input.sourceImageBase64, "base64");

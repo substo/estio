@@ -4,12 +4,20 @@ import { z } from "zod";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages";
 import { fetchImageBuffer } from "@/lib/ai/property-image-enhancement";
+import {
+    IMAGE_TRANSFORM_ASPECT_RATIOS,
+    IMAGE_TRANSFORM_ASPECT_RATIO_STRATEGIES,
+    IMAGE_TRANSFORM_QUALITIES,
+    IMAGE_UPSCALE_FACTORS,
+} from "@/lib/ai/property-image-enhancement-types";
 import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { assertPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 import { removeImageContentWithPrecisionMask } from "@/lib/ai/property-image-precision-remove";
 import { resolvePropertyImageGenerationModel } from "@/lib/ai/property-image-model-routing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveOwnedPropertyImageSource } from "../_helpers";
+
+const ratioPattern = /^\d{1,2}(?:\.\d{1,2})?:\d{1,2}(?:\.\d{1,2})?$/;
 
 const precisionRemoveRequestSchema = z.object({
     locationId: z.string().trim().min(1),
@@ -23,6 +31,13 @@ const precisionRemoveRequestSchema = z.object({
     semanticMaskClassIds: z.array(z.number().int().min(0).max(5000)).max(40).optional(),
     guidance: z.string().trim().max(500).optional(),
     generationModel: z.string().trim().min(1).max(200).optional(),
+    outputIntent: z.object({
+        aspectRatio: z.enum(IMAGE_TRANSFORM_ASPECT_RATIOS).default("original"),
+        customAspectRatio: z.string().trim().max(16).optional(),
+        aspectRatioStrategy: z.enum(IMAGE_TRANSFORM_ASPECT_RATIO_STRATEGIES).default("expand"),
+        upscaleFactor: z.enum(IMAGE_UPSCALE_FACTORS).default("off"),
+        quality: z.enum(IMAGE_TRANSFORM_QUALITIES).default("standard"),
+    }).optional(),
 }).superRefine((value, ctx) => {
     if (!value.cloudflareImageId && !value.sourceUrl) {
         ctx.addIssue({
@@ -46,6 +61,17 @@ const precisionRemoveRequestSchema = z.object({
             path: ["editorWidth"],
             message: "Provide both editorWidth and editorHeight together.",
         });
+    }
+
+    if (value.outputIntent?.aspectRatio === "custom") {
+        const custom = String(value.outputIntent.customAspectRatio || "").trim();
+        if (!ratioPattern.test(custom)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["outputIntent", "customAspectRatio"],
+                message: "Custom aspect ratio must look like 5:4 or 1.91:1.",
+            });
+        }
     }
 });
 
@@ -111,6 +137,7 @@ export async function POST(req: Request) {
             semanticMaskClassIds: parsed.data.semanticMaskClassIds,
             guidance: parsed.data.guidance,
             generationModel: modelResolution.model,
+            outputIntent: parsed.data.outputIntent,
         });
 
         const bytes = new Uint8Array(result.imageBuffer);
@@ -118,7 +145,7 @@ export async function POST(req: Request) {
         const upload = await uploadToCloudflare(blob);
         const generatedImageUrl = getImageDeliveryUrl(upload.imageId, "public");
 
-        // Blocking AI usage telemetry (Imagen uses flat-rate pricing, no tokens)
+        // Blocking AI usage telemetry to ensure it is not cancelled by the Next.js runtime.
         await securelyRecordAiUsage({
             locationId: parsed.data.locationId,
             userId: null,
@@ -136,6 +163,7 @@ export async function POST(req: Request) {
                 sourceCloudflareImageId: ownedMedia.cloudflareImageId,
                 resultCloudflareImageId: upload.imageId,
                 maskCoverage: result.maskCoverage,
+                outputIntent: parsed.data.outputIntent,
                 modelWarning: modelResolution.warning,
             },
         });

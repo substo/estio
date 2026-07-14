@@ -220,85 +220,33 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 - `app/(main)/admin/conversations/_components/chat-window.tsx`
 - `app/(main)/admin/conversations/_components/unified-timeline.tsx`
 
-## Vertex Env Setup For Precision Remove
+## Precision Remove Image Editing Setup
 
-The `Precision Remove` image-editing mode uses **shared Vertex AI server credentials**.
+The `Precision Remove` image-editing mode uses the same **Google Gemini / Nano Banana image model** path as property image generation.
 
-Unlike the regular `Polish` flow, it does **not** use the per-location Google AI API key from AI Settings.
+It uses the per-location Google AI API key from AI Settings, resolved through `resolveLocationGoogleAiApiKey(locationId)`.
 
-### Required Env Vars
+### Required Setting
 
-Add these to the runtime environment used by the app:
+- `/admin/settings/ai` -> `Google Gemini AI API Key`
+- `/admin/settings/ai` -> `Enable Precision Remove`
 
-```env
-GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
-GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
-```
+Vertex AI / Imagen service-account credentials are not required for the current Polish, Precision Remove, or output-settings flows. Google documents Imagen generation models as deprecated with a shutdown date, so new property image work should stay on Gemini image models unless a separately approved Vertex-only feature is introduced.
 
-### What Each Variable Does
+### How The App Gates Precision Remove
 
-- `GOOGLE_CLOUD_PROJECT_ID`
-  - Your Google Cloud project ID where Vertex AI is enabled.
-- `GOOGLE_CLOUD_LOCATION`
-  - Vertex region used for Imagen requests.
-  - Recommended default for this feature: `us-central1`.
-- `GOOGLE_APPLICATION_CREDENTIALS`
-  - Absolute filesystem path to the Google service account JSON file on the server.
-  - This is read by Google auth and used to mint access tokens for Vertex.
-
-### Where To Add Them
-
-#### Local development
-
-Add them to your local runtime env file:
-
-- `.env.local` for normal local dev
-- or `.env.production.local` if you are running a production-like local build
-
-Example:
-
-```env
-GOOGLE_CLOUD_PROJECT_ID=estio-prod
-GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/Users/yourname/.config/gcp/estio-imagen-service-account.json
-```
-
-#### Production / deploy flow
-
-This repo’s deploy flow copies runtime env from `.env.prod` onto the target server during deploy.
-
-So for production, add the same variables to:
-
-- `.env.prod`
-
-And make sure the JSON file referenced by `GOOGLE_APPLICATION_CREDENTIALS` actually exists on the server at that exact path.
-
-### Service Account Requirements
-
-The service account behind `GOOGLE_APPLICATION_CREDENTIALS` should have:
-
-- Vertex AI enabled in the target GCP project
-- permission to call Vertex prediction endpoints
-
-In practice, use a dedicated service account for image editing rather than reusing a broad owner credential.
-
-### How The App Uses These Vars
-
-The feature gate is evaluated in:
+The location enable toggle is evaluated in:
 
 - `lib/ai/property-image-precision-remove-config.ts`
 
 The mode is usable only when:
 
-1. `GOOGLE_CLOUD_PROJECT_ID` is set
-2. `GOOGLE_CLOUD_LOCATION` is set
-3. `GOOGLE_APPLICATION_CREDENTIALS` is set
-4. the current location has `Precision Remove` enabled in `/admin/settings/ai`
+1. the current location has a Google Gemini AI API key
+2. the current location has `Precision Remove` enabled in `/admin/settings/ai`
 
 ### Quick Verification Checklist
 
-After setting env vars:
+After saving AI settings:
 
 1. Restart the app server.
 2. Open an existing property in admin.
@@ -310,20 +258,14 @@ After setting env vars:
 
 If `Precision Remove` is missing, check:
 
-1. the credentials file path is valid on that machine
-2. `GOOGLE_CLOUD_PROJECT_ID` is set
-3. `GOOGLE_CLOUD_LOCATION` is set
-4. the server was restarted after the env change
-5. `Precision Remove` is enabled for that location in AI Settings
+1. the location has a Google Gemini AI API key
+2. `Precision Remove` is enabled for that location in AI Settings
+3. the selected generation model is a Gemini image model
 
 ### Important Distinction
 
-- `Polish` mode:
-  - Uses per-location Google AI configuration from Admin AI Settings
-- `Precision Remove` mode:
-  - Uses shared server-level Vertex credentials from env vars plus a per-location enable toggle in AI Settings
-
-That split is intentional because masked Imagen editing is currently implemented through shared Vertex access, not the location-specific Gemini API-key flow.
+- `Polish` and `Precision Remove` both use the per-location Google AI configuration from Admin AI Settings.
+- Output settings such as aspect ratio, crop/expand intent, upscale intent, and quality are composed into the same image request where possible.
 
 ## Related Docs
 

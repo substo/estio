@@ -1,30 +1,9 @@
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { settingsService } from "@/lib/settings/service";
 
-export type PrecisionRemoveConfig = {
-    projectId: string;
-    location: string;
-};
-
 export type PrecisionRemoveLocationSettings = {
     precisionRemoveEnabled: boolean;
 };
-
-export function getPrecisionRemoveInfrastructureConfig(): PrecisionRemoveConfig | null {
-    const projectId = String(process.env.GOOGLE_CLOUD_PROJECT_ID || "").trim();
-    const location = String(process.env.GOOGLE_CLOUD_LOCATION || "").trim();
-    const credentialsPath = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || "").trim();
-
-    if (!projectId || !location || !credentialsPath) {
-        return null;
-    }
-
-    return { projectId, location };
-}
-
-export function isPrecisionRemoveInfrastructureReady(): boolean {
-    return getPrecisionRemoveInfrastructureConfig() !== null;
-}
 
 export async function getPrecisionRemoveLocationSettings(
     locationId?: string

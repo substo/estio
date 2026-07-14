@@ -1,5 +1,6 @@
 import type {
     EnhancementAggression,
+    ImageOutputIntent,
     ImageEnhancementAnalysis,
     ImageEnhancementDetectedElement,
     ImageEnhancementSuggestedFix,
@@ -77,6 +78,37 @@ function buildDetectedElementRemovalInstruction(element: ImageEnhancementDetecte
     const label = toSingleLine(element.label || "the selected element");
     const category = toSingleLine(element.category || "area").toLowerCase();
     return `- Remove ${label} and reconstruct the surrounding ${category} naturally while preserving the property's real structure, layout, and materials.`;
+}
+
+function buildOutputIntentInstructions(outputIntent?: ImageOutputIntent): string {
+    if (!outputIntent) return "- Keep the original image format and natural listing-photo presentation.";
+
+    const lines: string[] = [];
+    const aspectRatio = outputIntent.aspectRatio || "original";
+    if (aspectRatio && aspectRatio !== "original") {
+        const ratioLabel = aspectRatio === "custom"
+            ? String(outputIntent.customAspectRatio || "custom ratio").trim()
+            : aspectRatio;
+        const strategy = outputIntent.aspectRatioStrategy === "crop" ? "crop" : "expand";
+        lines.push(strategy === "crop"
+            ? `- Output aspect ratio: ${ratioLabel}. Crop only the minimum needed and keep the main property subject centered.`
+            : `- Output aspect ratio: ${ratioLabel}. Expand/outpaint edges naturally to fit without changing the real property.`
+        );
+    } else {
+        lines.push("- Keep the original aspect ratio.");
+    }
+
+    if (outputIntent.upscaleFactor && outputIntent.upscaleFactor !== "off") {
+        lines.push(`- Upscale/detail recovery target: ${outputIntent.upscaleFactor}. Improve clarity without restyling surfaces or inventing detail.`);
+    }
+
+    if (outputIntent.quality === "high") {
+        lines.push("- Use high quality output with clean edges, natural detail, and low compression artifacts.");
+    } else {
+        lines.push("- Use standard quality output with realistic detail and natural texture.");
+    }
+
+    return lines.join("\n");
 }
 
 export function buildAnalysisPrompt(input?: { priorPrompt?: string; userInstructions?: string }): string {
@@ -161,6 +193,7 @@ export function buildGenerationPrompt(input: {
     aggression: EnhancementAggression;
     priorPrompt?: string;
     userInstructions?: string;
+    outputIntent?: ImageOutputIntent;
 }): string {
     const selectedFixes = getSelectedFixes(input.analysis, input.selectedFixIds);
     const removedElements = getRemovedDetectedElements(input.analysis, input.removedDetectedElementIds || []);
@@ -194,6 +227,9 @@ ${removalInstructions.length > 0 ? removalInstructions.join("\n") : "- None sele
 Manual operator instructions:
 ${userInstructions ? userInstructions : "None provided."}
 
+Output requirements:
+${buildOutputIntentInstructions(input.outputIntent)}
+
 Important guardrails:
 - Preserve room layout, dimensions, architecture, and material truthfulness.
 - Remove distractions only when they are non-essential clutter.
@@ -221,6 +257,7 @@ export function buildReusablePromptContext(input: {
     removedDetectedElementIds?: string[];
     aggression: EnhancementAggression;
     userInstructions?: string;
+    outputIntent?: ImageOutputIntent;
 }): string {
     const selectedFixes = getSelectedFixes(input.analysis, input.selectedFixIds);
     const removedElements = getRemovedDetectedElements(input.analysis, input.removedDetectedElementIds || []);
@@ -249,6 +286,9 @@ ${removalInstructions.length > 0 ? removalInstructions.join("\n") : "- None."}
 
 Operator notes:
 ${userInstructions || "None provided."}
+
+Output preferences:
+${buildOutputIntentInstructions(input.outputIntent)}
 
 Global guardrails:
 - Preserve architecture, layout, materials, and room proportions.

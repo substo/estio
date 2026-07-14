@@ -6,7 +6,7 @@
 
 This document describes the admin-only AI image enhancement flow for property listings.
 
-The feature now has two editing modes inside the **Property Form -> Media** tab:
+The feature has two editing modes inside the **Property Form -> Media** tab:
 
 1. **Polish**
    - Analyze the selected listing photo and return structured, selectable fixes.
@@ -14,6 +14,8 @@ The feature now has two editing modes inside the **Property Form -> Media** tab:
 2. **Precision Remove**
    - Let the operator paint or box-mask an exact area.
    - Remove the masked object with Gemini image editing (mask-conditioned), then blend the masked edit back over the original image.
+
+Aspect ratio, crop/expand behavior, upscale intent, and quality are **Output** settings inside both modes. They are composed into the same image-generation request whenever possible, reducing extra AI image calls.
 
 Outputs remain in **Cloudflare Images** and are added as a new `PropertyMedia` variant (original image is preserved).
 
@@ -113,8 +115,8 @@ The latest updates in this implementation cycle focused on the following practic
      - freeform override instructions
      - room type selection (`preset + custom`)
      - optional use of the saved prompt profile for the selected room type
-   - User chooses an **Analysis Model** from a dropdown that only shows structured analysis candidates.
-   - User runs **Analyze Photo**.
+   - User may optionally choose an **Analysis Model** from a dropdown that only shows structured analysis candidates.
+   - User may run **Suggest Fixes** when they want AI-generated fix chips.
    - AI returns:
      - `sceneSummary`
      - `sceneContext`
@@ -126,15 +128,23 @@ The latest updates in this implementation cycle focused on the following practic
      - Detected elements to remove (on/off)
      - Aggression: `conservative | balanced | aggressive` (default `balanced`)
      - a **Generation Model** from a dropdown that only shows image-editing candidates
+     - **Output** settings:
+       - aspect ratio (`Original`, `1:1`, `4:3`, `3:2`, `16:9`, `9:16`, `2:3`, or custom `A:B`)
+       - fit strategy (`Expand edges` or `Crop to fit`)
+       - upscale (`Off`, `2x`, `3x`, `4x`)
+       - quality (`Standard`, `High`)
      - review the **Live Final Prompt**, which updates whenever chips, removals, aggression, override instructions, or prompt reuse change
-   - User runs **Generate Enhanced Image**.
+   - User runs **Generate**.
+   - If analysis was not run, generation uses operator guidance, saved room profile context when present, and output settings directly in a single image request.
 6. In **Precision Remove** mode:
    - User masks the object with `Brush` or `Box`.
    - User may optionally run `Detect Objects` and enable click-select to add detected regions directly to the mask.
    - User may erase parts of the mask, undo, redo, or clear the mask.
    - User may optionally add short replacement guidance such as "continue the lawn texture naturally".
    - User chooses a **Generation Model** from the location image-generation catalog.
+   - User may configure the same **Output** settings used by Polish.
    - User runs **Remove Selected Area**.
+   - If output settings change the whole canvas, the route uses the model's full returned image rather than masked-region blending.
 7. Modal moves to the shared **Review** stage:
    - Compare viewer shows before/after in the main image area.
    - Action log is shown in the side rail.
@@ -149,7 +159,7 @@ The latest updates in this implementation cycle focused on the following practic
 
 ## Current UX Behavior
 
-- The modal can still generate even when `suggestedFixes[]` is empty, as long as analysis has completed.
+- The modal can generate without running analysis. Analysis is optional and only needed when the operator wants suggested fix chips, detected elements, or room classification.
 - Override instructions are intentionally operator-first and do not depend on the analyzer successfully detecting a target object.
 - Prompt reuse is now **property-scoped by room type**.
   - The room profile prompt can influence both analyze and generate when enabled.
@@ -163,12 +173,10 @@ The latest updates in this implementation cycle focused on the following practic
 - Precision Remove supports iterative passes against unsaved generated variants inside the same open dialog.
 - When an iteration has been applied inside Precision Remove, the edit rail exposes `Undo Last Applied Iteration` so the operator can step back without leaving the modal.
 - The review stage uses one consistent compare viewer for both modes to keep the modal smaller and easier to scan.
-- In `Polish`, the rail is progressive:
-  - Step 1 shows only the analysis-model selector.
-  - After analysis completes, Step 2 shows the generation-model selector.
-  - This keeps both model controls available without showing both at once.
+- In `Polish`, the rail is progressive, but generation is not blocked by the analysis step.
 - The analyze route can now fail fast with a compatibility error when an incompatible model is submitted, rather than forwarding a bad request to Gemini and surfacing a lower-level provider error later.
 - Precision Remove requests continue to work after a prior unsaved iteration because the backend can resolve transient Cloudflare delivery URLs for current-session AI variants.
+- Aspect ratio and upscale intent are output settings, not separate modes, so Polish and Precision Remove can apply those requirements in the same image model request.
 
 ## API Endpoints
 
@@ -181,6 +189,7 @@ Supports:
 - `analysisModel`
 - optional `userInstructions`
 - optional `priorPrompt`
+- optional `outputIntent`
 
 This route now also validates that the submitted model belongs to the server-derived `analysisModels` catalog for the location.
 
@@ -202,6 +211,7 @@ Supports:
 - `removedDetectedElementIds`
 - optional `userInstructions`
 - optional `priorPrompt`
+- optional `outputIntent` for aspect ratio, fit strategy, upscale target, and quality
 
 This route now also validates that the submitted model belongs to the server-derived `generationModels` catalog for the location.
 
@@ -222,6 +232,7 @@ Supports:
 - `maskDataUrl` for manual masks
 - optional `userInstructions`
 - optional `semanticMaskClassIds`
+- optional `outputIntent`
 
 ### `POST /api/images/enhance/room-type/predict`
 
@@ -241,6 +252,7 @@ Key types:
 
 - `EnhancementAggression = "conservative" | "balanced" | "aggressive"`
 - `EnhancementMode = "polish" | "precision_remove"`
+- `ImageOutputIntent`
 - `ImageEnhancementAnalysisRequest/Response`
 - `ImageEnhancementGenerateRequest/Response`
 - `ImagePrecisionRemoveRequest/Response`
@@ -251,6 +263,7 @@ Notable request fields for `Polish`:
 - `analysisModel?: string`
 - `generationModel?: string`
 - `removedDetectedElementIds: string[]`
+- `outputIntent?: ImageOutputIntent`
 
 Notable request fields for `Precision Remove`:
 
@@ -258,7 +271,15 @@ Notable request fields for `Precision Remove`:
 - `maskMode: "user_provided" | "background" | "foreground" | "semantic"`
 - `maskDataUrl?: string`
 - `semanticMaskClassIds?: number[]`
-- `userInstructions?: string`
+- `outputIntent?: ImageOutputIntent`
+
+`ImageOutputIntent` fields:
+
+- `aspectRatio`
+- `customAspectRatio`
+- `aspectRatioStrategy`
+- `upscaleFactor`
+- `quality`
 
 ## Model Routing
 
@@ -269,7 +290,8 @@ Property image model options now come from the shared model catalog in `lib/ai/f
   - `analysisModels`
   - `generationModels`
 - Capability filtering is heuristic and centralized:
-  - image-preview / `-image` / `imagen` style ids are treated as generation candidates
+  - Gemini `-image`, Gemini `image-preview`, OpenAI image, and ChatGPT subscription image ids are treated as generation candidates
+  - `imagen*` ids are not treated as valid candidates for this flow because Google recommends migrating image generation work to Nano Banana / Gemini image models before Imagen shutdown
   - non-image Gemini content models are treated as structured analysis candidates
   - utility families such as embeddings/robotics are excluded
 - The modal consumes those filtered lists through a dedicated hook and lets the operator choose a model for each polish step.
@@ -325,6 +347,8 @@ Resulting image is stored as `PropertyMedia` with `cloudflareImageId`, public de
 - Click-to-select currently uses bounding boxes, not pixel-accurate segmentation masks, so manual touch-up is still recommended for tight edges.
 - If the analyzer misses an object in `Polish`, the current fallback is text guidance through override instructions rather than guaranteed automatic region selection.
 - Precision Remove currently generates one result per request.
+- Output settings for aspect ratio and upscale use the existing Gemini/OpenAI image model catalog inside the active Polish or Precision Remove request.
+- Upscale is prompt/model driven in this phase using Gemini/OpenAI image-editing models, not Imagen.
 - Capability classification for image enhancement models is still heuristic because the Google models list used here does not expose a clean, app-ready “supports structured image analysis” vs “supports image editing output” split.
 
 ## Recommended Next Phase

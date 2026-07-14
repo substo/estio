@@ -8,7 +8,7 @@ export interface RecordAiUsageInput {
     resourceId?: string | null;
     featureArea: string; // e.g., "property_image_enhancement"
     action: string; // e.g., "analyze", "precision_remove"
-    provider: string; // e.g., "google_gemini", "vertex_imagen"
+    provider: string; // e.g., "google_gemini", "openai_api"
     model: string;
     inputTokens?: number;
     outputTokens?: number;

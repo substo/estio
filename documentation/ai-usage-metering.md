@@ -62,7 +62,7 @@ Located in `prisma/schema.prisma`.
 | `resourceId` | String? | The specific resource ID (e.g., `property.id`) |
 | `featureArea` | String | Logical grouping: `"property_image_enhancement"`, `"viewing_translation"`, etc. |
 | `action` | String | Specific step: `"analyze"`, `"generate"`, `"precision_remove"`, `"room_type_predict"` |
-| `provider` | String | AI provider key: `"google_gemini"`, `"vertex_imagen"` |
+| `provider` | String | AI provider key: `"google_gemini"`, `"openai_api"` |
 | `model` | String | Exact model identifier used (e.g., `"gemini-2.5-flash"`) |
 | `inputTokens` | Int? | Prompt/input tokens (from Gemini `usageMetadata`). Null for non-token providers. |
 | `outputTokens` | Int? | Completion/output tokens. Null for non-token providers. |
@@ -148,8 +148,8 @@ The following areas of the application are actively emitting Unified Telemetry:
 | Route / Feature | Provider | Cost Method | Metadata Recorded |
 |---|---|---|---|
 | `/api/images/enhance/analyze` | `google_gemini` | Per-token | `sourceCloudflareImageId` |
-| `/api/images/enhance/generate` | `google_gemini` | Per-token | `sourceCloudflareImageId`, `resultCloudflareImageId`, `aggression` |
-| `/api/images/enhance/precision-remove` | `vertex_imagen` | Flat $0.03/img | `sourceCloudflareImageId`, `resultCloudflareImageId`, `maskCoverage` |
+| `/api/images/enhance/generate` | `google_gemini` / `openai_api` | Per-token / image output | `sourceCloudflareImageId`, `resultCloudflareImageId`, `aggression`, `outputIntent` |
+| `/api/images/enhance/precision-remove` | `google_gemini` | Per-token / image output | `sourceCloudflareImageId`, `resultCloudflareImageId`, `maskCoverage`, `outputIntent` |
 | `/api/images/enhance/room-type/predict` | `google_gemini` | Per-token | `sourceCloudflareImageId`, `suggestedRoomType` |
 
 ### Conversational AI

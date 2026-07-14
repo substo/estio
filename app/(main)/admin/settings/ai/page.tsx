@@ -10,7 +10,6 @@ import {
     SETTINGS_SECRET_KEYS,
     isSettingsReadFromNewEnabled,
 } from "@/lib/settings/constants";
-import { isPrecisionRemoveInfrastructureReady } from "@/lib/ai/property-image-precision-remove-config";
 import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
 import { EMPTY_AI_RUNTIME_SUMMARY } from "@/lib/ai/settings/runtime-summary";
 
@@ -157,7 +156,6 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
-                    precisionRemoveInfrastructureReady={isPrecisionRemoveInfrastructureReady()}
                     runtimeSummary={enrichedRuntimeSummary}
                 />
             </div>
