@@ -535,18 +535,28 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
 }> {
     const allModels = await getAvailableModels(locationId);
     const pickerModels = sortModels(allModels.filter(isDraftPickerModel));
-    const { getOpenAiTextModelPickerState, hasOpenAiApiKey } = await import("@/lib/ai/openai-models");
-    const { getChatGptSubscriptionModelPickerState, hasChatGptSubscriptionAuth } = await import("@/lib/ai/chatgpt-subscription");
+    const { getOpenAiImageModelPickerState, getOpenAiTextModelPickerState, hasOpenAiApiKey } = await import("@/lib/ai/openai-models");
+    const {
+        getChatGptSubscriptionImageModelPickerState,
+        getChatGptSubscriptionModelPickerState,
+        hasChatGptSubscriptionAuth,
+    } = await import("@/lib/ai/chatgpt-subscription");
     const [openAiAvailable, chatGptSubscriptionAvailable] = await Promise.all([
         hasOpenAiApiKey(locationId),
         hasChatGptSubscriptionAuth(),
     ]);
-    const [openAiState, chatGptSubscriptionState] = await Promise.all([
+    const [openAiState, openAiImageState, chatGptSubscriptionState, chatGptSubscriptionImageState] = await Promise.all([
         openAiAvailable
             ? getOpenAiTextModelPickerState(locationId)
             : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
+        openAiAvailable
+            ? getOpenAiImageModelPickerState(locationId)
+            : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
         chatGptSubscriptionAvailable
             ? getChatGptSubscriptionModelPickerState()
+            : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
+        chatGptSubscriptionAvailable
+            ? getChatGptSubscriptionImageModelPickerState()
             : Promise.resolve({ models: [] as ModelOption[], defaultModel: "" }),
     ]);
 

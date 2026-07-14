@@ -8017,8 +8017,28 @@ export async function getAiModelPickerDefaultsAction() {
     return getAiModelPickerDefaults(location.id);
 }
 
-export async function getPropertyImageEnhancementModelCatalogAction() {
-    const location = await getBasicLocationContext();
+export async function getPropertyImageEnhancementModelCatalogAction(locationId?: string) {
+    const requestedLocationId = String(locationId || "").trim();
+    const location = requestedLocationId
+        ? await (async () => {
+            const { userId: clerkUserId } = await auth();
+            if (!clerkUserId) throw new Error("Unauthorized");
+
+            const user = await db.user.findUnique({
+                where: { clerkId: clerkUserId },
+                select: {
+                    locations: {
+                        where: { id: requestedLocationId },
+                        select: { id: true },
+                        take: 1,
+                    },
+                },
+            });
+            if (!user?.locations?.length) throw new Error("Unauthorized");
+
+            return { id: requestedLocationId };
+        })()
+        : await getBasicLocationContext();
     const { getPropertyImageEnhancementModelCatalog } = await import("@/lib/ai/fetch-models");
     return getPropertyImageEnhancementModelCatalog(location.id);
 }

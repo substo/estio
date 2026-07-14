@@ -238,7 +238,7 @@ export function PropertyImageEnhanceDialog({
         defaults: modelDefaults,
         loading: modelCatalogLoading,
         getModelLabel,
-    } = usePropertyImageEnhancementModelCatalog();
+    } = usePropertyImageEnhancementModelCatalog(locationId);
     const [mode, setMode] = useState<EnhancementMode>("polish");
     const [workflowMode, setWorkflowMode] = useState<EnhancementWorkflowMode>("semi_auto");
     const [activePolishTab, setActivePolishTab] = useState<"classify" | "analysis" | "generate">("classify");

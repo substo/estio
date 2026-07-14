@@ -39,7 +39,7 @@ function normalizeDefaults(value: unknown): PropertyImageEnhancementModelDefault
     };
 }
 
-export function usePropertyImageEnhancementModelCatalog() {
+export function usePropertyImageEnhancementModelCatalog(locationId?: string | null) {
     const [analysisModels, setAnalysisModels] = useState<AiModelOption[]>([]);
     const [generationModels, setGenerationModels] = useState<AiModelOption[]>([]);
     const [defaults, setDefaults] = useState<PropertyImageEnhancementModelDefaults>({ ...EMPTY_DEFAULTS });
@@ -50,7 +50,7 @@ export function usePropertyImageEnhancementModelCatalog() {
 
         const load = async () => {
             try {
-                const payload = await getPropertyImageEnhancementModelCatalogAction();
+                const payload = await getPropertyImageEnhancementModelCatalogAction(locationId || undefined);
                 if (cancelled) return;
 
                 const normalizedAnalysis = Array.isArray(payload?.analysisModels)
@@ -82,7 +82,7 @@ export function usePropertyImageEnhancementModelCatalog() {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [locationId]);
 
     const modelMap = useMemo(() => {
         const entries = [...analysisModels, ...generationModels].map((model) => [model.value, model] as const);

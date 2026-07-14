@@ -179,8 +179,7 @@ export async function getChatGptSubscriptionModelPickerState(configured?: string
 }
 
 export function isChatGptSubscriptionImageGenerationEnabled(): boolean {
-    return isChatGptSubscriptionTransportEnabled()
-        && String(process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION || "").trim() === "codex_imagegen_experimental";
+    return isChatGptSubscriptionTransportEnabled();
 }
 
 export async function getChatGptSubscriptionImageModelPickerState(): Promise<{
