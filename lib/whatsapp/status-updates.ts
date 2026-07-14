@@ -25,6 +25,53 @@ export function mapWhatsAppDeliveryStatus(rawStatus: string) {
     return rawStatus.toLowerCase();
 }
 
+function isProviderConfirmedStatus(status: string) {
+    return status === "sent" || status === "delivered" || status === "read";
+}
+
+async function applyOutboundOutboxStatusFromProviderAck(args: {
+    messageId: string;
+    status: string;
+    rawStatus: string;
+}) {
+    const messageId = String(args.messageId || "").trim();
+    if (!messageId) return null;
+
+    if (args.status === "failed") {
+        return (db as any).whatsAppOutboundOutbox.updateMany({
+            where: {
+                messageId,
+                status: { in: ["processing", "dispatch_accepted", "delivery_unconfirmed"] },
+            },
+            data: {
+                status: "failed",
+                scheduledAt: new Date(),
+                lockedAt: null,
+                lockedBy: null,
+                lastError: `Provider status webhook reported ${args.rawStatus || args.status}.`,
+            },
+        });
+    }
+
+    if (isProviderConfirmedStatus(args.status)) {
+        return (db as any).whatsAppOutboundOutbox.updateMany({
+            where: {
+                messageId,
+                status: { in: ["processing", "dispatch_accepted", "delivery_unconfirmed", "failed"] },
+            },
+            data: {
+                status: "completed",
+                processedAt: new Date(),
+                lockedAt: null,
+                lockedBy: null,
+                lastError: null,
+            },
+        });
+    }
+
+    return null;
+}
+
 export async function processStatusUpdate(wamId: string, rawStatus: string) {
     const status = mapWhatsAppDeliveryStatus(rawStatus);
     if (!status) return;
@@ -44,6 +91,12 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
                 wamId: true,
                 clientMessageId: true,
                 createdAt: true,
+                outboundWhatsAppOutbox: {
+                    select: {
+                        id: true,
+                        status: true,
+                    },
+                },
                 conversation: {
                     select: {
                         ghlConversationId: true,
@@ -56,12 +109,25 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
         const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
         const locationId = (messageWithConversation as any)?.conversation?.locationId;
         const createdAtMs = Date.parse(String((messageWithConversation as any)?.createdAt || ""));
+        const outboxUpdateResult = await applyOutboundOutboxStatusFromProviderAck({
+            messageId: String((messageWithConversation as any)?.id || ""),
+            status,
+            rawStatus,
+        }).catch((error: any) => {
+            console.warn("[WhatsApp Sync] Failed to update outbound outbox from provider ack:", error?.message || error);
+            return null;
+        });
+        const outboxUpdated = Number((outboxUpdateResult as any)?.count || 0);
+        const nextOutboxStatus = outboxUpdated > 0
+            ? (status === "failed" ? "failed" : "completed")
+            : String((messageWithConversation as any)?.outboundWhatsAppOutbox?.status || "");
         logWhatsAppSendLifecycle("status_webhook_received", {
             messageId: (messageWithConversation as any)?.id || null,
             clientMessageId: (messageWithConversation as any)?.clientMessageId || null,
             wamId,
             rawStatus,
             status,
+            outboxStatus: nextOutboxStatus || null,
             status_webhook_lag_ms: Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
             total_to_delivered_ms: status === "delivered" && Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
         });
@@ -76,6 +142,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
                     clientMessageId: (messageWithConversation as any).clientMessageId || null,
                     status,
                     rawStatus,
+                    outboxStatus: nextOutboxStatus || undefined,
                 },
             });
         }

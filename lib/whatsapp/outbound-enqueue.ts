@@ -429,7 +429,9 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
         scheduledAt: txResult.scheduledAt.toISOString(),
         typing: txResult.typing,
         transport,
-        outboxStatus: dispatchMode === "inline_fallback_sent" ? "completed" : (!queueAccepted ? "failed" : "pending"),
+        outboxStatus: dispatchMode === "inline_fallback_sent"
+            ? (transport === "web_bridge" ? "dispatch_accepted" : "completed")
+            : (!queueAccepted ? "failed" : "pending"),
         queueAccepted,
         dispatchMode,
         ...(warning ? { warning } : {}),

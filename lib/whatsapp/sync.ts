@@ -21,6 +21,9 @@ export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/s
 
 const LID_RETRY_INTERVAL_MS = Number(process.env.WHATSAPP_LID_RETRY_INTERVAL_MS || 30000);
 const LID_RETRY_MAX_ATTEMPTS = Number(process.env.WHATSAPP_LID_MAX_ATTEMPTS || 240);
+const OUTBOUND_WEB_BRIDGE_RECENT_RECONCILE_WINDOW_MS = 5 * 60 * 1000;
+const OUTBOUND_WEB_BRIDGE_MANUAL_RETRY_WINDOW_MS = 30 * 60 * 1000;
+const OUTBOUND_WEB_BRIDGE_AMBIGUITY_GAP_MS = 5000;
 
 function getMessageSyncProvider(source: NormalizedMessage["source"]) {
     if (source === "whatsapp_native") return WHATSAPP_CLOUD_PROVIDER;
@@ -71,6 +74,7 @@ type WhatsAppIdentityNamedContact = WhatsAppLidContactCandidate & {
     firstName?: string | null;
     lastName?: string | null;
     email?: string | null;
+    lid?: string | null;
 };
 
 function normalizeNameToken(value: unknown) {
@@ -98,6 +102,65 @@ function getWebBridgeIdentityName(identity: any) {
     ).trim();
 }
 
+export function normalizeOutboundWebBridgeRetryBodyForMatch(value: unknown) {
+    return String(value || "")
+        .replace(/\r\n/g, "\n")
+        .replace(/[ \t]+/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+function getOutboundWebBridgeOutboxStatusPriority(status: unknown) {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "delivery_unconfirmed") return 0;
+    if (normalized === "dispatch_accepted") return 1;
+    if (normalized === "processing") return 2;
+    if (normalized === "failed") return 3;
+    if (normalized === "pending") return 4;
+    return 5;
+}
+
+function getOutboundWebBridgeManualRetryMatch(candidate: any, args: {
+    timestamp: Date;
+    body?: string | null;
+}) {
+    const diffMs = Math.abs(new Date(candidate?.createdAt).getTime() - args.timestamp.getTime());
+    const webhookBody = normalizeOutboundWebBridgeRetryBodyForMatch(args.body);
+    const candidateBody = normalizeOutboundWebBridgeRetryBodyForMatch(candidate?.body);
+    const bodyMatches = !!webhookBody && !!candidateBody && webhookBody === candidateBody;
+    const recentTimestampMatch = Number.isFinite(diffMs) && diffMs <= OUTBOUND_WEB_BRIDGE_RECENT_RECONCILE_WINDOW_MS;
+    const manualRetryBodyMatch = bodyMatches && Number.isFinite(diffMs) && diffMs <= OUTBOUND_WEB_BRIDGE_MANUAL_RETRY_WINDOW_MS;
+    const outboxStatusPriority = getOutboundWebBridgeOutboxStatusPriority(candidate?.outboundWhatsAppOutbox?.status);
+
+    return {
+        diffMs,
+        bodyMatches,
+        outboxStatusPriority,
+        matches: recentTimestampMatch || manualRetryBodyMatch,
+    };
+}
+
+function hasStableWebBridgeContactIdentityMatch(identity: any, contact: WhatsAppIdentityNamedContact) {
+    const contactLid = normalizeLidJid(contact.lid);
+    const identityLid = normalizeLidJid(
+        identity?.lid
+        || identity?.lidJid
+        || identity?.rawContactIdentity?.lidJid
+    );
+    if (!contactLid || !identityLid || contactLid !== identityLid) return false;
+
+    const contactPhone = normalizeDigits(contact.phone);
+    const identityPhone = normalizeDigits(
+        identity?.phone
+        || identity?.phoneJid
+        || identity?.rawContactIdentity?.phone
+        || identity?.rawContactIdentity?.phoneJid
+    );
+    if (!isHighConfidenceResolvedPhone(contactPhone) || !isHighConfidenceResolvedPhone(identityPhone)) return false;
+
+    return phoneDigitsLikelyMatch(identityPhone, contactPhone);
+}
+
 function isEstablishedNamedContact(contact: WhatsAppIdentityNamedContact) {
     const name = String(contact.name || "").trim();
     if (!name) return false;
@@ -113,6 +176,7 @@ export function hasWebBridgeIdentityNameConflict(args: {
 }) {
     if (args.source !== "whatsapp_web_bridge" || args.isGroup || !args.contact) return false;
     if (!isEstablishedNamedContact(args.contact)) return false;
+    if (hasStableWebBridgeContactIdentityMatch(args.identity, args.contact)) return false;
 
     const identityToken = normalizeNameToken(getWebBridgeIdentityName(args.identity));
     const contactToken = normalizeNameToken(args.contact.firstName || args.contact.name);
@@ -375,34 +439,39 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     conversationId: string;
     conversationGhlId: string;
     wamId: string;
+    body?: string | null;
     timestamp: Date;
     source: NormalizedMessage["source"];
 }) {
     if (args.source !== "whatsapp_web_bridge") {
         return null;
     }
-    // Narrowed window from 20min to 5min — legitimate sends complete in seconds
-    const RECONCILE_WINDOW_MS = 5 * 60 * 1000;
-    const AMBIGUITY_GAP_MS = 5000;
-    const candidateWindowStart = new Date(args.timestamp.getTime() - RECONCILE_WINDOW_MS);
+    const webhookBody = normalizeOutboundWebBridgeRetryBodyForMatch(args.body);
+    const candidateWindowStart = new Date(args.timestamp.getTime() - (
+        webhookBody ? OUTBOUND_WEB_BRIDGE_MANUAL_RETRY_WINDOW_MS : OUTBOUND_WEB_BRIDGE_RECENT_RECONCILE_WINDOW_MS
+    ));
     const candidates = await (db as any).message.findMany({
         where: {
             conversationId: args.conversationId,
             direction: "outbound",
             source: "app_user",
-            wamId: null,
+            OR: [
+                { wamId: null },
+                { status: { in: ["dispatch_accepted", "delivery_unconfirmed"] } },
+            ],
             clientMessageId: { not: null },
             createdAt: { gte: candidateWindowStart },
             outboundWhatsAppOutbox: {
                 is: {
                     transport: "web_bridge",
-                    status: { in: ["pending", "processing", "failed", "completed"] },
+                    status: { in: ["pending", "processing", "failed", "completed", "dispatch_accepted", "delivery_unconfirmed"] },
                 },
             },
         },
         select: {
             id: true,
             clientMessageId: true,
+            body: true,
             createdAt: true,
             outboundWhatsAppOutbox: {
                 select: {
@@ -423,17 +492,25 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     const ranked = candidates
         .map((row: any) => ({
             ...row,
-            diffMs: Math.abs(new Date(row.createdAt).getTime() - args.timestamp.getTime()),
+            ...getOutboundWebBridgeManualRetryMatch(row, { timestamp: args.timestamp, body: args.body }),
         }))
-        .sort((left: any, right: any) => left.diffMs - right.diffMs);
+        .filter((row: any) => row.matches)
+        .sort((left: any, right: any) => {
+            if (Number(left.bodyMatches) !== Number(right.bodyMatches)) return Number(right.bodyMatches) - Number(left.bodyMatches);
+            if (left.outboxStatusPriority !== right.outboxStatusPriority) return left.outboxStatusPriority - right.outboxStatusPriority;
+            return left.diffMs - right.diffMs;
+        });
 
     const best = ranked[0];
-    if (!best || !Number.isFinite(best.diffMs) || best.diffMs > RECONCILE_WINDOW_MS) {
+    if (!best || !Number.isFinite(best.diffMs)) {
         return null;
     }
 
     const second = ranked[1];
-    const ambiguous = !!second && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < AMBIGUITY_GAP_MS;
+    const ambiguous = !!second
+        && Boolean(second.bodyMatches) === Boolean(best.bodyMatches)
+        && Number(second.outboxStatusPriority) === Number(best.outboxStatusPriority)
+        && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < OUTBOUND_WEB_BRIDGE_AMBIGUITY_GAP_MS;
     if (ambiguous) {
         console.warn(`[WhatsApp Sync] Outbound webhook reconcile ambiguous for wamId=${args.wamId}; skipping heuristic adopt.`);
         return null;
@@ -445,7 +522,7 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
             data: {
                 wamId: args.wamId,
                 ghlMessageId: args.wamId,
-                status: "sent",
+                status: "dispatch_accepted",
                 updatedAt: new Date(),
             },
         });
@@ -461,11 +538,11 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     await (db as any).whatsAppOutboundOutbox.updateMany({
         where: {
             messageId: best.id,
-            status: { in: ["pending", "processing", "failed"] },
+            status: { in: ["pending", "processing", "failed", "delivery_unconfirmed"] },
         },
         data: {
-            status: "completed",
-            processedAt: new Date(),
+            status: "dispatch_accepted",
+            processedAt: null,
             lockedAt: null,
             lockedBy: null,
             lastError: null,
@@ -482,7 +559,7 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
             messageId: best.id,
             clientMessageId: best.clientMessageId || null,
             wamId: args.wamId,
-            status: "sent",
+            status: "dispatch_accepted",
         },
     });
     void publishConversationRealtimeEvent({
@@ -493,8 +570,8 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
             messageId: best.id,
             clientMessageId: best.clientMessageId || null,
             wamId: args.wamId,
-            status: "sent",
-            rawStatus: "SERVER_ACK",
+            status: "dispatch_accepted",
+            rawStatus: "MESSAGE_CREATE",
         },
     });
 
@@ -728,21 +805,25 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
         return { id: String(existingByWam.id), clientMessageId: existingByWam.clientMessageId ? String(existingByWam.clientMessageId) : null };
     }
 
-    const windowStart = new Date(args.timestamp.getTime() - 5 * 60 * 1000);
+    const webhookBody = normalizeOutboundWebBridgeRetryBodyForMatch(args.body);
+    const windowStart = new Date(args.timestamp.getTime() - (
+        webhookBody ? OUTBOUND_WEB_BRIDGE_MANUAL_RETRY_WINDOW_MS : OUTBOUND_WEB_BRIDGE_RECENT_RECONCILE_WINDOW_MS
+    ));
     const windowEnd = new Date(args.timestamp.getTime() + 60 * 1000);
-    const body = String(args.body || "").trim();
     const candidates = await (db as any).message.findMany({
         where: {
             direction: "outbound",
             source: "app_user",
-            wamId: null,
+            OR: [
+                { wamId: null },
+                { status: { in: ["dispatch_accepted", "delivery_unconfirmed"] } },
+            ],
             createdAt: { gte: windowStart, lte: windowEnd },
-            ...(body ? { body } : {}),
             conversation: { locationId: args.locationId },
             outboundWhatsAppOutbox: {
                 is: {
                     transport: "web_bridge",
-                    status: { in: ["pending", "processing", "completed", "failed"] },
+                    status: { in: ["pending", "processing", "completed", "failed", "dispatch_accepted", "delivery_unconfirmed"] },
                 },
             },
         },
@@ -759,13 +840,22 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
     const ranked = candidates
         .map((row: any) => ({
             ...row,
-            diffMs: Math.abs(new Date(row.createdAt).getTime() - args.timestamp.getTime()),
+            ...getOutboundWebBridgeManualRetryMatch(row, { timestamp: args.timestamp, body: args.body }),
         }))
-        .sort((left: any, right: any) => left.diffMs - right.diffMs);
+        .filter((row: any) => row.matches)
+        .sort((left: any, right: any) => {
+            if (Number(left.bodyMatches) !== Number(right.bodyMatches)) return Number(right.bodyMatches) - Number(left.bodyMatches);
+            if (left.outboxStatusPriority !== right.outboxStatusPriority) return left.outboxStatusPriority - right.outboxStatusPriority;
+            return left.diffMs - right.diffMs;
+        });
 
     const best = ranked[0];
     const second = ranked[1];
-    if (second && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < 10_000) {
+    if (!best) return null;
+    if (second
+        && Boolean(second.bodyMatches) === Boolean(best.bodyMatches)
+        && Number(second.outboxStatusPriority) === Number(best.outboxStatusPriority)
+        && Math.abs(Number(second.diffMs) - Number(best.diffMs)) < 10_000) {
         console.warn(`[WhatsApp Sync] Outbound LID webhook adopt ambiguous for wamId=${args.wamId}; skipping heuristic adopt.`);
         return null;
     }
@@ -776,7 +866,7 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
             data: {
                 wamId: args.wamId,
                 ghlMessageId: args.wamId,
-                status: "sent",
+                status: "dispatch_accepted",
                 updatedAt: new Date(),
             },
         });
@@ -804,11 +894,11 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
     await (db as any).whatsAppOutboundOutbox.updateMany({
         where: {
             messageId: best.id,
-            status: { in: ["pending", "processing", "failed"] },
+            status: { in: ["pending", "processing", "failed", "delivery_unconfirmed"] },
         },
         data: {
-            status: "completed",
-            processedAt: new Date(),
+            status: "dispatch_accepted",
+            processedAt: null,
             lockedAt: null,
             lockedBy: null,
             lastError: null,
@@ -871,7 +961,7 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
             messageId: best.id,
             clientMessageId: best.clientMessageId || null,
             wamId: args.wamId,
-            status: "sent",
+            status: "dispatch_accepted",
             adoptedOutboundLidWebhook: true,
         },
     });
@@ -1859,6 +1949,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
             conversationId: conversation.id,
             conversationGhlId: conversation.ghlConversationId || conversation.id,
             wamId,
+            body,
             timestamp,
             source,
         });

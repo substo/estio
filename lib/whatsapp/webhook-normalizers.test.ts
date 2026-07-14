@@ -10,6 +10,7 @@ import {
 } from "@/lib/whatsapp/webhook-normalizers";
 import {
     hasWebBridgeIdentityNameConflict,
+    normalizeOutboundWebBridgeRetryBodyForMatch,
     selectPreferredWhatsAppLidContact,
     shouldRejectWebBridgeOutboundLidForOwnContact,
     shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
@@ -69,6 +70,17 @@ test("normalizeWhatsAppWebBridgeAckStatus maps bridge ack values", () => {
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(1), "SERVER_ACK");
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(-1), "FAILED");
     assert.equal(normalizeWhatsAppWebBridgeAckStatus(0), "");
+});
+
+test("normalizeOutboundWebBridgeRetryBodyForMatch preserves content while normalizing whitespace", () => {
+    assert.equal(
+        normalizeOutboundWebBridgeRetryBodyForMatch("Hello   there\r\n\r\n\r\nhttps://example.com/listing"),
+        "Hello there\n\nhttps://example.com/listing"
+    );
+    assert.notEqual(
+        normalizeOutboundWebBridgeRetryBodyForMatch("Hello there 1"),
+        normalizeOutboundWebBridgeRetryBodyForMatch("Hello there 2")
+    );
 });
 
 test("selectPreferredWhatsAppLidContact prefers mapped phone contact over LID placeholder", () => {
@@ -139,6 +151,35 @@ test("hasWebBridgeIdentityNameConflict allows matching established contact names
                 name: "Nicolas White Lead Sale DT4771 Studio Kato Paphos",
                 firstName: "Nicolas",
                 phone: "+353870972075",
+                contactType: "Lead",
+            },
+        }),
+        false
+    );
+});
+
+test("hasWebBridgeIdentityNameConflict trusts stable phone and LID match over stale bridge display name", () => {
+    assert.equal(
+        hasWebBridgeIdentityNameConflict({
+            source: "whatsapp_web_bridge",
+            identity: {
+                phone: "35794089579",
+                lid: "119456260952134@lid",
+                displayName: "Martin Jarzyna - Down Town Cyprus - Real Estate Sales and Rentals",
+                rawContactIdentity: {
+                    displayName: "Martin Jarzyna - Down Town Cyprus - Real Estate Sales and Rentals",
+                    phoneJid: "35794006663@c.us",
+                    lidJid: "119456260952134@lid",
+                },
+            },
+            contact: {
+                id: "vladimir",
+                name: "Vladimir Zoranovic Lead Sale DT2937 2Bdr Town House Peyia",
+                firstName: "Vladimir",
+                lastName: "Zoranovic",
+                email: "zoranovicprivate@gmail.com",
+                phone: "+35794089579",
+                lid: "119456260952134@lid",
                 contactType: "Lead",
             },
         }),

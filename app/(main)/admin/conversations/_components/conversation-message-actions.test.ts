@@ -109,6 +109,21 @@ test('text send ack applies queued, degraded, and fallback states by correlation
     assert.equal(fallback.status, 'sent');
     assert.equal(fallback.sendState, 'sent');
     assert.equal(fallback.outboxState.status, 'completed');
+
+    const webBridgeFallback = applySendAckByCorrelation([baseMessage], {
+        optimisticMessageId: 'msg-1',
+        optimisticClientMessageId: 'cmid_1',
+        ack: {
+            outboxJobId: 'job-4',
+            queued: true,
+            queueAccepted: false,
+            dispatchMode: 'inline_fallback_sent',
+            outboxStatus: 'dispatch_accepted',
+        },
+    })[0] as any;
+    assert.equal(webBridgeFallback.status, 'dispatch_accepted');
+    assert.equal(webBridgeFallback.sendState, 'queued');
+    assert.equal(webBridgeFallback.outboxState.status, 'dispatch_accepted');
 });
 
 test('text send ack replaces optimistic body and translation state with server canonical values', () => {
@@ -176,6 +191,26 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
         ...baseMessage,
         outboxState: { id: 'job-1', status: 'processing' },
     } as any)?.label, 'Sending');
+
+    const dispatchAccepted = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'dispatch_accepted',
+        outboxState: { id: 'job-1', status: 'dispatch_accepted' },
+    } as any);
+    assert.equal(dispatchAccepted?.label, 'Sending');
+    assert.equal(dispatchAccepted?.detail, 'Waiting for WhatsApp confirmation');
+
+    const unconfirmed = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'delivery_unconfirmed',
+        outboxState: {
+            id: 'job-1',
+            status: 'delivery_unconfirmed',
+            lastError: 'WhatsApp Web dispatch accepted but no delivery ack arrived.',
+        },
+    } as any);
+    assert.equal(unconfirmed?.label, 'Delivery unconfirmed');
+    assert.equal(unconfirmed?.canResend, true);
 
     const retrying = deriveOutboundWhatsAppUiState({
         ...baseMessage,

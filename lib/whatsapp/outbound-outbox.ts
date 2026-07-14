@@ -8,6 +8,7 @@ import { classifyOutboundSendFailure } from "@/lib/conversations/outbound-send-f
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
 const STALE_PROCESSING_LOCK_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
+const DISPATCH_ACK_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_DISPATCH_ACK_TIMEOUT_MS || 2 * 60 * 1000), 30_000);
 
 export type WhatsAppOutboundOutboxProcessOutcome = "success" | "failed" | "dead" | "skipped";
 
@@ -187,7 +188,9 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             total_to_sent_ms: Number.isFinite(messageCreatedAtMs) ? Date.now() - messageCreatedAtMs : null,
         });
 
-        const messageStatus = "sent";
+        const awaitsProviderAck = transport === "web_bridge";
+        const messageStatus = awaitsProviderAck ? "dispatch_accepted" : "sent";
+        const outboxStatus = awaitsProviderAck ? "dispatch_accepted" : "completed";
         try {
             await (db as any).message.update({
                 where: { id: row.messageId },
@@ -219,8 +222,8 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         await (db as any).whatsAppOutboundOutbox.update({
             where: { id: row.id },
             data: {
-                status: "completed",
-                processedAt: new Date(),
+                status: outboxStatus,
+                processedAt: awaitsProviderAck ? null : new Date(),
                 attemptCount,
                 lastError: null,
                 lockedAt: null,
@@ -298,9 +301,9 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             messageId: row.messageId,
             clientMessageId: row.message?.clientMessageId || null,
             wamId,
-            status: "sent",
+            status: messageStatus,
             outboxJobId: row.id,
-            outboxStatus: "completed",
+            outboxStatus,
             attemptCount,
             provider_send_ms: providerSendMs,
             total_to_sent_ms: Number.isFinite(messageCreatedAtMs) ? Date.now() - messageCreatedAtMs : null,
@@ -440,7 +443,46 @@ export async function recoverStaleWhatsAppOutboundOutboxLocks() {
             lastError: "Recovered stale processing lock; re-queued.",
         },
     });
-    return Number(recovered?.count || 0);
+    const ackTimeoutBefore = new Date(Date.now() - DISPATCH_ACK_TIMEOUT_MS);
+    const unconfirmedRows = await (db as any).whatsAppOutboundOutbox.findMany({
+        where: {
+            transport: "web_bridge",
+            status: "dispatch_accepted",
+            updatedAt: { lt: ackTimeoutBefore },
+        },
+        select: {
+            id: true,
+            messageId: true,
+        },
+        take: 250,
+    });
+    const unconfirmedOutboxIds = unconfirmedRows.map((row: any) => String(row.id));
+    const unconfirmedMessageIds = unconfirmedRows.map((row: any) => String(row.messageId));
+    if (unconfirmedOutboxIds.length > 0) {
+        const message = `WhatsApp Web dispatch accepted but no delivery ack arrived within ${Math.round(DISPATCH_ACK_TIMEOUT_MS / 1000)} seconds.`;
+        await db.$transaction([
+            (db as any).whatsAppOutboundOutbox.updateMany({
+                where: { id: { in: unconfirmedOutboxIds }, status: "dispatch_accepted" },
+                data: {
+                    status: "delivery_unconfirmed",
+                    lastError: message,
+                    lockedAt: null,
+                    lockedBy: null,
+                },
+            }),
+            db.message.updateMany({
+                where: {
+                    id: { in: unconfirmedMessageIds },
+                    status: "dispatch_accepted",
+                },
+                data: {
+                    status: "delivery_unconfirmed",
+                    updatedAt: now,
+                },
+            }),
+        ]);
+    }
+    return Number(recovered?.count || 0) + unconfirmedOutboxIds.length;
 }
 
 export async function listDueWhatsAppOutboundOutboxIds(limit = 200): Promise<string[]> {

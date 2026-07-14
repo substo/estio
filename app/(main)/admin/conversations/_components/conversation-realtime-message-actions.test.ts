@@ -152,7 +152,9 @@ test('applyRealtimeMessagePatchToMessages returns no match when correlation does
 
 test('getRealtimeMessageSendState preserves realtime status mapping', () => {
     assert.equal(getRealtimeMessageSendState('sending'), 'sending');
+    assert.equal(getRealtimeMessageSendState('dispatch_accepted'), 'sending');
     assert.equal(getRealtimeMessageSendState('failed'), 'failed');
+    assert.equal(getRealtimeMessageSendState('delivery_unconfirmed'), 'failed');
     assert.equal(getRealtimeMessageSendState('sent'), 'sent');
     assert.equal(getRealtimeMessageSendState('delivered'), 'sent');
     assert.equal(getRealtimeMessageSendState('read'), 'sent');

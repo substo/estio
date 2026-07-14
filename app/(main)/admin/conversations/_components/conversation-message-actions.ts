@@ -41,7 +41,7 @@ type FailureFallbackUiState = {
 };
 
 export type OutboundWhatsAppUiState = {
-    label: "Queued" | "Scheduled" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "Failed" | "SMS fallback available";
+    label: "Queued" | "Scheduled" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "Delivery unconfirmed" | "Failed" | "SMS fallback available";
     tone: OutboundWhatsAppUiTone;
     icon: OutboundWhatsAppUiIcon;
     detail: string | null;
@@ -146,6 +146,36 @@ export function deriveOutboundWhatsAppUiState(message: {
             icon: "checkCheck",
             detail: null,
             showSpinner: false,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (status === "delivery_unconfirmed" || outboxStatus === "delivery_unconfirmed") {
+        return {
+            label: "Delivery unconfirmed",
+            tone: "warning",
+            icon: "alert",
+            detail: lastError || "WhatsApp accepted the send, but delivery was not confirmed.",
+            showSpinner: false,
+            canResend: true,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (status === "dispatch_accepted" || outboxStatus === "dispatch_accepted") {
+        return {
+            label: "Sending",
+            tone: "info",
+            icon: "send",
+            detail: "Waiting for WhatsApp confirmation",
+            showSpinner: true,
             canResend: false,
             canSmsFallback: false,
             scheduledAt,
@@ -473,6 +503,8 @@ export function applySendAckByCorrelation(messages: Message[], args: {
             clientMessageId: args.optimisticClientMessageId,
         });
         if (!isTarget) return message;
+        const dispatchAccepted = ackState.outboxStatus === "dispatch_accepted";
+        const completedFallback = ackState.fallbackSent && !dispatchAccepted;
 
         return {
             ...message,
@@ -481,11 +513,11 @@ export function applySendAckByCorrelation(messages: Message[], args: {
             ...(typeof args.ack.body === "string" ? { body: args.ack.body } : {}),
             ...(args.ack.translation && typeof args.ack.translation === "object" ? { translation: args.ack.translation as any } : {}),
             ...(Array.isArray(args.ack.translations) ? { translations: args.ack.translations as any } : {}),
-            status: ackState.fallbackSent ? 'sent' : (ackState.queued ? 'sending' : 'sent'),
-            sendState: ackState.fallbackSent ? 'sent' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent')),
+            status: completedFallback ? 'sent' : (dispatchAccepted ? 'dispatch_accepted' : (ackState.queued ? 'sending' : 'sent')),
+            sendState: completedFallback ? 'sent' : (dispatchAccepted ? 'queued' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent'))),
             outboxState: {
                 id: ackState.outboxJobId || (message as any)?.outboxState?.id || null,
-                status: ackState.fallbackSent ? 'completed' : (ackState.degradedDelivery ? 'failed' : (ackState.outboxStatus || (ackState.queued ? 'pending' : 'completed'))),
+                status: completedFallback ? 'completed' : (ackState.degradedDelivery ? 'failed' : (ackState.outboxStatus || (ackState.queued ? 'pending' : 'completed'))),
                 ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}),
                 ...(ackState.typingDelayMs !== null ? { typingDelayMs: ackState.typingDelayMs } : {}),
                 ...(ackState.typingDelayReason ? { typingDelayReason: ackState.typingDelayReason } : {}),
@@ -502,14 +534,18 @@ export function applyResendAckById(messages: Message[], args: {
     const ackState = getSendAckState(args.ack, args.clientMessageId);
     return messages.map((message) => {
         if (message.id !== args.messageId) return message;
+        const dispatchAccepted = ackState.outboxStatus === "dispatch_accepted";
+        const completedFallback = ackState.fallbackSent && !dispatchAccepted;
         return {
             ...message,
             ...(ackState.ackMessageId ? { id: ackState.ackMessageId } : {}),
             clientMessageId: ackState.ackClientMessageId,
-            status: ackState.fallbackSent ? 'sent' : (ackState.queued ? 'sending' : 'sent'),
-            sendState: ackState.fallbackSent ? 'sent' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent')),
-            outboxState: ackState.fallbackSent
+            status: completedFallback ? 'sent' : (dispatchAccepted ? 'dispatch_accepted' : (ackState.queued ? 'sending' : 'sent')),
+            sendState: completedFallback ? 'sent' : (dispatchAccepted ? 'queued' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent'))),
+            outboxState: completedFallback
                 ? { id: ackState.outboxJobId || null, status: 'completed' }
+                : dispatchAccepted
+                    ? { id: ackState.outboxJobId || null, status: 'dispatch_accepted', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
                 : ackState.degradedDelivery
                     ? { id: ackState.outboxJobId || null, status: 'failed', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
                     : ackState.queued
