@@ -81,6 +81,16 @@ function isChatGptSubscriptionTextModel(model: AiModelDescriptor): boolean {
     return value.startsWith("chatgpt_subscription:") && !value.includes("image");
 }
 
+function isOpenAiImageModel(model: AiModelDescriptor): boolean {
+    const value = normalizeModelValue(model.value).toLowerCase();
+    return value.startsWith("openai:") && (value.includes("image") || value.includes("dall-e"));
+}
+
+function isChatGptSubscriptionImageModel(model: AiModelDescriptor): boolean {
+    const value = normalizeModelValue(model.value).toLowerCase();
+    return value.startsWith("chatgpt_subscription:") && value.includes("image");
+}
+
 function isExcludedUtilityModel(model: AiModelDescriptor): boolean {
     const value = normalizeModelValue(model.value).toLowerCase();
     return value.includes("embedding")
@@ -90,6 +100,7 @@ function isExcludedUtilityModel(model: AiModelDescriptor): boolean {
 }
 
 export function isLikelyPropertyImageGenerationModel(model: AiModelDescriptor): boolean {
+    if (isOpenAiImageModel(model) || isChatGptSubscriptionImageModel(model)) return true;
     if (!isGeminiFamilyModel(model) || isExcludedUtilityModel(model)) return false;
 
     const value = normalizeModelValue(model.value).toLowerCase();
@@ -120,6 +131,12 @@ export function getModelCapabilities(model: AiModelDescriptor): AiModelCapabilit
         capabilities.add("text");
         capabilities.add("json");
         capabilities.add("streaming");
+        return [...capabilities];
+    }
+
+    if (isOpenAiImageModel(model) || isChatGptSubscriptionImageModel(model)) {
+        capabilities.add("imageGeneration");
+        capabilities.add("imageEdit");
         return [...capabilities];
     }
 

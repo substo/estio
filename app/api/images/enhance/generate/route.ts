@@ -7,8 +7,11 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import {
     fetchImageAsInlineData,
     generateEnhancedImage,
+    generateEnhancedImageWithChatGptSubscription,
+    generateEnhancedImageWithOpenAi,
     normalizeImageEnhancementAnalysis,
 } from "@/lib/ai/property-image-enhancement";
+import { resolveOpenAiApiKey } from "@/lib/ai/openai-models";
 import {
     ENHANCEMENT_AGGRESSION_LEVELS,
 } from "@/lib/ai/property-image-enhancement-types";
@@ -67,14 +70,6 @@ export async function POST(req: Request) {
             sourceUrl: parsed.data.sourceUrl,
         });
 
-        const apiKey = await resolveLocationGoogleAiApiKey(parsed.data.locationId);
-        if (!apiKey) {
-            return NextResponse.json(
-                { error: "Google AI API key is not configured for this location." },
-                { status: 400 }
-            );
-        }
-
         const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
         const requestedGenerationModel = String(parsed.data.generationModel || "").trim();
         const modelResolution = await resolvePropertyImageGenerationModel({
@@ -91,18 +86,49 @@ export async function POST(req: Request) {
 
         const sourceImage = await fetchImageAsInlineData(ownedMedia.sourceUrl);
         const normalizedAnalysis = normalizeImageEnhancementAnalysis(parsed.data.analysis);
-        const generated = await generateEnhancedImage({
-            apiKey,
-            model: modelResolution.model,
-            sourceImageBase64: sourceImage.base64,
-            sourceImageMimeType: sourceImage.mimeType,
-            analysis: normalizedAnalysis,
-            selectedFixIds: parsed.data.selectedFixIds,
-            removedDetectedElementIds: parsed.data.removedDetectedElementIds,
-            aggression: parsed.data.aggression,
-            priorPrompt: parsed.data.priorPrompt,
-            userInstructions: parsed.data.userInstructions,
-        });
+        const generated = modelResolution.provider === "chatgpt_subscription"
+            ? await generateEnhancedImageWithChatGptSubscription({
+                model: modelResolution.model,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+                analysis: normalizedAnalysis,
+                selectedFixIds: parsed.data.selectedFixIds,
+                removedDetectedElementIds: parsed.data.removedDetectedElementIds,
+                aggression: parsed.data.aggression,
+                priorPrompt: parsed.data.priorPrompt,
+                userInstructions: parsed.data.userInstructions,
+            })
+            : modelResolution.provider === "openai_api"
+            ? await generateEnhancedImageWithOpenAi({
+                apiKey: await resolveOpenAiApiKey(parsed.data.locationId).then((key) => {
+                    if (!key) throw new Error("OpenAI API key is not configured for this location or user.");
+                    return key;
+                }),
+                model: modelResolution.model,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+                analysis: normalizedAnalysis,
+                selectedFixIds: parsed.data.selectedFixIds,
+                removedDetectedElementIds: parsed.data.removedDetectedElementIds,
+                aggression: parsed.data.aggression,
+                priorPrompt: parsed.data.priorPrompt,
+                userInstructions: parsed.data.userInstructions,
+            })
+            : await generateEnhancedImage({
+                apiKey: await resolveLocationGoogleAiApiKey(parsed.data.locationId).then((key) => {
+                    if (!key) throw new Error("Google AI API key is not configured for this location.");
+                    return key;
+                }),
+                model: modelResolution.model,
+                sourceImageBase64: sourceImage.base64,
+                sourceImageMimeType: sourceImage.mimeType,
+                analysis: normalizedAnalysis,
+                selectedFixIds: parsed.data.selectedFixIds,
+                removedDetectedElementIds: parsed.data.removedDetectedElementIds,
+                aggression: parsed.data.aggression,
+                priorPrompt: parsed.data.priorPrompt,
+                userInstructions: parsed.data.userInstructions,
+            });
 
         const bytes = Buffer.from(generated.imageBase64, "base64");
         if (!bytes.length) {
@@ -120,7 +146,7 @@ export async function POST(req: Request) {
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",
             action: "generate",
-            provider: "google_gemini",
+            provider: modelResolution.provider,
             model: generated.model,
             inputTokens: generated.usageMetadata?.promptTokenCount,
             outputTokens: generated.usageMetadata?.candidatesTokenCount,

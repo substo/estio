@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { z } from "zod";
 import type {
     ImageEnhancementAnalysis,
@@ -13,6 +17,12 @@ import {
     getSelectedFixes,
 } from "@/lib/ai/property-image-enhancement-prompt";
 import { resolvePropertyImageRoomType } from "@/lib/ai/property-image-room-types";
+import { stripOpenAiModelPrefix } from "@/lib/ai/openai-models";
+import {
+    isChatGptSubscriptionImageGenerationEnabled,
+    resolveChatGptSubscriptionAccessToken,
+    stripChatGptSubscriptionModelPrefix,
+} from "@/lib/ai/chatgpt-subscription";
 
 export {
     buildAnalysisPrompt,
@@ -88,6 +98,19 @@ type GeminiGenerateContentResponse = {
     };
 };
 
+type OpenAiImageResponse = {
+    data?: Array<{
+        b64_json?: string;
+        url?: string;
+        revised_prompt?: string;
+    }>;
+    usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        total_tokens?: number;
+    };
+};
+
 type AnalyzeImageForEnhancementInput = {
     apiKey: string;
     model: string;
@@ -119,6 +142,12 @@ type GenerateEnhancedImageResult = {
     model: string;
     usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 };
+
+type GenerateEnhancedImageWithOpenAiInput = Omit<GenerateEnhancedImageInput, "apiKey"> & {
+    apiKey: string;
+};
+
+type GenerateEnhancedImageWithChatGptSubscriptionInput = Omit<GenerateEnhancedImageInput, "apiKey">;
 
 function toSingleLine(text: string): string {
     return String(text || "").replace(/\s+/g, " ").trim();
@@ -429,6 +458,14 @@ export async function fetchImageAsInlineData(imageUrl: string): Promise<{ mimeTy
     };
 }
 
+async function fetchImageUrlAsBase64(imageUrl: string): Promise<{ mimeType: string; base64: string }> {
+    const source = await fetchImageBuffer(imageUrl);
+    return {
+        mimeType: source.mimeType,
+        base64: source.buffer.toString("base64"),
+    };
+}
+
 export async function analyzeImageForEnhancement(input: AnalyzeImageForEnhancementInput): Promise<{
     analysis: ImageEnhancementAnalysis;
     model: string;
@@ -544,4 +581,206 @@ export async function generateEnhancedImage(input: GenerateEnhancedImageInput): 
         model,
         usageMetadata: response.usageMetadata,
     };
+}
+
+export async function generateEnhancedImageWithOpenAi(input: GenerateEnhancedImageWithOpenAiInput): Promise<GenerateEnhancedImageResult> {
+    const apiKey = String(input.apiKey || "").trim();
+    if (!apiKey) {
+        throw new Error("OpenAI API key is missing.");
+    }
+
+    const model = requireSelectedModel(stripOpenAiModelPrefix(input.model), "generation");
+    const prompt = buildGenerationPrompt({
+        analysis: input.analysis,
+        selectedFixIds: input.selectedFixIds,
+        removedDetectedElementIds: input.removedDetectedElementIds,
+        aggression: input.aggression,
+        priorPrompt: input.priorPrompt,
+        userInstructions: input.userInstructions,
+    });
+    const reusablePrompt = buildReusablePromptContext({
+        analysis: input.analysis,
+        selectedFixIds: input.selectedFixIds,
+        removedDetectedElementIds: input.removedDetectedElementIds,
+        aggression: input.aggression,
+        userInstructions: input.userInstructions,
+    });
+
+    const sourceBytes = Buffer.from(input.sourceImageBase64, "base64");
+    if (!sourceBytes.length) {
+        throw new Error("Source image is empty.");
+    }
+
+    const formData = new FormData();
+    formData.set("model", model);
+    formData.set("prompt", prompt);
+    formData.set("image", new Blob([new Uint8Array(sourceBytes)], { type: input.sourceImageMimeType || DEFAULT_IMAGE_MIME_TYPE }), "source-image");
+    formData.set("size", "auto");
+    formData.set("quality", "auto");
+    formData.set("output_format", "png");
+
+    const response = await fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`OpenAI image edit failed (${response.status}): ${errorText || response.statusText}`);
+    }
+
+    const parsed = await response.json() as OpenAiImageResponse;
+    const image = parsed.data?.find((item) => item.b64_json || item.url);
+    if (!image) {
+        throw new Error("OpenAI did not return an edited image.");
+    }
+
+    const output = image.b64_json
+        ? { mimeType: "image/png", base64: image.b64_json }
+        : await fetchImageUrlAsBase64(image.url!);
+
+    const removedElements = getRemovedDetectedElements(input.analysis, input.removedDetectedElementIds || []);
+    const fallbackActionLog = input.analysis.actionLogDraft.length > 0
+        ? input.analysis.actionLogDraft
+        : [
+            ...getSelectedFixes(input.analysis, input.selectedFixIds).map((fix) => fix.label),
+            ...removedElements.map((element) => `Remove ${element.label}`),
+        ];
+
+    return {
+        imageBase64: output.base64,
+        mimeType: output.mimeType || "image/png",
+        actionLog: normalizeActionLog([
+            image.revised_prompt ? `OpenAI revised prompt: ${image.revised_prompt}` : "",
+            ...fallbackActionLog,
+        ]),
+        finalPrompt: prompt,
+        reusablePrompt,
+        model,
+        usageMetadata: parsed.usage
+            ? {
+                promptTokenCount: parsed.usage.input_tokens,
+                candidatesTokenCount: parsed.usage.output_tokens,
+                totalTokenCount: parsed.usage.total_tokens,
+            }
+            : undefined,
+    };
+}
+
+function runCodexImageCommand(command: string, args: string[], options: Parameters<typeof execFile>[2]): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const child = execFile(command, args, options, (error, _stdout, stderr) => {
+            if (error) {
+                reject(Object.assign(error, { stderr }));
+                return;
+            }
+            resolve();
+        });
+        child.stdin?.end();
+    });
+}
+
+export async function generateEnhancedImageWithChatGptSubscription(
+    input: GenerateEnhancedImageWithChatGptSubscriptionInput
+): Promise<GenerateEnhancedImageResult> {
+    if (!isChatGptSubscriptionImageGenerationEnabled()) {
+        throw new Error("ChatGPT subscription image generation is disabled. Set CHATGPT_SUBSCRIPTION_IMAGE_GENERATION=codex_imagegen_experimental and CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli to enable it.");
+    }
+
+    const model = requireSelectedModel(stripChatGptSubscriptionModelPrefix(input.model), "generation");
+    const prompt = buildGenerationPrompt({
+        analysis: input.analysis,
+        selectedFixIds: input.selectedFixIds,
+        removedDetectedElementIds: input.removedDetectedElementIds,
+        aggression: input.aggression,
+        priorPrompt: input.priorPrompt,
+        userInstructions: input.userInstructions,
+    });
+    const reusablePrompt = buildReusablePromptContext({
+        analysis: input.analysis,
+        selectedFixIds: input.selectedFixIds,
+        removedDetectedElementIds: input.removedDetectedElementIds,
+        aggression: input.aggression,
+        userInstructions: input.userInstructions,
+    });
+
+    const sourceBytes = Buffer.from(input.sourceImageBase64, "base64");
+    if (!sourceBytes.length) {
+        throw new Error("Source image is empty.");
+    }
+
+    const tempDir = await mkdtemp(path.join(tmpdir(), "estio-chatgpt-image-"));
+    const sourceFile = path.join(tempDir, input.sourceImageMimeType?.includes("png") ? "source-image.png" : "source-image.jpg");
+    const outputFile = path.join(tempDir, "generated.png");
+    const lastMessageFile = path.join(tempDir, "last-message.txt");
+    const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
+    const accessToken = String(await resolveChatGptSubscriptionAccessToken() || "").trim();
+    const env = { ...process.env };
+    if (accessToken) env.CODEX_ACCESS_TOKEN = accessToken;
+    else delete env.CODEX_ACCESS_TOKEN;
+
+    const codexPrompt = [
+        "$imagegen",
+        "Edit the attached property listing photo using the instructions below.",
+        `Save the final generated image as a PNG file at this exact path: ${outputFile}`,
+        "Do not edit repository files. Do not return only a text description.",
+        "",
+        prompt,
+    ].join("\n");
+
+    try {
+        await writeFile(sourceFile, sourceBytes);
+        await runCodexImageCommand(command, [
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "--ephemeral",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "workspace-write",
+            "-C",
+            tempDir,
+            "-m",
+            model,
+            "-i",
+            sourceFile,
+            "--output-last-message",
+            lastMessageFile,
+            codexPrompt,
+        ], {
+            env,
+            maxBuffer: 1024 * 1024 * 4,
+            timeout: Number(process.env.CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS || 180000),
+        });
+
+        const output = await readFile(outputFile).catch(() => null);
+        if (!output?.length) {
+            throw new Error("ChatGPT subscription image generation did not produce an image artifact. Use OpenAI GPT Image 2 through the API path for reliable programmatic image enhancement.");
+        }
+
+        const lastMessage = await readFile(lastMessageFile, "utf8").catch(() => "");
+        const removedElements = getRemovedDetectedElements(input.analysis, input.removedDetectedElementIds || []);
+        const fallbackActionLog = input.analysis.actionLogDraft.length > 0
+            ? input.analysis.actionLogDraft
+            : [
+                ...getSelectedFixes(input.analysis, input.selectedFixIds).map((fix) => fix.label),
+                ...removedElements.map((element) => `Remove ${element.label}`),
+            ];
+
+        return {
+            imageBase64: output.toString("base64"),
+            mimeType: "image/png",
+            actionLog: normalizeActionLog([lastMessage, ...fallbackActionLog]),
+            finalPrompt: prompt,
+            reusablePrompt,
+            model,
+            usageMetadata: undefined,
+        };
+    } finally {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
 }

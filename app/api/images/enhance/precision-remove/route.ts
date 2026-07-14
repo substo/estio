@@ -85,6 +85,12 @@ export async function POST(req: Request) {
                 { status: 400 }
             );
         }
+        if (modelResolution.provider !== "google_gemini") {
+            return NextResponse.json(
+                { error: "Precision Remove currently supports Gemini image models only. Select a Gemini image model for object removal." },
+                { status: 400 }
+            );
+        }
 
         const ownedMedia = await resolveOwnedPropertyImageSource({
             locationId: parsed.data.locationId,

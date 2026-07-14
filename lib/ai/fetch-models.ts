@@ -562,7 +562,12 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
 
     return buildAiModelPickerDefaultsResult(
         pickerModels,
-        [...openAiState.models, ...chatGptSubscriptionState.models],
+        [
+            ...openAiState.models,
+            ...openAiImageState.models,
+            ...chatGptSubscriptionState.models,
+            ...chatGptSubscriptionImageState.models,
+        ],
         { general, draft, extraction, design, imageGeneration, transcription, translation },
         { textDefaultModel: openAiState.defaultModel }
     );

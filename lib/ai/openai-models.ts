@@ -7,6 +7,7 @@ import { getStoredProviderModelOptions } from "@/lib/ai/provider-model-catalog";
 
 export const OPENAI_MODEL_VALUE_PREFIX = "openai:";
 export const OPENAI_DEFAULT_TEXT_MODEL = "gpt-4o-mini";
+export const OPENAI_DEFAULT_IMAGE_MODEL = "gpt-image-2";
 
 export type OpenAiModelOption = {
     value: string;
@@ -28,6 +29,24 @@ const FALLBACK_OPENAI_TEXT_MODELS: OpenAiModelOption[] = [
     { value: `${OPENAI_MODEL_VALUE_PREFIX}gpt-4o`, label: "OpenAI GPT-4o" },
     { value: `${OPENAI_MODEL_VALUE_PREFIX}gpt-4.1-mini`, label: "OpenAI GPT-4.1 Mini" },
     { value: `${OPENAI_MODEL_VALUE_PREFIX}gpt-4.1`, label: "OpenAI GPT-4.1" },
+];
+
+const FALLBACK_OPENAI_IMAGE_MODELS: OpenAiModelOption[] = [
+    {
+        value: `${OPENAI_MODEL_VALUE_PREFIX}${OPENAI_DEFAULT_IMAGE_MODEL}`,
+        label: "OpenAI GPT Image 2",
+        description: "OpenAI image generation and editing model",
+    },
+    {
+        value: `${OPENAI_MODEL_VALUE_PREFIX}gpt-image-1.5`,
+        label: "OpenAI GPT Image 1.5",
+        description: "OpenAI image generation and editing model",
+    },
+    {
+        value: `${OPENAI_MODEL_VALUE_PREFIX}gpt-image-1`,
+        label: "OpenAI GPT Image 1",
+        description: "OpenAI image generation and editing model",
+    },
 ];
 
 export function normalizeOpenAiModelValue(modelId: string): string {
@@ -53,6 +72,12 @@ export function isLikelyOpenAiTextGenerationModel(modelId: string): boolean {
     if (id.includes("embedding") || id.includes("moderation")) return false;
     if (id.includes("image") || id.includes("sora") || id.includes("dall-e")) return false;
     return id.startsWith("gpt-") || id.startsWith("chatgpt-") || id.startsWith("o");
+}
+
+export function isLikelyOpenAiImageGenerationModel(modelId: string): boolean {
+    const id = modelId.toLowerCase();
+    if (!id) return false;
+    return id.includes("image") || id.includes("dall-e");
 }
 
 export function labelOpenAiModel(modelId: string): string {
@@ -226,6 +251,19 @@ function buildOpenAiModelOptions(apiModels: NonNullable<OpenAiModelsResponse["da
     return sortOpenAiModels(dedupeModelOptions([...discovered, ...FALLBACK_OPENAI_TEXT_MODELS]));
 }
 
+function buildOpenAiImageModelOptions(apiModels: NonNullable<OpenAiModelsResponse["data"]>): OpenAiModelOption[] {
+    const discovered = apiModels
+        .map((model) => String(model.id || "").trim())
+        .filter(isLikelyOpenAiImageGenerationModel)
+        .map((id) => ({
+            value: normalizeOpenAiModelValue(id),
+            label: labelOpenAiModel(id),
+            description: "OpenAI image generation and editing model",
+        }));
+
+    return sortOpenAiModels(dedupeModelOptions([...discovered, ...FALLBACK_OPENAI_IMAGE_MODELS]));
+}
+
 export const getAvailableOpenAiTextModels = unstable_cache(
     async (locationId?: string): Promise<OpenAiModelOption[]> => {
         try {
@@ -299,6 +337,50 @@ export const getAvailableOpenAiTextModelsForUser = unstable_cache(
     { revalidate: 60 * 60 * 24, tags: [AI_PROVIDER_CATALOG_CACHE_TAG] }
 );
 
+export const getAvailableOpenAiImageModels = unstable_cache(
+    async (locationId?: string): Promise<OpenAiModelOption[]> => {
+        try {
+            const storedModels = locationId
+                ? [
+                    ...(await getStoredProviderModelOptions({
+                        provider: "openai_api",
+                        scopeType: "LOCATION",
+                        scopeId: locationId,
+                        taskId: "property.image.generation",
+                    })),
+                    ...(await getStoredProviderModelOptions({
+                        provider: "openai_api",
+                        scopeType: "GLOBAL",
+                        scopeId: "global",
+                        taskId: "property.image.generation",
+                    })),
+                ]
+                : await getStoredProviderModelOptions({
+                    provider: "openai_api",
+                    scopeType: "GLOBAL",
+                    scopeId: "global",
+                    taskId: "property.image.generation",
+                });
+            if (storedModels.length > 0) {
+                return sortOpenAiModels(dedupeModelOptions(storedModels));
+            }
+
+            const apiKey = await resolveOpenAiApiKey(locationId);
+            if (!apiKey) return [];
+
+            const models = await fetchOpenAiModels(apiKey);
+            if (!models) return FALLBACK_OPENAI_IMAGE_MODELS;
+
+            return buildOpenAiImageModelOptions(models);
+        } catch (error) {
+            console.error("[OpenAI Image Model Fetch] Error:", error);
+            return FALLBACK_OPENAI_IMAGE_MODELS;
+        }
+    },
+    ["available-openai-image-models"],
+    { revalidate: 60 * 60 * 24, tags: [AI_PROVIDER_CATALOG_CACHE_TAG] }
+);
+
 export async function getOpenAiTextModelPickerState(locationId?: string): Promise<{
     models: OpenAiModelOption[];
     defaultModel: string;
@@ -323,4 +405,16 @@ export async function getOpenAiTextModelPickerState(
     const pickerModels = ensureOpenAiModelOption(models, preferredModel || defaultModel);
 
     return { models: pickerModels, defaultModel };
+}
+
+export async function getOpenAiImageModelPickerState(locationId?: string): Promise<{
+    models: OpenAiModelOption[];
+    defaultModel: string;
+}> {
+    const models = await getAvailableOpenAiImageModels(locationId);
+    const defaultModel = models.find((model) => model.value === `${OPENAI_MODEL_VALUE_PREFIX}${OPENAI_DEFAULT_IMAGE_MODEL}`)?.value
+        || models[0]?.value
+        || "";
+
+    return { models, defaultModel };
 }

@@ -16,7 +16,7 @@ test("classifyProviderModelCapabilities recognizes Gemini image generation model
     assert.equal(capabilities.includes("imageEdit"), true);
 });
 
-test("classifyProviderModelCapabilities keeps ChatGPT subscription image guesses disabled", () => {
+test("classifyProviderModelCapabilities keeps ChatGPT subscription image guesses disabled by default", () => {
     const capabilities = classifyProviderModelCapabilities({
         provider: "chatgpt_subscription",
         modelId: "chatgpt_subscription:gpt-image-2",
@@ -24,6 +24,23 @@ test("classifyProviderModelCapabilities keeps ChatGPT subscription image guesses
     });
 
     assert.deepEqual(capabilities, []);
+});
+
+test("classifyProviderModelCapabilities allows experimental ChatGPT subscription image models", () => {
+    const original = process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION;
+    process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION = "codex_imagegen_experimental";
+    try {
+        const capabilities = classifyProviderModelCapabilities({
+            provider: "chatgpt_subscription",
+            modelId: "chatgpt_subscription:gpt-image-2",
+            label: "ChatGPT Subscription GPT Image 2",
+        });
+
+        assert.deepEqual(capabilities, ["imageGeneration", "imageEdit"]);
+    } finally {
+        if (original === undefined) delete process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION;
+        else process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION = original;
+    }
 });
 
 test("classifyProviderModelCapabilities separates OpenAI text and image models", () => {

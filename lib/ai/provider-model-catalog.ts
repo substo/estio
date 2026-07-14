@@ -168,7 +168,11 @@ export function classifyProviderModelCapabilities(input: {
     }
 
     if (input.provider === "chatgpt_subscription") {
-        if (id.includes("image")) return [];
+        if (id.includes("image")) {
+            return String(process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION || "").trim() === "codex_imagegen_experimental"
+                ? ["imageGeneration", "imageEdit"]
+                : [];
+        }
         return ["text", "json", "streaming"];
     }
 

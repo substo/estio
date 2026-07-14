@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     ensureOpenAiModelOption,
+    isLikelyOpenAiImageGenerationModel,
     isLikelyOpenAiTextGenerationModel,
     labelOpenAiModel,
     resolveOpenAiDefaultModelFromOptions,
@@ -19,6 +20,12 @@ test("isLikelyOpenAiTextGenerationModel keeps text models and excludes specializ
     assert.equal(isLikelyOpenAiTextGenerationModel("gpt-4o-realtime-preview"), false);
     assert.equal(isLikelyOpenAiTextGenerationModel("text-embedding-3-large"), false);
     assert.equal(isLikelyOpenAiTextGenerationModel("sora-2"), false);
+});
+
+test("isLikelyOpenAiImageGenerationModel recognizes image models", () => {
+    assert.equal(isLikelyOpenAiImageGenerationModel("gpt-image-2"), true);
+    assert.equal(isLikelyOpenAiImageGenerationModel("dall-e-3"), true);
+    assert.equal(isLikelyOpenAiImageGenerationModel("gpt-4o-mini"), false);
 });
 
 test("stripOpenAiModelPrefix preserves raw OpenAI ids", () => {

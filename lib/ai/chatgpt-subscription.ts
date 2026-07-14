@@ -8,6 +8,7 @@ import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 
 export const CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX = "chatgpt_subscription:";
 export const CHATGPT_SUBSCRIPTION_DEFAULT_MODEL = "gpt-5.4-mini";
+export const CHATGPT_SUBSCRIPTION_IMAGE_MODEL = "gpt-image-2";
 
 export type ChatGptSubscriptionModelOption = {
     value: string;
@@ -30,6 +31,14 @@ export const CHATGPT_SUBSCRIPTION_TEXT_MODELS: ChatGptSubscriptionModelOption[] 
         value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4`,
         label: "ChatGPT Subscription GPT-5.4",
         description: "Codex/ChatGPT subscription-backed text agent model",
+    },
+];
+
+export const CHATGPT_SUBSCRIPTION_IMAGE_MODELS: ChatGptSubscriptionModelOption[] = [
+    {
+        value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_IMAGE_MODEL}`,
+        label: "ChatGPT Subscription GPT Image 2",
+        description: "Experimental Codex/ChatGPT subscription-backed image generation",
     },
 ];
 
@@ -164,6 +173,25 @@ export async function getChatGptSubscriptionModelPickerState(configured?: string
     return {
         models: CHATGPT_SUBSCRIPTION_TEXT_MODELS,
         defaultModel: resolveChatGptSubscriptionDefaultModel(configured),
+    };
+}
+
+export function isChatGptSubscriptionImageGenerationEnabled(): boolean {
+    return isChatGptSubscriptionTransportEnabled()
+        && String(process.env.CHATGPT_SUBSCRIPTION_IMAGE_GENERATION || "").trim() === "codex_imagegen_experimental";
+}
+
+export async function getChatGptSubscriptionImageModelPickerState(): Promise<{
+    models: ChatGptSubscriptionModelOption[];
+    defaultModel: string;
+}> {
+    if (!isChatGptSubscriptionImageGenerationEnabled()) {
+        return { models: [], defaultModel: "" };
+    }
+
+    return {
+        models: CHATGPT_SUBSCRIPTION_IMAGE_MODELS,
+        defaultModel: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_IMAGE_MODEL}`,
     };
 }
 
