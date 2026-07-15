@@ -5,6 +5,7 @@ import { collectDealConversationReferences } from "@/lib/deals/conversation-link
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { orchestrate } from "@/lib/ai/orchestrator";
+import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import {
   AiAutomationConfig,
   AiAutomationConfigSchema,
@@ -1022,6 +1023,10 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextPending
       .map((message) => `${message.direction === "inbound" ? "User" : "Agent"}: ${String(message.body || "").trim()}`)
       .filter((line) => line.trim().length > 0)
       .join("\n");
+    const scheduledMessageContext = await getScheduledMessageAiContext({
+      locationId: job.locationId,
+      conversationId: conversation.id,
+    }).catch(() => "");
 
     const templatePrompt = getPayloadField(job.payload as Prisma.JsonValue, "templatePrompt");
     if (!templatePrompt) {
@@ -1032,7 +1037,10 @@ async function processClaimedJob(job: Awaited<ReturnType<typeof claimNextPending
       conversationId: conversation.id,
       contactId: conversation.contactId,
       message: templatePrompt,
-      conversationHistory,
+      conversationHistory: [
+        conversationHistory,
+        scheduledMessageContext ? `Scheduled future outbound messages:\n${scheduledMessageContext}` : null,
+      ].filter(Boolean).join("\n\n"),
       dealStage: null as any,
     });
 

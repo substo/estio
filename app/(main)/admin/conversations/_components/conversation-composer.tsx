@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw, MessageSquare, NotebookPen, ShieldCheck } from "lucide-react";
+import { CalendarClock, Check, ChevronsUpDown, Loader2, Send, Paperclip, Mic, Square, Sparkles, Wand2, PhoneOutgoing, X, RotateCcw, MessageSquare, NotebookPen, ShieldCheck } from "lucide-react";
 import { SuggestionBubbles } from "./suggestion-bubbles";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
 import { getSmsSegmentInfo } from "@/lib/sms/segments";
@@ -49,6 +49,13 @@ interface ConversationComposerProps {
             agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
         }
     ) => void | Promise<void>;
+    onScheduleMessage?: (args: {
+        body: string;
+        channel: ComposerChannel;
+        scheduledFor: string;
+        scheduledTimeZone?: string | null;
+        scheduledLocal?: string | null;
+    }) => Promise<{ success: boolean; error?: string } | void> | void;
     onSendMedia?: (file: File, caption: string) => void | Promise<void>;
     onGenerateDraft?: (
         instruction?: string,
@@ -132,6 +139,36 @@ const AI_DRAFT_SKILL_LABELS: Record<string, string> = {
     negotiator: "Negotiation",
     closer: "Closing",
 };
+
+function toDatetimeLocalValue(date: Date) {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return [
+        date.getFullYear(),
+        "-",
+        pad(date.getMonth() + 1),
+        "-",
+        pad(date.getDate()),
+        "T",
+        pad(date.getHours()),
+        ":",
+        pad(date.getMinutes()),
+    ].join("");
+}
+
+function getDefaultScheduleLocalValue() {
+    const date = new Date(Date.now() + 60 * 60 * 1000);
+    date.setMinutes(Math.ceil(date.getMinutes() / 5) * 5, 0, 0);
+    return toDatetimeLocalValue(date);
+}
+
+function getScheduleTimingWarning(localValue: string) {
+    const date = new Date(localValue);
+    if (!Number.isFinite(date.getTime())) return null;
+    const diffMs = date.getTime() - Date.now();
+    if (diffMs <= 0) return "Choose a future date and time.";
+    if (diffMs < 5 * 60 * 1000) return "This is scheduled within the next few minutes.";
+    return null;
+}
 
 function formatAiDraftSkillLabel(skillId?: string | null) {
     const normalized = String(skillId || "").trim();
@@ -268,6 +305,7 @@ export function ConversationComposer({
     onDraftChange,
     onDraftClear,
     onSendMessage,
+    onScheduleMessage,
     onSendMedia,
     onGenerateDraft,
     onSetReplyLanguageOverride,
@@ -300,6 +338,10 @@ export function ConversationComposer({
     const [whatsAppCallRequestError, setWhatsAppCallRequestError] = useState<string | null>(null);
     const [whatsAppCallState, setWhatsAppCallState] = useState<WhatsAppCallUiState | null>(null);
     const [latestAiDraftFeedback, setLatestAiDraftFeedback] = useState<ComposerAiDraftFeedback | null>(null);
+    const [scheduleOpen, setScheduleOpen] = useState(false);
+    const [scheduleLocal, setScheduleLocal] = useState(() => getDefaultScheduleLocalValue());
+    const [scheduleError, setScheduleError] = useState<string | null>(null);
+    const [scheduling, setScheduling] = useState(false);
     const {
         selectedChannel,
         selectChannel,
@@ -365,6 +407,7 @@ export function ConversationComposer({
     });
     const sendUnavailableReason = disabledReason || noAvailableChannelReason || channelSelectorTitle;
     const isSendUnavailable = isUnavailable || !!noAvailableChannelReason || !!channelSelectorTitle;
+    const canScheduleChannel = selectedChannel === "WhatsApp" || selectedChannel === "SMS_RELAY";
     const {
         previewingTranslation,
         translationPreviewText,
@@ -480,6 +523,7 @@ export function ConversationComposer({
     const aiQuickActions = composerHasDraft ? REFINE_DRAFT_ACTIONS : CREATE_DRAFT_ACTIONS;
     const visibleSuggestionBubbles = buildComposerSuggestionBubbles(suggestions, aiQuickActions);
     const showSuggestedResponseToggle = suggestedResponseCount > 0 && !!onToggleSuggestedResponses;
+    const scheduleTimingWarning = getScheduleTimingWarning(scheduleLocal);
 
     const runAiDraftCommand = (instruction?: string) => {
         const trimmedInstruction = String(instruction || "").trim();
@@ -487,6 +531,44 @@ export function ConversationComposer({
         setAiDraftOpen(false);
         setAiInstruction(EMPTY_AI_INSTRUCTION);
         void handleAiDraft(trimmedInstruction || undefined, baseDraft);
+    };
+
+    const handleScheduleDraft = async () => {
+        if (!onScheduleMessage || !canScheduleChannel || !draft.trim() || scheduling) return;
+        const scheduledDate = new Date(scheduleLocal);
+        if (!Number.isFinite(scheduledDate.getTime())) {
+            setScheduleError("Choose a valid date and time.");
+            return;
+        }
+        if (scheduledDate.getTime() <= Date.now()) {
+            setScheduleError("Choose a future date and time.");
+            return;
+        }
+
+        setScheduling(true);
+        setScheduleError(null);
+        try {
+            const result = await Promise.resolve(onScheduleMessage({
+                body: draft.trim(),
+                channel: selectedChannel,
+                scheduledFor: scheduledDate.toISOString(),
+                scheduledTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                scheduledLocal,
+            }));
+            if (result && result.success === false) {
+                setScheduleError(result.error || "Could not schedule message.");
+                return;
+            }
+            setScheduleOpen(false);
+            setScheduleLocal(getDefaultScheduleLocalValue());
+            onDraftClear();
+            clearAiDraftState();
+            clearTranslationPreview();
+        } catch (error) {
+            setScheduleError(error instanceof Error ? error.message : "Could not schedule message.");
+        } finally {
+            setScheduling(false);
+        }
     };
 
     const handleRequestWhatsAppCall = async () => {
@@ -1097,6 +1179,79 @@ export function ConversationComposer({
                                 >
                                     {smsRelaySegmentLabel}
                                 </span>
+                            )}
+                            {onScheduleMessage && canScheduleChannel && (
+                                <Popover open={scheduleOpen} onOpenChange={(open) => {
+                                    setScheduleOpen(open);
+                                    if (open) {
+                                        setScheduleError(null);
+                                        if (!scheduleLocal) setScheduleLocal(getDefaultScheduleLocalValue());
+                                    }
+                                }}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
+                                            disabled={isSendUnavailable || sending || isRecording || scheduling || !draft.trim()}
+                                            title="Schedule message"
+                                        >
+                                            <CalendarClock className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[320px] p-3" align="end">
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="text-xs font-semibold text-slate-800">Schedule message</div>
+                                                <div className="text-[10px] text-slate-500">{selectedChannel}</div>
+                                            </div>
+                                            <Input
+                                                type="datetime-local"
+                                                step={300}
+                                                value={scheduleLocal}
+                                                onChange={(event) => setScheduleLocal(event.target.value)}
+                                                className="h-8 text-xs"
+                                                disabled={scheduling}
+                                            />
+                                            <div className="max-h-32 overflow-y-auto rounded-md border bg-slate-50 p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-700">
+                                                {draft.trim() || "No message drafted."}
+                                            </div>
+                                            {!scheduleError && scheduleTimingWarning && (
+                                                <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+                                                    {scheduleTimingWarning}
+                                                </div>
+                                            )}
+                                            {scheduleError && (
+                                                <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                                                    {scheduleError}
+                                                </div>
+                                            )}
+                                            <div className="flex justify-end gap-1.5">
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 px-2 text-xs"
+                                                    onClick={() => setScheduleOpen(false)}
+                                                    disabled={scheduling}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    className="h-7 gap-1 px-2 text-xs"
+                                                    onClick={() => void handleScheduleDraft()}
+                                                    disabled={scheduling || !draft.trim()}
+                                                >
+                                                    {scheduling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarClock className="h-3.5 w-3.5" />}
+                                                    Schedule
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
                             )}
                             {canUseWriteTranslation && hasTranslationPreview ? (
                                 <Button

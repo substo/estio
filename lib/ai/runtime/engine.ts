@@ -6,6 +6,7 @@ import { orchestrate } from "@/lib/ai/orchestrator";
 import { SkillLoader } from "@/lib/ai/skills/loader";
 import { getTimeZoneDayKey, isWithinQuietHours } from "@/lib/ai/automation/config";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
+import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import {
   AiSkillPolicyConfig,
   AiSkillPolicySchema,
@@ -1202,6 +1203,10 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
       .map((message) => `${message.direction === "inbound" ? "User" : "Agent"}: ${String(message.body || "").trim()}`)
       .filter((line) => line.trim().length > 0)
       .join("\n");
+    const scheduledMessageContext = await getScheduledMessageAiContext({
+      locationId: decision.locationId,
+      conversationId: conversation.id,
+    }).catch(() => "");
 
     const payload = (job.payload && typeof job.payload === "object" && !Array.isArray(job.payload))
       ? job.payload as Record<string, unknown>
@@ -1214,7 +1219,10 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
     const templatePrompt = buildRuntimePrompt({
       policy,
       decision,
-      contextSummary,
+      contextSummary: [
+        contextSummary,
+        scheduledMessageContext ? `Scheduled future outbound messages:\n${scheduledMessageContext}` : null,
+      ].filter(Boolean).join("\n\n"),
       locationKnowledge,
     });
 
@@ -1229,7 +1237,10 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
       conversationId: conversation.id,
       contactId: conversation.contactId,
       message: templatePrompt,
-      conversationHistory,
+      conversationHistory: [
+        conversationHistory,
+        scheduledMessageContext ? `Scheduled future outbound messages:\n${scheduledMessageContext}` : null,
+      ].filter(Boolean).join("\n\n"),
       dealStage: null as any,
       forcedSkill: selectedSkillId,
       forcedIntent: mapSkillToIntent(selectedSkillId),

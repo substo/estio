@@ -35,6 +35,12 @@ export interface Conversation {
     lastMessageDirection?: 'inbound' | 'outbound';
     lastMessageId?: string | null;
     suggestedActions?: string[];
+    scheduledMessages?: {
+        count: number;
+        nextScheduledFor: string | null;
+        nextBody: string | null;
+        reviewRecommended: boolean;
+    } | null;
 }
 
 export interface MessageTranslationVariant {

@@ -3,6 +3,7 @@ import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conv
 import { DEFAULT_MODEL, calculateRunCost } from "@/lib/ai/pricing";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
+import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import {
     buildDealProtectiveCommunicationContract,
     resolveCommunicationLanguage
@@ -45,6 +46,10 @@ export async function generateSmartReplies(conversationId: string) {
         
         const recentEvents = timelineResult.events;
         const conversationText = recentEvents.map((e) => formatTimelineEventForPrompt(e, 220)).join("\n");
+        const scheduledMessageContext = await getScheduledMessageAiContext({
+            locationId: conversation.locationId,
+            conversationId: conversation.id,
+        }).catch(() => "");
         
         // Find latest inbound text for language detection
         const latestInboundText = [...recentEvents]
@@ -75,6 +80,9 @@ export async function generateSmartReplies(conversationId: string) {
         
         Conversation History:
         ${conversationText}
+
+        Scheduled Future Outbound Messages:
+        ${scheduledMessageContext || "None"}
 
         Rules:
         - Provide exactly 3 options.

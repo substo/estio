@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, ArrowLeft, ListTodo, MoreHorizontal, Languages } from "lucide-react";
+import { CalendarClock, Loader2, MessageSquare, RefreshCw, FileText, Trash2, Search, AudioLines, ArrowLeft, ListTodo, MoreHorizontal, Languages, Pencil, Send, X } from "lucide-react";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -12,6 +12,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ActivityLogEntry } from "./activity-log-entry";
 import {
@@ -141,6 +142,21 @@ import { groupAdjacentWhatsAppImageMessages } from "./message-image-grouping";
 
 import { ConversationComposer } from "./conversation-composer";
 
+type ScheduledMessageItem = {
+    id: string;
+    conversationId: string;
+    contactId: string;
+    channel: "WhatsApp" | "SMS_RELAY";
+    body: string;
+    status: string;
+    scheduledFor: string;
+    scheduledTimeZone: string | null;
+    scheduledLocal: string | null;
+    reviewRecommended: boolean;
+    reviewReason: string | null;
+    lastError: string | null;
+};
+
 const TRANSCRIPT_SEARCH_KEYWORDS = [
     "budget",
     "requirements",
@@ -158,6 +174,26 @@ function getInitialSurfaceChannel(conversation: Conversation): ConversationSurfa
         return channel;
     }
     return "default";
+}
+
+function formatScheduledDate(value?: string | null) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return date.toLocaleString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+function toScheduledLocalInput(value?: string | null) {
+    const date = value ? new Date(value) : new Date(Date.now() + 60 * 60 * 1000);
+    if (!Number.isFinite(date.getTime())) return "";
+    const pad = (number: number) => String(number).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export function ChatWindow({
@@ -217,6 +253,12 @@ export function ChatWindow({
     });
     const [selectedModel, setSelectedModel] = useState("");
     const [activeSurfaceChannel, setActiveSurfaceChannel] = useState<ConversationSurfaceChannel>(() => getInitialSurfaceChannel(conversation));
+    const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessageItem[]>([]);
+    const [scheduledMessagesLoading, setScheduledMessagesLoading] = useState(false);
+    const [scheduledMessagesOpen, setScheduledMessagesOpen] = useState(false);
+    const [editingScheduledId, setEditingScheduledId] = useState<string | null>(null);
+    const [editingScheduledBody, setEditingScheduledBody] = useState("");
+    const [editingScheduledLocal, setEditingScheduledLocal] = useState("");
     const [suggestedResponsesCollapsed, setSuggestedResponsesCollapsed] = usePersistentAiSuggestionsCollapsed(
         "idx.conversations.suggestedResponsesCollapsed.v1",
         isMobileAiSuggestionDefaultCollapsed()
@@ -300,7 +342,112 @@ export function ChatWindow({
         setIsBulkTranscribingAudio(false);
         setActiveSurfaceChannel(getInitialSurfaceChannel(conversation));
         setSuggestedResponsesCollapsed(typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches);
+        setScheduledMessagesOpen(false);
+        setEditingScheduledId(null);
     }, [conversation.id]);
+
+    const loadScheduledMessages = useCallback(async () => {
+        if (!conversation.id) return;
+        setScheduledMessagesLoading(true);
+        try {
+            const params = new URLSearchParams({ conversationId: conversation.id, limit: "30" });
+            const response = await fetch(`/api/admin/conversations/scheduled-messages?${params.toString()}`);
+            const payload = await response.json().catch(() => ({}));
+            if (response.ok && payload?.success && Array.isArray(payload.items)) {
+                setScheduledMessages(payload.items);
+            }
+        } catch (error) {
+            console.error("Failed to load scheduled messages:", error);
+        } finally {
+            setScheduledMessagesLoading(false);
+        }
+    }, [conversation.id]);
+
+    useEffect(() => {
+        void loadScheduledMessages();
+    }, [loadScheduledMessages]);
+
+    const handleScheduleMessage = useCallback(async (args: {
+        body: string;
+        channel: ComposerChannel;
+        scheduledFor: string;
+        scheduledTimeZone?: string | null;
+        scheduledLocal?: string | null;
+    }) => {
+        const response = await fetch("/api/admin/conversations/scheduled-messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                conversationId: conversation.id,
+                contactId: conversation.contactId,
+                body: args.body,
+                channel: args.channel,
+                scheduledFor: args.scheduledFor,
+                scheduledTimeZone: args.scheduledTimeZone || null,
+                scheduledLocal: args.scheduledLocal || null,
+                source: "composer",
+            }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.success) {
+            return { success: false, error: String(payload?.error || "Could not schedule message.") };
+        }
+        await loadScheduledMessages();
+        return { success: true };
+    }, [conversation.contactId, conversation.id, loadScheduledMessages]);
+
+    const handleCancelScheduledMessage = useCallback(async (id: string) => {
+        const response = await fetch(`/api/admin/conversations/scheduled-messages/${encodeURIComponent(id)}`, {
+            method: "DELETE",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.success) {
+            console.error("Failed to cancel scheduled message:", payload?.error || response.statusText);
+            return;
+        }
+        await loadScheduledMessages();
+    }, [loadScheduledMessages]);
+
+    const handleSendScheduledMessageNow = useCallback(async (id: string) => {
+        const response = await fetch(`/api/admin/conversations/scheduled-messages/${encodeURIComponent(id)}`, {
+            method: "POST",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.success) {
+            console.error("Failed to send scheduled message:", payload?.error || response.statusText);
+            return;
+        }
+        await loadScheduledMessages();
+    }, [loadScheduledMessages]);
+
+    const startEditingScheduledMessage = useCallback((item: ScheduledMessageItem) => {
+        setEditingScheduledId(item.id);
+        setEditingScheduledBody(item.body);
+        setEditingScheduledLocal(toScheduledLocalInput(item.scheduledFor));
+    }, []);
+
+    const handleSaveScheduledMessageEdit = useCallback(async () => {
+        if (!editingScheduledId) return;
+        const scheduledDate = new Date(editingScheduledLocal);
+        if (!Number.isFinite(scheduledDate.getTime())) return;
+        const response = await fetch(`/api/admin/conversations/scheduled-messages/${encodeURIComponent(editingScheduledId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                body: editingScheduledBody,
+                scheduledFor: scheduledDate.toISOString(),
+                scheduledTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                scheduledLocal: editingScheduledLocal,
+            }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.success) {
+            console.error("Failed to update scheduled message:", payload?.error || response.statusText);
+            return;
+        }
+        setEditingScheduledId(null);
+        await loadScheduledMessages();
+    }, [editingScheduledBody, editingScheduledId, editingScheduledLocal, loadScheduledMessages]);
 
     const handleBulkTranscribeUnprocessedAudio = useCallback(async (window: "30d" | "all") => {
         if (!onBulkTranscribeUnprocessedAudio || isBulkTranscribingAudio) return;
@@ -328,6 +475,11 @@ export function ChatWindow({
         () => getPendingSuggestedResponseCount(suggestedResponseQueue),
         [suggestedResponseQueue]
     );
+    const activeScheduledMessages = useMemo(
+        () => scheduledMessages.filter((item) => !["sent", "canceled"].includes(String(item.status || "").toLowerCase())),
+        [scheduledMessages]
+    );
+    const nextScheduledMessage = activeScheduledMessages[0] || null;
     const groupedTimelineItems = useMemo(
         () => groupAdjacentWhatsAppImageMessages(timelineItems),
         [timelineItems]
@@ -863,12 +1015,137 @@ export function ChatWindow({
                 onCollapsedChange={setSuggestedResponsesCollapsed}
             />
 
+            {activeScheduledMessages.length > 0 && (
+                <div className="border-t border-sky-100 bg-sky-50/70 px-3 py-2 dark:border-sky-900/50 dark:bg-sky-950/25">
+                    <button
+                        type="button"
+                        className="flex w-full min-w-0 items-center justify-between gap-2 text-left"
+                        onClick={() => setScheduledMessagesOpen((open) => !open)}
+                    >
+                        <span className="flex min-w-0 items-center gap-2">
+                            <CalendarClock className="h-4 w-4 shrink-0 text-sky-700 dark:text-sky-300" />
+                            <span className="min-w-0">
+                                <span className="block truncate text-xs font-semibold text-sky-900 dark:text-sky-100">
+                                    {activeScheduledMessages.length} scheduled
+                                    {nextScheduledMessage ? ` · ${formatScheduledDate(nextScheduledMessage.scheduledFor)}` : ""}
+                                </span>
+                                {nextScheduledMessage && (
+                                    <span className="block truncate text-[11px] text-sky-700 dark:text-sky-200">
+                                        {nextScheduledMessage.body}
+                                    </span>
+                                )}
+                            </span>
+                        </span>
+                        <span className="shrink-0 text-[11px] font-medium text-sky-700 dark:text-sky-200">
+                            {scheduledMessagesOpen ? "Hide" : "Review"}
+                        </span>
+                    </button>
+
+                    {scheduledMessagesOpen && (
+                        <div className="mt-2 max-h-72 space-y-2 overflow-y-auto rounded-md border border-sky-100 bg-white p-2 shadow-sm dark:border-sky-900 dark:bg-slate-950">
+                            {scheduledMessagesLoading ? (
+                                <div className="flex items-center gap-2 px-2 py-3 text-xs text-slate-500">
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    Loading scheduled messages...
+                                </div>
+                            ) : (
+                                activeScheduledMessages.map((item) => {
+                                    const isEditing = editingScheduledId === item.id;
+                                    return (
+                                        <div key={item.id} className="rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
+                                            <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                                                <span>{item.channel} · {formatScheduledDate(item.scheduledFor)}</span>
+                                                <span className={cn(
+                                                    "rounded px-1.5 py-0.5 font-medium",
+                                                    item.reviewRecommended
+                                                        ? "bg-amber-50 text-amber-700"
+                                                        : "bg-slate-50 text-slate-600"
+                                                )}>
+                                                    {item.reviewRecommended ? "Review" : item.status}
+                                                </span>
+                                            </div>
+                                            {isEditing ? (
+                                                <div className="space-y-2">
+                                                    <Input
+                                                        type="datetime-local"
+                                                        step={300}
+                                                        value={editingScheduledLocal}
+                                                        onChange={(event) => setEditingScheduledLocal(event.target.value)}
+                                                        className="h-8 text-xs"
+                                                    />
+                                                    <Textarea
+                                                        value={editingScheduledBody}
+                                                        onChange={(event) => setEditingScheduledBody(event.target.value)}
+                                                        rows={3}
+                                                        className="min-h-[76px] resize-none text-xs"
+                                                    />
+                                                    <div className="flex justify-end gap-1.5">
+                                                        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEditingScheduledId(null)}>
+                                                            Cancel
+                                                        </Button>
+                                                        <Button type="button" size="sm" className="h-7 px-2 text-xs" onClick={() => void handleSaveScheduledMessageEdit()}>
+                                                            Save
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-800 dark:text-slate-100">{item.body}</p>
+                                                    {item.lastError && (
+                                                        <div className="mt-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                                                            {item.lastError}
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-2 flex justify-end gap-1.5">
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 gap-1 px-2 text-xs"
+                                                            onClick={() => startEditingScheduledMessage(item)}
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                            Edit
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 gap-1 px-2 text-xs"
+                                                            onClick={() => void handleSendScheduledMessageNow(item.id)}
+                                                        >
+                                                            <Send className="h-3.5 w-3.5" />
+                                                            Send now
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 gap-1 px-2 text-xs text-red-700 hover:bg-red-50 hover:text-red-800"
+                                                            onClick={() => void handleCancelScheduledMessage(item.id)}
+                                                        >
+                                                            <X className="h-3.5 w-3.5" />
+                                                            Cancel
+                                                        </Button>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
             <ConversationComposer
                 conversation={conversation}
                 draft={composerDraft}
                 onDraftChange={onComposerDraftChange}
                 onDraftClear={onComposerDraftClear}
                 onSendMessage={onSendMessage}
+                onScheduleMessage={handleScheduleMessage}
                 onSendMedia={onSendMedia}
                 onGenerateDraft={onGenerateDraft}
                 onSetReplyLanguageOverride={onSetReplyLanguageOverride}

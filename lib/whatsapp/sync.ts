@@ -15,6 +15,7 @@ import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
+import { markScheduledMessagesReviewRecommended } from "@/lib/conversations/scheduled-messages";
 import { findContactsByPhoneDigitsWithFallback, phoneDigitsLikelyMatch } from "@/lib/contacts/phone-lookup";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 export { mapWhatsAppDeliveryStatus, processStatusUpdate } from "@/lib/whatsapp/status-updates";
@@ -2154,6 +2155,11 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     }
     // --- Smart Reply Generation (Background) ---
     if (direction === "inbound") {
+        void markScheduledMessagesReviewRecommended({
+            locationId,
+            conversationId: conversation.id,
+            reason: "New inbound WhatsApp message arrived before this scheduled send.",
+        });
         if (source === "whatsapp_web_bridge" && !isGroup) {
             void detectAndHandleWhatsAppCallConsent({
                 locationId,

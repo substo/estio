@@ -12,6 +12,7 @@ import {
 import { unstable_cache } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { getInternalTimelineMessageSources } from "./internal-message-visibility";
+import { buildScheduledMessageSummaryMap } from "@/lib/conversations/scheduled-messages";
 
 export type ConversationListStatus = "active" | "archived" | "trash" | "tasks" | "all";
 export type ConversationCursor = { id: string; lastMessageAtMs: number };
@@ -264,12 +265,17 @@ export async function mapConversationListSnapshotRows(args: {
     const dealMap = new Map<string, { id: string; title: string }>(args.dealMapEntries);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id || "");
     const conversationIds = args.rows.map((row: any) => row.id);
-    const [latestMessageMap, outboundMessageMap] = await Promise.all([
+    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap] = await Promise.all([
         fetchLatestMessageMetadataByConversationId(conversationIds),
         fetchHasOutboundMessageByConversationId(conversationIds),
+        buildScheduledMessageSummaryMap(args.location.id || "", conversationIds),
     ]);
     return args.rows.map((row: any) => mapConversationRowToUi(
-        { ...row, hasOutboundMessage: outboundMessageMap.get(row.id) || false },
+        {
+            ...row,
+            hasOutboundMessage: outboundMessageMap.get(row.id) || false,
+            scheduledMessages: scheduledMessageSummaryMap.get(row.id) || null,
+        },
         args.location,
         dealMap,
         locationDefaultReplyLanguage,
@@ -293,9 +299,10 @@ export async function hydrateRankedConversationRows(args: {
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, fetchedRows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
     const conversationIds = fetchedRows.map((row) => row.id);
-    const [latestMessageMap, outboundMessageMap] = await Promise.all([
+    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap] = await Promise.all([
         fetchLatestMessageMetadataByConversationId(conversationIds),
         fetchHasOutboundMessageByConversationId(conversationIds),
+        buildScheduledMessageSummaryMap(args.location.id, conversationIds),
     ]);
 
     const rankIndex = new Map<string, number>();
@@ -309,7 +316,11 @@ export async function hydrateRankedConversationRows(args: {
     });
 
     return sortedRows.map((row) => mapConversationRowToUi(
-        { ...row, hasOutboundMessage: outboundMessageMap.get(row.id) || false },
+        {
+            ...row,
+            hasOutboundMessage: outboundMessageMap.get(row.id) || false,
+            scheduledMessages: scheduledMessageSummaryMap.get(row.id) || null,
+        },
         args.location,
         dealMap,
         locationDefaultReplyLanguage,
@@ -356,9 +367,10 @@ export async function queryConversationListDelta(args: {
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, rows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
     const conversationIds = rows.map((row) => row.id);
-    const [latestMessageMap, outboundMessageMap] = await Promise.all([
+    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap] = await Promise.all([
         fetchLatestMessageMetadataByConversationId(conversationIds),
         fetchHasOutboundMessageByConversationId(conversationIds),
+        buildScheduledMessageSummaryMap(args.location.id, conversationIds),
     ]);
 
     const deltas = rows.map((row) => {
@@ -371,7 +383,11 @@ export async function queryConversationListDelta(args: {
             lastMessageBody: row.lastMessageBody || "",
             lastMessageDate: Math.floor(new Date(row.lastMessageAt).getTime() / 1000),
             conversation: matchesFilter ? mapConversationRowToUi(
-                { ...row, hasOutboundMessage: outboundMessageMap.get(row.id) || false },
+                {
+                    ...row,
+                    hasOutboundMessage: outboundMessageMap.get(row.id) || false,
+                    scheduledMessages: scheduledMessageSummaryMap.get(row.id) || null,
+                },
                 args.location,
                 dealMap,
                 locationDefaultReplyLanguage,

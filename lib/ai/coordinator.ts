@@ -22,6 +22,7 @@ import { getDraftModelWithCachedContext } from "@/lib/ai/draft-context-cache";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { formatLocationKnowledgeForPrompt, listActiveLocationKnowledge } from "@/lib/ai/location-learning";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
+import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import {
     buildConversationalMessagingContract,
     buildDealProtectiveCommunicationContract,
@@ -905,6 +906,13 @@ export async function generateDraft(context: CoordinationContext) {
             .map(m => (m.body || "").trim())
             .filter(Boolean)
             .join("\n");
+        const scheduledMessageContext = await getScheduledMessageAiContext({
+            locationId: context.locationId,
+            conversationId: context.conversationId,
+        }).catch((error: any) => {
+            console.warn("[AI Draft] Scheduled message context failed:", error?.message || error);
+            return "";
+        });
         const requestedDraftLanguage = String(context.draftLanguage || "").trim() || null;
         const manualReplyLanguage = context.replyLanguageOverride === undefined
             ? localConversationReplyLanguageOverride
@@ -1095,6 +1103,9 @@ export async function generateDraft(context: CoordinationContext) {
 
         Selected Thread Messages (for cadence/language behavior):
         ${threadConversationText}
+
+        Scheduled Future Outbound Messages:
+        ${scheduledMessageContext || "[No scheduled outbound messages]"}
 
         Timeline Context Scope:
         ${timelineScopeLabel}

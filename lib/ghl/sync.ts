@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { buildConversationReferenceWhere, isLikelyGhlConversationId } from "@/lib/conversations/identity";
 import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
+import { markScheduledMessagesReviewRecommended } from "@/lib/conversations/scheduled-messages";
 
 function isLocalSyntheticConversationId(id: string | null | undefined) {
     const value = String(id || "").trim();
@@ -212,6 +213,11 @@ export async function syncMessageFromWebhook(payload: any) {
     });
 
     if (direction === "inbound") {
+        void markScheduledMessagesReviewRecommended({
+            locationId: location.id,
+            conversationId: conversation.id,
+            reason: "New inbound message arrived before this scheduled send.",
+        });
         queueRequirementProposalForNewActivity({
             locationId: location.id,
             contactId: contact.id,

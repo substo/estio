@@ -7,6 +7,7 @@ import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
 import { isLikelyGhlConversationId } from "@/lib/conversations/identity";
+import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import {
     buildDealProtectiveCommunicationContract,
     resolveCommunicationLanguage
@@ -87,6 +88,10 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
                 if (localConversation) {
                     if (seenConversationRefs.has(localConversation.id)) return null;
                     seenConversationRefs.add(localConversation.id);
+                    const scheduledContext = await getScheduledMessageAiContext({
+                        locationId: dealContext.location.id,
+                        conversationId: localConversation.id,
+                    }).catch(() => "");
                     return {
                         id: localConversation.id,
                         details: {
@@ -98,6 +103,7 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
                                 body: message.body,
                                 direction: message.direction,
                             })),
+                        scheduledContext,
                     };
                 }
 
@@ -162,6 +168,9 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
                 const sender = m.direction === 'outbound' ? 'Agent' : (c.details.contactName || 'Contact');
                 systemPrompt += `  ${sender}: ${m.body}\n`;
             });
+            if (String(c.scheduledContext || "").trim()) {
+                systemPrompt += `  Scheduled future outbound messages:\n${c.scheduledContext}\n`;
+            }
         });
 
         const userInstruction = params.userHints ? `\n\nSpecific Instruction from Agent: "${params.userHints}"` : "";

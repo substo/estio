@@ -1,7 +1,7 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
-import { Link as LinkIcon } from "lucide-react";
+import { Clock3, Link as LinkIcon } from "lucide-react";
 import { getConversationChannelInfo } from "./conversation-channel-info";
 
 interface ConversationListRowProps {
@@ -47,6 +47,18 @@ function getContactTypeTone(contactType?: string | null) {
     return CONTACT_TYPE_TONES[key] || "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300";
 }
 
+function formatScheduledBadgeTime(value?: string | null) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
 export function ConversationListRow({
     conversation,
     selectedId,
@@ -59,6 +71,9 @@ export function ConversationListRow({
     const channel = getConversationChannelInfo(conversation);
     const contactTypeLabel = formatContactTypeLabel(conversation.contactType);
     const contactTypeTone = getContactTypeTone(conversation.contactType);
+    const scheduledSummary = conversation.scheduledMessages;
+    const scheduledCount = Number(scheduledSummary?.count || 0);
+    const scheduledTime = formatScheduledBadgeTime(scheduledSummary?.nextScheduledFor || null);
 
     return (
         <div
@@ -129,6 +144,22 @@ export function ConversationListRow({
                     >
                         <span className="truncate">{contactTypeLabel}</span>
                     </span>
+                    {scheduledCount > 0 && (
+                        <span
+                            title={scheduledSummary?.nextBody || "Scheduled message"}
+                            className={cn(
+                                "inline-flex h-4 max-w-[150px] shrink-0 items-center gap-1 rounded border px-1.5 text-[9px] font-semibold leading-none",
+                                scheduledSummary?.reviewRecommended
+                                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                                    : "border-sky-200 bg-sky-50 text-sky-700"
+                            )}
+                        >
+                            <Clock3 className="h-2.5 w-2.5 shrink-0" />
+                            <span className="truncate">
+                                {scheduledCount} scheduled{scheduledTime ? ` · ${scheduledTime}` : ""}
+                            </span>
+                        </span>
+                    )}
                 </div>
             </div>
         </div>

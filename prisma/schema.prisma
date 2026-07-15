@@ -61,6 +61,7 @@ model Location {
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
   userNotifications             UserNotification[]
   taskReminderJobs              TaskReminderJob[]
+  scheduledMessages             ScheduledMessage[]
   scrapingConnections           ScrapingConnection[]
   scrapingTasks                 ScrapingTask[]
   deepScrapeRuns                DeepScrapeRun[]
@@ -225,6 +226,8 @@ model User {
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")
   acceptedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseAcceptedBy")
   rejectedAiSuggestedResponses AiSuggestedResponse[]       @relation("AiSuggestedResponseRejectedBy")
+  createdScheduledMessages     ScheduledMessage[]          @relation("ScheduledMessageCreatedBy")
+  approvedScheduledMessages    ScheduledMessage[]          @relation("ScheduledMessageApprovedBy")
   approvedContactRequirementProposals ContactRequirementProposal[] @relation("ContactRequirementProposalApprovedBy")
   rejectedContactRequirementProposals ContactRequirementProposal[] @relation("ContactRequirementProposalRejectedBy")
   createdPropertyMatchCampaigns PropertyMatchCampaign[] @relation("PropertyMatchCampaignCreatedBy")
@@ -670,6 +673,7 @@ model Contact {
   providerOutboxJobs         ProviderOutbox[]
   analyticsVisitors          AnalyticsVisitor[]
   analyticsEvents            AnalyticsEvent[]
+  scheduledMessages          ScheduledMessage[]
 
   @@unique([locationId, email])
   @@unique([locationId, legacyCrmOwnerId])
@@ -1737,6 +1741,7 @@ model Conversation {
   location                   Location                  @relation(fields: [locationId], references: [id], onDelete: Cascade)
   contact                    Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
   messages                   Message[]
+  scheduledMessages          ScheduledMessage[]
   executions                 AgentExecution[]
   participants               ConversationParticipant[]
   insights                   Insight[]
@@ -2814,6 +2819,7 @@ model Message {
   providerOutboxJobs           ProviderOutbox[]
   syncRecords                  MessageSync[]
   smsRelayOutboxJobs           SmsRelayOutbox[]
+  dispatchedScheduledMessages  ScheduledMessage[]           @relation("ScheduledMessageDispatchedMessage")
 
   // WhatsApp Integration
   wamId String? @unique // WhatsApp Message ID (for dedup)
@@ -2823,6 +2829,52 @@ model Message {
   @@index([conversationId, updatedAt(sort: Desc)])
   @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([emailThreadId])
+}
+
+model ScheduledMessage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId     String
+  conversationId String
+  contactId      String
+
+  channel  String // WhatsApp | SMS_RELAY
+  body     String @db.Text
+  status   String @default("scheduled") // scheduled | sending | sent | failed | canceled
+  source   String @default("composer")
+  metadata Json?
+
+  scheduledFor      DateTime
+  scheduledTimeZone String?
+  scheduledLocal    String?
+  reviewRecommended Boolean @default(false)
+  reviewReason      String?
+
+  approvedAt          DateTime?
+  approvedByUserId    String?
+  createdByUserId     String?
+  sentAt              DateTime?
+  canceledAt          DateTime?
+  failedAt            DateTime?
+  lastError           String? @db.Text
+  attemptCount        Int     @default(0)
+  lockedAt            DateTime?
+  lockedBy            String?
+  dispatchedMessageId String?
+
+  location          Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact           Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdByUser     User?        @relation("ScheduledMessageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser    User?        @relation("ScheduledMessageApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  dispatchedMessage Message?     @relation("ScheduledMessageDispatchedMessage", fields: [dispatchedMessageId], references: [id], onDelete: SetNull)
+
+  @@index([status, scheduledFor])
+  @@index([locationId, status, scheduledFor])
+  @@index([conversationId, status, scheduledFor])
+  @@index([contactId, status, scheduledFor])
 }
 
 model ConversationSync {

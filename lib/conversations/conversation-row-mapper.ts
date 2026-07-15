@@ -84,5 +84,6 @@ export function mapConversationRowToUi(
         activeDealId: dealMap?.get(c.id)?.id || dealMap?.get(c.ghlConversationId)?.id,
         activeDealTitle: dealMap?.get(c.id)?.title || dealMap?.get(c.ghlConversationId)?.title,
         suggestedActions: normalizeSuggestedActions(c, latestMessage),
+        scheduledMessages: c.scheduledMessages || null,
     } satisfies Conversation;
 }

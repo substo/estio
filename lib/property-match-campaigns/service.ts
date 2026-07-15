@@ -5,6 +5,7 @@ import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
+import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
 import {
@@ -1841,6 +1842,12 @@ Rules:
     const speaker = message.direction === "inbound" ? "Client" : "Agent";
     return `[${message.id}] ${speaker}: ${normalizeText(message.body, 800) || ""}`;
   }).join("\n");
+  const scheduledMessageContext = args.candidate.conversationId
+    ? await getScheduledMessageAiContext({
+      locationId: args.locationId,
+      conversationId: args.candidate.conversationId,
+    }).catch(() => "")
+    : "";
   const warnings = candidateProfileWarnings(args.candidate);
 
   const userContent = `Property:
@@ -1859,7 +1866,10 @@ Structured match:
 ${JSON.stringify(args.candidate.evidence?.structured || {}, null, 2)}
 
 Recent messages:
-${messageText || "No recent messages."}`;
+${messageText || "No recent messages."}
+
+Scheduled future outbound messages:
+${scheduledMessageContext || "None."}`;
 
   const result = await callLLMWithMetadata(modelName, prompt, userContent, {
     jsonMode: true,
