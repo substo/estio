@@ -352,9 +352,10 @@ export function PropertyImageEnhanceDialog({
     const usageCurrencyCode = String(usageCurrency || "USD").trim().toUpperCase();
     const compactUsageCost = formatAiUsageCost(usageSummary?.totalEstimatedCostUsd || 0, usageCurrencyCode);
     const sourceImageIsLandscape = sourceImageAspectRatio > 1;
-    const sourceImageFrameStyle = sourceImageIsLandscape
-        ? { aspectRatio: sourceImageAspectRatio }
-        : { aspectRatio: sourceImageAspectRatio, width: `min(100%, calc(50dvh * ${sourceImageAspectRatio}))` };
+    const sourceImageFrameStyle = {
+        aspectRatio: sourceImageAspectRatio,
+        width: `min(100%, calc(min(58dvh, 620px) * ${sourceImageAspectRatio}))`,
+    };
     const liveFinalPrompt = useMemo(() => {
         if (!effectiveAnalysis) return "";
         return buildGenerationPrompt({
@@ -2312,8 +2313,7 @@ export function PropertyImageEnhanceDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="h-[100dvh] max-h-[100dvh] w-screen max-w-none overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[94vh] sm:w-[96vw] sm:max-w-7xl sm:rounded-lg sm:p-6">
-                <div className="flex h-full min-h-0 flex-col sm:block">
+            <DialogContent className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col overflow-hidden rounded-none p-0 sm:h-[94vh] sm:w-[96vw] sm:max-w-7xl sm:rounded-lg">
                 <DialogHeader className="shrink-0 border-b px-3 py-2 pr-12 sm:px-4 sm:pr-12">
                     <DialogTitle className="sr-only">AI Listing Photo</DialogTitle>
                     <DialogDescription className="sr-only">
@@ -2360,7 +2360,7 @@ export function PropertyImageEnhanceDialog({
                     </div>
                 </DialogHeader>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:overflow-visible sm:px-0 sm:py-0">
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
                 {!canRun ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                         Save the property first and use a hosted image to enable AI enhancement.
@@ -2368,9 +2368,9 @@ export function PropertyImageEnhanceDialog({
                 ) : null}
 
                 {canRun && image ? (
-                    <div className="space-y-4">
+                    <div className="space-y-4 xl:grid xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start xl:gap-6 xl:space-y-0">
                         {error ? (
-                            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 xl:col-span-2">
                                 {error}
                             </div>
                         ) : null}
@@ -2382,77 +2382,75 @@ export function PropertyImageEnhanceDialog({
                                 defaultExpanded
                                 hideWhenEmpty={false}
                                 title="Property AI Usage"
-                                className="shadow-sm"
+                                className="shadow-sm xl:col-span-2"
                                 currency={usageCurrencyCode}
                                 showSummaryHeader={false}
                             />
                         ) : null}
 
-                        {stage === "edit" && mode !== "precision_remove" ? renderSourcePhotoPreview() : null}
+                        <div className="space-y-4 xl:sticky xl:top-4 xl:max-h-[calc(94vh-7rem)] xl:overflow-y-auto xl:pr-1">
+                            {stage === "edit" && mode !== "precision_remove" ? renderSourcePhotoPreview() : null}
 
-                        {generated ? (
-                            <PropertyImageCompareViewer
-                                beforeSrc={image.url}
-                                afterSrc={generated.generatedImageUrl}
-                                alt={`Property image ${imageIndex + 1}`}
-                            />
-                        ) : null}
+                            {generated ? (
+                                <PropertyImageCompareViewer
+                                    beforeSrc={image.url}
+                                    afterSrc={generated.generatedImageUrl}
+                                    alt={`Property image ${imageIndex + 1}`}
+                                    className="xl:[&>div:nth-child(2)>div]:max-h-[min(58dvh,620px)]"
+                                />
+                            ) : null}
 
-                        {stage === "edit" && mode === "polish" ? (
-                            <div className="space-y-3">
-                                {renderModeSwitcher()}
-                                {renderPolishControls()}
-                            </div>
-                        ) : (
-                            <div className={cn("grid gap-4", stage === "edit" ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "")}>
-                                <div className={cn("space-y-4", stage === "review" ? "hidden" : "")}>
-                                    {mode === "precision_remove" ? (
-                                        <div className="space-y-2">
-                                            <Label>Precision Remove Editor</Label>
-                                            <PropertyImageMaskEditor
-                                                ref={precisionEditorRef}
-                                                imageUrl={image.url}
-                                                tool={precisionTool}
-                                                brushSize={precisionBrushSize}
-                                                eraseMode={precisionEraseMode}
-                                                selectableRegions={precisionSelectableRegions}
-                                                clickSelectEnabled={precisionClickSelectEnabled}
-                                                disabled={isBusy}
-                                                onStateChange={setPrecisionEditorState}
-                                                className="max-h-[65dvh] sm:max-h-none"
-                                            />
-                                        </div>
-                                    ) : null}
+                            {stage === "edit" && mode === "precision_remove" ? (
+                                <div className="space-y-2">
+                                    <Label>Precision Remove Editor</Label>
+                                    <PropertyImageMaskEditor
+                                        ref={precisionEditorRef}
+                                        imageUrl={image.url}
+                                        tool={precisionTool}
+                                        brushSize={precisionBrushSize}
+                                        eraseMode={precisionEraseMode}
+                                        selectableRegions={precisionSelectableRegions}
+                                        clickSelectEnabled={precisionClickSelectEnabled}
+                                        disabled={isBusy}
+                                        onStateChange={setPrecisionEditorState}
+                                        className="max-h-[65dvh] xl:max-h-[min(58dvh,620px)]"
+                                    />
                                 </div>
+                            ) : null}
+                        </div>
 
-                                <div className="space-y-4 rounded-md border p-3 sm:p-4 xl:sticky xl:top-0 xl:max-h-[calc(94vh-9rem)] xl:overflow-y-auto">
-                                    {stage === "edit" ? (
-                                        <>
-                                            <div className="space-y-1">
-                                                <Badge variant="outline">Edit</Badge>
-                                                <p className="text-sm text-muted-foreground">
-                                                    Select an area to remove with a precise mask.
-                                                </p>
-                                            </div>
+                        <div className="min-h-0 space-y-4 rounded-md border p-3 sm:p-4 xl:max-h-[calc(94vh-7rem)] xl:overflow-y-auto">
+                            {stage === "edit" && mode === "polish" ? (
+                                <>
+                                    {renderModeSwitcher()}
+                                    {renderPolishControls()}
+                                </>
+                            ) : stage === "edit" ? (
+                                <>
+                                    <div className="space-y-1">
+                                        <Badge variant="outline">Edit</Badge>
+                                        <p className="text-sm text-muted-foreground">
+                                            Select an area to remove with a precise mask.
+                                        </p>
+                                    </div>
 
-                                            {renderModeSwitcher()}
-                                            {renderPrecisionControls()}
-                                        </>
-                                    ) : renderReviewRail()}
-                                </div>
-                            </div>
-                        )}
+                                    {renderModeSwitcher()}
+                                    {renderPrecisionControls()}
+                                </>
+                            ) : (
+                                renderReviewRail()
+                            )}
+                        </div>
                     </div>
                 ) : null}
 
                 </div>
 
-                <DialogFooter className="shrink-0 border-t bg-background px-4 py-3 sm:border-0 sm:px-0 sm:py-0">
+                <DialogFooter className="shrink-0 border-t bg-background px-4 py-3">
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
                         Close
                     </Button>
                 </DialogFooter>
-                </div>
             </DialogContent>
         </Dialog>
     );
