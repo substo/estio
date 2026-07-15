@@ -141,6 +141,12 @@ import { MessageImageGroup } from "./message-image-group";
 import { groupAdjacentWhatsAppImageMessages } from "./message-image-grouping";
 
 import { ConversationComposer } from "./conversation-composer";
+import {
+    formatScheduledDate,
+    getBrowserTimeZone,
+    parseDatetimeLocalValue,
+    toScheduledLocalInput,
+} from "./scheduled-message-time";
 
 type ScheduledMessageItem = {
     id: string;
@@ -174,26 +180,6 @@ function getInitialSurfaceChannel(conversation: Conversation): ConversationSurfa
         return channel;
     }
     return "default";
-}
-
-function formatScheduledDate(value?: string | null) {
-    if (!value) return "";
-    const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return "";
-    return date.toLocaleString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-    });
-}
-
-function toScheduledLocalInput(value?: string | null) {
-    const date = value ? new Date(value) : new Date(Date.now() + 60 * 60 * 1000);
-    if (!Number.isFinite(date.getTime())) return "";
-    const pad = (number: number) => String(number).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export function ChatWindow({
@@ -428,15 +414,16 @@ export function ChatWindow({
 
     const handleSaveScheduledMessageEdit = useCallback(async () => {
         if (!editingScheduledId) return;
-        const scheduledDate = new Date(editingScheduledLocal);
-        if (!Number.isFinite(scheduledDate.getTime())) return;
+        const scheduledDate = parseDatetimeLocalValue(editingScheduledLocal);
+        if (!scheduledDate) return;
+        const deviceTimeZone = getBrowserTimeZone();
         const response = await fetch(`/api/admin/conversations/scheduled-messages/${encodeURIComponent(editingScheduledId)}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 body: editingScheduledBody,
                 scheduledFor: scheduledDate.toISOString(),
-                scheduledTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                scheduledTimeZone: deviceTimeZone,
                 scheduledLocal: editingScheduledLocal,
             }),
         });
@@ -1027,7 +1014,7 @@ export function ChatWindow({
                             <span className="min-w-0">
                                 <span className="block truncate text-xs font-semibold text-sky-900 dark:text-sky-100">
                                     {activeScheduledMessages.length} scheduled
-                                    {nextScheduledMessage ? ` · ${formatScheduledDate(nextScheduledMessage.scheduledFor)}` : ""}
+                                    {nextScheduledMessage ? ` · ${formatScheduledDate(nextScheduledMessage.scheduledFor, nextScheduledMessage.scheduledTimeZone)}` : ""}
                                 </span>
                                 {nextScheduledMessage && (
                                     <span className="block truncate text-[11px] text-sky-700 dark:text-sky-200">
@@ -1054,7 +1041,10 @@ export function ChatWindow({
                                     return (
                                         <div key={item.id} className="rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
                                             <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
-                                                <span>{item.channel} · {formatScheduledDate(item.scheduledFor)}</span>
+                                                <span>
+                                                    {item.channel} · {formatScheduledDate(item.scheduledFor, item.scheduledTimeZone)}
+                                                    {item.scheduledTimeZone ? ` · ${item.scheduledTimeZone}` : ""}
+                                                </span>
                                                 <span className={cn(
                                                     "rounded px-1.5 py-0.5 font-medium",
                                                     item.reviewRecommended

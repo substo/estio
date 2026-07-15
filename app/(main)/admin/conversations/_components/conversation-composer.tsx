@@ -33,6 +33,14 @@ import { PropertyMessageAssist } from "./property-message-assist";
 import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
 import { buildComposerSuggestionBubbles } from "./conversation-composer-suggestions";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
+import {
+    formatDeviceScheduleClock,
+    getBrowserTimeZone,
+    getDefaultScheduleLocalValue,
+    getScheduleDelayLocalValue,
+    getScheduleTimingWarning,
+    parseDatetimeLocalValue,
+} from "./scheduled-message-time";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -150,40 +158,6 @@ const AI_DRAFT_SKILL_LABELS: Record<string, string> = {
     negotiator: "Negotiation",
     closer: "Closing",
 };
-
-function toDatetimeLocalValue(date: Date) {
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return [
-        date.getFullYear(),
-        "-",
-        pad(date.getMonth() + 1),
-        "-",
-        pad(date.getDate()),
-        "T",
-        pad(date.getHours()),
-        ":",
-        pad(date.getMinutes()),
-    ].join("");
-}
-
-function getDefaultScheduleLocalValue() {
-    const date = new Date(Date.now() + 60 * 60 * 1000);
-    date.setMinutes(Math.ceil(date.getMinutes() / 5) * 5, 0, 0);
-    return toDatetimeLocalValue(date);
-}
-
-function getScheduleDelayLocalValue(minutes: number) {
-    return toDatetimeLocalValue(new Date(Date.now() + minutes * 60 * 1000));
-}
-
-function getScheduleTimingWarning(localValue: string) {
-    const date = new Date(localValue);
-    if (!Number.isFinite(date.getTime())) return null;
-    const diffMs = date.getTime() - Date.now();
-    if (diffMs <= 0) return "Choose a future date and time.";
-    if (diffMs < 60 * 1000) return "This is scheduled in under a minute.";
-    return null;
-}
 
 function formatAiDraftSkillLabel(skillId?: string | null) {
     const normalized = String(skillId || "").trim();
@@ -539,6 +513,8 @@ export function ConversationComposer({
     const visibleSuggestionBubbles = buildComposerSuggestionBubbles(suggestions, aiQuickActions);
     const showSuggestedResponseToggle = suggestedResponseCount > 0 && !!onToggleSuggestedResponses;
     const scheduleTimingWarning = getScheduleTimingWarning(scheduleLocal);
+    const scheduleDeviceTimeZone = getBrowserTimeZone();
+    const scheduleDeviceClock = formatDeviceScheduleClock(scheduleDeviceTimeZone);
 
     const runAiDraftCommand = (instruction?: string) => {
         const trimmedInstruction = String(instruction || "").trim();
@@ -550,8 +526,8 @@ export function ConversationComposer({
 
     const handleScheduleDraft = async () => {
         if (!onScheduleMessage || !canScheduleChannel || !draft.trim() || scheduling) return;
-        const scheduledDate = new Date(scheduleLocal);
-        if (!Number.isFinite(scheduledDate.getTime())) {
+        const scheduledDate = parseDatetimeLocalValue(scheduleLocal);
+        if (!scheduledDate) {
             setScheduleError("Choose a valid date and time.");
             return;
         }
@@ -567,7 +543,7 @@ export function ConversationComposer({
                 body: draft.trim(),
                 channel: selectedChannel,
                 scheduledFor: scheduledDate.toISOString(),
-                scheduledTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                scheduledTimeZone: scheduleDeviceTimeZone,
                 scheduledLocal: scheduleLocal,
             }));
             if (result && result.success === false) {
@@ -1228,6 +1204,11 @@ export function ConversationComposer({
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="text-xs font-semibold text-slate-800">Schedule message</div>
                                                 <div className="text-[10px] text-slate-500">{selectedChannel}</div>
+                                            </div>
+                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                                                Device time: <span className="font-medium text-slate-800">{scheduleDeviceClock}</span>
+                                                <span className="mx-1 text-slate-400">·</span>
+                                                <span className="font-medium text-slate-800">{scheduleDeviceTimeZone || "Device local time"}</span>
                                             </div>
                                             <Input
                                                 type="datetime-local"
