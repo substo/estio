@@ -112,6 +112,17 @@ const MOBILE_COMPOSER_MAX_VIEWPORT_RATIO = 0.32;
 const MOBILE_COMPOSER_MAX_HEIGHT_PX = 188;
 const DESKTOP_COMPOSER_MAX_HEIGHT_PX = 320;
 const EMPTY_AI_INSTRUCTION = "";
+const MOBILE_TOOLBAR_ICON_BUTTON_CLASS = "h-10 w-10 p-0 sm:h-7 sm:w-7";
+const TOOLBAR_ICON_CLASS = "h-4 w-4 sm:h-3.5 sm:w-3.5";
+const MOBILE_PRIMARY_SEND_BUTTON_CLASS = "ml-1 h-11 min-w-14 rounded-xl px-3 sm:ml-0 sm:h-7 sm:min-w-0 sm:rounded-lg";
+const QUICK_SCHEDULE_DELAYS = [
+    { label: "5 min", minutes: 5 },
+    { label: "10 min", minutes: 10 },
+    { label: "15 min", minutes: 15 },
+    { label: "30 min", minutes: 30 },
+    { label: "1 hour", minutes: 60 },
+    { label: "2 hours", minutes: 120 },
+];
 
 const CREATE_DRAFT_ACTIONS = [
     "Best next reply",
@@ -161,12 +172,16 @@ function getDefaultScheduleLocalValue() {
     return toDatetimeLocalValue(date);
 }
 
+function getScheduleDelayLocalValue(minutes: number) {
+    return toDatetimeLocalValue(new Date(Date.now() + minutes * 60 * 1000));
+}
+
 function getScheduleTimingWarning(localValue: string) {
     const date = new Date(localValue);
     if (!Number.isFinite(date.getTime())) return null;
     const diffMs = date.getTime() - Date.now();
     if (diffMs <= 0) return "Choose a future date and time.";
-    if (diffMs < 5 * 60 * 1000) return "This is scheduled within the next few minutes.";
+    if (diffMs < 60 * 1000) return "This is scheduled in under a minute.";
     return null;
 }
 
@@ -553,7 +568,7 @@ export function ConversationComposer({
                 channel: selectedChannel,
                 scheduledFor: scheduledDate.toISOString(),
                 scheduledTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                scheduledLocal,
+                scheduledLocal: scheduleLocal,
             }));
             if (result && result.success === false) {
                 setScheduleError(result.error || "Could not schedule message.");
@@ -1117,7 +1132,7 @@ export function ConversationComposer({
                             </div>
                         )}
 
-                        <div className="ml-auto flex w-full min-w-0 flex-wrap items-center justify-end gap-1.5">
+                        <div className="ml-auto flex w-full min-w-0 flex-wrap items-center justify-end gap-2 pt-1 sm:gap-1.5 sm:pt-0">
                             <span className="text-[10px] text-slate-400 hidden sm:inline">⌘↵</span>
                             {selectedChannel === "WhatsApp" && (
                                 <>
@@ -1125,15 +1140,16 @@ export function ConversationComposer({
                                         type="button"
                                         variant="ghost"
                                         size="sm"
-                                        className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
+                                        className={cn(MOBILE_TOOLBAR_ICON_BUTTON_CLASS, resolvedSurfaceTheme.composerIconButtonClassName)}
                                         onClick={() => void handleRequestWhatsAppCall()}
                                         title="Start WhatsApp Call"
+                                        aria-label="Start WhatsApp Call"
                                         disabled={isUnavailable || sending || isRecording || requestingWhatsAppCall}
                                     >
                                         {requestingWhatsAppCall ? (
-                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            <Loader2 className={cn(TOOLBAR_ICON_CLASS, "animate-spin")} />
                                         ) : (
-                                            <PhoneOutgoing className="h-3.5 w-3.5" />
+                                            <PhoneOutgoing className={TOOLBAR_ICON_CLASS} />
                                         )}
                                     </Button>
                                     {onSendMedia && (
@@ -1142,28 +1158,30 @@ export function ConversationComposer({
                                                 type="button"
                                                 variant="ghost"
                                                 size="sm"
-                                                className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
+                                                className={cn(MOBILE_TOOLBAR_ICON_BUTTON_CLASS, resolvedSurfaceTheme.composerIconButtonClassName)}
                                                 onClick={handleMediaPickClick}
                                                 title="Send media"
+                                                aria-label="Send media"
                                                 disabled={isUnavailable || sending || isRecording}
                                             >
-                                                <Paperclip className="h-3.5 w-3.5" />
+                                                <Paperclip className={TOOLBAR_ICON_CLASS} />
                                             </Button>
                                             <Button
                                                 type="button"
                                                 variant="ghost"
                                                 size="sm"
                                                 className={cn(
-                                                    "h-7 w-7 p-0",
+                                                    MOBILE_TOOLBAR_ICON_BUTTON_CLASS,
                                                     isRecording
                                                         ? "text-red-600 hover:text-red-700"
                                                         : resolvedSurfaceTheme.composerIconButtonClassName
                                                 )}
                                                 onClick={handleRecordToggle}
                                                 title={isRecording ? "Stop recording and send voice note" : "Record voice note"}
+                                                aria-label={isRecording ? "Stop recording and send voice note" : "Record voice note"}
                                                 disabled={isUnavailable || sending}
                                             >
-                                                {isRecording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                                                {isRecording ? <Square className={TOOLBAR_ICON_CLASS} /> : <Mic className={TOOLBAR_ICON_CLASS} />}
                                             </Button>
                                         </>
                                     )}
@@ -1193,14 +1211,19 @@ export function ConversationComposer({
                                             type="button"
                                             variant="ghost"
                                             size="sm"
-                                            className={cn("h-7 w-7 p-0", resolvedSurfaceTheme.composerIconButtonClassName)}
+                                            className={cn(
+                                                "h-10 min-w-[104px] gap-1.5 rounded-xl border border-emerald-200 bg-white px-3 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50 hover:text-emerald-800 sm:h-7 sm:w-7 sm:min-w-0 sm:gap-0 sm:rounded-md sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:hover:bg-transparent",
+                                                resolvedSurfaceTheme.composerIconButtonClassName
+                                            )}
                                             disabled={isSendUnavailable || sending || isRecording || scheduling || !draft.trim()}
                                             title="Schedule message"
+                                            aria-label="Schedule message"
                                         >
-                                            <CalendarClock className="h-3.5 w-3.5" />
+                                            <CalendarClock className={TOOLBAR_ICON_CLASS} />
+                                            <span className="sm:sr-only">Schedule</span>
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent className="w-[320px] p-3" align="end">
+                                    <PopoverContent className="w-[min(calc(100vw-2rem),320px)] p-3 sm:w-[320px]" align="end">
                                         <div className="space-y-2">
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="text-xs font-semibold text-slate-800">Schedule message</div>
@@ -1214,6 +1237,24 @@ export function ConversationComposer({
                                                 className="h-8 text-xs"
                                                 disabled={scheduling}
                                             />
+                                            <div className="grid grid-cols-3 gap-1.5">
+                                                {QUICK_SCHEDULE_DELAYS.map((delay) => (
+                                                    <Button
+                                                        key={delay.minutes}
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-8 px-2 text-xs"
+                                                        onClick={() => {
+                                                            setScheduleError(null);
+                                                            setScheduleLocal(getScheduleDelayLocalValue(delay.minutes));
+                                                        }}
+                                                        disabled={scheduling}
+                                                    >
+                                                        {delay.label}
+                                                    </Button>
+                                                ))}
+                                            </div>
                                             <div className="max-h-32 overflow-y-auto rounded-md border bg-slate-50 p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-700">
                                                 {draft.trim() || "No message drafted."}
                                             </div>
@@ -1256,40 +1297,45 @@ export function ConversationComposer({
                             {canUseWriteTranslation && hasTranslationPreview ? (
                                 <Button
                                     size="sm"
-                                    className={cn("h-7 rounded-lg px-3 transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName)}
+                                    className={cn(MOBILE_PRIMARY_SEND_BUTTON_CLASS, "transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName)}
                                     onClick={() => handleSend("translated")}
                                     disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     title="Sends the previewed customer-language version and preserves your working draft."
+                                    aria-label={`Send in ${autoTranslateTargetLabel}`}
                                 >
-                                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                    {sending ? <Loader2 className={cn(TOOLBAR_ICON_CLASS, "animate-spin")} /> : <Send className={TOOLBAR_ICON_CLASS} />}
                                     <span className="ml-1 text-[11px]">Send in {autoTranslateTargetLabel}</span>
                                 </Button>
                             ) : willAutoTranslate ? (
                                 <Button
                                     size="sm"
                                     className={cn(
-                                        "h-7 rounded-lg px-3 transition-all duration-150 gap-1",
+                                        MOBILE_PRIMARY_SEND_BUTTON_CLASS,
+                                        "gap-1 transition-all duration-150",
                                         draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName
                                     )}
                                     onClick={() => handleSend("original")}
                                     disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     title={`Message will be prepared in ${autoTranslateTargetLabel} before sending`}
+                                    aria-label={`Send in ${autoTranslateTargetLabel}`}
                                 >
-                                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                    {sending ? <Loader2 className={cn(TOOLBAR_ICON_CLASS, "animate-spin")} /> : <Send className={TOOLBAR_ICON_CLASS} />}
                                     <span className="text-[11px]">Send in {autoTranslateTargetLabel}</span>
                                 </Button>
                             ) : (
                                 <Button
                                     size="sm"
                                     className={cn(
-                                        "h-7 rounded-lg px-3 transition-all duration-150",
+                                        MOBILE_PRIMARY_SEND_BUTTON_CLASS,
+                                        "transition-all duration-150",
                                         draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName
                                     )}
                                     onClick={() => handleSend("original")}
                                     disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
                                     title={sendUnavailableReason || undefined}
+                                    aria-label="Send message"
                                 >
-                                    {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                    {sending ? <Loader2 className={cn(TOOLBAR_ICON_CLASS, "animate-spin")} /> : <Send className={TOOLBAR_ICON_CLASS} />}
                                 </Button>
                             )}
                         </div>
