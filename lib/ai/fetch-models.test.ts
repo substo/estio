@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildAiDraftModelPickerStateResult, buildAiModelPickerDefaultsResult, resolveAiModelDefault } from "./fetch-models";
+import { buildAiDraftModelPickerStateResult, buildAiModelPickerDefaultsResult, buildAvailableModelOptions, resolveAiModelDefault } from "./fetch-models";
 import {
     GEMINI_DRAFT_FAST_DEFAULT,
     GEMINI_FLASH_LITE_LATEST_ALIAS,
@@ -61,6 +61,43 @@ test("buildAiModelPickerDefaultsResult includes OpenAI models while keeping Gemi
     assert.equal(values.has("openai:gpt-test-text"), true);
     assert.equal(state.defaults.general, GEMINI_FLASH_LATEST_ALIAS);
     assert.equal(state.defaults.draft, GEMINI_DRAFT_FAST_DEFAULT);
+});
+
+test("buildAvailableModelOptions keeps curated draft fallbacks with partial stored catalogs", () => {
+    const models = buildAvailableModelOptions([
+        { value: GEMINI_IMAGE_FAST_DEFAULT, label: "Gemini 3.1 Flash-Lite Image" },
+    ]);
+
+    const values = new Set(models.map((model) => model.value));
+    assert.equal(values.has(GEMINI_IMAGE_FAST_DEFAULT), true);
+    assert.equal(values.has(GEMINI_FLASH_LATEST_ALIAS), true);
+    assert.equal(values.has(GEMINI_DRAFT_FAST_DEFAULT), true);
+});
+
+test("buildAiModelPickerDefaultsResult keeps ChatGPT subscription models with partial stored catalogs", () => {
+    const pickerModels = buildAvailableModelOptions([
+        { value: GEMINI_IMAGE_FAST_DEFAULT, label: "Gemini 3.1 Flash-Lite Image" },
+    ]);
+
+    const state = buildAiModelPickerDefaultsResult(
+        pickerModels,
+        [
+            { value: "chatgpt_subscription:gpt-5.4-mini", label: "ChatGPT Subscription GPT-5.4 Mini" },
+        ],
+        {
+            general: GEMINI_FLASH_LATEST_ALIAS,
+            draft: GEMINI_DRAFT_FAST_DEFAULT,
+            extraction: GEMINI_FLASH_LATEST_ALIAS,
+            design: GEMINI_FLASH_LATEST_ALIAS,
+            imageGeneration: GEMINI_IMAGE_FAST_DEFAULT,
+            transcription: GEMINI_DRAFT_FAST_DEFAULT,
+            translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
+        }
+    );
+
+    const values = new Set(state.models.map((model) => model.value));
+    assert.equal(values.has("chatgpt_subscription:gpt-5.4-mini"), true);
+    assert.equal(values.has(GEMINI_DRAFT_FAST_DEFAULT), true);
 });
 
 test("buildAiModelPickerDefaultsResult uses available OpenAI text default for general and draft", () => {

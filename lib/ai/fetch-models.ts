@@ -104,6 +104,10 @@ function sortModels(models: ModelOption[]): ModelOption[] {
     );
 }
 
+export function buildAvailableModelOptions(models: ModelOption[]): ModelOption[] {
+    return sortModels(dedupeModelOptions([...models, ...FALLBACK_MODELS]));
+}
+
 export async function fetchGoogleModels(apiKey: string): Promise<NonNullable<ModelsApiResponse["models"]> | null> {
     const collected: NonNullable<ModelsApiResponse["models"]> = [];
     let nextPageToken: string | undefined;
@@ -273,7 +277,7 @@ export const getAvailableModels = unstable_cache(
                     scopeId: "global",
                 });
             if (storedModels.length > 0) {
-                return sortModels(dedupeModelOptions(storedModels));
+                return buildAvailableModelOptions(storedModels);
             }
 
             // 1. Resolve API Key
@@ -281,14 +285,14 @@ export const getAvailableModels = unstable_cache(
 
             if (!apiKey) {
                 console.warn("[Model Fetch] No API Key found. Returning fallback list.");
-                return FALLBACK_MODELS;
+                return buildAvailableModelOptions([]);
             }
 
             // 2. Fetch from Google API Response
             // Using direct fetch and pagination because the list endpoint is paginated.
             const apiModels = await fetchGoogleModels(apiKey);
             if (!apiModels) {
-                return FALLBACK_MODELS;
+                return buildAvailableModelOptions([]);
             }
 
             // 3. Transform, merge curated aliases, and sort for UI
