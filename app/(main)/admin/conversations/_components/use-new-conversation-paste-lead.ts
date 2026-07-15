@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'r
 
 import { useToast } from '@/components/ui/use-toast';
 import { useAiModelCatalog } from '@/components/ai/use-ai-model-catalog';
+import { usePersistentAiModelSelection } from '@/components/ai/use-persistent-ai-model-selection';
 import { GEMINI_FLASH_LITE_LATEST_ALIAS } from '@/lib/ai/models';
 import {
     createPasteLeadStatus,
@@ -40,11 +41,18 @@ export function useNewConversationPasteLead(args: {
 }) {
     const { toast } = useToast();
     const { models: availableModels } = useAiModelCatalog();
+    const {
+        selectedModel: selectedPasteLeadModel,
+        handleModelChange: persistPasteLeadModelSelection,
+    } = usePersistentAiModelSelection({
+        usageKey: 'conversation.pasteLead',
+        models: availableModels,
+        defaultModel: GEMINI_FLASH_LITE_LATEST_ALIAS,
+    });
     const [leadText, setLeadText] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [parsedLead, setParsedLead] = useState<ParsedLeadData | null>(null);
     const [pasteLeadCanImportOldCrmProperties, setPasteLeadCanImportOldCrmProperties] = useState(false);
-    const [selectedPasteLeadModel, setSelectedPasteLeadModel] = useState('');
     const [pasteLeadStatuses, setPasteLeadStatuses] = useState<PasteLeadImportStatus[]>([]);
     const [creatingPasteLead, setCreatingPasteLead] = useState(false);
     const leadParseCacheRef = useRef<{
@@ -142,10 +150,10 @@ export function useNewConversationPasteLead(args: {
     }, [clearPreviewCache, leadText]);
 
     const selectPasteLeadModel = useCallback((value: string) => {
-        setSelectedPasteLeadModel(value);
+        persistPasteLeadModelSelection(value);
         setParsedLead(null);
         clearPreviewCache();
-    }, [clearPreviewCache]);
+    }, [clearPreviewCache, persistPasteLeadModelSelection]);
 
     const reviewLeadFirst = useCallback(async () => {
         if (!leadText.trim()) return;
@@ -254,14 +262,8 @@ export function useNewConversationPasteLead(args: {
         setPasteLeadStatuses([]);
         setIsAnalyzing(false);
         setCreatingPasteLead(false);
-        setSelectedPasteLeadModel('');
         clearPreviewCache();
     }, [clearPreviewCache]);
-
-    useEffect(() => {
-        if (selectedPasteLeadModel) return;
-        setSelectedPasteLeadModel(GEMINI_FLASH_LITE_LATEST_ALIAS);
-    }, [selectedPasteLeadModel]);
 
     useEffect(() => {
         if (!args.open || parsedLead) return;
