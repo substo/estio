@@ -21,18 +21,47 @@ export function getBrowserTimeZone() {
     }
 }
 
-export function formatDeviceScheduleClock(timeZone: string | null, now = new Date()) {
+export function formatScheduleLocalSendSummary(localValue: string, timeZone: string | null, locale?: string) {
+    const date = parseDatetimeLocalValue(localValue);
+    if (!date) {
+        return {
+            time: "",
+            date: "",
+            timeZoneLabel: timeZone || "Device local time",
+        };
+    }
+
+    const timeOptions: Intl.DateTimeFormatOptions = {
+        hour: "2-digit",
+        minute: "2-digit",
+        ...(timeZone ? { timeZone } : {}),
+    };
+    const dateOptions: Intl.DateTimeFormatOptions = {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        ...(timeZone ? { timeZone } : {}),
+    };
+
     try {
-        return now.toLocaleTimeString(undefined, {
-            hour: "2-digit",
-            minute: "2-digit",
-            ...(timeZone ? { timeZone } : {}),
-        });
+        return {
+            time: date.toLocaleTimeString(locale, timeOptions),
+            date: date.toLocaleDateString(locale, dateOptions),
+            timeZoneLabel: timeZone || "Device local time",
+        };
     } catch {
-        return now.toLocaleTimeString(undefined, {
-            hour: "2-digit",
-            minute: "2-digit",
-        });
+        return {
+            time: date.toLocaleTimeString(locale, {
+                hour: "2-digit",
+                minute: "2-digit",
+            }),
+            date: date.toLocaleDateString(locale, {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+            }),
+            timeZoneLabel: "Device local time",
+        };
     }
 }
 

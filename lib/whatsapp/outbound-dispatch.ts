@@ -20,7 +20,7 @@ export type WhatsAppOutboundDispatchResult = {
     transport: string;
     provider: string;
     providerAccountId: string;
-    wamId: string;
+    wamId: string | null;
 };
 
 function normalizePhoneDigits(phone: string | null | undefined): string {
@@ -189,7 +189,7 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
         throw new Error(`Unsupported WhatsApp transport: ${transport}`);
     }
 
-    if (!wamId) {
+    if (!wamId && transport !== "web_bridge") {
         throw new Error(`${transport} send did not return provider message id confirmation.`);
     }
 

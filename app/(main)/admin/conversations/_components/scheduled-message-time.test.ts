@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    formatScheduleLocalSendSummary,
     getScheduleDelayLocalValue,
     getScheduleTimingWarning,
     parseDatetimeLocalValue,
@@ -28,6 +29,13 @@ test("schedule delay helpers produce datetime-local values", () => {
     const now = new Date(2026, 6, 15, 19, 18, 0, 0).getTime();
     assert.equal(getScheduleDelayLocalValue(10, now), "2026-07-15T19:28");
     assert.equal(toDatetimeLocalValue(new Date(2026, 6, 15, 19, 30, 0, 0)), "2026-07-15T19:30");
+});
+
+test("formatScheduleLocalSendSummary shows the selected local send time", () => {
+    const summary = formatScheduleLocalSendSummary("2026-07-15T22:15", "Asia/Nicosia", "en-GB");
+    assert.equal(summary.time, "22:15");
+    assert.equal(summary.date, "15 Jul 2026");
+    assert.equal(summary.timeZoneLabel, "Asia/Nicosia");
 });
 
 test("getScheduleTimingWarning allows common short delays but rejects past values", () => {

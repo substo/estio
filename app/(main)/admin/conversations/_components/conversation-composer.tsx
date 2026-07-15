@@ -34,7 +34,7 @@ import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversatio
 import { buildComposerSuggestionBubbles } from "./conversation-composer-suggestions";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 import {
-    formatDeviceScheduleClock,
+    formatScheduleLocalSendSummary,
     getBrowserTimeZone,
     getDefaultScheduleLocalValue,
     getScheduleDelayLocalValue,
@@ -514,7 +514,7 @@ export function ConversationComposer({
     const showSuggestedResponseToggle = suggestedResponseCount > 0 && !!onToggleSuggestedResponses;
     const scheduleTimingWarning = getScheduleTimingWarning(scheduleLocal);
     const scheduleDeviceTimeZone = getBrowserTimeZone();
-    const scheduleDeviceClock = formatDeviceScheduleClock(scheduleDeviceTimeZone);
+    const scheduleSendSummary = formatScheduleLocalSendSummary(scheduleLocal, scheduleDeviceTimeZone);
 
     const runAiDraftCommand = (instruction?: string) => {
         const trimmedInstruction = String(instruction || "").trim();
@@ -1205,10 +1205,19 @@ export function ConversationComposer({
                                                 <div className="text-xs font-semibold text-slate-800">Schedule message</div>
                                                 <div className="text-[10px] text-slate-500">{selectedChannel}</div>
                                             </div>
-                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
-                                                Device time: <span className="font-medium text-slate-800">{scheduleDeviceClock}</span>
-                                                <span className="mx-1 text-slate-400">·</span>
-                                                <span className="font-medium text-slate-800">{scheduleDeviceTimeZone || "Device local time"}</span>
+                                            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-slate-700">
+                                                <div className="text-[10px] font-semibold uppercase tracking-normal text-emerald-700">Will send at</div>
+                                                <div className="text-lg font-semibold leading-6 text-slate-950">
+                                                    {scheduleSendSummary.time || "Choose a time"}
+                                                </div>
+                                                <div className="text-[11px] text-slate-600">
+                                                    {scheduleSendSummary.date || "Select a future date"}
+                                                    <span className="mx-1 text-slate-400">·</span>
+                                                    {scheduleSendSummary.timeZoneLabel}
+                                                </div>
+                                                <div className="mt-1 text-[10px] text-emerald-700">
+                                                    This is the exact send time on this device.
+                                                </div>
                                             </div>
                                             <Input
                                                 type="datetime-local"

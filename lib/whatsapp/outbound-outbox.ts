@@ -18,6 +18,32 @@ export type WhatsAppOutboundOutboxProcessResult = {
     error?: string;
 };
 
+export function resolveWhatsAppOutboundCompletionState(args: { transport: string; wamId?: string | null }) {
+    const transport = String(args.transport || "").trim();
+    const wamId = String(args.wamId || "").trim();
+    const awaitsProviderAck = transport === "web_bridge" && !!wamId;
+    const deliveryUnconfirmed = transport === "web_bridge" && !wamId;
+
+    return {
+        awaitsProviderAck,
+        deliveryUnconfirmed,
+        messageStatus: deliveryUnconfirmed
+            ? "delivery_unconfirmed"
+            : awaitsProviderAck
+                ? "dispatch_accepted"
+                : "sent",
+        outboxStatus: deliveryUnconfirmed
+            ? "delivery_unconfirmed"
+            : awaitsProviderAck
+                ? "dispatch_accepted"
+                : "completed",
+        processedAt: awaitsProviderAck ? null : new Date(),
+        lastError: deliveryUnconfirmed
+            ? "WhatsApp Web dispatch completed but did not return a provider message id; not retrying to avoid duplicate sends."
+            : null,
+    };
+}
+
 function normalizeError(error: unknown): string {
     if (error instanceof Error) return error.message;
     try {
@@ -188,9 +214,8 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             total_to_sent_ms: Number.isFinite(messageCreatedAtMs) ? Date.now() - messageCreatedAtMs : null,
         });
 
-        const awaitsProviderAck = transport === "web_bridge";
-        const messageStatus = awaitsProviderAck ? "dispatch_accepted" : "sent";
-        const outboxStatus = awaitsProviderAck ? "dispatch_accepted" : "completed";
+        const completionState = resolveWhatsAppOutboundCompletionState({ transport, wamId });
+        const { awaitsProviderAck, messageStatus, outboxStatus } = completionState;
         try {
             await (db as any).message.update({
                 where: { id: row.messageId },
@@ -204,10 +229,12 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         } catch (error) {
             if (!isUniqueConstraintError(error)) throw error;
 
-            const existingByWam = await db.message.findUnique({
-                where: { wamId },
-                select: { id: true },
-            });
+            const existingByWam = wamId
+                ? await db.message.findUnique({
+                    where: { wamId },
+                    select: { id: true },
+                })
+                : null;
             if (!existingByWam?.id) throw error;
 
             await db.message.update({
@@ -223,9 +250,9 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             where: { id: row.id },
             data: {
                 status: outboxStatus,
-                processedAt: awaitsProviderAck ? null : new Date(),
+                processedAt: completionState.processedAt,
                 attemptCount,
-                lastError: null,
+                lastError: completionState.lastError,
                 lockedAt: null,
                 lockedBy: null,
             },
@@ -247,11 +274,12 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 providerAccountId,
                 providerMessageId: wamId,
                 providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
-                status: "synced",
+                status: completionState.deliveryUnconfirmed ? "pending" : "synced",
                 remoteUpdatedAt: new Date(),
                 lastSyncedAt: new Date(),
                 metadata: {
                     transport,
+                    deliveryUnconfirmed: completionState.deliveryUnconfirmed,
                     pricingIntent: payload?.pricingIntent || null,
                     templateName: payload?.templateName || null,
                     templateLanguage: payload?.templateLanguage || null,
@@ -261,12 +289,13 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             update: {
                 providerMessageId: wamId,
                 providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
-                status: "synced",
+                status: completionState.deliveryUnconfirmed ? "pending" : "synced",
                 remoteUpdatedAt: new Date(),
                 lastSyncedAt: new Date(),
                 lastError: null,
                 metadata: {
                     transport,
+                    deliveryUnconfirmed: completionState.deliveryUnconfirmed,
                     pricingIntent: payload?.pricingIntent || null,
                     templateName: payload?.templateName || null,
                     templateLanguage: payload?.templateLanguage || null,
