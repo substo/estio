@@ -69,6 +69,28 @@ export type WebBridgeMediaState = {
         updatedAt?: string | null;
         finishedAt?: string | null;
     } | null;
+    group?: {
+        kind?: "image_album" | string | null;
+        count?: number | null;
+        messageIds?: string[] | null;
+        items?: Array<{
+            messageId?: string | null;
+            wamId?: string | null;
+            status?: string | null;
+            reason?: string | null;
+            error?: string | null;
+            meta?: {
+                mimetype?: string | null;
+                filename?: string | null;
+                size?: number | null;
+                type?: string | null;
+                caption?: string | null;
+                attemptedDownload?: boolean | null;
+                inlined?: boolean | null;
+            } | null;
+            updatedAt?: string | null;
+        }> | null;
+    } | null;
     updatedAt?: string | null;
 } | null;
 

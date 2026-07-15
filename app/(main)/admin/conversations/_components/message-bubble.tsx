@@ -273,11 +273,17 @@ export function MessageBubble({
 
         setIsRefetchingMedia(true);
         try {
-            await Promise.resolve(onRefetchMedia(message.id));
+            const groupedMessageIds = Array.isArray(webBridgeMedia?.group?.messageIds)
+                ? webBridgeMedia.group.messageIds.filter(Boolean)
+                : [];
+            const messageIds = groupedMessageIds.length > 0 ? groupedMessageIds : [message.id];
+            for (const messageId of messageIds) {
+                await Promise.resolve(onRefetchMedia(messageId));
+            }
         } finally {
             setIsRefetchingMedia(false);
         }
-    }, [isMediaRefetchInProgress, isRefetchingMedia, message.id, onRefetchMedia]);
+    }, [isMediaRefetchInProgress, isRefetchingMedia, message.id, onRefetchMedia, webBridgeMedia?.group?.messageIds]);
 
     const isTranscriptExpanded = useCallback((attachmentId?: string, fallbackIndex?: number) => {
         const key = attachmentId || `${message.id}:audio:${fallbackIndex || 0}`;

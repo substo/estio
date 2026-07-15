@@ -60,6 +60,98 @@ function resolveMessageDisplayBody(message: any) {
     return "";
 }
 
+const WEB_BRIDGE_IMAGE_ALBUM_GROUP_WINDOW_MS = 10_000;
+const WEB_BRIDGE_MEDIA_PLACEHOLDER_BODIES = new Set(["[Image]", "[Media]"]);
+
+function isWebBridgeImageMediaPlaceholder(message: any) {
+    const webBridgeMedia = message?.webBridgeMedia || null;
+    if (!webBridgeMedia || String(webBridgeMedia.status || "") === "stored") return false;
+    if (String(message?.source || "") !== "whatsapp_web_bridge") return false;
+    if (!String(message?.type || "").toUpperCase().includes("WHATSAPP")) return false;
+    if (Array.isArray(message?.attachments) && message.attachments.length > 0) return false;
+
+    const meta = webBridgeMedia.meta || {};
+    const metaType = String(meta.type || "").toLowerCase();
+    const mimeType = String(meta.mimetype || "").toLowerCase();
+    const body = String(message?.body || "").trim();
+    return metaType === "image" || mimeType.startsWith("image/") || WEB_BRIDGE_MEDIA_PLACEHOLDER_BODIES.has(body);
+}
+
+function getMessageTimestampMs(message: any) {
+    const value = message?.dateAdded instanceof Date
+        ? message.dateAdded.getTime()
+        : new Date(message?.dateAdded || 0).getTime();
+    return Number.isFinite(value) ? value : 0;
+}
+
+function getAlbumRepresentative(group: any[]) {
+    return group.find((message) => {
+        const body = String(message?.body || "").trim();
+        return body && !WEB_BRIDGE_MEDIA_PLACEHOLDER_BODIES.has(body);
+    }) || group[0];
+}
+
+function serializeWebBridgeMediaAlbum(group: any[]) {
+    const representative = getAlbumRepresentative(group);
+    const items = group.map((message) => ({
+        messageId: message.id,
+        wamId: message.wamId || null,
+        status: message.webBridgeMedia?.status || null,
+        reason: message.webBridgeMedia?.reason || null,
+        error: message.webBridgeMedia?.error || null,
+        meta: message.webBridgeMedia?.meta || null,
+        updatedAt: message.webBridgeMedia?.updatedAt || null,
+    }));
+
+    return {
+        ...representative,
+        webBridgeMedia: {
+            ...(representative.webBridgeMedia || {}),
+            group: {
+                kind: "image_album",
+                count: group.length,
+                messageIds: group.map((message) => message.id),
+                items,
+            },
+        },
+    };
+}
+
+export function groupWebBridgeImageMediaPlaceholdersForDisplay<T extends Record<string, any>>(messages: T[]): T[] {
+    const output: T[] = [];
+    let pending: T[] = [];
+
+    const flush = () => {
+        if (pending.length === 0) return;
+        output.push((pending.length > 1 ? serializeWebBridgeMediaAlbum(pending) : pending[0]) as T);
+        pending = [];
+    };
+
+    for (const message of messages || []) {
+        if (!isWebBridgeImageMediaPlaceholder(message)) {
+            flush();
+            output.push(message);
+            continue;
+        }
+
+        const previous = pending[pending.length - 1];
+        const sameAlbum = previous
+            && previous.direction === message.direction
+            && Math.abs(getMessageTimestampMs(message) - getMessageTimestampMs(previous)) <= WEB_BRIDGE_IMAGE_ALBUM_GROUP_WINDOW_MS;
+
+        if (!previous || sameAlbum) {
+            pending.push(message);
+            continue;
+        }
+
+        flush();
+        pending.push(message);
+    }
+
+    flush();
+    return output;
+}
+
 async function parseStoredVCardAttachmentContacts(attachment: {
     url?: string | null;
     contentType?: string | null;
@@ -491,6 +583,7 @@ export async function fetchMessagesForResolvedConversation(args: {
             html: m.body?.includes("<") ? m.body : undefined
         };
     }));
+    const displayMessages = groupWebBridgeImageMediaPlaceholdersForDisplay(serializedMessages);
     markTiming("serialize_ms", serializeStartedAtMs);
 
     const attachmentCount = messages.reduce((count: number, message: any) => (
@@ -517,7 +610,7 @@ export async function fetchMessagesForResolvedConversation(args: {
         ensureHistory,
         reusedConversationContext: args.reusedConversationContext,
         activeRefreshMessageLimit: refreshMode === "active_refresh" ? boundedTake : undefined,
-        returnedMessageCount: messages.length,
+        returnedMessageCount: displayMessages.length,
         message_count: messages.length,
         attachment_count: attachmentCount,
         transcript_count: transcriptCount,
@@ -529,5 +622,5 @@ export async function fetchMessagesForResolvedConversation(args: {
         ...timings,
     }));
 
-    return serializedMessages;
+    return displayMessages;
 }

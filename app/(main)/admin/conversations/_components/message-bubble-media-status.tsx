@@ -38,6 +38,16 @@ function MessageBubbleMediaStatusComponent({
     const isRefetchInProgress = refetchStatus === "queued" || refetchStatus === "processing";
     const refetchStageLabel = formatMediaRefetchStage(webBridgeMedia?.refetch?.stage);
     const refetchError = webBridgeMedia?.refetch?.error || null;
+    const mediaGroupCount = Math.max(0, Number(webBridgeMedia?.group?.count || 0));
+    const unavailableTitle = mediaGroupCount > 1
+        ? `${mediaGroupCount} images not stored`
+        : "Media not stored";
+    const mediaGroupItems = Array.isArray(webBridgeMedia?.group?.items)
+        ? webBridgeMedia.group.items.slice(0, 4)
+        : [];
+    const mediaGroupOverflow = mediaGroupCount > mediaGroupItems.length
+        ? mediaGroupCount - mediaGroupItems.length
+        : 0;
 
     return (
         <>
@@ -87,10 +97,23 @@ function MessageBubbleMediaStatusComponent({
                         <div className="flex items-start gap-2">
                             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <div className="min-w-0 space-y-0.5">
-                                <div className="font-medium">Media not stored</div>
+                                <div className="font-medium">{unavailableTitle}</div>
                                 <div className="break-words">
                                     {webBridgeMedia.error || webBridgeMedia.reason || "WhatsApp sent media, but Estio could not store the attachment yet."}
                                 </div>
+                                {mediaGroupItems.length > 1 && (
+                                    <div className={cn("mt-1 space-y-0.5", theme.mediaUnavailableMutedTextClassName)}>
+                                        {mediaGroupItems.map((item, index) => (
+                                            <div key={item.messageId || item.wamId || index} className="truncate">
+                                                Image {index + 1}: {item.error || item.reason || item.status || "not stored"}
+                                                {item.meta?.size ? ` · ${formatBytes(item.meta.size)}` : ""}
+                                            </div>
+                                        ))}
+                                        {mediaGroupOverflow > 0 && (
+                                            <div>+{mediaGroupOverflow} more</div>
+                                        )}
+                                    </div>
+                                )}
                                 {(webBridgeMedia.meta?.filename || webBridgeMedia.meta?.mimetype) && (
                                     <div className={cn("truncate", theme.mediaUnavailableMutedTextClassName)}>
                                         {[webBridgeMedia.meta?.filename, webBridgeMedia.meta?.mimetype].filter(Boolean).join(" · ")}
@@ -135,6 +158,13 @@ function MessageBubbleMediaStatusComponent({
 }
 
 export const MessageBubbleMediaStatus = memo(MessageBubbleMediaStatusComponent);
+
+function formatBytes(value: number) {
+    if (!Number.isFinite(value) || value <= 0) return "";
+    if (value < 1024) return `${Math.round(value)} B`;
+    if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function formatMediaRefetchStage(stage?: string | null) {
     switch (stage) {
