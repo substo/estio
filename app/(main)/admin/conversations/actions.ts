@@ -10586,10 +10586,15 @@ export async function startNewConversation(phone: string) {
     const requestedLid = isRequestedLid ? requestedIdentity : "";
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedIdentity);
 
-    // Normalize phone to E.164
-    let normalizedPhone = isRequestedLid || isEmail ? "" : phone.replace(/\s+/g, '').replace(/[-()]/g, '');
+    // Normalize phone to E.164 using the same libphonenumber path as Paste Lead.
+    const phoneNormalization = isRequestedLid || isEmail
+        ? null
+        : normalizeInternationalPhone(requestedIdentity);
+    let normalizedPhone = isRequestedLid || isEmail
+        ? ""
+        : phoneNormalization?.formatted || requestedIdentity.replace(/\s+/g, '').replace(/[-()]/g, '');
     if (normalizedPhone && !normalizedPhone.startsWith('+')) {
-        normalizedPhone = `+${normalizedPhone}`;
+        normalizedPhone = `+${normalizedPhone.replace(/\D/g, '')}`;
     }
 
     const rawDigits = normalizedPhone.replace(/\D/g, '');

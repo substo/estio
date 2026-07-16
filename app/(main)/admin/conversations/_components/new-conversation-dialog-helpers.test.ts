@@ -19,8 +19,16 @@ import {
     shouldShowHistoryBackfillQueuedToast,
 } from './new-conversation-dialog-helpers';
 
-test('normalizes manual start input by trimming only', () => {
-    assert.equal(normalizeNewConversationStartInput('  +357 99 045 511  '), '+357 99 045 511');
+test('normalizes manual phone starts to E.164 like Paste Lead', () => {
+    assert.equal(normalizeNewConversationStartInput('  +357 99 045 511  '), '+35799045511');
+    assert.equal(normalizeNewConversationStartInput('357 99 045 511'), '+35799045511');
+    assert.equal(normalizeNewConversationStartInput('99 045 511'), '+35799045511');
+    assert.equal(normalizeNewConversationStartInput('00357 99 045 511'), '+35799045511');
+});
+
+test('keeps non-phone manual conversation identities intact', () => {
+    assert.equal(normalizeNewConversationStartInput('  lead@example.com  '), 'lead@example.com');
+    assert.equal(normalizeNewConversationStartInput('  12345@lid  '), '12345@lid');
 });
 
 test('resolves WhatsApp chat identity using existing priority', () => {

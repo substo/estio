@@ -21,6 +21,16 @@ export function useNewConversationPhone(args: {
     const [phoneInput, setPhoneInput] = useState('');
     const [creatingPhone, setCreatingPhone] = useState(false);
 
+    const updatePhoneInput = useCallback((value: string) => {
+        const normalized = normalizeNewConversationStartInput(value);
+        const digitCount = value.replace(/\D/g, '').length;
+        setPhoneInput(
+            normalized.startsWith('+') && digitCount >= 7
+                ? normalized
+                : value
+        );
+    }, []);
+
     const startByPhone = useCallback(async () => {
         const input = normalizeNewConversationStartInput(phoneInput);
         if (!input) return;
@@ -56,7 +66,7 @@ export function useNewConversationPhone(args: {
 
     return {
         phoneInput,
-        setPhoneInput,
+        setPhoneInput: updatePhoneInput,
         creatingPhone,
         startByPhone,
         resetPhone,

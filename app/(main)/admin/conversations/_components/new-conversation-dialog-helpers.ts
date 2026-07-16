@@ -2,6 +2,7 @@ import {
     createPasteLeadStatus,
     type PasteLeadImportStatus,
 } from '@/lib/conversations/paste-lead-status';
+import { normalizeInternationalPhone } from '@/lib/utils/phone';
 
 type RecoverableParsedLead = {
     contact?: {
@@ -65,7 +66,12 @@ export type NewConversationCreatedResult = {
 };
 
 export function normalizeNewConversationStartInput(input: string) {
-    return input.trim();
+    const trimmed = input.trim();
+    if (!trimmed) return '';
+    if (/@lid$/i.test(trimmed) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return trimmed;
+
+    const normalized = normalizeInternationalPhone(trimmed);
+    return normalized.formatted || trimmed;
 }
 
 export function buildNewConversationResultError(
