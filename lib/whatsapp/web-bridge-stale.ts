@@ -30,7 +30,11 @@ export function isWhatsAppWebBridgeRecoverableMediaError(error: unknown) {
         || isWhatsAppWebBridgeStaleError(error);
 }
 
-export function shouldRestartWhatsAppWebBridgeSession(error: unknown, options?: { isolateMediaFetch?: boolean }) {
+export function shouldRestartWhatsAppWebBridgeSession(
+    error: unknown,
+    options?: { isolateMediaFetch?: boolean; recoverBridgeFetch?: boolean },
+) {
     if (options?.isolateMediaFetch) return false;
+    if (options?.recoverBridgeFetch && isWhatsAppWebBridgeRecoverableMediaError(error)) return true;
     return isWhatsAppWebBridgeStaleError(error);
 }
