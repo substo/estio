@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     getMessageBubbleTranslationToggleLabel,
     getOutboundTranslationDisplayMode,
+    getResolvedMessageTranslationViewMode,
     isManualSendPreviewTranslation,
 } from "./message-bubble-body";
 
@@ -39,6 +40,27 @@ test("outbound manual send preview toggles between sent and source", () => {
     }), "Show source");
 });
 
+test("outbound manual send preview ignores translated thread default until explicitly toggled", () => {
+    assert.equal(getResolvedMessageTranslationViewMode({
+        isOutbound: true,
+        activeTranslation: manualPreviewTranslation,
+        translationViewMode: "thread",
+        threadTranslationMode: "translated",
+    }), "original");
+    assert.equal(getMessageBubbleTranslationToggleLabel({
+        isOutbound: true,
+        activeTranslation: manualPreviewTranslation,
+        translationViewMode: "thread",
+        threadTranslationMode: "translated",
+    }), "Show source");
+    assert.equal(getResolvedMessageTranslationViewMode({
+        isOutbound: true,
+        activeTranslation: manualPreviewTranslation,
+        translationViewMode: "translated",
+        threadTranslationMode: "translated",
+    }), "translated");
+});
+
 test("outbound normal translation toggles between sent and translated meaning", () => {
     assert.equal(isManualSendPreviewTranslation(normalTranslation), false);
     assert.equal(getOutboundTranslationDisplayMode(normalTranslation, "original"), "sent");
@@ -50,4 +72,3 @@ test("outbound normal translation toggles between sent and translated meaning", 
         threadTranslationMode: "original",
     }), "Show translation");
 });
-

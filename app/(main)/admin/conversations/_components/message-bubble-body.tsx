@@ -50,7 +50,12 @@ export function getMessageBubbleTranslationToggleLabel({
     translationViewMode,
     threadTranslationMode,
 }: Pick<MessageBubbleTranslationActionsProps, "isOutbound" | "activeTranslation" | "translationViewMode" | "threadTranslationMode">) {
-    const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
+    const effectiveViewMode = getResolvedMessageTranslationViewMode({
+        isOutbound,
+        activeTranslation,
+        translationViewMode,
+        threadTranslationMode,
+    });
     if (isOutbound) {
         if (isManualSendPreviewTranslation(activeTranslation)) {
             return effectiveViewMode === "translated" ? "Show sent" : "Show source";
@@ -64,6 +69,22 @@ export function isManualSendPreviewTranslation(activeTranslation: MessageTransla
     const provider = String(activeTranslation?.provider || "").trim();
     const model = String(activeTranslation?.model || "").trim();
     return provider === "manual_send_preview" || model === "manual_send_preview";
+}
+
+export function getResolvedMessageTranslationViewMode({
+    isOutbound,
+    activeTranslation,
+    translationViewMode,
+    threadTranslationMode,
+}: Pick<MessageBubbleTranslationActionsProps, "isOutbound" | "activeTranslation" | "translationViewMode" | "threadTranslationMode">): "original" | "translated" {
+    if (
+        translationViewMode === "thread"
+        && isOutbound
+        && isManualSendPreviewTranslation(activeTranslation)
+    ) {
+        return "original";
+    }
+    return translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
 }
 
 export function getOutboundTranslationDisplayMode(
@@ -86,7 +107,12 @@ export function MessageBubbleBody({
     onEmailSelectionChange,
 }: MessageBubbleBodyProps) {
     const isRichHtml = body ? isRichHtmlBody(body) : false;
-    const effectiveViewMode = translationViewMode === "thread" ? threadTranslationMode : translationViewMode;
+    const effectiveViewMode = getResolvedMessageTranslationViewMode({
+        isOutbound,
+        activeTranslation,
+        translationViewMode,
+        threadTranslationMode,
+    });
     const translatedText = String(activeTranslation?.translatedText || "").trim();
     const showTranslatedText = !isOutbound && !!translatedText && effectiveViewMode === "translated";
     const sourceText = isOutbound && activeTranslation?.sourceText

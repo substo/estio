@@ -29,7 +29,11 @@ import { MessageImageAttachments } from "./message-image-attachments";
 import { MessageVideoAttachments } from "./message-video-attachments";
 import { MessageSharedContactCards } from "./message-shared-contact-cards";
 import { MessageBubbleActionsMenu, useMessageBubbleActions } from "./message-bubble-actions-menu";
-import { MessageBubbleBody, MessageBubbleTranslationActions } from "./message-bubble-body";
+import {
+    getResolvedMessageTranslationViewMode,
+    MessageBubbleBody,
+    MessageBubbleTranslationActions,
+} from "./message-bubble-body";
 import { getMessageLinkPreviewCandidate } from "./message-link-preview-actions";
 import { MessageLinkPreviewCard } from "./message-link-preview-card";
 import {
@@ -364,10 +368,15 @@ export function MessageBubble({
 
     const handleToggleTranslationViewMode = useCallback(() => {
         setTranslationViewMode((current) => {
-            const effectiveViewMode = current === "thread" ? threadTranslationMode : current;
+            const effectiveViewMode = getResolvedMessageTranslationViewMode({
+                isOutbound,
+                activeTranslation,
+                translationViewMode: current,
+                threadTranslationMode,
+            });
             return effectiveViewMode === "translated" ? "original" : "translated";
         });
-    }, [threadTranslationMode]);
+    }, [activeTranslation, isOutbound, threadTranslationMode]);
     const handleEmailExpandToggle = useCallback(() => {
         setIsExpanded((current) => !current);
     }, []);
