@@ -455,7 +455,7 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
         where: {
             conversationId: args.conversationId,
             direction: "outbound",
-            source: "app_user",
+            source: { in: ["app_user", "scheduled_message"] },
             OR: [
                 { wamId: null },
                 { status: { in: ["dispatch_accepted", "delivery_unconfirmed"] } },
@@ -814,7 +814,7 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
     const candidates = await (db as any).message.findMany({
         where: {
             direction: "outbound",
-            source: "app_user",
+            source: { in: ["app_user", "scheduled_message"] },
             OR: [
                 { wamId: null },
                 { status: { in: ["dispatch_accepted", "delivery_unconfirmed"] } },

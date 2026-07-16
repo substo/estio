@@ -35,6 +35,7 @@ type RealtimeEnvelopeRoutingArgs = {
     applyRealtimeMessagePatch: (conversationId: string | null | undefined, payload: Record<string, unknown>) => boolean;
     upsertActivityEntryInWorkspace: (conversationId: string | null | undefined, activityEntry: ActivityTimelineItem | null | undefined) => void;
     removeActivityEntryFromWorkspace: (conversationId: string | null | undefined, activityId: string | null | undefined) => void;
+    onScheduledMessagesChanged?: (conversationId: string | null | undefined) => void;
     prefetchWorkspaceCore: (conversationId: string) => Promise<void>;
     getCachedWorkspaceCoreSnapshot: (conversationId: string) => any | null;
     cacheWorkspaceCoreSnapshot: (conversationId: string, snapshot: any) => void;
@@ -67,6 +68,7 @@ export function routeConversationRealtimeEnvelope({
     applyRealtimeMessagePatch,
     upsertActivityEntryInWorkspace,
     removeActivityEntryFromWorkspace,
+    onScheduledMessagesChanged,
     prefetchWorkspaceCore,
     getCachedWorkspaceCoreSnapshot,
     cacheWorkspaceCoreSnapshot,
@@ -108,6 +110,12 @@ export function routeConversationRealtimeEnvelope({
         if (patched) return;
 
         // Fallback consistency repair for unknown message ids.
+        runEventDrivenRefresh(conversationId);
+        return;
+    }
+
+    if (viewMode === "chats" && conversationId && eventType.startsWith("scheduled_message.")) {
+        onScheduledMessagesChanged?.(conversationId);
         runEventDrivenRefresh(conversationId);
         return;
     }
@@ -258,6 +266,7 @@ export function useConversationRealtimeEvents({
                         applyRealtimeMessagePatch,
                         upsertActivityEntryInWorkspace,
                         removeActivityEntryFromWorkspace,
+                        onScheduledMessagesChanged,
                         prefetchWorkspaceCore,
                     getCachedWorkspaceCoreSnapshot,
                     cacheWorkspaceCoreSnapshot,

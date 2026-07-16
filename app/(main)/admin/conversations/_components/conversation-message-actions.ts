@@ -156,12 +156,12 @@ export function deriveOutboundWhatsAppUiState(message: {
 
     if (status === "delivery_unconfirmed" || outboxStatus === "delivery_unconfirmed") {
         return {
-            label: "Delivery unconfirmed",
-            tone: "warning",
-            icon: "alert",
-            detail: lastError || "WhatsApp accepted the send, but delivery was not confirmed.",
+            label: "Sent, confirming",
+            tone: "info",
+            icon: "send",
+            detail: "WhatsApp accepted the send. Waiting for confirmation.",
             showSpinner: false,
-            canResend: true,
+            canResend: false,
             canSmsFallback: false,
             scheduledAt,
             retryAttempt,

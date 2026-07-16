@@ -46,6 +46,9 @@ function createHarness(overrides?: {
         removeActivityEntryFromWorkspace: (conversationId, activityId) => {
             calls.push(`activity-delete:${conversationId}:${activityId || ''}`);
         },
+        onScheduledMessagesChanged: (conversationId) => {
+            calls.push(`scheduled:${conversationId || ''}`);
+        },
         prefetchWorkspaceCore: async (conversationId: string) => {
             calls.push(`prefetch:${conversationId}`);
         },
@@ -164,6 +167,20 @@ test('message.status patch miss triggers refresh', () => {
     });
 
     assert.deepEqual(harness.calls, ['patch:conv-1:msg-1', 'refresh:conv-1']);
+});
+
+test('scheduled message event refreshes active scheduled state and timeline', () => {
+    const harness = createHarness();
+
+    harness.route({
+        id: 'evt-scheduled-sent',
+        type: 'scheduled_message.sent',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:00.000Z',
+        payload: { scheduledMessageId: 'sched-1' },
+    });
+
+    assert.deepEqual(harness.calls, ['scheduled:conv-1', 'refresh:conv-1']);
 });
 
 test('activity.created with entry upserts without refresh', () => {

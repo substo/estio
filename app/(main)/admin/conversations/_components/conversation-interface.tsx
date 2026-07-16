@@ -352,6 +352,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const conversationsRef = useRef<Conversation[]>(initialConversations);
     const [messages, setMessages] = useState<Message[]>([]);
     const messagesRef = useRef<Message[]>([]);
+    const [scheduledMessagesRefreshToken, setScheduledMessagesRefreshToken] = useState(0);
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [chatTimelineInitialPainted, setChatTimelineInitialPainted] = useState(false);
     const messageSignatureRef = useRef<string>('0');
@@ -1482,6 +1483,11 @@ export function ConversationInterface({ locationId, initialConversations, initia
         applyRealtimeMessagePatch,
         upsertActivityEntryInWorkspace,
         removeActivityEntryFromWorkspace,
+        onScheduledMessagesChanged: (conversationId) => {
+            if (conversationId && conversationId === activeIdRef.current) {
+                setScheduledMessagesRefreshToken((value) => value + 1);
+            }
+        },
         prefetchWorkspaceCore,
         getCachedWorkspaceCoreSnapshot,
         cacheWorkspaceCoreSnapshot,
@@ -3081,6 +3087,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             suggestions={[...(activeConversation?.suggestedActions || []), ...suggestions]}
             suggestedResponseQueue={suggestedResponseQueue}
             suggestedResponseQueueLoading={loadingSuggestedResponseQueue}
+            scheduledMessagesRefreshToken={scheduledMessagesRefreshToken}
             onAcceptSuggestedResponse={handleAcceptSuggestedResponse}
             onRejectSuggestedResponse={handleRejectSuggestedResponse}
             composerInsertSeed={composerInsertSeed}

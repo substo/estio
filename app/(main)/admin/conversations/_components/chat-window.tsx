@@ -125,6 +125,7 @@ interface ChatWindowProps {
     onActivityEntryDeleted?: (activityId: string) => void;
     suggestedResponseQueue?: SuggestedResponseQueueItem[];
     suggestedResponseQueueLoading?: boolean;
+    scheduledMessagesRefreshToken?: number;
     onAcceptSuggestedResponse?: (id: string, mode: "insertOnly" | "sendNow") => Promise<void>;
     onRejectSuggestedResponse?: (id: string, reason?: string | null) => Promise<void>;
     composerDraft: string;
@@ -147,6 +148,7 @@ import {
     parseDatetimeLocalValue,
     toScheduledLocalInput,
 } from "./scheduled-message-time";
+import { LinkifiedText } from "./linkified-text";
 
 type ScheduledMessageItem = {
     id: string;
@@ -213,6 +215,7 @@ export function ChatWindow({
     onActivityEntryDeleted,
     suggestedResponseQueue = [],
     suggestedResponseQueueLoading = false,
+    scheduledMessagesRefreshToken = 0,
     onAcceptSuggestedResponse,
     onRejectSuggestedResponse,
     composerDraft,
@@ -351,7 +354,7 @@ export function ChatWindow({
 
     useEffect(() => {
         void loadScheduledMessages();
-    }, [loadScheduledMessages]);
+    }, [loadScheduledMessages, scheduledMessagesRefreshToken]);
 
     const handleScheduleMessage = useCallback(async (args: {
         body: string;
@@ -1080,7 +1083,9 @@ export function ChatWindow({
                                                 </div>
                                             ) : (
                                                 <>
-                                                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-800 dark:text-slate-100">{item.body}</p>
+                                                    <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-800 dark:text-slate-100">
+                                                        <LinkifiedText text={item.body} linkClassName="text-sky-700 dark:text-sky-300" />
+                                                    </p>
                                                     {item.lastError && (
                                                         <div className="mt-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
                                                             {item.lastError}

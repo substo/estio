@@ -62,6 +62,7 @@ function resolveMessageDisplayBody(message: any) {
 
 const WEB_BRIDGE_IMAGE_ALBUM_GROUP_WINDOW_MS = 10_000;
 const WEB_BRIDGE_MEDIA_PLACEHOLDER_BODIES = new Set(["[Image]", "[Media]"]);
+const WEB_BRIDGE_SCHEDULED_ECHO_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 
 function isWebBridgeImageMediaPlaceholder(message: any) {
     const webBridgeMedia = message?.webBridgeMedia || null;
@@ -80,8 +81,55 @@ function isWebBridgeImageMediaPlaceholder(message: any) {
 function getMessageTimestampMs(message: any) {
     const value = message?.dateAdded instanceof Date
         ? message.dateAdded.getTime()
-        : new Date(message?.dateAdded || 0).getTime();
+        : message?.createdAt instanceof Date
+            ? message.createdAt.getTime()
+            : new Date(message?.dateAdded || message?.createdAt || 0).getTime();
     return Number.isFinite(value) ? value : 0;
+}
+
+function normalizeMessageBodyForDedupe(value: unknown) {
+    return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function isUnconfirmedScheduledWhatsAppPlaceholder(message: any) {
+    const status = String(message?.status || "").toLowerCase();
+    const outboxStatus = String(message?.outboundWhatsAppOutbox?.status || "").toLowerCase();
+    return String(message?.direction || "") === "outbound"
+        && String(message?.source || "") === "scheduled_message"
+        && !String(message?.wamId || "").trim()
+        && (status === "delivery_unconfirmed" || outboxStatus === "delivery_unconfirmed");
+}
+
+function isConfirmedWebBridgeEcho(message: any) {
+    return String(message?.direction || "") === "outbound"
+        && String(message?.source || "") === "whatsapp_web_bridge"
+        && !!String(message?.wamId || "").trim();
+}
+
+export function hideDuplicateScheduledWebBridgeEchoesForDisplay<T extends Record<string, any>>(messages: T[]): T[] {
+    const confirmedEchoes = (messages || [])
+        .filter(isConfirmedWebBridgeEcho)
+        .map((message) => ({
+            body: normalizeMessageBodyForDedupe(message.body),
+            timestampMs: getMessageTimestampMs(message),
+        }))
+        .filter((message) => message.body && message.timestampMs > 0);
+
+    if (confirmedEchoes.length === 0) return messages;
+
+    return (messages || []).filter((message) => {
+        if (!isUnconfirmedScheduledWhatsAppPlaceholder(message)) return true;
+
+        const body = normalizeMessageBodyForDedupe(message.body);
+        const timestampMs = getMessageTimestampMs(message);
+        if (!body || timestampMs <= 0) return true;
+
+        return !confirmedEchoes.some((echo) => (
+            echo.body === body
+            && echo.timestampMs >= timestampMs
+            && echo.timestampMs - timestampMs <= WEB_BRIDGE_SCHEDULED_ECHO_DEDUPE_WINDOW_MS
+        ));
+    });
 }
 
 function getAlbumRepresentative(group: any[]) {
@@ -392,7 +440,7 @@ export async function fetchMessagesForResolvedConversation(args: {
     });
     markTiming("query_ms", queryStartedAtMs);
 
-    const messages = readDescending ? [...messageRows].reverse() : messageRows;
+    const messages = hideDuplicateScheduledWebBridgeEchoesForDisplay(readDescending ? [...messageRows].reverse() : messageRows);
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
 
     const hasEmailMessages = includeLegacyEmailMeta

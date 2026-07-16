@@ -41,6 +41,7 @@ import {
     getScheduleTimingWarning,
     parseDatetimeLocalValue,
 } from "./scheduled-message-time";
+import { LinkifiedText } from "./linkified-text";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -1246,7 +1247,9 @@ export function ConversationComposer({
                                                 ))}
                                             </div>
                                             <div className="max-h-32 overflow-y-auto rounded-md border bg-slate-50 p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-700">
-                                                {draft.trim() || "No message drafted."}
+                                                {draft.trim()
+                                                    ? <LinkifiedText text={draft.trim()} linkClassName="text-sky-700" />
+                                                    : "No message drafted."}
                                             </div>
                                             {!scheduleError && scheduleTimingWarning && (
                                                 <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">

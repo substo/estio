@@ -54,9 +54,9 @@ export function normalizeRealtimeMessagePatchPayload(payload: Record<string, unk
 }
 
 export function getRealtimeMessageSendState(status: string): "sending" | "failed" | "sent" {
-    return status === "sending" || status === "dispatch_accepted"
+    return status === "sending" || status === "dispatch_accepted" || status === "delivery_unconfirmed"
         ? "sending"
-        : status === "failed" || status === "delivery_unconfirmed"
+        : status === "failed"
             ? "failed"
             : "sent";
 }
