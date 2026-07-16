@@ -692,6 +692,31 @@ async function fetchMessages(sessionId: string, payload: any) {
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
     const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
+
+    if (targetMessageId && typeof session.client.getMessageById === "function") {
+        try {
+            const targetMessage = await withStaleRecovery(session, () => withTimeout(
+                session.client.getMessageById(targetMessageId),
+                OPERATION_TIMEOUT_MS,
+                `WhatsApp get message ${sessionId}`
+            ));
+            if (targetMessage) {
+                return [
+                    await withStaleRecovery(
+                        session,
+                        () => serializeMessage(targetMessage, { includeMedia }),
+                        includeMedia ? { isolateMediaFetch: true } : undefined,
+                    ),
+                ];
+            }
+        } catch (error: any) {
+            console.warn(
+                `[WhatsApp Web Bridge] Direct message lookup failed for ${targetMessageId}; falling back to chat scan:`,
+                error?.message || error,
+            );
+        }
+    }
+
     const messages = await withStaleRecovery(session, async () => {
         const chat = await withTimeout(
             session.client.getChatById(chatId),
