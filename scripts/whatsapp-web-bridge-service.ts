@@ -12,6 +12,7 @@ import {
 import {
     isWhatsAppWebBridgeRecoverableMediaError,
     isWhatsAppWebBridgeStaleError,
+    shouldRestartWhatsAppWebBridgeSession,
 } from "../lib/whatsapp/web-bridge-stale";
 import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
 
@@ -299,11 +300,15 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
     }
 }
 
-async function withStaleRecovery<T>(session: ManagedSession, operation: () => Promise<T>): Promise<T> {
+async function withStaleRecovery<T>(
+    session: ManagedSession,
+    operation: () => Promise<T>,
+    options?: { isolateMediaFetch?: boolean },
+): Promise<T> {
     try {
         return await operation();
     } catch (error) {
-        if (isWhatsAppWebBridgeStaleError(error)) {
+        if (shouldRestartWhatsAppWebBridgeSession(error, options)) {
             await restartStaleSession(session, error);
         }
         throw error;
@@ -436,10 +441,6 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing media data`);
             }
         } catch (error: any) {
-            if (isWhatsAppWebBridgeStaleError(error)) {
-                const session = Array.from(sessions.values()).find((item) => item.client === message?.client);
-                if (session) void restartStaleSession(session, error);
-            }
             serialized.mediaError = {
                 code: "download_failed",
                 message: error?.message || "Failed to download media.",
@@ -691,6 +692,7 @@ async function fetchMessages(sessionId: string, payload: any) {
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
     const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
+    const staleRecoveryOptions = includeMedia ? { isolateMediaFetch: true } : undefined;
     const messages = await withStaleRecovery(session, async () => {
         const chat = await withTimeout(
             session.client.getChatById(chatId),
@@ -702,10 +704,14 @@ async function fetchMessages(sessionId: string, payload: any) {
             OPERATION_TIMEOUT_MS,
             `WhatsApp fetch messages ${sessionId}`
         );
-    });
+    }, staleRecoveryOptions);
     return Promise.all((messages || []).map((message: any) => {
         const shouldIncludeMedia = includeMedia && (!targetMessageId || getSerializedMessageId(message) === targetMessageId);
-        return withStaleRecovery(session, () => serializeMessage(message, { includeMedia: shouldIncludeMedia }));
+        return withStaleRecovery(
+            session,
+            () => serializeMessage(message, { includeMedia: shouldIncludeMedia }),
+            shouldIncludeMedia ? { isolateMediaFetch: true } : undefined,
+        );
     }));
 }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     isWhatsAppWebBridgeRecoverableMediaError,
     isWhatsAppWebBridgeStaleError,
+    shouldRestartWhatsAppWebBridgeSession,
 } from "./web-bridge-stale";
 
 test("isWhatsAppWebBridgeStaleError detects Puppeteer stale page failures", () => {
@@ -26,4 +27,22 @@ test("isWhatsAppWebBridgeRecoverableMediaError detects opaque WhatsApp Web media
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("WhatsApp Web session is not ready.")), true);
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Protocol error: Target closed")), true);
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Recipient is not on WhatsApp.")), false);
+});
+
+test("media fetch isolation does not restart the WhatsApp Web Bridge session", () => {
+    assert.equal(
+        shouldRestartWhatsAppWebBridgeSession(new Error("Protocol error (Runtime.callFunctionOn): Target closed.")),
+        true,
+    );
+    assert.equal(
+        shouldRestartWhatsAppWebBridgeSession(
+            new Error("Protocol error (Runtime.callFunctionOn): Target closed."),
+            { isolateMediaFetch: true },
+        ),
+        false,
+    );
+    assert.equal(
+        shouldRestartWhatsAppWebBridgeSession(new Error("r"), { isolateMediaFetch: true }),
+        false,
+    );
 });

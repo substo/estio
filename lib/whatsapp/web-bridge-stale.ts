@@ -29,3 +29,8 @@ export function isWhatsAppWebBridgeRecoverableMediaError(error: unknown) {
         || RECOVERABLE_MEDIA_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern))
         || isWhatsAppWebBridgeStaleError(error);
 }
+
+export function shouldRestartWhatsAppWebBridgeSession(error: unknown, options?: { isolateMediaFetch?: boolean }) {
+    if (options?.isolateMediaFetch) return false;
+    return isWhatsAppWebBridgeStaleError(error);
+}
