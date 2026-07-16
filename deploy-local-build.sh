@@ -22,6 +22,8 @@ WHATSAPP_BRIDGE_DEFAULT_PORT=3218
 WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
 WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
 WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
+WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS:-180}"
+WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS:-5}"
 REQUIRE_WHATSAPP_BRIDGE_READY="${REQUIRE_WHATSAPP_BRIDGE_READY:-false}"
 RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAMES="estio-whatsapp-browser-call-bridge estio-whatsapp-call-bridge"
 APP_REDIS_CONTAINER_NAME="${APP_REDIS_CONTAINER_NAME:-estio-redis}"
@@ -328,6 +330,9 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     WHATSAPP_BRIDGE_APP_NAME="$WHATSAPP_BRIDGE_APP_NAME"
     WHATSAPP_BRIDGE_DEFAULT_PORT="$WHATSAPP_BRIDGE_DEFAULT_PORT"
     WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT"
+    WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS="$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS"
+    WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS="$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS"
+    REQUIRE_WHATSAPP_BRIDGE_READY="$REQUIRE_WHATSAPP_BRIDGE_READY"
     RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAMES="$RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAMES"
     BLUE_PORT="$BLUE_PORT"
     GREEN_PORT="$GREEN_PORT"
@@ -658,6 +663,44 @@ NODE
         fi
     }
 
+    whatsapp_bridge_has_ready_session() {
+        BRIDGE_HEALTH_JSON="\$1" node <<-'NODE'
+const health = JSON.parse(process.env.BRIDGE_HEALTH_JSON || '{}');
+const sessions = Array.isArray(health.sessions) ? health.sessions : [];
+process.exit(sessions.some((session) => session && session.ready) ? 0 : 1);
+NODE
+    }
+
+    write_whatsapp_bridge_deploy_status() {
+        BRIDGE_HEALTH_JSON="\$1" BRIDGE_DEPLOY_STATUS="\$2" BRIDGE_STATE_FILE="\$DEPLOY_STATE_DIR/whatsapp-web-bridge-readiness.json" node <<-'NODE' || true
+const fs = require('fs');
+const health = JSON.parse(process.env.BRIDGE_HEALTH_JSON || '{}');
+const sessions = Array.isArray(health.sessions) ? health.sessions : [];
+const readySessions = sessions.filter((session) => session && session.ready);
+const payload = {
+    status: process.env.BRIDGE_DEPLOY_STATUS || 'unknown',
+    checkedAt: new Date().toISOString(),
+    ok: Boolean(health.ok),
+    sessionCount: sessions.length,
+    readySessionCount: readySessions.length,
+    sessionDir: health.sessionDir || null,
+    sessions: sessions.map((session) => ({
+        sessionId: session.sessionId || null,
+        locationId: session.locationId || null,
+        status: session.status || null,
+        ready: Boolean(session.ready),
+        phone: session.phone || null,
+        lastEventAt: session.lastEventAt || null,
+        lastReadyAt: session.lastReadyAt || null,
+        lastError: session.lastError || null,
+        lastWebhookSuccessAt: session.lastWebhookSuccessAt || null,
+        lastWebhookErrorAt: session.lastWebhookErrorAt || null,
+    })),
+};
+fs.writeFileSync(process.env.BRIDGE_STATE_FILE, JSON.stringify(payload, null, 2) + '\n');
+NODE
+    }
+
     echo "🧹 Enforcing WhatsApp Web Bridge PM2 singleton..."
     WHATSAPP_BRIDGE_SINGLETON_JSON=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" EXPECTED_CWD="\$SYMLINK_PATH" EXPECTED_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" EXPECTED_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" APPLY=1 node "\$SYMLINK_PATH/scripts/ops/whatsapp-bridge-pm2-singleton.js" 2>/dev/null || true)
     if [ -n "\$WHATSAPP_BRIDGE_SINGLETON_JSON" ]; then
@@ -719,11 +762,57 @@ NODE
         echo "⚠️  WhatsApp Web Bridge failed bounded health checks on :\$WHATSAPP_BRIDGE_PORT."
         pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" || true
         pm2 logs "\$WHATSAPP_BRIDGE_APP_NAME" --lines 120 --nostream || true
-        if [ "$REQUIRE_WHATSAPP_BRIDGE_READY" = "true" ]; then
+        write_whatsapp_bridge_deploy_status "\${BRIDGE_HEALTH_JSON:-{}}" "unreachable"
+        if [ "\$REQUIRE_WHATSAPP_BRIDGE_READY" = "true" ]; then
             echo "❌ REQUIRE_WHATSAPP_BRIDGE_READY=true, failing deploy."
             exit 1
         fi
         echo "⚠️  Continuing deploy because app cutover is healthy and bridge readiness is non-blocking."
+    fi
+
+    BRIDGE_SESSION_READY=0
+    if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
+        LAST_BRIDGE_HEALTH_JSON="\$BRIDGE_HEALTH_JSON"
+        if ! [[ "\$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS" =~ ^[0-9]+$ ]] || [ "\$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS" -lt 0 ]; then
+            WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS=180
+        fi
+        if ! [[ "\$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS" =~ ^[0-9]+$ ]] || [ "\$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS" -lt 1 ]; then
+            WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS=5
+        fi
+
+        echo "🩺 Waiting up to \$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS seconds for a ready WhatsApp Web session..."
+        ELAPSED_SECONDS=0
+        while [ "\$ELAPSED_SECONDS" -le "\$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS" ]; do
+            BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
+            if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
+                LAST_BRIDGE_HEALTH_JSON="\$BRIDGE_HEALTH_JSON"
+            fi
+            if [ -n "\$BRIDGE_HEALTH_JSON" ] && whatsapp_bridge_has_ready_session "\$BRIDGE_HEALTH_JSON"; then
+                BRIDGE_SESSION_READY=1
+                echo "✅ WhatsApp Web Bridge has at least one ready session"
+                break
+            fi
+            if [ "\$ELAPSED_SECONDS" -ge "\$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS" ]; then
+                break
+            fi
+            sleep "\$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS"
+            ELAPSED_SECONDS=\$((ELAPSED_SECONDS + WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS))
+        done
+
+        BRIDGE_HEALTH_JSON="\$LAST_BRIDGE_HEALTH_JSON"
+
+        if [ "\$BRIDGE_SESSION_READY" -eq 1 ]; then
+            write_whatsapp_bridge_deploy_status "\$BRIDGE_HEALTH_JSON" "ready"
+        else
+            write_whatsapp_bridge_deploy_status "\$BRIDGE_HEALTH_JSON" "degraded_no_ready_session"
+            echo "⚠️  WhatsApp Web Bridge service is reachable, but no WhatsApp session became ready during the deploy grace period."
+            echo "⚠️  Deploy status for this subsystem: degraded_no_ready_session. Details saved to \$DEPLOY_STATE_DIR/whatsapp-web-bridge-readiness.json"
+            if [ "\$REQUIRE_WHATSAPP_BRIDGE_READY" = "true" ]; then
+                echo "❌ REQUIRE_WHATSAPP_BRIDGE_READY=true, failing deploy because no WhatsApp session is ready."
+                exit 1
+            fi
+            echo "⚠️  Continuing deploy because app cutover is healthy and WhatsApp session readiness is non-blocking."
+        fi
     fi
 
     if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
