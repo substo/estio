@@ -63,6 +63,7 @@ function resolveMessageDisplayBody(message: any) {
 const WEB_BRIDGE_IMAGE_ALBUM_GROUP_WINDOW_MS = 10_000;
 const WEB_BRIDGE_MEDIA_PLACEHOLDER_BODIES = new Set(["[Image]", "[Media]"]);
 const WEB_BRIDGE_SCHEDULED_ECHO_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
+const WHATSAPP_FAILED_ATTEMPT_SUPERSEDE_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 function isWebBridgeImageMediaPlaceholder(message: any) {
     const webBridgeMedia = message?.webBridgeMedia || null;
@@ -89,6 +90,34 @@ function getMessageTimestampMs(message: any) {
 
 function normalizeMessageBodyForDedupe(value: unknown) {
     return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function getMessageOutboxStatus(message: any) {
+    return String(message?.outboundWhatsAppOutbox?.status || message?.outboxState?.status || "").toLowerCase();
+}
+
+function isOutboundWhatsApp(message: any) {
+    return String(message?.direction || "") === "outbound"
+        && String(message?.type || "").toUpperCase().includes("WHATSAPP");
+}
+
+function isFailedOutboundWhatsAppAttempt(message: any) {
+    const status = String(message?.status || "").toLowerCase();
+    const outboxStatus = getMessageOutboxStatus(message);
+    return isOutboundWhatsApp(message)
+        && !String(message?.wamId || "").trim()
+        && (status === "failed" || outboxStatus === "dead");
+}
+
+function isAcceptedOutboundWhatsAppSend(message: any) {
+    const status = String(message?.status || "").toLowerCase();
+    const outboxStatus = getMessageOutboxStatus(message);
+    return isOutboundWhatsApp(message)
+        && (
+            ["sent", "delivered", "read", "played", "dispatch_accepted", "delivery_unconfirmed"].includes(status)
+            || ["completed", "dispatch_accepted", "delivery_unconfirmed"].includes(outboxStatus)
+            || !!String(message?.wamId || "").trim()
+        );
 }
 
 function isUnconfirmedScheduledWhatsAppPlaceholder(message: any) {
@@ -128,6 +157,32 @@ export function hideDuplicateScheduledWebBridgeEchoesForDisplay<T extends Record
             echo.body === body
             && echo.timestampMs >= timestampMs
             && echo.timestampMs - timestampMs <= WEB_BRIDGE_SCHEDULED_ECHO_DEDUPE_WINDOW_MS
+        ));
+    });
+}
+
+export function hideSupersededFailedWhatsAppAttemptsForDisplay<T extends Record<string, any>>(messages: T[]): T[] {
+    const acceptedSends = (messages || [])
+        .filter(isAcceptedOutboundWhatsAppSend)
+        .map((message) => ({
+            body: normalizeMessageBodyForDedupe(message.body),
+            timestampMs: getMessageTimestampMs(message),
+        }))
+        .filter((message) => message.body && message.timestampMs > 0);
+
+    if (acceptedSends.length === 0) return messages;
+
+    return (messages || []).filter((message) => {
+        if (!isFailedOutboundWhatsAppAttempt(message)) return true;
+
+        const body = normalizeMessageBodyForDedupe(message.body);
+        const timestampMs = getMessageTimestampMs(message);
+        if (!body || timestampMs <= 0) return true;
+
+        return !acceptedSends.some((accepted) => (
+            accepted.body === body
+            && accepted.timestampMs >= timestampMs
+            && accepted.timestampMs - timestampMs <= WHATSAPP_FAILED_ATTEMPT_SUPERSEDE_WINDOW_MS
         ));
     });
 }
@@ -440,7 +495,9 @@ export async function fetchMessagesForResolvedConversation(args: {
     });
     markTiming("query_ms", queryStartedAtMs);
 
-    const messages = hideDuplicateScheduledWebBridgeEchoesForDisplay(readDescending ? [...messageRows].reverse() : messageRows);
+    const messages = hideSupersededFailedWhatsAppAttemptsForDisplay(
+        hideDuplicateScheduledWebBridgeEchoesForDisplay(readDescending ? [...messageRows].reverse() : messageRows)
+    );
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
 
     const hasEmailMessages = includeLegacyEmailMeta

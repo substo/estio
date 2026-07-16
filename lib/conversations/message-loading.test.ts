@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { hideDuplicateScheduledWebBridgeEchoesForDisplay } from "./message-loading";
+import {
+    hideDuplicateScheduledWebBridgeEchoesForDisplay,
+    hideSupersededFailedWhatsAppAttemptsForDisplay,
+} from "./message-loading";
 
 test("hideDuplicateScheduledWebBridgeEchoesForDisplay hides unconfirmed scheduled placeholder when confirmed echo exists", () => {
     const scheduled = {
@@ -54,5 +57,61 @@ test("hideDuplicateScheduledWebBridgeEchoesForDisplay keeps unconfirmed schedule
     assert.deepEqual(
         hideDuplicateScheduledWebBridgeEchoesForDisplay([scheduled, unrelatedEcho]).map((message) => message.id),
         ["scheduled-placeholder", "web-bridge-echo"]
+    );
+});
+
+test("hideSupersededFailedWhatsAppAttemptsForDisplay hides failed attempt after later accepted resend", () => {
+    const failedAttempt = {
+        id: "failed-attempt",
+        body: "Here is the option\n\nhttps://example.test/listing/1",
+        type: "TYPE_WHATSAPP",
+        direction: "outbound",
+        status: "failed",
+        wamId: null,
+        createdAt: new Date("2026-07-16T07:10:00.000Z"),
+        outboundWhatsAppOutbox: { status: "dead" },
+    };
+    const acceptedResend = {
+        id: "accepted-resend",
+        body: "Here is the option https://example.test/listing/1",
+        type: "TYPE_WHATSAPP",
+        direction: "outbound",
+        status: "delivery_unconfirmed",
+        wamId: null,
+        createdAt: new Date("2026-07-16T07:12:00.000Z"),
+        outboundWhatsAppOutbox: { status: "delivery_unconfirmed" },
+    };
+
+    assert.deepEqual(
+        hideSupersededFailedWhatsAppAttemptsForDisplay([failedAttempt, acceptedResend]).map((message) => message.id),
+        ["accepted-resend"]
+    );
+});
+
+test("hideSupersededFailedWhatsAppAttemptsForDisplay keeps unrelated failed WhatsApp attempt", () => {
+    const failedAttempt = {
+        id: "failed-attempt",
+        body: "Message A",
+        type: "TYPE_WHATSAPP",
+        direction: "outbound",
+        status: "failed",
+        wamId: null,
+        createdAt: new Date("2026-07-16T07:10:00.000Z"),
+        outboundWhatsAppOutbox: { status: "dead" },
+    };
+    const acceptedResend = {
+        id: "accepted-resend",
+        body: "Message B",
+        type: "TYPE_WHATSAPP",
+        direction: "outbound",
+        status: "sent",
+        wamId: "3EB_TEST",
+        createdAt: new Date("2026-07-16T07:12:00.000Z"),
+        outboundWhatsAppOutbox: { status: "completed" },
+    };
+
+    assert.deepEqual(
+        hideSupersededFailedWhatsAppAttemptsForDisplay([failedAttempt, acceptedResend]).map((message) => message.id),
+        ["failed-attempt", "accepted-resend"]
     );
 });
