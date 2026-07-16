@@ -10,10 +10,7 @@ import {
   LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, LEAD_SOURCES,
   REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES, CONTACT_TYPE_CONFIG, type ContactType
 } from '@/app/(main)/admin/contacts/_components/contact-types';
-import { syncContactToGHL } from '@/lib/ghl/stakeholders';
-import { runGoogleAutoSyncForContact } from '@/lib/google/automation';
 import { enqueueContactSync } from '@/lib/contacts/sync-engine';
-import { enqueueGhlContactSync } from '@/lib/integrations/provider-outbox-enqueue';
 import { Prisma } from '@prisma/client';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { seedConversationFromContactLeadText } from '@/lib/conversations/bootstrap';
@@ -72,33 +69,6 @@ async function resolvePreferredChannelTypeForPhone(
 ): Promise<'TYPE_WHATSAPP' | 'TYPE_SMS'> {
   const rawDigits = String(phone || '').replace(/\D/g, '');
   return rawDigits.length >= 7 ? 'TYPE_WHATSAPP' : 'TYPE_SMS';
-}
-
-function enqueueProviderContactMirrorsAfterResponse(args: {
-  locationId: string;
-  contactId: string;
-  userId?: string | null;
-  reason: string;
-  googleEvent: 'create' | 'update';
-}) {
-  after(async () => {
-    try {
-      await enqueueGhlContactSync({
-        locationId: args.locationId,
-        contactId: args.contactId,
-        payload: { reason: args.reason },
-      });
-      await runGoogleAutoSyncForContact({
-        locationId: args.locationId,
-        contactId: args.contactId,
-        source: 'CONTACT_FORM',
-        event: args.googleEvent,
-        preferredUserId: args.userId,
-      });
-    } catch (error) {
-      console.error('[ProviderOutbox] Failed to enqueue contact mirrors:', error);
-    }
-  });
 }
 
 // --- Helpers & Zod Transforms ---
@@ -933,14 +903,6 @@ export async function createContact(
       return contact;
     });
 
-    enqueueProviderContactMirrorsAfterResponse({
-      locationId: data.locationId,
-      contactId: contact.id,
-      userId: internalUserId,
-      reason: 'contact_create',
-      googleEvent: 'create',
-    });
-
     revalidatePath('/admin/contacts');
     return {
       message: 'Contact created successfully.',
@@ -1135,14 +1097,6 @@ async function updateContactCore(
     });
     mark('10_txComplete');
 
-    enqueueProviderContactMirrorsAfterResponse({
-      locationId: data.locationId,
-      contactId: data.contactId,
-      userId: internalUserId,
-      reason: 'contact_update',
-      googleEvent: 'update',
-    });
-
     mark('11_returning');
     emitPerf('success');
     return { success: true, message: 'Contact updated successfully.', contact: savedContactSummary };
@@ -1332,14 +1286,6 @@ export async function updateContactIdentityAction(contactId: string, data: Conta
     return updated;
   });
 
-  enqueueProviderContactMirrorsAfterResponse({
-    locationId: existing.locationId,
-    contactId: existing.id,
-    userId: internalUserId,
-    reason: 'contact_identity_update',
-    googleEvent: 'update',
-  });
-
   console.log('[updateContactIdentityAction:perf]', JSON.stringify({
     total_ms: Math.round(performance.now() - t0),
     contactId: existing.id,
@@ -1449,14 +1395,6 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
     });
 
     return updated;
-  });
-
-  enqueueProviderContactMirrorsAfterResponse({
-    locationId: existing.locationId,
-    contactId: existing.id,
-    userId: internalUserId,
-    reason: 'contact_type_update',
-    googleEvent: 'update',
   });
 
   revalidatePath('/admin/contacts');
