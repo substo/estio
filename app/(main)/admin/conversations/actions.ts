@@ -10437,8 +10437,10 @@ async function importWebBridgeRecentMessagesForContact(args: {
                         await updateWebBridgeMediaSyncMetadata(messageId, {
                             status: "stored",
                             key: ingestResult.key || null,
+                            attachmentId: ingestResult.attachmentId || null,
                             error: null,
                             reason: null,
+                            workerError: null,
                             meta: message?.mediaMeta || null,
                         });
                     } else {

@@ -174,8 +174,11 @@ export async function POST(req: NextRequest) {
                         await updateBridgeMessageMediaMetadata(wamId, {
                             status: "stored",
                             key: ingestResult.key || null,
+                            attachmentId: ingestResult.attachmentId || null,
                             meta: message.mediaMeta || null,
                             error: null,
+                            reason: null,
+                            workerError: null,
                         });
                     } else {
                         await updateBridgeMessageMediaMetadata(wamId, {

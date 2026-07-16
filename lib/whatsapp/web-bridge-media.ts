@@ -369,5 +369,5 @@ async function ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params: {
         })();
     }
 
-    return { status: "stored" as const, key: uploaded.key };
+    return { status: "stored" as const, key: uploaded.key, attachmentId: createdAttachment.id };
 }

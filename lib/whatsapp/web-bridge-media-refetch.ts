@@ -538,11 +538,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
         }
     }
 
-    const createdAttachment = await db.messageAttachment.findFirst({
-        where: { messageId: message.id },
-        orderBy: { createdAt: "desc" },
-        select: { id: true },
-    }).catch(() => null);
+    const attachmentId = ingestResult.attachmentId || null;
 
     await updateRefetchProgress({
         locationId: args.locationId,
@@ -555,7 +551,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
             message: "Media stored. Audio transcription is queued automatically for voice notes.",
             chatId: matchedChatId,
             scannedMessages,
-            attachmentId: createdAttachment?.id || null,
+            attachmentId,
             mediaType: String(matched.type || "media"),
         },
         mediaState: {
@@ -563,6 +559,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
             key: ingestResult.key || null,
             error: null,
             reason: null,
+            workerError: null,
             meta: matched?.mediaMeta || null,
         },
     });
@@ -572,6 +569,6 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
         mediaType: String(matched.type || "media"),
         remoteJid: matchedChatId,
         scannedMessages,
-        attachmentId: createdAttachment?.id || null,
+        attachmentId,
     };
 }

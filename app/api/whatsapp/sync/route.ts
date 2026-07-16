@@ -169,7 +169,9 @@ export async function GET(req: NextRequest) {
                                             status: ingestResult?.status || "skipped",
                                             reason: ingestResult?.reason || null,
                                             key: ingestResult?.key || null,
+                                            attachmentId: ingestResult?.attachmentId || null,
                                             error: null,
+                                            workerError: null,
                                             meta: message?.mediaMeta || null,
                                         });
                                     } else if (messageId && message?.mediaError) {
