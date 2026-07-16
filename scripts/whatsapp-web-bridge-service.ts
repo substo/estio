@@ -303,7 +303,7 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
 async function withStaleRecovery<T>(
     session: ManagedSession,
     operation: () => Promise<T>,
-    options?: { isolateMediaFetch?: boolean; recoverBridgeFetch?: boolean },
+    options?: { isolateMediaFetch?: boolean },
 ): Promise<T> {
     try {
         return await operation();
@@ -692,7 +692,6 @@ async function fetchMessages(sessionId: string, payload: any) {
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
     const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
-    const staleRecoveryOptions = includeMedia ? { recoverBridgeFetch: true } : undefined;
     const messages = await withStaleRecovery(session, async () => {
         const chat = await withTimeout(
             session.client.getChatById(chatId),
@@ -704,13 +703,30 @@ async function fetchMessages(sessionId: string, payload: any) {
             OPERATION_TIMEOUT_MS,
             `WhatsApp fetch messages ${sessionId}`
         );
-    }, staleRecoveryOptions);
+    });
+    if (targetMessageId) {
+        return Promise.all((messages || []).map((message: any) => {
+            const messageId = getSerializedMessageId(message);
+            if (messageId === targetMessageId) {
+                return withStaleRecovery(
+                    session,
+                    () => serializeMessage(message, { includeMedia }),
+                    includeMedia ? { isolateMediaFetch: true } : undefined,
+                );
+            }
+            return {
+                id: messageId,
+                type: String(message?.type || "text"),
+                timestamp: Number(message?.timestamp || Math.floor(Date.now() / 1000)),
+                hasMedia: Boolean(message?.hasMedia),
+            };
+        }));
+    }
     return Promise.all((messages || []).map((message: any) => {
-        const shouldIncludeMedia = includeMedia && (!targetMessageId || getSerializedMessageId(message) === targetMessageId);
         return withStaleRecovery(
             session,
-            () => serializeMessage(message, { includeMedia: shouldIncludeMedia }),
-            shouldIncludeMedia ? { isolateMediaFetch: true } : undefined,
+            () => serializeMessage(message, { includeMedia }),
+            includeMedia ? { isolateMediaFetch: true } : undefined,
         );
     }));
 }

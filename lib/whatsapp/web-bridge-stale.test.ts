@@ -47,22 +47,20 @@ test("media fetch isolation does not restart the WhatsApp Web Bridge session", (
     );
 });
 
-test("bridge fetch recovery can restart before media download isolation", () => {
+test("bridge fetch recovery does not restart for opaque media fetch failures", () => {
     assert.equal(
-        shouldRestartWhatsAppWebBridgeSession(new Error("r"), { recoverBridgeFetch: true }),
-        true,
+        shouldRestartWhatsAppWebBridgeSession(new Error("r")),
+        false,
     );
     assert.equal(
         shouldRestartWhatsAppWebBridgeSession(
             new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready."),
-            { recoverBridgeFetch: true },
         ),
-        true,
+        false,
     );
     assert.equal(
         shouldRestartWhatsAppWebBridgeSession(
             new Error("Recipient is not on WhatsApp."),
-            { recoverBridgeFetch: true },
         ),
         false,
     );
