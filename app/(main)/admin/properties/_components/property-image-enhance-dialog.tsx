@@ -2176,13 +2176,29 @@ export function PropertyImageEnhanceDialog({
                     </p>
                 ) : null}
 
-                {generated.outputIntent ? (
-                    <p className="text-xs text-muted-foreground">
-                        Output: {generated.outputIntent.aspectRatio === "custom"
-                            ? generated.outputIntent.customAspectRatio || "Custom"
-                            : generated.outputIntent.aspectRatio || "Original"} · {generated.outputIntent.aspectRatioStrategy === "crop" ? "Crop" : "Expand"} · {generated.outputIntent.upscaleFactor === "off" ? "No upscale" : generated.outputIntent.upscaleFactor || "No upscale"} · {generated.outputIntent.quality || "standard"}
-                    </p>
-                ) : null}
+                <div className="space-y-3">
+                    <div className="space-y-1">
+                        <Label className="text-sm font-medium">Adjust Output</Label>
+                        {generated.outputIntent ? (
+                            <p className="text-xs text-muted-foreground">
+                                Current preview: {generated.outputIntent.aspectRatio === "custom"
+                                    ? generated.outputIntent.customAspectRatio || "Custom"
+                                    : generated.outputIntent.aspectRatio || "Original"} · {generated.outputIntent.aspectRatioStrategy === "crop" ? "Crop" : "Expand"} · {generated.outputIntent.upscaleFactor === "off" ? "No upscale" : generated.outputIntent.upscaleFactor || "No upscale"} · {generated.outputIntent.quality || "standard"}
+                            </p>
+                        ) : null}
+                    </div>
+                    {renderOutputSettings()}
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void handleRegenerate()}
+                        disabled={isBusy}
+                        className="w-full"
+                    >
+                        {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                        Update Output & Regenerate
+                    </Button>
+                </div>
 
                 {generated.mode === "precision_remove" ? (
                     <div className="space-y-2 rounded-md border p-3">
@@ -2301,7 +2317,7 @@ export function PropertyImageEnhanceDialog({
                     ) : null}
                     <Button type="button" variant="secondary" onClick={() => void handleRegenerate()} disabled={isBusy}>
                         {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Regenerate
+                        Regenerate Current Settings
                     </Button>
                     <Button type="button" variant="outline" onClick={handleBackToEdit} disabled={isBusy}>
                         Back to Edit
