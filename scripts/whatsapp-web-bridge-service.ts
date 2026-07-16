@@ -436,7 +436,7 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing media data`);
             }
         } catch (error: any) {
-            if (isWhatsAppWebBridgeRecoverableMediaError(error)) {
+            if (isWhatsAppWebBridgeStaleError(error)) {
                 const session = Array.from(sessions.values()).find((item) => item.client === message?.client);
                 if (session) void restartStaleSession(session, error);
             }
@@ -691,26 +691,18 @@ async function fetchMessages(sessionId: string, payload: any) {
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
     const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
-    let messages: any[];
-    try {
-        messages = await withStaleRecovery(session, async () => {
-            const chat = await withTimeout(
-                session.client.getChatById(chatId),
-                OPERATION_TIMEOUT_MS,
-                `WhatsApp get chat ${sessionId}`
-            );
-            return withTimeout(
-                chat.fetchMessages({ limit }),
-                OPERATION_TIMEOUT_MS,
-                `WhatsApp fetch messages ${sessionId}`
-            );
-        });
-    } catch (error) {
-        if (includeMedia && isWhatsAppWebBridgeRecoverableMediaError(error)) {
-            void restartStaleSession(session, error);
-        }
-        throw error;
-    }
+    const messages = await withStaleRecovery(session, async () => {
+        const chat = await withTimeout(
+            session.client.getChatById(chatId),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp get chat ${sessionId}`
+        );
+        return withTimeout(
+            chat.fetchMessages({ limit }),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp fetch messages ${sessionId}`
+        );
+    });
     return Promise.all((messages || []).map((message: any) => {
         const shouldIncludeMedia = includeMedia && (!targetMessageId || getSerializedMessageId(message) === targetMessageId);
         return withStaleRecovery(session, () => serializeMessage(message, { includeMedia: shouldIncludeMedia }));
