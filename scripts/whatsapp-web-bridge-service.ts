@@ -342,6 +342,15 @@ function getSerializedMessageId(message: any) {
     return message?.id?._serialized || message?.id?.id || message?.id || "";
 }
 
+function buildMessageLookupIds(messageId: string, chatId: string) {
+    const candidates = [messageId];
+    if (messageId && chatId && !messageId.includes("_")) {
+        candidates.push(`false_${chatId}_${messageId}`);
+        candidates.push(`true_${chatId}_${messageId}`);
+    }
+    return Array.from(new Set(candidates.filter(Boolean)));
+}
+
 async function serializeMessage(message: any, options?: { includeMedia?: boolean }) {
     const id = getSerializedMessageId(message);
     const messageType = String(message?.type || "text");
@@ -694,26 +703,29 @@ async function fetchMessages(sessionId: string, payload: any) {
     const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
 
     if (targetMessageId && typeof session.client.getMessageById === "function") {
-        try {
-            const targetMessage = await withStaleRecovery(session, () => withTimeout(
-                session.client.getMessageById(targetMessageId),
-                OPERATION_TIMEOUT_MS,
-                `WhatsApp get message ${sessionId}`
-            ));
-            if (targetMessage) {
-                return [
-                    await withStaleRecovery(
-                        session,
-                        () => serializeMessage(targetMessage, { includeMedia }),
-                        includeMedia ? { isolateMediaFetch: true } : undefined,
-                    ),
-                ];
+        for (const lookupMessageId of buildMessageLookupIds(targetMessageId, chatId)) {
+            try {
+                const targetMessage = await withStaleRecovery(session, () => withTimeout(
+                    session.client.getMessageById(lookupMessageId),
+                    OPERATION_TIMEOUT_MS,
+                    `WhatsApp get message ${sessionId}`
+                ));
+                if (targetMessage) {
+                    console.log(`[WhatsApp Web Bridge] Direct message lookup matched ${targetMessageId} via ${lookupMessageId}`);
+                    return [
+                        await withStaleRecovery(
+                            session,
+                            () => serializeMessage(targetMessage, { includeMedia }),
+                            includeMedia ? { isolateMediaFetch: true } : undefined,
+                        ),
+                    ];
+                }
+            } catch (error: any) {
+                console.warn(
+                    `[WhatsApp Web Bridge] Direct message lookup failed for ${lookupMessageId}; falling back to next candidate:`,
+                    error?.message || error,
+                );
             }
-        } catch (error: any) {
-            console.warn(
-                `[WhatsApp Web Bridge] Direct message lookup failed for ${targetMessageId}; falling back to chat scan:`,
-                error?.message || error,
-            );
         }
     }
 
