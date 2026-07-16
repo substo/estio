@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isWhatsAppWebBridgeStaleError } from "./web-bridge-stale";
+import {
+    isWhatsAppWebBridgeRecoverableMediaError,
+    isWhatsAppWebBridgeStaleError,
+} from "./web-bridge-stale";
 
 test("isWhatsAppWebBridgeStaleError detects Puppeteer stale page failures", () => {
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Attempted to use detached Frame 'ABC'.")), true);
@@ -8,4 +11,14 @@ test("isWhatsAppWebBridgeStaleError detects Puppeteer stale page failures", () =
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Protocol error (Runtime.callFunctionOn): Target closed.")), true);
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("WhatsApp Web session is not ready.")), false);
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Recipient is not on WhatsApp.")), false);
+});
+
+test("isWhatsAppWebBridgeRecoverableMediaError detects opaque WhatsApp Web media failures", () => {
+    assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("r")), true);
+    assert.equal(
+        isWhatsAppWebBridgeRecoverableMediaError(new Error("getAlternateUserWid - Invalid get call using deviceWid")),
+        true,
+    );
+    assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Protocol error: Target closed")), true);
+    assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Recipient is not on WhatsApp.")), false);
 });

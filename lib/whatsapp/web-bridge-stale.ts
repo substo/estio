@@ -9,7 +9,20 @@ const STALE_BROWSER_ERROR_PATTERNS = [
     "page closed",
 ];
 
+const RECOVERABLE_MEDIA_ERROR_PATTERNS = [
+    "getalternateuserwid",
+    "invalid get call using devicewid",
+];
+
 export function isWhatsAppWebBridgeStaleError(error: unknown) {
     const message = String((error as any)?.message || error || "").toLowerCase();
     return STALE_BROWSER_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+}
+
+export function isWhatsAppWebBridgeRecoverableMediaError(error: unknown) {
+    const message = String((error as any)?.message || error || "").trim();
+    const normalized = message.toLowerCase();
+    return message === "r"
+        || RECOVERABLE_MEDIA_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern))
+        || isWhatsAppWebBridgeStaleError(error);
 }

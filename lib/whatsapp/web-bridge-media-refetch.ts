@@ -8,6 +8,7 @@ import {
     ingestWhatsAppWebBridgeMediaAttachment,
     isTransientWebBridgeMediaIngestError,
 } from "@/lib/whatsapp/web-bridge-media";
+import { isWhatsAppWebBridgeRecoverableMediaError } from "@/lib/whatsapp/web-bridge-stale";
 
 export type WhatsAppWebBridgeMediaRefetchStatus = "queued" | "processing" | "completed" | "failed";
 
@@ -62,10 +63,14 @@ function normalizeKnownLidJid(value: string | null | undefined) {
     return `${raw}@lid`;
 }
 
-function resolveRefetchChatCandidates(conversation: any) {
+export function resolveRefetchChatCandidates(conversation: any, message?: any) {
     const contact = conversation?.contact || {};
     return dedupeStrings([
+        ...(message?.syncRecords || []).map((sync: any) => sync?.providerThreadId),
+        ...(conversation?.syncRecords || []).map((sync: any) => sync?.providerConversationId),
+        ...(conversation?.syncRecords || []).map((sync: any) => sync?.providerThreadId),
         normalizeWhatsAppWebChatId(contact.phone),
+        contact.lid,
         normalizeWhatsAppWebChatId(contact.lid),
         normalizeWhatsAppWebChatId(normalizeKnownLidJid(contact.lid)),
     ]);
@@ -190,7 +195,10 @@ export function shouldRetryTransientMediaRefetchIngest(args: {
 }) {
     const queueAttempt = Math.max(Number(args.queueAttempt || 1), 1);
     const queueMaxAttempts = Math.max(Number(args.queueMaxAttempts || 1), 1);
-    return isTransientWebBridgeMediaIngestError(args.error) && queueAttempt < queueMaxAttempts;
+    return (
+        isTransientWebBridgeMediaIngestError(args.error)
+        || isWhatsAppWebBridgeRecoverableMediaError(args.error)
+    ) && queueAttempt < queueMaxAttempts;
 }
 
 export async function startWhatsAppWebBridgeMediaRefetchAttempt(args: {
@@ -254,6 +262,13 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
                     contactType: true,
                 },
             },
+            syncRecords: {
+                where: { provider: "whatsapp_web_bridge" },
+                select: {
+                    providerConversationId: true,
+                    providerThreadId: true,
+                },
+            },
         },
     });
     if (!conversation) {
@@ -273,7 +288,15 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
 
     const message = await db.message.findUnique({
         where: { id: args.messageId },
-        include: { attachments: true },
+        include: {
+            attachments: true,
+            syncRecords: {
+                where: { provider: "whatsapp_web_bridge" },
+                select: {
+                    providerThreadId: true,
+                },
+            },
+        },
     });
     if (!message || message.conversationId !== conversation.id || !message.wamId) {
         await updateRefetchProgress({
@@ -290,7 +313,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
         return { success: false as const, error: "Message not found or missing WhatsApp message id." };
     }
 
-    const chatCandidates = resolveRefetchChatCandidates(conversation);
+    const chatCandidates = resolveRefetchChatCandidates(conversation, message);
     if (chatCandidates.length === 0) {
         await updateRefetchProgress({
             locationId: args.locationId,
@@ -343,6 +366,23 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
             }
         } catch (error: any) {
             lastFetchError = error?.message || String(error || "Unknown bridge fetch error.");
+            if (shouldRetryTransientMediaRefetchIngest({ error, queueAttempt, queueMaxAttempts })) {
+                await updateRefetchProgress({
+                    locationId: args.locationId,
+                    conversationId: args.conversationId,
+                    messageId: args.messageId,
+                    update: {
+                        attemptId: args.attemptId,
+                        status: "processing",
+                        stage: "bridge_fetch_retrying",
+                        error: lastFetchError,
+                        chatId,
+                        scannedMessages,
+                        message: `WhatsApp Web media fetch failed temporarily; retry ${queueAttempt + 1} of ${queueMaxAttempts} is scheduled.`,
+                    },
+                });
+                throw error;
+            }
         }
     }
 

@@ -9,7 +9,10 @@ import {
     DEFAULT_WEB_BRIDGE_NON_READY_STALE_MS,
     getStaleWhatsAppWebBridgeNonReadyReason,
 } from "../lib/whatsapp/web-bridge-readiness";
-import { isWhatsAppWebBridgeStaleError } from "../lib/whatsapp/web-bridge-stale";
+import {
+    isWhatsAppWebBridgeRecoverableMediaError,
+    isWhatsAppWebBridgeStaleError,
+} from "../lib/whatsapp/web-bridge-stale";
 import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
@@ -53,6 +56,14 @@ const OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_OPE
 const MEDIA_OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_OPERATION_TIMEOUT_MS || 60_000), 10_000);
 const SESSION_RESTART_BACKOFF_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_SESSION_RESTART_BACKOFF_MS || 15_000), 1_000);
 const MAX_SESSION_RESTART_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_SESSION_RESTART_ATTEMPTS || 5), 1);
+const MEDIA_DOWNLOAD_RETRY_ATTEMPTS = Math.min(
+    Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_DOWNLOAD_RETRY_ATTEMPTS || 2), 1),
+    3,
+);
+const MEDIA_DOWNLOAD_RETRY_BACKOFF_MS = Math.max(
+    Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_DOWNLOAD_RETRY_BACKOFF_MS || 1_000),
+    100,
+);
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     let timeout: NodeJS.Timeout | null = null;
@@ -62,6 +73,10 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
     return Promise.race([promise, timeoutPromise]).finally(() => {
         if (timeout) clearTimeout(timeout);
     });
+}
+
+async function sleep(ms: number) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function jidFromId(value: any) {
@@ -295,6 +310,29 @@ async function withStaleRecovery<T>(session: ManagedSession, operation: () => Pr
     }
 }
 
+async function downloadMessageMediaWithRetry(message: any, messageId: string) {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= MEDIA_DOWNLOAD_RETRY_ATTEMPTS; attempt++) {
+        try {
+            return await withTimeout(
+                message.downloadMedia(),
+                MEDIA_OPERATION_TIMEOUT_MS,
+                `WhatsApp media download ${messageId || "unknown"}`
+            );
+        } catch (error) {
+            lastError = error;
+            const retryable = isWhatsAppWebBridgeRecoverableMediaError(error);
+            if (!retryable || attempt >= MEDIA_DOWNLOAD_RETRY_ATTEMPTS) break;
+            console.warn(
+                `[WhatsApp Web Bridge] Media download retry ${attempt}/${MEDIA_DOWNLOAD_RETRY_ATTEMPTS - 1} for ${messageId}:`,
+                (error as any)?.message || error,
+            );
+            await sleep(MEDIA_DOWNLOAD_RETRY_BACKOFF_MS * attempt);
+        }
+    }
+    throw lastError || new Error("Failed to download media.");
+}
+
 function getSerializedMessageId(message: any) {
     return message?.id?._serialized || message?.id?.id || message?.id || "";
 }
@@ -344,11 +382,7 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
         }
 
         try {
-            const media = await withTimeout(
-                message.downloadMedia(),
-                MEDIA_OPERATION_TIMEOUT_MS,
-                `WhatsApp media download ${id || "unknown"}`
-            );
+            const media = await downloadMessageMediaWithRetry(message, id);
             const base64 = String(media?.data || "");
             const approxBytes = Math.floor((base64.length * 3) / 4);
             const mimetype = media?.mimetype || message?._data?.mimetype || "";
@@ -402,7 +436,7 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing media data`);
             }
         } catch (error: any) {
-            if (isWhatsAppWebBridgeStaleError(error)) {
+            if (isWhatsAppWebBridgeRecoverableMediaError(error)) {
                 const session = Array.from(sessions.values()).find((item) => item.client === message?.client);
                 if (session) void restartStaleSession(session, error);
             }
@@ -657,18 +691,26 @@ async function fetchMessages(sessionId: string, payload: any) {
     const limit = Math.min(Math.max(Number(payload.limit || 30), 1), 100);
     const includeMedia = Boolean(payload.includeMedia);
     const targetMessageId = String(payload.targetMessageId || payload.messageId || "").trim();
-    const messages = await withStaleRecovery(session, async () => {
-        const chat = await withTimeout(
-            session.client.getChatById(chatId),
-            OPERATION_TIMEOUT_MS,
-            `WhatsApp get chat ${sessionId}`
-        );
-        return withTimeout(
-            chat.fetchMessages({ limit }),
-            OPERATION_TIMEOUT_MS,
-            `WhatsApp fetch messages ${sessionId}`
-        );
-    });
+    let messages: any[];
+    try {
+        messages = await withStaleRecovery(session, async () => {
+            const chat = await withTimeout(
+                session.client.getChatById(chatId),
+                OPERATION_TIMEOUT_MS,
+                `WhatsApp get chat ${sessionId}`
+            );
+            return withTimeout(
+                chat.fetchMessages({ limit }),
+                OPERATION_TIMEOUT_MS,
+                `WhatsApp fetch messages ${sessionId}`
+            );
+        });
+    } catch (error) {
+        if (includeMedia && isWhatsAppWebBridgeRecoverableMediaError(error)) {
+            void restartStaleSession(session, error);
+        }
+        throw error;
+    }
     return Promise.all((messages || []).map((message: any) => {
         const shouldIncludeMedia = includeMedia && (!targetMessageId || getSerializedMessageId(message) === targetMessageId);
         return withStaleRecovery(session, () => serializeMessage(message, { includeMedia: shouldIncludeMedia }));
