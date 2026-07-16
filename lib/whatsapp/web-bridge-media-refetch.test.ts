@@ -39,6 +39,17 @@ test("recoverable bridge media fetch failure is retryable before final queue att
     );
 });
 
+test("bridge not-ready media fetch failure is retryable before final queue attempt", () => {
+    assert.equal(
+        shouldRetryTransientMediaRefetchIngest({
+            error: new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready."),
+            queueAttempt: 1,
+            queueMaxAttempts: 5,
+        }),
+        true,
+    );
+});
+
 test("recoverable bridge media fetch failure is not retried after final queue attempt", () => {
     assert.equal(
         shouldRetryTransientMediaRefetchIngest({

@@ -12,6 +12,9 @@ const STALE_BROWSER_ERROR_PATTERNS = [
 const RECOVERABLE_MEDIA_ERROR_PATTERNS = [
     "getalternateuserwid",
     "invalid get call using devicewid",
+    "whatsapp web bridge is not connected",
+    "scan the qr code and wait until the session is ready",
+    "whatsapp web session is not ready",
 ];
 
 export function isWhatsAppWebBridgeStaleError(error: unknown) {

@@ -19,6 +19,11 @@ test("isWhatsAppWebBridgeRecoverableMediaError detects opaque WhatsApp Web media
         isWhatsAppWebBridgeRecoverableMediaError(new Error("getAlternateUserWid - Invalid get call using deviceWid")),
         true,
     );
+    assert.equal(
+        isWhatsAppWebBridgeRecoverableMediaError(new Error("WhatsApp Web Bridge is not connected. Scan the QR code and wait until the session is ready.")),
+        true,
+    );
+    assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("WhatsApp Web session is not ready.")), true);
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Protocol error: Target closed")), true);
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Recipient is not on WhatsApp.")), false);
 });
