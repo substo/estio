@@ -319,11 +319,14 @@ async function downloadMessageMediaWithRetry(message: any, messageId: string) {
     let lastError: unknown = null;
     for (let attempt = 1; attempt <= MEDIA_DOWNLOAD_RETRY_ATTEMPTS; attempt++) {
         try {
-            return await withTimeout(
+            const media = await withTimeout(
                 message.downloadMedia(),
                 MEDIA_OPERATION_TIMEOUT_MS,
                 `WhatsApp media download ${messageId || "unknown"}`
             );
+            if (media?.data) return media;
+            lastError = new Error("WhatsApp Web returned empty media data.");
+            break;
         } catch (error) {
             lastError = error;
             const retryable = isWhatsAppWebBridgeRecoverableMediaError(error);
@@ -335,7 +338,82 @@ async function downloadMessageMediaWithRetry(message: any, messageId: string) {
             await sleep(MEDIA_DOWNLOAD_RETRY_BACKOFF_MS * attempt);
         }
     }
+
+    try {
+        const media = await downloadMessageMediaFromRawFields(message, messageId);
+        if (media?.data) {
+            console.log(`[WhatsApp Web Bridge] Media fallback download succeeded for ${messageId}`);
+            return media;
+        }
+    } catch (fallbackError: any) {
+        console.warn(
+            `[WhatsApp Web Bridge] Media fallback download failed for ${messageId}:`,
+            fallbackError?.message || fallbackError,
+        );
+    }
+
     throw lastError || new Error("Failed to download media.");
+}
+
+async function downloadMessageMediaFromRawFields(message: any, messageId: string) {
+    const page = message?.client?.pupPage;
+    if (!page || typeof page.evaluate !== "function") {
+        throw new Error("WhatsApp Web media fallback cannot access the browser page.");
+    }
+
+    const data = message?._data || {};
+    const mediaFields = {
+        directPath: message?.directPath || data.directPath || "",
+        encFilehash: message?.encFilehash || data.encFilehash || "",
+        filehash: message?.filehash || data.filehash || "",
+        mediaKey: message?.mediaKey || data.mediaKey || "",
+        mediaKeyTimestamp: message?.mediaKeyTimestamp || data.mediaKeyTimestamp || "",
+        type: message?.type || data.type || "",
+        mimetype: data.mimetype || message?.mimetype || "",
+        filename: data.filename || data.title || message?.filename || "",
+        filesize: Number(data.size || data.fileSize || message?.size || 0) || null,
+    };
+
+    if (!mediaFields.directPath || !mediaFields.mediaKey) {
+        throw new Error("WhatsApp Web media fallback is missing directPath or mediaKey.");
+    }
+
+    return withTimeout(
+        page.evaluate(async (fields: any) => {
+            const manager = window.require("WAWebDownloadManager")?.downloadManager;
+            if (!manager?.downloadAndMaybeDecrypt) {
+                throw new Error("WhatsApp Web download manager is unavailable.");
+            }
+
+            const mockQpl = {
+                addAnnotations() {
+                    return this;
+                },
+                addPoint() {
+                    return this;
+                },
+            };
+            const decryptedMedia = await manager.downloadAndMaybeDecrypt({
+                directPath: fields.directPath,
+                encFilehash: fields.encFilehash,
+                filehash: fields.filehash,
+                mediaKey: fields.mediaKey,
+                mediaKeyTimestamp: fields.mediaKeyTimestamp,
+                type: fields.type,
+                signal: new AbortController().signal,
+                downloadQpl: mockQpl,
+            });
+            const data = await window.WWebJS.arrayBufferToBase64Async(decryptedMedia);
+            return {
+                data,
+                mimetype: fields.mimetype,
+                filename: fields.filename,
+                filesize: fields.filesize,
+            };
+        }, mediaFields),
+        MEDIA_OPERATION_TIMEOUT_MS,
+        `WhatsApp raw media fallback ${messageId || "unknown"}`
+    );
 }
 
 function getSerializedMessageId(message: any) {
