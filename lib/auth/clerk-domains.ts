@@ -168,10 +168,7 @@ export async function registerClerkDomain(domain: string) {
 
         if (existingDomain) {
             console.log(`[Clerk Registration] Domain already exists: ${name} (ID: ${existingDomain.id})`);
-
-            // If it exists but isn't a satellite, we might want to update it?
-            // For now, assume if it exists, it's good or managed manually.
-            return true;
+            return whitelistClerkDomain(name);
         }
 
         // 2. Create the domain
@@ -199,12 +196,72 @@ export async function registerClerkDomain(domain: string) {
         console.log(`[Clerk Registration] Successfully registered domain: ${name} (ID: ${newDomain.id})`);
 
         // IMPORTANT: We also need to add it to allowed_origins and redirect_urls just in case
-        await whitelistClerkDomain(name);
-
-        return true;
+        return await whitelistClerkDomain(name);
 
     } catch (error) {
         console.error("[Clerk Registration] Error:", error);
+        return false;
+    }
+}
+
+export async function unregisterClerkDomain(domain: string) {
+    if (!domain || !CLERK_SECRET_KEY) return false;
+    const name = domain.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase();
+    const origin = `https://${name}`;
+
+    try {
+        const listRes = await fetch("https://api.clerk.com/v1/domains", {
+            headers: { "Authorization": `Bearer ${CLERK_SECRET_KEY}` },
+        });
+        if (!listRes.ok) return false;
+        const domainsData = await listRes.json();
+        const existingDomain = domainsData.data?.find((item: any) => item.name === name);
+        if (existingDomain?.id) {
+            const deleteRes = await fetch(`https://api.clerk.com/v1/domains/${existingDomain.id}`, {
+                method: "DELETE",
+                headers: { "Authorization": `Bearer ${CLERK_SECRET_KEY}` },
+            });
+            if (!deleteRes.ok && deleteRes.status !== 404) return false;
+        }
+
+        const settingsRes = await fetch("https://api.clerk.com/v1/instance", {
+            headers: { "Authorization": `Bearer ${CLERK_SECRET_KEY}` },
+        });
+        if (settingsRes.ok) {
+            const settings = await settingsRes.json();
+            const allowedOrigins = (settings.allowed_origins || []).filter((item: string) => item !== origin);
+            await fetch("https://api.clerk.com/v1/instance", {
+                method: "PATCH",
+                headers: {
+                    "Authorization": `Bearer ${CLERK_SECRET_KEY}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ allowed_origins: allowedOrigins }),
+            });
+        }
+
+        const redirectsRes = await fetch("https://api.clerk.com/v1/redirect_urls", {
+            headers: { "Authorization": `Bearer ${CLERK_SECRET_KEY}` },
+        });
+        if (redirectsRes.ok) {
+            const redirects = await redirectsRes.json();
+            const owned = (redirects.data || []).filter((item: any) => {
+                try {
+                    return new URL(item.url).hostname.toLowerCase() === name;
+                } catch {
+                    return false;
+                }
+            });
+            await Promise.all(owned.map((item: any) => fetch(`https://api.clerk.com/v1/redirect_urls/${item.id}`, {
+                method: "DELETE",
+                headers: { "Authorization": `Bearer ${CLERK_SECRET_KEY}` },
+            })));
+        }
+
+        console.log(`[Clerk Registration] Removed domain lifecycle resources: ${name}`);
+        return true;
+    } catch (error) {
+        console.error("[Clerk Registration] Domain cleanup failed:", error);
         return false;
     }
 }

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import db from "@/lib/db";
 import { SYSTEM_DOMAINS } from "@/lib/app-config";
+import { isPublicSiteDomainAuthorized } from "@/lib/public-site-domains/service";
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
-    const domain = searchParams.get("domain");
+    const domain = String(searchParams.get("domain") || "").toLowerCase().replace(/:\d+$/, "");
 
     if (!domain) {
         return new NextResponse("Domain required", { status: 400 });
@@ -14,30 +14,14 @@ export async function GET(req: NextRequest) {
 
     // 1. System Domains - ALWAYS ALLOW
     // These are required for the dashboard and API to function.
-    if (SYSTEM_DOMAINS.includes(domain)) {
+    if (SYSTEM_DOMAINS.includes(domain) || (domain.startsWith("www.") && SYSTEM_DOMAINS.includes(domain.slice(4)))) {
         return new NextResponse("Allowed (System)", { status: 200 });
     }
 
     try {
-        // 2. Database Check
-        // We check if ANY location has claimed this custom domain.
-        // NOTE: We must AUTHORIZE 'www' versions even if they aren't in the DB, 
-        // so Caddy can issue the cert, and then Middleware can redirect them.
-        const normalizedDomain = domain.startsWith("www.") ? domain.replace("www.", "") : domain;
-
-        const config = await db.siteConfig.findFirst({
-            where: {
-                domain: {
-                    equals: normalizedDomain,
-                    mode: 'insensitive' // Ensure case-insensitive match
-                }
-            },
-            select: { id: true } // Efficiency
-        });
-
-        if (config) {
+        if (await isPublicSiteDomainAuthorized(domain)) {
             console.log(`[Caddy Verify] Domain authorized: ${domain}`);
-            return new NextResponse("Allowed (Database)", { status: 200 });
+            return new NextResponse("Allowed (Domain Lifecycle)", { status: 200 });
         }
 
         // 3. Subdomain Strategy (Optional - if you want all *.substo.com to work automatically)

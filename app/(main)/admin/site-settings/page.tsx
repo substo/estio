@@ -1,10 +1,11 @@
 import db from "@/lib/db";
 import { SiteSettingsForm } from "./site-settings-form";
 import { cookies } from "next/headers";
-import { DnsInstructions } from "@/components/domain/dns-instructions";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
+import { listPublicSiteDomains } from "@/lib/public-site-domains/service";
+import { PublicSiteDomainManager } from "./public-site-domain-manager";
 
 export default async function SiteSettingsPage(props: { searchParams: Promise<{ locationId?: string }> }) {
     const searchParams = await props.searchParams;
@@ -21,7 +22,7 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
     }
 
     // Fetch existing config + location details + new settings document
-    const [siteConfig, location, settingsDoc] = await Promise.all([
+    const [siteConfig, location, settingsDoc, publicSiteDomains] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -34,12 +35,15 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
             scopeId: locationId,
             domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
         }),
+        listPublicSiteDomains(locationId),
     ]);
+
+    const canonicalDomain = publicSiteDomains.find((item) => item.role === "CANONICAL" && item.status === "ACTIVE");
 
     const initialData = isSettingsReadFromNewEnabled() && settingsDoc
         ? {
             ...settingsDoc.payload,
-            domain: settingsDoc.payload?.domain ?? siteConfig?.domain ?? null,
+            domain: canonicalDomain?.hostname ?? siteConfig?.domain ?? null,
             theme: settingsDoc.payload?.theme ?? siteConfig?.theme ?? {},
             contactInfo: settingsDoc.payload?.contactInfo ?? siteConfig?.contactInfo ?? {},
             navLinks: settingsDoc.payload?.navLinks ?? siteConfig?.navLinks ?? [],
@@ -52,7 +56,9 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
             secondaryColor: (settingsDoc.payload?.theme as any)?.secondaryColor ?? siteConfig?.secondaryColor ?? null,
             accentColor: (settingsDoc.payload?.theme as any)?.accentColor ?? siteConfig?.accentColor ?? null,
         }
-        : siteConfig;
+        : siteConfig
+            ? { ...siteConfig, domain: canonicalDomain?.hostname ?? siteConfig.domain }
+            : siteConfig;
 
     const settingsVersion = settingsDoc?.version ?? 0;
 
@@ -65,6 +71,20 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
                 </p>
             </div>
 
+            <PublicSiteDomainManager
+                locationId={locationId}
+                initialDomains={publicSiteDomains.map((item) => ({
+                    id: item.id,
+                    hostname: item.hostname,
+                    role: item.role,
+                    status: item.status,
+                    verificationToken: item.verificationToken,
+                    provisioningError: item.provisioningError,
+                    verifiedAt: item.verifiedAt?.toISOString() || null,
+                    activatedAt: item.activatedAt?.toISOString() || null,
+                }))}
+            />
+
             <div className="border rounded-lg p-6 bg-card">
                 <SiteSettingsForm
                     initialData={initialData}
@@ -75,10 +95,6 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
                 />
             </div>
 
-            {/* DNS Instructions - Show when a custom domain is configured */}
-            {initialData?.domain && (
-                <DnsInstructions domain={initialData.domain} />
-            )}
         </div>
     );
 }

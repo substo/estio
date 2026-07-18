@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { getVisiblePropertyImageMedia, getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import { cache } from "react";
+import { resolvePublicSiteDomain } from "@/lib/public-site-domains/service";
 
 // Use React 'cache' to deduplicate requests in the same render cycle
 export const getSiteConfig = cache(async (domain: string) => {
@@ -10,12 +11,22 @@ export const getSiteConfig = cache(async (domain: string) => {
     // So we map the test domain to the real one here.
     const searchDomain = domain === 'test.localhost' ? 'downtowncyprus.site' : domain;
 
-    const config = await db.siteConfig.findUnique({
+    let config = await db.siteConfig.findUnique({
         where: { domain: searchDomain },
         include: {
             location: true, // We might need location details (address, etc) later
         },
     });
+
+    if (!config) {
+        const resolution = await resolvePublicSiteDomain(searchDomain);
+        if (resolution) {
+            config = await db.siteConfig.findUnique({
+                where: { locationId: resolution.locationId },
+                include: { location: true },
+            });
+        }
+    }
 
     // SECURITY COMPLIANCE: Strip sensitive keys before sending SiteConfig to the client.
     // Next.js RSC payload will serialize the entire object when passed to a Client Component.

@@ -86,6 +86,8 @@ model Location {
   analyticsSessions             AnalyticsSession[]
   analyticsEvents               AnalyticsEvent[]
   analyticsDailyRollups         AnalyticsDailyRollup[]
+  publicSiteDomains             PublicSiteDomain[]
+  publicSiteDomainJobs          PublicSiteDomainProvisioningJob[]
 
   // SIM Relay (Android SMS Gateway)
   smsRelayEnabled Boolean @default(false)
@@ -526,6 +528,75 @@ model SiteConfig {
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   @@map("SearchConfig")
+}
+
+enum PublicSiteDomainRole {
+  CANONICAL
+  REDIRECT
+}
+
+enum PublicSiteDomainStatus {
+  PENDING
+  VERIFIED
+  ACTIVE
+  RELEASED
+}
+
+enum PublicSiteDomainJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model PublicSiteDomain {
+  id                String                 @id @default(cuid())
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  locationId        String
+  hostname          String                 @unique
+  role              PublicSiteDomainRole   @default(CANONICAL)
+  status            PublicSiteDomainStatus @default(PENDING)
+  verificationToken String                 @unique
+  verifiedAt        DateTime?
+  activatedAt       DateTime?
+  releasedAt        DateTime?
+  lastDnsCheckAt    DateTime?
+  lastHealthCheckAt DateTime?
+  provisioningError String?                @db.Text
+  createdByUserId   String?
+  releasedByUserId  String?
+
+  location Location                          @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  jobs     PublicSiteDomainProvisioningJob[]
+
+  @@index([locationId, status])
+  @@index([locationId, role, status])
+  @@map("public_site_domains")
+}
+
+model PublicSiteDomainProvisioningJob {
+  id             String                    @id @default(cuid())
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  locationId     String
+  domainId       String
+  operation      String
+  status         PublicSiteDomainJobStatus @default(PENDING)
+  idempotencyKey String                    @unique
+  attemptCount   Int                       @default(0)
+  scheduledAt    DateTime                  @default(now())
+  lockedAt       DateTime?
+  processedAt    DateTime?
+  lastError      String?                   @db.Text
+
+  location Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  domain   PublicSiteDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([domainId, status])
+  @@index([locationId, status])
+  @@map("public_site_domain_provisioning_jobs")
 }
 
 model Contact {

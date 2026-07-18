@@ -23,10 +23,12 @@ type PreviewState =
 
 export function MessageLinkPreviewCard({ url, overflowCount = 0, theme }: MessageLinkPreviewCardProps) {
     const [state, setState] = useState<PreviewState>({ status: "idle" });
+    const [imageFailed, setImageFailed] = useState(false);
     const fallbackHost = useMemo(() => getPreviewHost(url), [url]);
 
     useEffect(() => {
         let cancelled = false;
+        setImageFailed(false);
         setState({ status: "loading" });
         fetchPropertyUrlContext(url)
             .then((preview) => {
@@ -49,7 +51,7 @@ export function MessageLinkPreviewCard({ url, overflowCount = 0, theme }: Messag
     const preview = state.status === "ready" ? state.preview : null;
     const title = String(preview?.title || fallbackHost || "Link").trim();
     const description = String(preview?.description || "").trim();
-    const imageUrl = String(preview?.imageUrl || "").trim();
+    const imageUrl = imageFailed ? "" : String(preview?.imageUrl || "").trim();
     const siteLabel = String(preview?.siteName || fallbackHost || "").trim();
     const isLoading = state.status === "loading" || state.status === "idle";
 
@@ -73,6 +75,7 @@ export function MessageLinkPreviewCard({ url, overflowCount = 0, theme }: Messag
                             alt=""
                             className="h-full w-full object-cover"
                             loading="lazy"
+                            onError={() => setImageFailed(true)}
                         />
                     ) : (
                         <div className="flex h-full w-full items-center justify-center text-slate-400">

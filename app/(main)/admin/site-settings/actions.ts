@@ -41,7 +41,6 @@ export async function updateSiteSettings(
         return { message: "Unauthorized: Admin access is required to update settings." };
     }
 
-    const domain = formData.get("domain") as string;
     const locationNameRaw = formData.get("locationName") as string;
     const locationName = locationNameRaw?.trim() ? locationNameRaw.trim() : null;
     const locationTimeZoneRaw = (formData.get("locationTimeZone") as string) || "";
@@ -138,8 +137,12 @@ export async function updateSiteSettings(
     const expectedVersion = Number.isFinite(expectedVersionCandidate) ? expectedVersionCandidate : null;
 
     try {
-        // If domain is empty string, we should probably set it to null/undefined
-        const domainVal = domain && domain.trim() !== "" ? domain.trim() : null;
+        // Domain lifecycle is managed separately. General settings saves must never disconnect a site.
+        const activeDomain = await db.publicSiteDomain.findFirst({
+            where: { locationId, role: "CANONICAL", status: "ACTIVE" },
+            select: { hostname: true },
+        });
+        const domainVal = activeDomain?.hostname || existingConfig?.domain || null;
         let validatedLocationTimeZone: string | null = null;
         if (locationTimeZone) {
             validatedLocationTimeZone = normalizeIanaTimeZoneOrThrow(locationTimeZone);
@@ -210,19 +213,6 @@ export async function updateSiteSettings(
                 timeZone: validatedLocationTimeZone
             }
         });
-
-        // AUTOMATION: If a valid domain was saved, whitelist it in Clerk
-        if (domainVal) {
-            try {
-                // Use registerClerkDomain to ensure it's added as a Satellite Domain + Whitelisted
-                const { registerClerkDomain } = await import("@/lib/auth/clerk-domains");
-                // We fire and forget this to not block the UI, or await it if strict
-                await registerClerkDomain(domainVal);
-            } catch (clerkErr) {
-                console.error("Failed to automate Clerk whitelist:", clerkErr);
-                // We don't fail the request, but we log it. User might need to retry or do it manually.
-            }
-        }
 
         if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
             await settingsService.checkDocumentParity({

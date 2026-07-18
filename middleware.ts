@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { isRetiredPublicDomain, SYSTEM_DOMAINS } from "@/lib/app-config";
+import { APP_DOMAIN, APP_URL, isRetiredPublicDomain, SYSTEM_DOMAINS } from "@/lib/app-config";
 
 const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)"]);
 
@@ -10,6 +10,14 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   // Remove port if present (robust regex)
   hostname = hostname ? hostname.replace(/:\d+$/, "") : "";
   const url = req.nextUrl;
+
+  if (hostname === `www.${APP_DOMAIN}`) {
+    const destination = new URL(req.url);
+    destination.hostname = APP_DOMAIN;
+    destination.protocol = "https:";
+    destination.port = "";
+    return NextResponse.redirect(destination, 308);
+  }
 
   if (isRetiredPublicDomain(hostname)) {
     return new NextResponse("Gone", {
@@ -29,18 +37,6 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
       "frame-ancestors 'self' https://*.gohighlevel.com https://*.leadconnectorhq.com https://app.gohighlevel.com https://estio.co;"
     );
     return response;
-  }
-
-  // 0. Global WWW Redirect
-  const host = req.headers.get("host");
-
-  if (host && host.startsWith("www.") && host !== "localhost") {
-    const newHostname = host.replace(/^www\./, "");
-    const newUrl = new URL(req.url);
-    newUrl.hostname = newHostname;
-    newUrl.protocol = "https:";
-    newUrl.port = "";
-    return NextResponse.redirect(newUrl);
   }
 
   const searchParams = req.nextUrl.searchParams.toString();
@@ -87,6 +83,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
       url.pathname.startsWith("/api/clerk") ||
       url.pathname.startsWith("/api/auth-proxy") ||
       url.pathname.startsWith("/api/analytics") ||
+      url.pathname.startsWith("/api/public-site-domain-health") ||
       url.pathname.startsWith("/v1/oauth_callback") ||
       url.pathname.startsWith("/api/webhooks") ||
       url.pathname.startsWith("/api/google");
@@ -137,6 +134,31 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     }
   } else {
     // Tenant Public Content
+    try {
+      const resolverUrl = new URL("/api/public-site-domains/resolve", APP_URL);
+      resolverUrl.searchParams.set("hostname", hostname);
+      const resolverResponse = await fetch(resolverUrl, { next: { revalidate: 30 } });
+      if (resolverResponse.status === 404) {
+        return new NextResponse("Not Found", { status: 404 });
+      }
+      if (!resolverResponse.ok) {
+        throw new Error(`Domain resolver returned ${resolverResponse.status}`);
+      }
+      const resolution = await resolverResponse.json() as { redirect?: boolean; canonicalHostname?: string };
+      if (resolution.redirect && resolution.canonicalHostname && resolution.canonicalHostname !== hostname) {
+        const destination = new URL(req.url);
+        destination.protocol = "https:";
+        destination.hostname = resolution.canonicalHostname;
+        destination.port = "";
+        return NextResponse.redirect(destination, 308);
+      }
+    } catch (error) {
+      console.error("[public-site-domain] resolver unavailable", error);
+      return new NextResponse("Domain resolution temporarily unavailable", {
+        status: 503,
+        headers: { "Retry-After": "30" },
+      });
+    }
     const mappedPath = `/${hostname}${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ""}`;
     return createInternalRewrite(mappedPath);
   }

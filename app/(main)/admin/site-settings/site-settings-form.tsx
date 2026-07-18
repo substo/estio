@@ -92,9 +92,8 @@ export function SiteSettingsForm({
             // Determine research URL
             let targetResearchUrl = undefined;
             if (useResearchUrl) {
-                const domainInput = document.getElementById("domain") as HTMLInputElement;
                 // Use local researchUrl state
-                targetResearchUrl = researchUrl || (domainInput?.value ? `https://${domainInput?.value}` : undefined);
+                targetResearchUrl = researchUrl || (initialData?.domain ? `https://${initialData.domain}` : undefined);
 
                 if (!targetResearchUrl) {
                     toast.error("Enter an Existing Website URL to research.");
@@ -259,21 +258,6 @@ export function SiteSettingsForm({
                         <p className="text-sm text-muted-foreground">
                             Internal location/business name stored on the Location record.
                         </p>
-                    </div>
-                    <div className="grid gap-2">
-                        <Label htmlFor="domain">Custom Domain (or Subdomain)</Label>
-                        <Input
-                            id="domain"
-                            name="domain"
-                            placeholder="properties.myagency.com"
-                            defaultValue={initialData?.domain || ""}
-                        />
-                        <p className="text-sm text-muted-foreground">
-                            Enter the domain where this site will be accessed.
-                        </p>
-                        {state?.errors?.domain && (
-                            <p className="text-sm text-red-500">{state.errors.domain[0]}</p>
-                        )}
                     </div>
                     <div className="grid gap-2">
                         <Label htmlFor="locationTimeZone">Default Location Timezone (IANA)</Label>

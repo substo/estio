@@ -94,3 +94,40 @@ test("validatePublicHttpUrl rejects private and non-http URLs", async () => {
         error: "Local URLs are not supported.",
     });
 });
+
+test("extractPropertyUrlContext validates redirects and resolves metadata from the final URL", async () => {
+    const calls: string[] = [];
+    const result = await extractPropertyUrlContext("https://example.com/old", {
+        skipPublicUrlValidation: true,
+        fetchImpl: async (input) => {
+            const url = String(input);
+            calls.push(url);
+            if (url.endsWith("/old")) {
+                return new Response(null, { status: 302, headers: { location: "https://listings.example/new/page" } });
+            }
+            return new Response('<meta property="og:image" content="../photo.jpg"><main>Listing details</main>', {
+                status: 200,
+                headers: { "content-type": "text/html" },
+            });
+        },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.url, "https://listings.example/new/page");
+    assert.equal(result.imageUrl, "https://listings.example/photo.jpg");
+    assert.deepEqual(calls, ["https://example.com/old", "https://listings.example/new/page"]);
+});
+
+test("extractPropertyUrlContext rejects a redirect to a private address", async () => {
+    let fetchCount = 0;
+    const result = await extractPropertyUrlContext("https://example.com/old", {
+        fetchImpl: async () => {
+            fetchCount += 1;
+            return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/private" } });
+        },
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.error || "", /Private network URLs/);
+    assert.equal(fetchCount, 1);
+});

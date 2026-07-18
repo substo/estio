@@ -18,6 +18,7 @@ type FetchLike = typeof fetch;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 700_000;
 const MAX_SOURCE_TEXT_CHARS = 8_000;
+const MAX_REDIRECTS = 5;
 
 const BLOCKED_HOSTS = new Set([
     "localhost",
@@ -62,6 +63,9 @@ export async function validatePublicHttpUrl(rawUrl: string): Promise<{ ok: true;
 
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         return { ok: false, error: "Only http and https URLs are supported." };
+    }
+    if (parsed.username || parsed.password) {
+        return { ok: false, error: "URLs containing credentials are not supported." };
     }
 
     const hostname = parsed.hostname.toLowerCase();
@@ -192,6 +196,77 @@ async function readResponseTextWithLimit(response: Response, maxBytes: number): 
     return output;
 }
 
+export class PropertyUrlFetchError extends Error {
+    constructor(message: string, public readonly code: string) {
+        super(message);
+        this.name = "PropertyUrlFetchError";
+    }
+}
+
+export async function fetchPublicHttpResponse(
+    rawUrl: string,
+    options: {
+        fetchImpl?: FetchLike;
+        timeoutMs?: number;
+        skipPublicUrlValidation?: boolean;
+        accept?: string;
+        maxRedirects?: number;
+    } = {}
+): Promise<{ response: Response; finalUrl: string }> {
+    const fetchImpl = options.fetchImpl || fetch;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const visited = new Set<string>();
+    let currentUrl = String(rawUrl || "").trim();
+
+    try {
+        for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+            let parsed: URL;
+            if (options.skipPublicUrlValidation) {
+                try {
+                    parsed = new URL(currentUrl);
+                } catch {
+                    throw new PropertyUrlFetchError("Enter a valid URL.", "invalid_url");
+                }
+            } else {
+                const validation = await validatePublicHttpUrl(currentUrl);
+                if (!validation.ok) throw new PropertyUrlFetchError(validation.error, "unsafe_url");
+                parsed = validation.url;
+            }
+
+            const normalizedUrl = parsed.toString();
+            if (visited.has(normalizedUrl)) throw new PropertyUrlFetchError("The URL redirects in a loop.", "redirect_loop");
+            visited.add(normalizedUrl);
+
+            const response = await fetchImpl(normalizedUrl, {
+                method: "GET",
+                redirect: "manual",
+                signal: controller.signal,
+                headers: {
+                    "Accept": options.accept || "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+                    "User-Agent": "Mozilla/5.0 (compatible; EstioPropertyMessageBot/1.0)",
+                },
+            });
+
+            if (![301, 302, 303, 307, 308].includes(response.status)) {
+                return { response, finalUrl: normalizedUrl };
+            }
+            const location = response.headers.get("location");
+            if (!location) throw new PropertyUrlFetchError("The URL returned an invalid redirect.", "invalid_redirect");
+            if (redirectCount === maxRedirects) throw new PropertyUrlFetchError("The URL redirected too many times.", "too_many_redirects");
+            currentUrl = new URL(location, normalizedUrl).toString();
+        }
+        throw new PropertyUrlFetchError("The URL redirected too many times.", "too_many_redirects");
+    } catch (error: any) {
+        if (error?.name === "AbortError") throw new PropertyUrlFetchError("Timed out while fetching this URL.", "timeout");
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 export async function extractPropertyUrlContext(
     rawUrl: string,
     options: {
@@ -200,41 +275,19 @@ export async function extractPropertyUrlContext(
         skipPublicUrlValidation?: boolean;
     } = {}
 ): Promise<PropertyMessageUrlContextResult> {
-    const validation = options.skipPublicUrlValidation
-        ? (() => {
-            try {
-                const parsed = new URL(String(rawUrl || "").trim());
-                parsed.hash = "";
-                return { ok: true as const, url: parsed };
-            } catch {
-                return { ok: false as const, error: "Enter a valid URL." };
-            }
-        })()
-        : await validatePublicHttpUrl(rawUrl);
-
-    if (!validation.ok) {
-        return { success: false, url: String(rawUrl || "").trim(), error: validation.error };
-    }
-
-    const fetchImpl = options.fetchImpl || fetch;
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+    const requestedUrl = String(rawUrl || "").trim();
 
     try {
-        const response = await fetchImpl(validation.url.toString(), {
-            method: "GET",
-            signal: abortController.signal,
-            headers: {
-                "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
-                "User-Agent": "Mozilla/5.0 (compatible; EstioPropertyMessageBot/1.0)",
-            },
+        const { response, finalUrl } = await fetchPublicHttpResponse(requestedUrl, {
+            fetchImpl: options.fetchImpl,
+            timeoutMs: options.timeoutMs,
+            skipPublicUrlValidation: options.skipPublicUrlValidation,
         });
 
         if (!response.ok) {
             return {
                 success: false,
-                url: validation.url.toString(),
+                url: finalUrl,
                 error: `Could not fetch URL (${response.status}).`,
             };
         }
@@ -243,24 +296,24 @@ export async function extractPropertyUrlContext(
         if (contentType && !/text\/html|application\/xhtml\+xml|text\/plain/i.test(contentType)) {
             return {
                 success: false,
-                url: validation.url.toString(),
+                url: finalUrl,
                 error: "This URL did not return readable page text.",
             };
         }
 
         const html = await readResponseTextWithLimit(response, MAX_RESPONSE_BYTES);
-        const extracted = extractReadableText(html, validation.url.toString());
+        const extracted = extractReadableText(html, finalUrl);
         if (!extracted.sourceText) {
             return {
                 success: false,
-                url: validation.url.toString(),
+                url: finalUrl,
                 error: "No readable property text was found on this page.",
             };
         }
 
         return {
             success: true,
-            url: validation.url.toString(),
+            url: finalUrl,
             title: extracted.title || undefined,
             description: extracted.description || undefined,
             imageUrl: extracted.imageUrl || undefined,
@@ -268,13 +321,10 @@ export async function extractPropertyUrlContext(
             sourceText: extracted.sourceText,
         };
     } catch (error: any) {
-        const isAbort = error?.name === "AbortError";
         return {
             success: false,
-            url: validation.url.toString(),
-            error: isAbort ? "Timed out while fetching this URL." : "Could not fetch this URL.",
+            url: requestedUrl,
+            error: error instanceof PropertyUrlFetchError ? error.message : "Could not fetch this URL.",
         };
-    } finally {
-        clearTimeout(timeout);
     }
 }

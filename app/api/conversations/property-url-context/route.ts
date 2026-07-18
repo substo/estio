@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { extractPropertyUrlContext } from "@/lib/conversations/property-url-context";
+import { createPropertyThumbnailUrl } from "@/lib/conversations/property-thumbnail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: "URL is required." }, { status: 400 });
     }
 
-    const result = await extractPropertyUrlContext(url);
+    const extracted = await extractPropertyUrlContext(url);
+    const result = extracted.success && extracted.imageUrl
+        ? { ...extracted, imageUrl: createPropertyThumbnailUrl(extracted.imageUrl) }
+        : extracted;
     return NextResponse.json(result, { status: result.success ? 200 : 400 });
 }
