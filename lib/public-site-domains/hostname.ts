@@ -1,6 +1,6 @@
 import { domainToASCII } from "node:url";
 import net from "node:net";
-import { RETIRED_PUBLIC_DOMAINS, SYSTEM_DOMAINS } from "@/lib/app-config";
+import { SYSTEM_DOMAINS } from "@/lib/app-config";
 
 export class PublicSiteDomainValidationError extends Error {
     constructor(message: string) {
@@ -29,7 +29,7 @@ export function normalizePublicSiteHostname(input: string): string {
         throw new PublicSiteDomainValidationError("Enter a valid public hostname.");
     }
 
-    const reserved = [...SYSTEM_DOMAINS, ...RETIRED_PUBLIC_DOMAINS]
+    const reserved = SYSTEM_DOMAINS
         .map((item) => String(item || "").toLowerCase().replace(/:\d+$/, "").replace(/^www\./, ""));
     const comparable = hostname.replace(/^www\./, "");
     if (reserved.includes(comparable) || comparable === "localhost" || comparable.endsWith(".localhost")) {

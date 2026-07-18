@@ -5,21 +5,15 @@ import { resolvePublicSiteDomain } from "@/lib/public-site-domains/service";
 
 // Use React 'cache' to deduplicate requests in the same render cycle
 export const getSiteConfig = cache(async (domain: string) => {
-    // DEVELOPMENT ALIAS: Allow local testing of the live site
-    // Since SiteConfig.locationId is unique, we can't have a separate 'test.localhost' config 
-    // pointing to the same location as 'downtowncyprus.site'.
-    // So we map the test domain to the real one here.
-    const searchDomain = domain === 'test.localhost' ? 'downtowncyprus.site' : domain;
-
     let config = await db.siteConfig.findUnique({
-        where: { domain: searchDomain },
+        where: { domain },
         include: {
             location: true, // We might need location details (address, etc) later
         },
     });
 
     if (!config) {
-        const resolution = await resolvePublicSiteDomain(searchDomain);
+        const resolution = await resolvePublicSiteDomain(domain);
         if (resolution) {
             config = await db.siteConfig.findUnique({
                 where: { locationId: resolution.locationId },

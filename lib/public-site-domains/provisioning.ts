@@ -3,7 +3,7 @@ import { registerClerkDomain, unregisterClerkDomain } from "@/lib/auth/clerk-dom
 import { promotePublicSiteDomain } from "./service";
 
 const HEALTH_TIMEOUT_MS = 20_000;
-const MANAGED_DOMAIN_SUFFIXES = (process.env.PUBLIC_SITE_MANAGED_DOMAIN_SUFFIXES || "substo.com")
+const MANAGED_DOMAIN_SUFFIXES = (process.env.PUBLIC_SITE_MANAGED_DOMAIN_SUFFIXES || "")
     .split(",")
     .map((value) => value.trim().toLowerCase().replace(/^\./, ""))
     .filter(Boolean);

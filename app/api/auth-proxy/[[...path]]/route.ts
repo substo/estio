@@ -73,8 +73,7 @@ async function proxyRequest(request: NextRequest) {
         responseHeaders.delete('content-encoding');
         responseHeaders.delete('content-length');
 
-        // Rewrite Set-Cookie to strip the domain or set it to current domain
-        // Clerk sets cookies for .estio.co. We need them for .downtowncyprus.site (or just host-only)
+        // Rewrite Set-Cookie to strip the domain so cookies become host-only.
         const setCookie = responseHeaders.get('set-cookie');
         if (setCookie) {
             // Simple rewrite: Remove "Domain=.estio.co;" or replace it

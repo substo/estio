@@ -237,6 +237,27 @@ async function syncLegacyCanonicalDomain(tx: Prisma.TransactionClient, locationI
     }
 }
 
+async function clearLegacyCanonicalDomain(tx: Prisma.TransactionClient, locationId: string) {
+    await tx.siteConfig.updateMany({ where: { locationId }, data: { domain: null } });
+    await tx.location.update({ where: { id: locationId }, data: { domain: null } });
+    const settingsDocument = await tx.settingsDocument.findUnique({
+        where: {
+            scopeType_scopeId_domain: {
+                scopeType: "LOCATION",
+                scopeId: locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
+            },
+        },
+    });
+    if (settingsDocument) {
+        const payload = { ...(settingsDocument.payload as Record<string, unknown>), domain: null };
+        await tx.settingsDocument.update({
+            where: { id: settingsDocument.id },
+            data: { payload: payload as Prisma.InputJsonValue, version: { increment: 1 } },
+        });
+    }
+}
+
 export async function promotePublicSiteDomain(args: { locationId: string; domainId: string }) {
     return db.$transaction(async (tx) => {
         const target = await tx.publicSiteDomain.findFirst({
@@ -274,12 +295,32 @@ export async function releasePublicSiteDomain(args: {
     domainId: string;
     actorUserId?: string | null;
 }) {
-    const binding = await db.publicSiteDomain.findFirst({ where: { id: args.domainId, locationId: args.locationId } });
-    if (!binding || binding.status === "RELEASED") throw new PublicSiteDomainValidationError("Domain not found.");
-    if (binding.role === "CANONICAL" && binding.status === "ACTIVE") {
-        throw new PublicSiteDomainValidationError("Promote a replacement domain before releasing the active canonical domain.");
+    const result = await db.$transaction((tx) => releasePublicSiteDomainInTransaction(tx, args));
+    logDomainEvent("released", {
+        hostname: result.released.hostname,
+        locationId: result.released.locationId,
+        clearedCanonical: result.clearedCanonical,
+    });
+    return result;
+}
+
+export async function releasePublicSiteDomainInTransaction(
+    tx: Prisma.TransactionClient,
+    args: { locationId: string; domainId: string; actorUserId?: string | null }
+) {
+    const binding = await tx.publicSiteDomain.findFirst({
+        where: { id: args.domainId, locationId: args.locationId },
+    });
+    if (!binding || binding.status === "RELEASED") {
+        throw new PublicSiteDomainValidationError("Domain not found.");
     }
-    const released = await db.publicSiteDomain.update({
+
+    const clearedCanonical = binding.role === "CANONICAL" && binding.status === "ACTIVE";
+    if (clearedCanonical) {
+        await clearLegacyCanonicalDomain(tx, binding.locationId);
+    }
+
+    const released = await tx.publicSiteDomain.update({
         where: { id: binding.id },
         data: {
             status: "RELEASED",
@@ -288,8 +329,24 @@ export async function releasePublicSiteDomain(args: {
             provisioningError: null,
         },
     });
-    logDomainEvent("released", { hostname: binding.hostname, locationId: binding.locationId });
-    return released;
+    const idempotencyKey = `RELEASE:${binding.id}`;
+    const job = await tx.publicSiteDomainProvisioningJob.upsert({
+        where: { idempotencyKey },
+        create: {
+            locationId: binding.locationId,
+            domainId: binding.id,
+            operation: "RELEASE",
+            idempotencyKey,
+        },
+        update: {
+            status: "PENDING",
+            scheduledAt: new Date(),
+            lockedAt: null,
+            processedAt: null,
+            lastError: null,
+        },
+    });
+    return { released, job, clearedCanonical };
 }
 
 export async function enqueuePublicSiteDomainJob(args: {

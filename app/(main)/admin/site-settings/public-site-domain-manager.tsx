@@ -88,7 +88,10 @@ export function PublicSiteDomainManager({
     };
 
     const release = async (domain: ManagedDomain) => {
-        const confirmation = window.prompt(`Type RELEASE to stop serving ${domain.hostname}. Existing links will break.`);
+        const consequence = domain.role === "CANONICAL" && domain.status === "ACTIVE"
+            ? " This location will have no public domain."
+            : "";
+        const confirmation = window.prompt(`Type RELEASE to stop serving ${domain.hostname}.${consequence} Existing links will break.`);
         if (confirmation !== "RELEASE") return;
         setBusyId(domain.id);
         try {
@@ -155,7 +158,7 @@ export function PublicSiteDomainManager({
                                         {domain.status === "ACTIVE" && <Button size="icon" variant="ghost" asChild title="Open domain"><a href={`https://${domain.hostname}`} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /></a></Button>}
                                         {pending && <Button type="button" size="sm" onClick={() => runAction(domain, "verify")} disabled={working}>{working ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />} Verify</Button>}
                                         {domain.provisioningError && domain.status === "VERIFIED" && <Button type="button" size="sm" variant="outline" onClick={() => runAction(domain, "retry")} disabled={working}>{working ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />} Retry</Button>}
-                                        {domain.role === "REDIRECT" && <Button type="button" size="icon" variant="ghost" title="Release domain" onClick={() => release(domain)} disabled={working}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                                        <Button type="button" size="icon" variant="ghost" title="Release domain" onClick={() => release(domain)} disabled={working}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                                     </div>
                                 </div>
                                 {pending && (

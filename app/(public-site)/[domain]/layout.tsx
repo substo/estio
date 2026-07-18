@@ -116,7 +116,6 @@ export default async function PublicSiteLayout(props: Props) {
     const navLinks = filterNavLinks(rawNavLinks);
 
     // 5. Determine if this is a satellite domain (Tenant)
-    // In Dev Mode: estio.co is Primary. downtowncyprus.site is Satellite.
     const isPrimary = params.domain === 'estio.co' || params.domain === 'localhost';
     const isSatellite = !isPrimary;
 

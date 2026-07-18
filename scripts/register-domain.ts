@@ -11,7 +11,7 @@ async function main() {
     const domain = args[0];
 
     if (!domain) {
-        console.error("Please provide a domain argument (e.g., npx tsx scripts/register-domain.ts downtowncyprus.site)");
+        console.error("Please provide a domain argument (e.g., npx tsx scripts/register-domain.ts properties.example.com)");
         process.exit(1);
     }
 

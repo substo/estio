@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requirePublicSiteDomainAdmin } from "@/lib/public-site-domains/api-auth";
 import {
-    enqueuePublicSiteDomainJob,
     listPublicSiteDomains,
     releasePublicSiteDomain,
 } from "@/lib/public-site-domains/service";
@@ -15,8 +14,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ d
     if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (body?.confirmation !== "RELEASE") return NextResponse.json({ error: "Type RELEASE to confirm." }, { status: 400 });
     try {
-        await releasePublicSiteDomain({ locationId, domainId, actorUserId: admin.userId });
-        const job = await enqueuePublicSiteDomainJob({ locationId, domainId, operation: "RELEASE" });
+        const { job } = await releasePublicSiteDomain({ locationId, domainId, actorUserId: admin.userId });
         processPublicSiteDomainJob(job.id).catch(() => undefined);
         return NextResponse.json({ domains: await listPublicSiteDomains(locationId) });
     } catch (error) {
