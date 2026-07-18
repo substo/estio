@@ -23,6 +23,7 @@ chmod +x "${SCRIPT_DIR}/cron-whatsapp-outbound.sh"
 chmod +x "${SCRIPT_DIR}/cron-provider-outbox.sh"
 chmod +x "${SCRIPT_DIR}/cron-ai-provider-catalog.sh"
 chmod +x "${SCRIPT_DIR}/cron-public-site-domains.sh"
+chmod +x "${SCRIPT_DIR}/cron-property-match-profiles.sh"
 
 # Check if cron entry already exists (Gmail)
 CRON_ENTRY_GMAIL="*/15 * * * * ${SCRIPT_DIR}/cron-gmail-sync.sh"
@@ -34,6 +35,7 @@ CRON_ENTRY_WHATSAPP_OUTBOUND="*/1 * * * * ${SCRIPT_DIR}/cron-whatsapp-outbound.s
 CRON_ENTRY_PROVIDER_OUTBOX="*/1 * * * * ${SCRIPT_DIR}/cron-provider-outbox.sh"
 CRON_ENTRY_AI_PROVIDER_CATALOG="17 3 * * * ${SCRIPT_DIR}/cron-ai-provider-catalog.sh"
 CRON_ENTRY_PUBLIC_SITE_DOMAINS="*/1 * * * * ${SCRIPT_DIR}/cron-public-site-domains.sh"
+CRON_ENTRY_PROPERTY_MATCH_PROFILES="37 * * * * ${SCRIPT_DIR}/cron-property-match-profiles.sh"
 
 EXISTING_GMAIL=$(crontab -l 2>/dev/null | grep -F "cron-gmail-sync.sh" || true)
 EXISTING_OUTLOOK=$(crontab -l 2>/dev/null | grep -F "cron-outlook-sync.sh" || true)
@@ -44,6 +46,7 @@ EXISTING_WHATSAPP_OUTBOUND=$(crontab -l 2>/dev/null | grep -F "cron-whatsapp-out
 EXISTING_PROVIDER_OUTBOX=$(crontab -l 2>/dev/null | grep -F "cron-provider-outbox.sh" || true)
 EXISTING_AI_PROVIDER_CATALOG=$(crontab -l 2>/dev/null | grep -F "cron-ai-provider-catalog.sh" || true)
 EXISTING_PUBLIC_SITE_DOMAINS=$(crontab -l 2>/dev/null | grep -F "cron-public-site-domains.sh" || true)
+EXISTING_PROPERTY_MATCH_PROFILES=$(crontab -l 2>/dev/null | grep -F "cron-property-match-profiles.sh" || true)
 
 # Update Gmail Entry
 if [ -n "${EXISTING_GMAIL}" ]; then
@@ -117,10 +120,17 @@ else
     (crontab -l 2>/dev/null; echo "${CRON_ENTRY_PUBLIC_SITE_DOMAINS}") | crontab -
 fi
 
+if [ -n "${EXISTING_PROPERTY_MATCH_PROFILES}" ]; then
+    echo "Property match profiles cron entry already exists. Updating..."
+    (crontab -l 2>/dev/null | grep -v "cron-property-match-profiles.sh"; echo "${CRON_ENTRY_PROPERTY_MATCH_PROFILES}") | crontab -
+else
+    (crontab -l 2>/dev/null; echo "${CRON_ENTRY_PROPERTY_MATCH_PROFILES}") | crontab -
+fi
+
 echo "✅ Cron jobs installed!"
 echo ""
 echo "Current crontab:"
-crontab -l | grep -E "(gmail|outlook|ai-runtime|ai-automations|task-reminders|scheduled-messages|whatsapp-outbound|provider-outbox|ai-provider-catalog|public-site-domains|estio)" || echo "(no estio-related entries)"
+crontab -l | grep -E "(gmail|outlook|ai-runtime|ai-automations|task-reminders|scheduled-messages|whatsapp-outbound|provider-outbox|ai-provider-catalog|public-site-domains|property-match-profiles|estio)" || echo "(no estio-related entries)"
 echo ""
 echo "📋 Manual verification:"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/gmail-sync-cron.log"
@@ -132,6 +142,7 @@ echo "   - Check logs: tail -f ${APP_DIR}/logs/whatsapp-outbound-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/provider-outbox-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/ai-provider-catalog-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/public-site-domains-cron.log"
+echo "   - Check logs: tail -f ${APP_DIR}/logs/property-match-profiles-cron.log"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-gmail-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-outlook-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-ai-automations.sh"
@@ -141,5 +152,6 @@ echo "   - Test manually: ${SCRIPT_DIR}/cron-whatsapp-outbound.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-provider-outbox.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-ai-provider-catalog.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-public-site-domains.sh"
+echo "   - Test manually: ${SCRIPT_DIR}/cron-property-match-profiles.sh"
 echo ""
 echo "🔐 Don't forget to set CRON_SECRET in your environment!"
