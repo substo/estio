@@ -3,6 +3,15 @@ import { registerClerkDomain, unregisterClerkDomain } from "@/lib/auth/clerk-dom
 import { promotePublicSiteDomain } from "./service";
 
 const HEALTH_TIMEOUT_MS = 20_000;
+const MANAGED_DOMAIN_SUFFIXES = (process.env.PUBLIC_SITE_MANAGED_DOMAIN_SUFFIXES || "substo.com")
+    .split(",")
+    .map((value) => value.trim().toLowerCase().replace(/^\./, ""))
+    .filter(Boolean);
+
+export function requiresClerkSatelliteDomain(hostname: string) {
+    const normalized = hostname.toLowerCase();
+    return !MANAGED_DOMAIN_SUFFIXES.some((suffix) => normalized.endsWith(`.${suffix}`));
+}
 
 async function checkDomainHttpsHealth(hostname: string, domainId: string) {
     const controller = new AbortController();
@@ -42,8 +51,16 @@ export async function processPublicSiteDomainJob(jobId: string) {
     try {
         if (job.operation === "PROVISION") {
             if (job.domain.status !== "VERIFIED") throw new Error("Domain must be verified before provisioning.");
-            const clerkReady = await registerClerkDomain(job.domain.hostname);
-            if (!clerkReady) throw new Error("Clerk domain registration failed.");
+            if (requiresClerkSatelliteDomain(job.domain.hostname)) {
+                const clerkReady = await registerClerkDomain(job.domain.hostname);
+                if (!clerkReady) throw new Error("Clerk domain registration failed.");
+            } else {
+                console.log("[public-site-domain]", JSON.stringify({
+                    event: "clerk_platform_domain_skipped",
+                    domainId: job.domain.id,
+                    hostname: job.domain.hostname,
+                }));
+            }
             const tlsReady = await checkDomainHttpsHealth(job.domain.hostname, job.domain.id);
             await db.publicSiteDomain.update({
                 where: { id: job.domain.id },
@@ -52,8 +69,10 @@ export async function processPublicSiteDomainJob(jobId: string) {
             if (!tlsReady) throw new Error("HTTPS health check failed after TLS provisioning.");
             await promotePublicSiteDomain({ locationId: job.locationId, domainId: job.domainId });
         } else if (job.operation === "RELEASE") {
-            const cleaned = await unregisterClerkDomain(job.domain.hostname);
-            if (!cleaned) throw new Error("Clerk domain cleanup failed.");
+            if (requiresClerkSatelliteDomain(job.domain.hostname)) {
+                const cleaned = await unregisterClerkDomain(job.domain.hostname);
+                if (!cleaned) throw new Error("Clerk domain cleanup failed.");
+            }
         } else {
             throw new Error(`Unsupported domain job operation: ${job.operation}`);
         }
