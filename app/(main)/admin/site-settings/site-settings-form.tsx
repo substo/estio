@@ -51,6 +51,7 @@ export function SiteSettingsForm({
     // Safe access to JSON fields
     const theme = initialData?.theme as any || {};
     const hero = initialData?.heroContent as any || {};
+    const marketProfile = initialData?.marketProfile as any || {};
 
     // --- STATE FOR CONTROLLED INPUTS (AI DESIGNER) ---
     const [brandName, setBrandName] = useState<string>(theme.logo?.textTop || "");
@@ -281,6 +282,99 @@ export function SiteSettingsForm({
                         </p>
                         {state?.errors?.locationTimeZone && (
                             <p className="text-sm text-red-500">{state.errors.locationTimeZone[0]}</p>
+                        )}
+                    </div>
+                </div>
+
+                <Separator />
+
+                {/* Location Market Context */}
+                <div className="space-y-4">
+                    <div>
+                        <h3 className="text-lg font-medium">Property Market</h3>
+                        <p className="text-sm text-muted-foreground">
+                            Defines the geography, currency, and languages used when matching campaign properties for this location only.
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid gap-2">
+                            <Label htmlFor="marketCountryCode">Country code</Label>
+                            <Input
+                                id="marketCountryCode"
+                                name="marketCountryCode"
+                                placeholder="e.g. ES"
+                                defaultValue={marketProfile.countryCode || ""}
+                                maxLength={2}
+                            />
+                            {state?.errors?.marketCountryCode && (
+                                <p className="text-sm text-red-500">{state.errors.marketCountryCode[0]}</p>
+                            )}
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="marketCountryName">Country name</Label>
+                            <Input
+                                id="marketCountryName"
+                                name="marketCountryName"
+                                placeholder="e.g. Spain"
+                                defaultValue={marketProfile.countryName || ""}
+                            />
+                            {state?.errors?.marketCountryName && (
+                                <p className="text-sm text-red-500">{state.errors.marketCountryName[0]}</p>
+                            )}
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="marketLocale">Default locale</Label>
+                            <Input
+                                id="marketLocale"
+                                name="marketLocale"
+                                placeholder="e.g. es-ES or ar-AE"
+                                defaultValue={marketProfile.locale || ""}
+                            />
+                            {state?.errors?.marketLocale && (
+                                <p className="text-sm text-red-500">{state.errors.marketLocale[0]}</p>
+                            )}
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="marketCurrencyCode">Currency code</Label>
+                            <Input
+                                id="marketCurrencyCode"
+                                name="marketCurrencyCode"
+                                placeholder="e.g. EUR or AED"
+                                defaultValue={marketProfile.currencyCode || ""}
+                                maxLength={3}
+                            />
+                            {state?.errors?.marketCurrencyCode && (
+                                <p className="text-sm text-red-500">{state.errors.marketCurrencyCode[0]}</p>
+                            )}
+                        </div>
+                    </div>
+                    <div className="grid gap-2">
+                        <Label htmlFor="marketSupportedLanguages">Supported languages</Label>
+                        <Input
+                            id="marketSupportedLanguages"
+                            name="marketSupportedLanguages"
+                            placeholder="e.g. es, en, de"
+                            defaultValue={Array.isArray(marketProfile.supportedLanguages) ? marketProfile.supportedLanguages.join(", ") : ""}
+                        />
+                        <p className="text-xs text-muted-foreground">Comma-separated language or locale codes used in this office&apos;s conversations.</p>
+                        {state?.errors?.marketSupportedLanguages && (
+                            <p className="text-sm text-red-500">{state.errors.marketSupportedLanguages[0]}</p>
+                        )}
+                    </div>
+                    <div className="grid gap-2">
+                        <Label htmlFor="marketServiceAreas">Service areas and aliases</Label>
+                        <textarea
+                            id="marketServiceAreas"
+                            name="marketServiceAreas"
+                            className="min-h-56 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            defaultValue={JSON.stringify(marketProfile.serviceAreas || [], null, 2)}
+                            spellCheck={false}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            JSON array using id, label, aliases, parentId, and kind. Kinds: country, region, city, district, locality, neighborhood.
+                        </p>
+                        {state?.errors?.marketServiceAreas && (
+                            <p className="text-sm text-red-500">{state.errors.marketServiceAreas[0]}</p>
                         )}
                     </div>
                 </div>

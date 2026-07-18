@@ -725,6 +725,16 @@ async function applyContactVerificationAssessment(args: {
     });
   });
 
+  try {
+    const { rebuildContactPropertyMatchProfile } = await import("@/lib/property-match-campaigns/profile-service");
+    await rebuildContactPropertyMatchProfile({
+      locationId: args.locationId,
+      contactId: args.contact.id,
+    });
+  } catch (error) {
+    console.warn("[contact-verification] Failed to refresh property match profile:", error);
+  }
+
   if (args.assessment.status === "verified_lead") {
     if (args.reprocessCampaignBlocks !== false) {
       await reprocessCampaignBlocksForVerifiedContact({

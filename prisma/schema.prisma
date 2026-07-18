@@ -88,6 +88,8 @@ model Location {
   analyticsDailyRollups         AnalyticsDailyRollup[]
   publicSiteDomains             PublicSiteDomain[]
   publicSiteDomainJobs          PublicSiteDomainProvisioningJob[]
+  contactPropertyMatchProfiles ContactPropertyMatchProfile[]
+  contactPropertyInteractions  ContactPropertyInteraction[]
 
   // SIM Relay (Android SMS Gateway)
   smsRelayEnabled Boolean @default(false)
@@ -375,6 +377,7 @@ model Property {
   primaryViewingSessions ViewingSession[]      @relation("ViewingSessionPrimaryProperty")
   activeViewingSessions  ViewingSession[]      @relation("ViewingSessionCurrentProperty")
   analyticsEvents        AnalyticsEvent[]
+  propertyMatchInteractions ContactPropertyInteraction[]
 
   createdById String?
   creator     User?   @relation("PropertyCreator", fields: [createdById], references: [id])
@@ -735,6 +738,8 @@ model Contact {
   contactClassificationRunItems ContactClassificationRunItem[]
   aiSuggestedResponses       AiSuggestedResponse[]
   requirementProposals       ContactRequirementProposal[]
+  propertyMatchProfile       ContactPropertyMatchProfile?
+  propertyMatchInteractions  ContactPropertyInteraction[]
   propertyMatchCandidates    PropertyMatchCandidate[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
   whatsappIdentityMaps       WhatsAppIdentityMap[]
@@ -1823,6 +1828,7 @@ model Conversation {
   agentFeedback              AgentFeedback[]
   aiSuggestedResponses       AiSuggestedResponse[]
   requirementProposals       ContactRequirementProposal[]
+  propertyMatchInteractions  ContactPropertyInteraction[]
   propertyMatchCandidates    PropertyMatchCandidate[]
   whatsappOutboundOutboxJobs WhatsAppOutboundOutbox[]
   whatsappCallAttempts       WhatsAppCallAttempt[]
@@ -2761,6 +2767,68 @@ model ContactRequirementProposal {
   @@index([contactId, status, createdAt(sort: Desc)])
   @@index([contactId, proposalType, status, createdAt(sort: Desc)])
   @@index([conversationId, status, createdAt(sort: Desc)])
+}
+
+model ContactPropertyMatchProfile {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  contactId  String   @unique
+
+  schemaVersion          Int      @default(2)
+  status                 String   @default("ready") // ready | sparse | ineligible | failed
+  eligibilityProfile     Json
+  requirementProfile     Json
+  interactionProfile     Json
+  requirementSummary     String?  @db.Text
+  interactionSummary     String?  @db.Text
+  sourceContactUpdatedAt DateTime?
+  evidenceWatermarkAt    DateTime?
+  lastBuiltAt            DateTime @default(now())
+  lastError              String?  @db.Text
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, status, updatedAt(sort: Desc)])
+  @@index([locationId, evidenceWatermarkAt])
+}
+
+model ContactPropertyInteraction {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId     String
+  contactId      String
+  conversationId String?
+  propertyId     String?
+
+  propertyReference String?
+  propertyUrl       String?  @db.Text
+  eventType         String   // enquired | sent | clicked | replied | liked | rejected | viewing_requested | viewed
+  sentiment         String   @default("unknown") // positive | negative | neutral | unknown
+  signalStrength    String   @default("observed") // explicit | inferred | observed
+  sourceType        String   // message | note | transcript | viewing | campaign | analytics | import
+  sourceId          String?
+  occurredAt        DateTime
+  evidence          Json?
+  metadata          Json?
+
+  location     Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  contact      Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  property     Property?     @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, eventType, occurredAt(sort: Desc)])
+  @@index([contactId, occurredAt(sort: Desc)])
+  @@index([contactId, sentiment, occurredAt(sort: Desc)])
+  @@index([propertyId, eventType, occurredAt(sort: Desc)])
+  @@index([conversationId, occurredAt(sort: Desc)])
+  @@index([sourceType, sourceId])
+  @@unique([sourceType, sourceId, eventType])
 }
 
 model PropertyMatchCampaign {

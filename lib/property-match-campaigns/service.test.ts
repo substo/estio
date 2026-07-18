@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   attachPropertyMatchAiRunEvidence,
+  applyInteractionSimilarityToStructuredMatch,
   buildAiReviewClaimWhere,
   buildPriorPropertyShareSearchTerms,
   buildPropertyMatchContactWhere,
@@ -16,6 +17,23 @@ import {
   summarizePropertyMatchCandidateQueues,
   sortPropertyMatchSearchRows,
 } from "./service";
+import { buildPropertyMatchProfileBackfillWhere } from "./profile-service";
+
+const SOURCE_TEST_MARKET = {
+  locationId: "source-test",
+  locationName: "Test office",
+  countryCode: "CY",
+  countryName: "Cyprus",
+  locale: "en-CY",
+  currencyCode: "EUR",
+  supportedLanguages: ["en"],
+  source: { configured: true, inventoryFallback: false },
+  serviceAreas: [
+    { id: "paphos", label: "Paphos", aliases: [], parentId: null, kind: "district" as const },
+    { id: "peyia", label: "Peyia", aliases: ["Peia"], parentId: "paphos", kind: "locality" as const },
+    { id: "kato-paphos", label: "Kato Paphos", aliases: [], parentId: "paphos", kind: "locality" as const },
+  ],
+};
 
 test("AI match normalizer downgrades low-confidence yes to maybe", () => {
   const result = normalizeAiMatchAssessment({
@@ -213,7 +231,7 @@ test("property match campaign count decisions still move active campaigns forwar
   assert.equal(stillProcessing.processingFinishedAt, null);
 });
 
-test("completed or failed AI candidates can enter human review when verdict is sendable", () => {
+test("only successfully completed AI candidates can enter human review", () => {
   assert.equal(canCandidateEnterHumanReview({
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -225,7 +243,7 @@ test("completed or failed AI candidates can enter human review when verdict is s
     aiVerdict: "maybe",
     aiReviewStatus: "failed",
     contact: { profileVerificationStatus: "verified_lead" },
-  }), true);
+  }), false);
   assert.equal(canCandidateEnterHumanReview({
     reviewerStatus: "pending",
     aiVerdict: "no",
@@ -246,18 +264,120 @@ test("unverified lead-like candidates cannot enter review and draft flow", () =>
   assert.equal(canCandidateDraftOrSend(candidate), false);
 });
 
-test("property match contact filter leaves identity to profile verification", () => {
+test("property match contact filter removes only known ineligible identities", () => {
   const cursor = JSON.stringify({ createdAt: "2026-07-09T12:00:00.000Z", id: "contact_10" });
   const where = buildPropertyMatchContactWhere("loc_1", cursor) as any;
 
+  assert.deepEqual(where.contactType, {
+    notIn: ["Owner", "Agent", "Partner", "Associate", "Maintenance", "WhatsAppGroup"],
+  });
   assert.deepEqual(where.NOT, [
     { matchingEmailMatchedProperties: { startsWith: "No" } },
+  ]);
+  assert.deepEqual(where.AND, [
+    {
+      OR: [
+        { profileVerificationStatus: null },
+        { profileVerificationStatus: { notIn: ["likely_owner", "likely_agent", "not_a_lead"] } },
+      ],
+    },
   ]);
   assert.deepEqual(where.conversations, { some: { locationId: "loc_1", deletedAt: null } });
   assert.deepEqual(where.OR, [
     { createdAt: { lt: new Date("2026-07-09T12:00:00.000Z") } },
     { createdAt: new Date("2026-07-09T12:00:00.000Z"), id: { lt: "contact_10" } },
   ]);
+});
+
+test("property match profile backfill selects only missing or old profile versions", () => {
+  const staleBuiltBefore = new Date("2026-07-18T10:00:00.000Z");
+  assert.deepEqual(buildPropertyMatchProfileBackfillWhere("loc_1", staleBuiltBefore), {
+    locationId: "loc_1",
+    OR: [
+      { propertyMatchProfile: { is: null } },
+      { propertyMatchProfile: { is: { schemaVersion: { lt: 2 } } } },
+      { propertyMatchProfile: { is: { lastBuiltAt: { lt: staleBuiltBefore } } } },
+    ],
+  });
+});
+
+test("positive interaction similarity enriches evidence without automatically forcing yes", () => {
+  const result = applyInteractionSimilarityToStructuredMatch({
+    verdict: "maybe",
+    score: 2,
+    needsAi: true,
+    matches: ["property type matches"],
+    mismatches: [],
+    unknowns: ["budget is unclear"],
+    dimensions: [],
+    hardMismatches: [],
+    disqualifiers: [],
+    qualificationEvidence: {
+      anchorCount: 1,
+      anchors: ["property type matches"],
+      concreteFitAnchorCount: 1,
+      concreteFitAnchors: ["property type matches"],
+      groundingFitAnchorCount: 0,
+      groundingFitAnchors: [],
+      sparseLead: true,
+      broadOnly: false,
+      minimumAnchorsForYes: 2,
+      minimumConcreteFitAnchorsForYes: 2,
+      reason: "Not enough evidence.",
+    },
+  }, {
+    positiveMatches: [{
+      reference: "DT5000",
+      eventType: "liked",
+      reason: "interested",
+      occurredAt: "2026-07-18T10:00:00.000Z",
+      similarity: 0.9,
+      matchedFields: ["location", "price", "type"],
+      differingFields: [],
+    }],
+    negativeCautions: [],
+    hasPositiveGrounding: true,
+    requiresReview: false,
+    summary: "Similar to one positively received property.",
+  });
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.needsAi, true);
+  assert.equal(result.qualificationEvidence?.sparseLead, false);
+  assert.ok(result.matches.some((match) => match.includes("DT5000")));
+  assert.equal(result.score, 4);
+});
+
+test("negative property similarity downgrades an automatic yes to review", () => {
+  const result = applyInteractionSimilarityToStructuredMatch({
+    verdict: "yes",
+    score: 7,
+    needsAi: false,
+    matches: ["location matches", "budget matches"],
+    mismatches: [],
+    unknowns: [],
+    dimensions: [],
+    hardMismatches: [],
+    disqualifiers: [],
+  }, {
+    positiveMatches: [],
+    negativeCautions: [{
+      reference: "DT4999",
+      eventType: "rejected",
+      reason: "price_rejection",
+      occurredAt: "2026-07-17T10:00:00.000Z",
+      similarity: 0.85,
+      matchedFields: ["location", "price", "type"],
+      differingFields: [],
+    }],
+    hasPositiveGrounding: false,
+    requiresReview: true,
+    summary: "Similar to one rejected property.",
+  });
+
+  assert.equal(result.verdict, "maybe");
+  assert.equal(result.needsAi, true);
+  assert.ok(result.unknowns.some((unknown) => unknown.includes("DT4999")));
 });
 
 test("AI review claim filter reclaims stale processing locks", () => {
@@ -323,6 +443,15 @@ test("property match queue sends unverified lead-like yes candidates to needs in
   assert.equal(propertyMatchCandidateQueue(candidate), "needs_profile_verification");
 });
 
+test("failed AI reviews do not enter the human recommendation queue", () => {
+  assert.equal(propertyMatchCandidateQueue({
+    reviewerStatus: "pending",
+    aiVerdict: "maybe",
+    aiReviewStatus: "failed",
+    contact: { profileVerificationStatus: "verified_lead" },
+  }), "not_match");
+});
+
 test("property match queue separates profile verification blockers from not matches", () => {
   const candidate = {
     reviewerStatus: "pending",
@@ -366,10 +495,45 @@ test("property source snapshot extracts known Cyprus location from title text", 
     url: "https://agency.example/properties/dt5098",
     title: "Peyia, Paphos Traditional House For Sale | DT5098",
     sourceText: "Available for sale is a two-storey, three-bedroom house with a swimming pool.",
+    marketContext: SOURCE_TEST_MARKET,
   });
 
   assert.equal(snapshot.reference, "DT5098");
   assert.equal(snapshot.propertyLocation, "Peyia");
+});
+
+test("property source snapshot ignores similar listings and covered-area labels", () => {
+  const snapshot = propertySourceSnapshot({
+    url: "https://agency.example/properties/dt5115",
+    title: "Kato Paphos, Paphos Apartment For Sale | DT5115",
+    description: "Apartment in a gated community close to amenities.",
+    sourceText: `€200,000
+For Sale
+Kato Paphos
+Paphos
+Apartment
+Resale
+2 Bedrooms
+1 Bathrooms
+87m² Covered
+Covered living area: 73m²
+Swimming Pool
+
+SIMILAR NEARBY
+
+Studio
+Paphos, Kato Paphos
+€195,000
+32m² Covered`,
+    marketContext: SOURCE_TEST_MARKET,
+  });
+
+  assert.equal(snapshot.reference, "DT5115");
+  assert.equal(snapshot.goal, "Sale");
+  assert.equal(snapshot.type, "Apartment");
+  assert.equal(snapshot.bedrooms, 2);
+  assert.equal(snapshot.propertyLocation, "Kato Paphos");
+  assert.equal(snapshot.price, 200000);
 });
 
 test("prior property share terms include exact reference and URL variants", () => {

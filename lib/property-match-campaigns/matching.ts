@@ -1,4 +1,4 @@
-import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
+import type { LocationMarketContext, MarketServiceArea } from "@/lib/locations/market-context";
 
 export type MatchVerdict = "yes" | "maybe" | "no";
 
@@ -96,92 +96,74 @@ function display(value: unknown): string | null {
 }
 
 function compactLocation(value: unknown): string {
-  return normalize(value).replace(/[^a-z0-9]+/g, "");
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/\p{Mark}/gu, "")
+    .toLocaleLowerCase("und")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
 }
 
-const LOCATION_ALIASES: Record<string, string> = {
-  peia: "peyia",
-  pegeia: "peyia",
-  paphostown: "paphos_town",
-  paphos: "paphos",
-  limassol: "limassol",
-  larnaca: "larnaca",
-  nicosia: "nicosia",
-  famagusta: "famagusta",
+type LocationIndexEntry = {
+  area: MarketServiceArea;
+  districtLabels: string[];
 };
 
-const DISTRICT_BY_TOKEN = new Map<string, string>();
-const AREA_BY_TOKEN = new Map<string, { area: string; district: string; label: string }>();
-
-for (const district of PROPERTY_LOCATIONS) {
-  const districtTokens = [
-    district.district_key,
-    district.district_label,
-    compactLocation(district.district_key),
-    compactLocation(district.district_label),
-  ];
-  for (const token of districtTokens) {
-    const key = LOCATION_ALIASES[compactLocation(token)] || compactLocation(token);
-    if (key) DISTRICT_BY_TOKEN.set(key, normalize(district.district_label));
-  }
-  for (const location of district.locations) {
-    const areaTokens = [
-      location.key,
-      location.label,
-      compactLocation(location.key),
-      compactLocation(location.label),
-    ];
-    for (const token of areaTokens) {
-      const key = LOCATION_ALIASES[compactLocation(token)] || compactLocation(token);
-      if (key) AREA_BY_TOKEN.set(key, {
-        area: normalize(location.label),
-        district: normalize(district.district_label),
-        label: location.label,
-      });
+function buildLocationIndex(marketContext?: LocationMarketContext | null): Map<string, LocationIndexEntry> {
+  const result = new Map<string, LocationIndexEntry>();
+  const areas = marketContext?.serviceAreas || [];
+  const byId = new Map(areas.map((area) => [area.id, area]));
+  const broadKinds = new Set(["country", "region", "city", "district"]);
+  for (const area of areas) {
+    const districtLabels = new Set<string>();
+    if (broadKinds.has(area.kind)) districtLabels.add(normalize(area.label));
+    let parent = area.parentId ? byId.get(area.parentId) : null;
+    const visited = new Set<string>();
+    while (parent && !visited.has(parent.id)) {
+      visited.add(parent.id);
+      if (broadKinds.has(parent.kind)) districtLabels.add(normalize(parent.label));
+      parent = parent.parentId ? byId.get(parent.parentId) : null;
+    }
+    const entry = { area, districtLabels: [...districtLabels] };
+    for (const value of [area.id, area.label, ...area.aliases]) {
+      const key = compactLocation(value);
+      if (key) result.set(key, entry);
     }
   }
+  return result;
 }
 
-function locationInfo(value: unknown): { districts: string[]; areas: string[] } {
+function locationInfo(value: unknown, index: Map<string, LocationIndexEntry>): { districts: string[]; areas: string[] } {
   const text = normalize(value);
   if (!text) return { districts: [], areas: [] };
-  const compact = LOCATION_ALIASES[compactLocation(text)] || compactLocation(text);
+  const compact = compactLocation(text);
   const districts = new Set<string>();
   const areas = new Set<string>();
 
-  const directArea = AREA_BY_TOKEN.get(compact);
-  if (directArea) {
-    areas.add(directArea.area);
-    districts.add(directArea.district);
-  }
-  const directDistrict = DISTRICT_BY_TOKEN.get(compact);
-  if (directDistrict) districts.add(directDistrict);
-
-  for (const [token, district] of DISTRICT_BY_TOKEN.entries()) {
-    if (token.length >= 4 && compact.includes(token)) districts.add(district);
-  }
-  for (const [token, area] of AREA_BY_TOKEN.entries()) {
-    if (token.length >= 4 && compact.includes(token)) {
-      areas.add(area.area);
-      districts.add(area.district);
+  for (const [candidate, entry] of index.entries()) {
+    if (candidate !== compact && (candidate.length < 3 || !compact.includes(candidate))) continue;
+    if (["locality", "neighborhood"].includes(entry.area.kind)) {
+      areas.add(normalize(entry.area.label));
+    } else {
+      districts.add(normalize(entry.area.label));
     }
+    entry.districtLabels.forEach((district) => districts.add(district));
   }
 
   return { districts: Array.from(districts), areas: Array.from(areas) };
 }
 
-function mergeLocationInfo(values: unknown[]): { districts: string[]; areas: string[] } {
+function mergeLocationInfo(values: unknown[], index: Map<string, LocationIndexEntry>): { districts: string[]; areas: string[] } {
   const districts = new Set<string>();
   const areas = new Set<string>();
   for (const value of values) {
-    const info = locationInfo(value);
+    const info = locationInfo(value, index);
     info.districts.forEach((item) => districts.add(item));
     info.areas.forEach((item) => areas.add(item));
   }
   return { districts: Array.from(districts), areas: Array.from(areas) };
 }
 
-function detectRecentIntent(contact: ContactRequirementInput) {
+function detectRecentIntent(contact: ContactRequirementInput, index: Map<string, LocationIndexEntry>) {
   const sources = [
     contact.contactName,
     contact.requirementOtherDetails,
@@ -189,23 +171,11 @@ function detectRecentIntent(contact: ContactRequirementInput) {
     contact.recentMessagesText,
   ].map((item) => display(item)).filter(Boolean) as string[];
   const text = sources.join("\n");
-  const info = mergeLocationInfo(sources);
-  const explicitDistricts = PROPERTY_LOCATIONS
-    .filter((district) => new RegExp(`\\b${district.district_label}\\b`, "i").test(text))
-    .map((district) => normalize(district.district_label));
-  const explicitAreas = PROPERTY_LOCATIONS.flatMap((district) => (
-    district.locations
-      .filter((location) => {
-        const label = location.label.replace(/\s*\([^)]*\)\s*/g, " ").trim();
-        if (!label || !new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text)) return false;
-        return explicitDistricts.length === 0 || explicitDistricts.includes(normalize(district.district_label));
-      })
-      .map((location) => normalize(location.label))
-  ));
+  const info = mergeLocationInfo(sources, index);
   const stoppedSearch = /\b(already\s+(bought|purchased|rented|found)|found\s+(something|a\s+property|one)|not\s+(looking|searching|interested)\s+any\s*more|no\s+longer\s+(looking|searching)|stop\s+(sending|contacting|messaging)|remove\s+me|unsubscribe|wrong\s+number)\b/i.test(text);
   return {
-    districts: explicitDistricts.length ? explicitDistricts : info.districts,
-    areas: Array.from(new Set([...explicitAreas, ...info.areas])),
+    districts: info.districts,
+    areas: info.areas,
     stoppedSearch,
     source: text ? text.slice(0, 500) : null,
   };
@@ -367,6 +337,7 @@ function primaryGoalRequirement(contact: ContactRequirementInput): unknown {
 export function evaluateStructuredPropertyMatch(
   property: PropertyMatchInput,
   contact: ContactRequirementInput,
+  options: { marketContext?: LocationMarketContext | null } = {},
 ): StructuredMatchResult {
   const matches: string[] = [];
   const mismatches: string[] = [];
@@ -374,7 +345,8 @@ export function evaluateStructuredPropertyMatch(
   const dimensions: MatchDimension[] = [];
   const hardMismatches: string[] = [];
   const disqualifiers: string[] = [];
-  const recentIntent = detectRecentIntent(contact);
+  const locationIndex = buildLocationIndex(options.marketContext);
+  const recentIntent = detectRecentIntent(contact, locationIndex);
   const combinedRequirementText = requirementText(contact);
   const qualificationAnchors = new Set<string>();
   const concreteFitAnchors = new Set<string>();
@@ -548,14 +520,14 @@ export function evaluateStructuredPropertyMatch(
   }
 
   const propertyLocations = [property.propertyLocation, property.city, property.propertyArea].map(normalize).filter(Boolean);
-  const propertyLocationInfo = mergeLocationInfo(propertyLocations);
+  const propertyLocationInfo = mergeLocationInfo(propertyLocations, locationIndex);
   const requiredDistrict = normalize(contact.requirementDistrict);
   const requiredLocations = normalizeList(contact.requirementPropertyLocations);
   const hasLocationRequirement = !isAny(requiredDistrict) || requiredLocations.length > 0;
   let locationStatus: MatchVerdict | "unknown" = "unknown";
   let locationReason = "Location requirement is broad or unclear.";
   if (hasLocationRequirement && propertyLocations.length > 0) {
-    const requirementInfo = mergeLocationInfo([requiredDistrict, ...requiredLocations]);
+    const requirementInfo = mergeLocationInfo([requiredDistrict, ...requiredLocations], locationIndex);
     const hasSpecificRequiredArea = requirementInfo.areas.length > 0;
     const districtMatches = !hasSpecificRequiredArea && (
       requirementInfo.districts.some((district) => propertyLocationInfo.districts.includes(district))

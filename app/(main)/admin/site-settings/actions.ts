@@ -12,6 +12,8 @@ import {
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
 import { SettingsVersionConflictError } from "@/lib/settings/errors";
+import { clearLocationMarketContextCache } from "@/lib/locations/market-context";
+import { parseLocationMarketProfileSettings } from "@/lib/locations/market-profile-settings";
 
 interface SiteSettingsState {
     message?: string;
@@ -19,6 +21,12 @@ interface SiteSettingsState {
     errors?: {
         domain?: string[];
         locationTimeZone?: string[];
+        marketCountryCode?: string[];
+        marketCountryName?: string[];
+        marketLocale?: string[];
+        marketCurrencyCode?: string[];
+        marketSupportedLanguages?: string[];
+        marketServiceAreas?: string[];
         _version?: string[];
         _form?: string[];
     };
@@ -74,6 +82,23 @@ export async function updateSiteSettings(
         scopeId: locationId,
         domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
     });
+    const marketProfileSubmitted = formData.has("marketCountryCode");
+    const parsedMarketProfile = marketProfileSubmitted
+        ? parseLocationMarketProfileSettings({
+            countryCode: formData.get("marketCountryCode"),
+            countryName: formData.get("marketCountryName"),
+            locale: formData.get("marketLocale"),
+            currencyCode: formData.get("marketCurrencyCode"),
+            supportedLanguages: formData.get("marketSupportedLanguages"),
+            serviceAreasJson: formData.get("marketServiceAreas"),
+        })
+        : null;
+    if (parsedMarketProfile?.errors) {
+        return { errors: parsedMarketProfile.errors };
+    }
+    const marketProfile = parsedMarketProfile?.profile
+        || (settingsDoc?.payload as any)?.marketProfile
+        || {};
     const existingConfig = await db.siteConfig.findUnique({ where: { locationId } });
     const existingTheme =
         (settingsDoc?.payload as any)?.theme
@@ -152,6 +177,7 @@ export async function updateSiteSettings(
             domain: domainVal,
             theme: themeData,
             contactInfo: contactData,
+            marketProfile,
 
             primaryColor,
             secondaryColor,
@@ -223,6 +249,8 @@ export async function updateSiteSettings(
                 actorUserId: localUser?.id,
             });
         }
+
+        clearLocationMarketContextCache(locationId);
 
         revalidatePath("/admin/site-settings");
         return { message: "Settings saved successfully", version: savedDoc.version };

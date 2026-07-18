@@ -7,7 +7,7 @@ import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
-import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
+import { getLocationMarketContext, type LocationMarketContext } from "@/lib/locations/market-context";
 import {
   evaluateStructuredPropertyMatch,
   type MatchVerdict,
@@ -16,6 +16,12 @@ import {
   type StructuredMatchResult,
 } from "@/lib/property-match-campaigns/matching";
 import { verifyContactProfile } from "@/lib/ai/contact-verification/service";
+import { resolveContactPropertyMatchProfile } from "@/lib/property-match-campaigns/profile";
+import { recordContactPropertyInteraction } from "@/lib/property-match-campaigns/profile-service";
+import {
+  comparePropertyToInteractionProfile,
+  type PropertyInteractionSimilarity,
+} from "@/lib/property-match-campaigns/interaction-similarity";
 
 type AnyRecord = Record<string, any>;
 export type PropertyMatchCampaignQueue =
@@ -126,6 +132,7 @@ export function propertyMatchCandidateQueue(candidate: {
   if (hasPriorPropertyShareEvidence(candidate)) return "already_shared";
   if (hasProfileVerificationBlock(candidate)) return "needs_profile_verification";
   if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
+  if (aiReviewStatus === "failed") return "not_match";
   if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe") && !candidateProfileIsVerified(candidate)) return "needs_profile_verification";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
@@ -442,21 +449,38 @@ function extractGoalFromSource(text: string): string | null {
   return null;
 }
 
-function extractLocationFromSource(text: string): string | null {
-  const match = text.match(/\b(?:location|area|city)\s*[:#-]\s*([^\n,;|]{2,80})/i);
+function extractLocationFromSource(text: string, marketContext?: LocationMarketContext | null): string | null {
+  const match = text.match(/\b(?:(?:property|listing)\s+)?(?:location|city)\s*[:#-]\s*([^\n,;|]{2,80})/i);
   const explicit = normalizeText(match?.[1], 120);
   if (explicit) return explicit;
-  const candidates = PROPERTY_LOCATIONS.flatMap((district) => [
-    { label: district.district_label, priority: 1 },
-    ...district.locations.map((location) => ({ label: location.label, priority: 2 })),
-  ]).sort((a, b) => b.priority - a.priority || b.label.length - a.label.length);
+  const candidates = (marketContext?.serviceAreas || [])
+    .flatMap((area) => [area.label, ...area.aliases].map((label) => ({
+      label,
+      canonicalLabel: area.label,
+      specificity: ["locality", "neighborhood"].includes(area.kind) ? 2 : 1,
+    })))
+    .sort((a, b) => b.specificity - a.specificity || b.label.length - a.label.length);
   for (const candidate of candidates) {
     const escaped = candidate.label.replace(/\s*\([^)]*\)\s*/g, " ").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (escaped && new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text)) {
-      return candidate.label;
+      return candidate.canonicalLabel;
     }
   }
   return null;
+}
+
+function primaryPropertySourceText(text: string): string {
+  const markers = [
+    /\n\s*SIMILAR\s+NEARBY\s*\n/i,
+    /\n\s*SIMILAR\s+PROPERTIES\s*\n/i,
+    /\n\s*YOU\s+MAY\s+ALSO\s+LIKE\s*\n/i,
+  ];
+  let end = text.length;
+  for (const marker of markers) {
+    const match = marker.exec(text);
+    if (match?.index != null) end = Math.min(end, match.index);
+  }
+  return text.slice(0, end).trim();
 }
 
 export function propertySourceSnapshot(args: {
@@ -465,15 +489,17 @@ export function propertySourceSnapshot(args: {
   title?: string | null;
   description?: string | null;
   linkedProperty?: AnyRecord | null;
+  marketContext?: LocationMarketContext | null;
 }) {
   const sourceText = normalizeText(args.sourceText, 12000);
+  const primarySourceText = primaryPropertySourceText(sourceText || "");
   const combined = [
     args.title ? `Title: ${args.title}` : null,
     args.description ? `Description: ${args.description}` : null,
-    sourceText,
+    primarySourceText,
     args.url ? `Source URL: ${args.url}` : null,
   ].filter(Boolean).join("\n");
-  const linked = args.linkedProperty ? propertySnapshot(args.linkedProperty) : {};
+  const linked: AnyRecord = args.linkedProperty ? propertySnapshot(args.linkedProperty) : {};
   const reference = linked.reference || extractReferenceFromSource(combined);
   const title = normalizeText(args.title, 240)
     || linked.title
@@ -484,13 +510,18 @@ export function propertySourceSnapshot(args: {
     id: linked.id || null,
     title,
     reference,
-    goal: linked.goal || extractGoalFromSource(combined),
-    type: linked.type || extractTypeFromSource(combined),
-    price: linked.price ?? extractPriceFromSource(combined),
-    currency: linked.currency || "EUR",
-    bedrooms: linked.bedrooms ?? extractBedroomsFromSource(combined),
+    goal: linked.goal || extractGoalFromSource(args.title || "") || extractGoalFromSource(combined),
+    type: linked.type || extractTypeFromSource(args.title || "") || extractTypeFromSource(combined),
+    price: linked.price ?? extractPriceFromSource(primarySourceText || combined),
+    currency: linked.currency || args.marketContext?.currencyCode || null,
+    bedrooms: linked.bedrooms
+      ?? extractBedroomsFromSource(args.title || "")
+      ?? extractBedroomsFromSource(args.description || "")
+      ?? extractBedroomsFromSource(primarySourceText),
     city: linked.city || null,
-    propertyLocation: linked.propertyLocation || extractLocationFromSource(combined),
+    propertyLocation: linked.propertyLocation
+      || extractLocationFromSource(args.title || "", args.marketContext)
+      || extractLocationFromSource(primarySourceText, args.marketContext),
     sourceUrl: normalizeText(args.url, 1200),
     sourceText,
     description: linked.description || normalizeText(args.description || sourceText, 1600),
@@ -567,19 +598,113 @@ function evidenceForStructuredMatch(result: StructuredMatchResult) {
   };
 }
 
+export function applyInteractionSimilarityToStructuredMatch(
+  result: StructuredMatchResult,
+  similarity: PropertyInteractionSimilarity,
+): StructuredMatchResult {
+  if (similarity.positiveMatches.length === 0 && similarity.negativeCautions.length === 0) return result;
+
+  const next: StructuredMatchResult = {
+    ...result,
+    matches: [...result.matches],
+    mismatches: [...result.mismatches],
+    unknowns: [...result.unknowns],
+    dimensions: [...(result.dimensions || [])],
+    qualificationEvidence: result.qualificationEvidence ? {
+      ...result.qualificationEvidence,
+      anchors: [...result.qualificationEvidence.anchors],
+      concreteFitAnchors: [...result.qualificationEvidence.concreteFitAnchors],
+      groundingFitAnchors: [...result.qualificationEvidence.groundingFitAnchors],
+    } : undefined,
+  };
+  let scoreAdjustment = 0;
+
+  if (similarity.positiveMatches.length > 0) {
+    const references = similarity.positiveMatches.map((match) => match.reference).filter(Boolean);
+    next.matches.push(`similar to positively received propert${references.length === 1 ? "y" : "ies"}${references.length ? ` (${references.join(", ")})` : ""}`);
+    scoreAdjustment += 2;
+    const qualification = next.qualificationEvidence;
+    if (qualification) {
+      const anchor = "similar to a positively received property";
+      qualification.anchors = Array.from(new Set([...qualification.anchors, anchor]));
+      qualification.concreteFitAnchors = Array.from(new Set([...qualification.concreteFitAnchors, anchor]));
+      if (similarity.hasPositiveGrounding) {
+        qualification.groundingFitAnchors = Array.from(new Set([...qualification.groundingFitAnchors, anchor]));
+      }
+      qualification.anchorCount = qualification.anchors.length;
+      qualification.concreteFitAnchorCount = qualification.concreteFitAnchors.length;
+      qualification.groundingFitAnchorCount = qualification.groundingFitAnchors.length;
+      qualification.sparseLead = qualification.anchorCount < qualification.minimumAnchorsForYes
+        || qualification.concreteFitAnchorCount < qualification.minimumConcreteFitAnchorsForYes
+        || qualification.groundingFitAnchorCount < 1;
+      qualification.broadOnly = false;
+      qualification.reason = qualification.sparseLead
+        ? "Positive property history provides grounding, but more concrete fit evidence is still needed."
+        : "Current requirements and positive property history provide enough concrete evidence for AI adjudication.";
+    }
+  }
+
+  if (similarity.negativeCautions.length > 0) {
+    const references = similarity.negativeCautions.map((match) => match.reference).filter(Boolean);
+    next.unknowns.push(`similar to previously rejected propert${references.length === 1 ? "y" : "ies"}${references.length ? ` (${references.join(", ")})` : ""}; rejection reason requires review`);
+    scoreAdjustment -= 1;
+    if (next.verdict === "yes" && (next.hardMismatches?.length || 0) === 0 && (next.disqualifiers?.length || 0) === 0) {
+      next.verdict = "maybe";
+      next.needsAi = true;
+    }
+  }
+
+  next.dimensions?.push({
+    key: "interaction_similarity",
+    label: "Property History",
+    propertyValue: "Current campaign property",
+    requirementValue: similarity.summary,
+    status: similarity.negativeCautions.length > 0 ? "maybe" : "yes",
+    weight: 2,
+    score: scoreAdjustment,
+    reason: similarity.summary,
+  });
+  next.score = Math.round((next.score + scoreAdjustment) * 100) / 100;
+  return next;
+}
+
 function structuredCandidateData(args: {
   locationId: string;
   campaignId: string;
   contact: AnyRecord;
   propertyInput: PropertyMatchInput;
+  marketContext: LocationMarketContext;
 }) {
   const conversation = args.contact.conversations?.[0];
   if (!conversation?.id) return null;
   const recentMessages = [...(conversation.messages || [])].reverse();
-  const structured = evaluateStructuredPropertyMatch(args.propertyInput, contactRequirementInput({
+  const campaignProfile = resolveContactPropertyMatchProfile({
     ...args.contact,
-    recentMessages,
-  }));
+    recentMessagesText: recentMessages
+      .filter((message: AnyRecord) => String(message.direction || "").toLowerCase() === "inbound")
+      .map((message: AnyRecord) => message.body)
+      .filter(Boolean)
+      .join("\n"),
+  });
+  const interactionSimilarity = comparePropertyToInteractionProfile(
+    args.propertyInput,
+    campaignProfile.interactions,
+  );
+  const structured = applyInteractionSimilarityToStructuredMatch(
+    evaluateStructuredPropertyMatch(args.propertyInput, contactRequirementInput({
+      ...args.contact,
+      recentMessages,
+    }), { marketContext: args.marketContext }),
+    interactionSimilarity,
+  );
+  if (campaignProfile.eligibility.status === "ineligible") {
+    structured.disqualifiers = Array.from(new Set([
+      ...(structured.disqualifiers || []),
+      ...campaignProfile.eligibility.reasons,
+    ]));
+    structured.verdict = "no";
+    structured.needsAi = false;
+  }
   const requirementsAreStale = contactRequirementsAreStaleForCampaign(args.contact);
   const structuredNeedsConversationReview = requirementsAreStale
     && structured.verdict === "no"
@@ -606,6 +731,18 @@ function structuredCandidateData(args: {
         ...structured,
         needsAi: effectiveNeedsAi,
       }),
+      campaignProfile,
+      interactionSimilarity,
+      marketContext: {
+        locationId: args.marketContext.locationId,
+        locationName: args.marketContext.locationName,
+        countryCode: args.marketContext.countryCode,
+        countryName: args.marketContext.countryName,
+        locale: args.marketContext.locale,
+        currencyCode: args.marketContext.currencyCode,
+        supportedLanguages: args.marketContext.supportedLanguages,
+        serviceAreas: args.marketContext.serviceAreas,
+      },
       ...(requirementsAreStale ? {
         warnings: [
           "Requirement fields are stale or have never been assessed; campaign AI must verify against conversation context.",
@@ -630,7 +767,7 @@ function structuredCandidateData(args: {
 }
 
 export function isAiReviewTerminal(status: unknown) {
-  return status === "done" || status === "failed";
+  return status === "done";
 }
 
 export function isPropertyMatchCampaignStopped(campaign: {
@@ -722,6 +859,9 @@ export function buildPropertyMatchContactWhere(locationId: string, cursor?: stri
   const decodedCursor = decodePropertyMatchContactCursor(cursor);
   return {
     locationId,
+    contactType: {
+      notIn: ["Owner", "Agent", "Partner", "Associate", "Maintenance", "WhatsAppGroup"],
+    },
     ...(decodedCursor ? {
       OR: [
         { createdAt: { lt: new Date(decodedCursor.createdAt) } },
@@ -731,6 +871,14 @@ export function buildPropertyMatchContactWhere(locationId: string, cursor?: stri
     NOT: [
       { matchingEmailMatchedProperties: { startsWith: "No" } },
     ],
+    AND: [
+      {
+        OR: [
+          { profileVerificationStatus: null },
+          { profileVerificationStatus: { notIn: ["likely_owner", "likely_agent", "not_a_lead"] } },
+        ],
+      },
+    ],
     conversations: { some: { locationId, deletedAt: null } },
   };
 }
@@ -739,10 +887,23 @@ function buildVerifiedPropertyMatchContactWhere(locationId: string) {
   return buildPropertyMatchContactWhere(locationId);
 }
 
+const campaignPropertyMatchProfileSelect = {
+  schemaVersion: true,
+  status: true,
+  eligibilityProfile: true,
+  requirementProfile: true,
+  interactionProfile: true,
+  requirementSummary: true,
+  interactionSummary: true,
+  sourceContactUpdatedAt: true,
+  evidenceWatermarkAt: true,
+};
+
 function campaignContactSelect(locationId: string) {
   return {
     id: true,
     createdAt: true,
+    updatedAt: true,
     name: true,
     email: true,
     phone: true,
@@ -765,6 +926,12 @@ function campaignContactSelect(locationId: string) {
     requirementSummary: true,
     requirementsLastAssessedAt: true,
     requirementsAssessmentDueAt: true,
+    propertiesInterested: true,
+    propertiesInspected: true,
+    propertiesEmailed: true,
+    propertyMatchProfile: {
+      select: campaignPropertyMatchProfileSelect,
+    },
     conversations: {
       where: { locationId, deletedAt: null },
       orderBy: { lastMessageAt: "desc" as const },
@@ -775,7 +942,7 @@ function campaignContactSelect(locationId: string) {
         messages: {
           orderBy: { createdAt: "desc" as const },
           take: 8,
-          select: { body: true },
+          select: { body: true, direction: true, createdAt: true },
         },
       },
     },
@@ -958,6 +1125,10 @@ async function reopenVerifiedProfileBlockedCandidates(args: {
           requirementPropertyLocations: true,
           requirementOtherDetails: true,
           requirementSummary: true,
+          propertiesInterested: true,
+          propertiesInspected: true,
+          propertiesEmailed: true,
+          propertyMatchProfile: { select: campaignPropertyMatchProfileSelect },
           conversations: {
             where: { locationId: args.locationId, deletedAt: null },
             orderBy: { lastMessageAt: "desc" },
@@ -968,7 +1139,7 @@ async function reopenVerifiedProfileBlockedCandidates(args: {
               messages: {
                 orderBy: { createdAt: "desc" },
                 take: 8,
-                select: { body: true },
+                select: { body: true, direction: true, createdAt: true },
               },
             },
           },
@@ -981,12 +1152,14 @@ async function reopenVerifiedProfileBlockedCandidates(args: {
 
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
+  const marketContext = await getLocationMarketContext(args.locationId);
   const rebuilt = rows.flatMap((row: AnyRecord) => {
     const candidate = structuredCandidateData({
       locationId: args.locationId,
       campaignId: args.campaign.id,
       contact: row.contact,
       propertyInput,
+      marketContext,
     });
     return candidate ? [{ row, candidate }] : [];
   });
@@ -1072,6 +1245,7 @@ export async function reprocessPendingCampaignCandidatesForContactRequirements(a
       contact: {
         select: {
           id: true,
+          updatedAt: true,
           name: true,
           email: true,
           phone: true,
@@ -1092,6 +1266,10 @@ export async function reprocessPendingCampaignCandidatesForContactRequirements(a
           requirementPropertyLocations: true,
           requirementOtherDetails: true,
           requirementSummary: true,
+          propertiesInterested: true,
+          propertiesInspected: true,
+          propertiesEmailed: true,
+          propertyMatchProfile: { select: campaignPropertyMatchProfileSelect },
           conversations: {
             where: { locationId: args.locationId, deletedAt: null },
             orderBy: { lastMessageAt: "desc" },
@@ -1102,7 +1280,7 @@ export async function reprocessPendingCampaignCandidatesForContactRequirements(a
               messages: {
                 orderBy: { createdAt: "desc" },
                 take: 8,
-                select: { body: true },
+                select: { body: true, direction: true, createdAt: true },
               },
             },
           },
@@ -1113,12 +1291,14 @@ export async function reprocessPendingCampaignCandidatesForContactRequirements(a
     take: limit,
   });
 
+  const marketContext = await getLocationMarketContext(args.locationId);
   const rebuilt = rows.flatMap((row: AnyRecord) => {
     const candidate = structuredCandidateData({
       locationId: args.locationId,
       campaignId: row.campaignId,
       contact: row.contact,
       propertyInput: propertyMatchInput(row.campaign.propertySnapshot || {}),
+      marketContext,
     });
     return candidate ? [{ row, candidate }] : [];
   });
@@ -1441,6 +1621,7 @@ export async function createPropertyMatchCampaignFromSource(args: {
   actorUserId?: string | null;
   priorityNote?: string | null;
 }) {
+  const marketContext = await getLocationMarketContext(args.locationId);
   const sourceText = [
     normalizeText(args.extractedText, 8000),
     normalizeText(args.propertyText, 8000),
@@ -1450,6 +1631,7 @@ export async function createPropertyMatchCampaignFromSource(args: {
     sourceText,
     title: args.extractedTitle,
     description: args.extractedDescription,
+    marketContext,
   });
   const reference = normalizeText(snapshotWithoutLink.reference, 120);
   const linkedProperty = reference
@@ -1466,6 +1648,7 @@ export async function createPropertyMatchCampaignFromSource(args: {
     title: args.extractedTitle,
     description: args.extractedDescription,
     linkedProperty: linkedProperty as any,
+    marketContext,
   });
   if (!snapshot.sourceText && !snapshot.title && !snapshot.reference) {
     return { success: false as const, error: "Add a property URL or pasted property text." };
@@ -1548,6 +1731,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
 
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
+  const marketContext = await getLocationMarketContext(args.locationId);
   const verificationStartedAt = Date.now();
   const verificationResults = await mapWithConcurrency(contacts as AnyRecord[], PROFILE_VERIFICATION_CONCURRENCY, async (contact) => {
     const conversation = contact.conversations[0];
@@ -1592,6 +1776,7 @@ async function collectPropertyMatchCandidatesBatch(args: {
       campaignId: args.campaign.id,
       contact,
       propertyInput,
+      marketContext,
     });
     return candidate ? [candidate] : [];
   });
@@ -1820,11 +2005,15 @@ Rules:
 - If structured.hardMismatches are present and warnings do not say requirement fields are stale, verdict must be no.
 - If warnings say requirement fields are stale or never assessed, use the contact profile and conversation as the source of truth; do not reject only because old structured fields conflict.
 - Treat the structured dimension rows as useful evidence for goal, location, price, bedrooms, type, and stopped-search intent, but prefer newer explicit conversation evidence when stored fields are stale.
+- Interpret place names, currencies, and local geography only within the supplied location market context. Never import assumptions from another office or country.
 - Absence of conflicts is not a match. Broad values like "Any District", "Any Bedrooms", "Any price", empty locations/types, or missing details are neutral, not positive evidence.
 - Choose yes only when there are at least two concrete positive fit anchors from the contact's requirements or recent messages, such as matching location, type, bedrooms, budget, required features, size, or a clearly similar prior enquiry. Matching sale/rent intent, verified-lead status, and broad "Any" fields are eligibility signals, not fit anchors.
 - A definite yes must include at least one grounding fit anchor: location, bedrooms, budget, or size. Type/feature overlap alone is a maybe unless the conversation explicitly says the client is open-ended.
 - If the contact recently asked for land/plots and this listing is a house/villa/apartment, verdict must be no unless the conversation also clearly says they are open to this listing type.
 - Do not use property facts alone as proof. Evidence for yes must quote or reference the contact-side requirement/message that makes the property a close fit.
+- Use interactionSimilarity only when it names a positively received or explicitly rejected prior property. A strong positive similarity is one concrete fit anchor, not a complete recommendation by itself.
+- Treat properties merely sent by an agent as neutral exposure. Never infer preference from sent history or silence.
+- If interactionSimilarity includes a negative caution, review its recorded rejection reason. Do not repeat the same price, location, or size problem without current evidence that the concern changed.
 - Use unstructured requirements and summary to decide yes vs maybe.
 - Choose yes only when sending is clearly reasonable.
 - Choose maybe when there is a plausible fit but missing, stale, or ambiguous information.
@@ -1864,6 +2053,15 @@ ${warnings.length ? warnings.map((warning) => `- ${warning}`).join("\n") : "None
 
 Structured match:
 ${JSON.stringify(args.candidate.evidence?.structured || {}, null, 2)}
+
+Location market context:
+${JSON.stringify(args.candidate.evidence?.marketContext || {}, null, 2)}
+
+Campaign profile:
+${JSON.stringify(args.candidate.evidence?.campaignProfile || {}, null, 2)}
+
+Property interaction similarity:
+${JSON.stringify(args.candidate.evidence?.interactionSimilarity || {}, null, 2)}
 
 Recent messages:
 ${messageText || "No recent messages."}
@@ -2201,6 +2399,7 @@ export async function listContactPropertyRecommendations(args: {
       contactId: args.contactId,
       ...(args.conversationId ? { conversationId: args.conversationId } : {}),
       aiVerdict: { in: ["yes", "maybe"] },
+      aiReviewStatus: "done",
       reviewerStatus: { notIn: ["rejected", "skipped"] },
       NOT: alreadySharedCandidateWhere(),
     },
@@ -2414,7 +2613,7 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
     return {
       reviewerStatus: "pending",
       aiVerdict: { in: ["yes", "maybe"] },
-      aiReviewStatus: { in: ["done", "failed"] },
+      aiReviewStatus: "done",
       contact: { profileVerificationStatus: "verified_lead" },
     };
   }
@@ -2616,8 +2815,11 @@ export async function markPropertyMatchCandidateSent(args: {
     select: {
       id: true,
       campaignId: true,
+      contactId: true,
+      conversationId: true,
       aiVerdict: true,
       aiReviewStatus: true,
+      campaign: { select: { propertyId: true, propertySnapshot: true } },
       contact: { select: { profileVerificationStatus: true } },
     },
   });
@@ -2625,14 +2827,35 @@ export async function markPropertyMatchCandidateSent(args: {
   if (!canCandidateDraftOrSend(candidate)) {
     return { success: false as const, error: "Contact profile must be verified before sending." };
   }
+  const sentAt = new Date();
   await db.propertyMatchCandidate.update({
     where: { id: candidate.id },
     data: {
       reviewerStatus: "sent",
-      sentAt: new Date(),
+      sentAt,
       lastError: null,
     },
   });
+  const snapshot = (candidate.campaign.propertySnapshot || {}) as AnyRecord;
+  try {
+    await recordContactPropertyInteraction({
+      locationId: args.locationId,
+      contactId: candidate.contactId,
+      conversationId: candidate.conversationId,
+      propertyId: candidate.campaign.propertyId,
+      propertyReference: snapshot.reference || null,
+      propertyUrl: snapshot.sourceUrl || null,
+      eventType: "sent",
+      sentiment: "neutral",
+      signalStrength: "observed",
+      sourceType: "campaign",
+      sourceId: candidate.id,
+      occurredAt: sentAt,
+      evidence: { campaignId: candidate.campaignId },
+    });
+  } catch (error) {
+    console.warn("[property-match-campaign] Failed to record sent-property interaction:", error);
+  }
   await refreshCampaignCounts(candidate.campaignId);
   return { success: true as const };
 }

@@ -10,6 +10,7 @@ import {
   type PropertyEvidenceInput,
   type PropertyEvidenceInterestSource,
 } from "@/lib/ai/property-evidence-resolver/service";
+import { queueInboundPropertyFeedback } from "@/lib/property-match-campaigns/feedback-service";
 
 export const REQUIREMENTS_INTELLIGENCE_MODES = [
   "off",
@@ -771,6 +772,16 @@ export async function approveRequirementProposal(args: {
     });
   });
 
+  try {
+    const { rebuildContactPropertyMatchProfile } = await import("@/lib/property-match-campaigns/profile-service");
+    await rebuildContactPropertyMatchProfile({
+      locationId: args.locationId,
+      contactId: proposal.contactId,
+    });
+  } catch (error) {
+    console.warn("[requirements-intelligence] Failed to refresh property match profile:", error);
+  }
+
   const settings = await getRequirementsIntelligenceSettings(args.locationId);
   if (settings.autoReprocessCampaignCandidates) {
     try {
@@ -1074,6 +1085,17 @@ export function queueRequirementProposalForNewActivity(args: {
   sourceIds?: string[];
   actorUserId?: string | null;
 }) {
+  if (args.sourceType === "message") {
+    for (const messageId of args.sourceIds || []) {
+      queueInboundPropertyFeedback({
+        locationId: args.locationId,
+        contactId: args.contactId,
+        conversationId: args.conversationId || null,
+        messageId,
+      });
+    }
+  }
+
   void (async () => {
     const settings = await getRequirementsIntelligenceSettings(args.locationId);
     if (settings.mode !== "new_activity" && settings.mode !== "daily_and_new_activity") return;

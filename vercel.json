@@ -25,6 +25,10 @@
       "schedule": "17 3 * * *"
     },
     {
+      "path": "/api/cron/property-match-profiles",
+      "schedule": "37 * * * *"
+    },
+    {
       "path": "/api/cron/public-site-domains",
       "schedule": "*/1 * * * *"
     }

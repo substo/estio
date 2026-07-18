@@ -3,6 +3,7 @@ import db from "@/lib/db";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { getWhatsAppMediaObjectBytes, parseR2Uri } from "@/lib/whatsapp/media-r2";
+import { processTranscriptPropertyFeedback } from "@/lib/property-match-campaigns/feedback-service";
 
 const AUDIO_TRANSCRIPTION_DEFAULT_MODEL = GEMINI_FLASH_STABLE_FALLBACK || "gemini-2.5-flash";
 const AUDIO_TRANSCRIPTION_PROMPT =
@@ -279,6 +280,13 @@ export async function transcribeAttachmentWithGoogle(input: AudioTranscriptionJo
                 messageId: input.messageId,
                 attachmentId: input.attachmentId,
             },
+        });
+
+        await processTranscriptPropertyFeedback({
+            locationId: input.locationId,
+            transcriptId: transcript.id,
+        }).catch((error) => {
+            console.error("[Audio Transcription] Property feedback processing failed:", error);
         });
 
         return {

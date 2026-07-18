@@ -128,6 +128,10 @@ import {
     rejectContactVerificationProposal,
     verifyContactProfile,
 } from "@/lib/ai/contact-verification/service";
+import {
+    processActivityNotePropertyFeedback,
+} from "@/lib/property-match-campaigns/feedback-service";
+import { clearContactPropertyInteractionsForSource } from "@/lib/property-match-campaigns/profile-service";
 import { withProfileVerificationInvalidation } from "@/lib/contacts/profile-verification";
 import {
     buildCampaignDraftInstruction,
@@ -14261,6 +14265,15 @@ export async function addConversationActivityEntry(
         },
     });
 
+    await processActivityNotePropertyFeedback({
+        locationId: location.id,
+        contactId: conversation.contactId,
+        conversationId: conversation.id,
+        historyId: createdHistory.id,
+    }).catch((error) => {
+        console.error(`[Property Match Feedback] Activity note ${createdHistory.id} failed:`, error);
+    });
+
     runDetachedTask(`requirements_activity_note:${createdHistory.id}`, async () => {
         queueRequirementProposalForNewActivity({
             locationId: location.id,
@@ -14336,6 +14349,15 @@ export async function updateConversationActivityEntry(
         dateIso,
     });
 
+    await processActivityNotePropertyFeedback({
+        locationId: location.id,
+        contactId: result.history.contactId,
+        conversationId: result.conversationIds[0] || null,
+        historyId: result.history.id,
+    }).catch((error) => {
+        console.error(`[Property Match Feedback] Activity note ${result.history.id} update failed:`, error);
+    });
+
     revalidatePath(`/admin/contacts/${result.history.contactId}/view`);
     for (const conversationId of result.conversationIds) {
         invalidateConversationReadCaches(conversationId, { skipPath: true });
@@ -14371,6 +14393,15 @@ export async function deleteConversationActivityEntry(historyId: string, reason?
         locationId: location.id,
         actor: user,
         reason,
+    });
+
+    await clearContactPropertyInteractionsForSource({
+        locationId: location.id,
+        contactId: result.contactId,
+        sourceType: "note",
+        sourceId: result.historyId,
+    }).catch((error) => {
+        console.error(`[Property Match Feedback] Activity note ${result.historyId} deletion cleanup failed:`, error);
     });
 
     revalidatePath(`/admin/contacts/${result.contactId}/view`);

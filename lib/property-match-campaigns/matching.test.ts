@@ -2,6 +2,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateStructuredPropertyMatch } from "./matching";
 
+const CYPRUS_TEST_MARKET = {
+  locationId: "office-cy",
+  locationName: "Cyprus office",
+  countryCode: "CY",
+  countryName: "Cyprus",
+  locale: "en-CY",
+  currencyCode: "EUR",
+  supportedLanguages: ["en", "el"],
+  source: { configured: true, inventoryFallback: false },
+  serviceAreas: [
+    { id: "paphos", label: "Paphos", aliases: [], parentId: null, kind: "district" as const },
+    { id: "limassol", label: "Limassol", aliases: [], parentId: null, kind: "district" as const },
+    { id: "peyia", label: "Peyia", aliases: ["Peia", "Pegeia"], parentId: "paphos", kind: "locality" as const },
+    { id: "paphos-town", label: "Paphos Town", aliases: [], parentId: "paphos", kind: "locality" as const },
+    { id: "agios-ioannis", label: "Agios Ioannis", aliases: [], parentId: "limassol", kind: "locality" as const },
+  ],
+};
+
 test("structured matcher returns yes for clear CRM requirement fit", () => {
   const result = evaluateStructuredPropertyMatch(
     {
@@ -172,6 +190,7 @@ test("structured matcher rejects different district recent intent even when stru
       requirementPropertyLocations: ["Limassol", "Paphos"],
       requirementOtherDetails: "Interested in Ref. No. DT3294: 1-bed Apartment in Limassol - Agios Ioannis.",
     },
+    { marketContext: CYPRUS_TEST_MARKET },
   );
 
   assert.equal(result.verdict, "no");
@@ -197,6 +216,7 @@ test("structured matcher keeps same-district different area as maybe", () => {
       requirementPropertyLocations: ["Paphos"],
       requirementOtherDetails: "Interested in a 1-bed apartment in Paphos Town.",
     },
+    { marketContext: CYPRUS_TEST_MARKET },
   );
 
   assert.equal(result.verdict, "maybe");

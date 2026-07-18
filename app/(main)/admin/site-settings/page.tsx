@@ -40,7 +40,7 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
 
     const canonicalDomain = publicSiteDomains.find((item) => item.role === "CANONICAL" && item.status === "ACTIVE");
 
-    const initialData = isSettingsReadFromNewEnabled() && settingsDoc
+    const initialDataBase = isSettingsReadFromNewEnabled() && settingsDoc
         ? {
             ...settingsDoc.payload,
             domain: canonicalDomain?.hostname ?? siteConfig?.domain ?? null,
@@ -59,6 +59,10 @@ export default async function SiteSettingsPage(props: { searchParams: Promise<{ 
         : siteConfig
             ? { ...siteConfig, domain: canonicalDomain?.hostname ?? siteConfig.domain }
             : siteConfig;
+    const initialData = {
+        ...(initialDataBase || {}),
+        marketProfile: settingsDoc?.payload?.marketProfile || {},
+    };
 
     const settingsVersion = settingsDoc?.version ?? 0;
 

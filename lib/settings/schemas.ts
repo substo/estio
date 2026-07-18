@@ -66,12 +66,30 @@ const contactInfoSchema = z.object({
     email: nullableTrimmedString,
 }).passthrough();
 
+const marketServiceAreaSchema = z.object({
+    id: z.string().trim().min(1),
+    label: z.string().trim().min(1),
+    aliases: z.array(z.string().trim().min(1)).default([]),
+    parentId: nullableTrimmedString,
+    kind: z.enum(["country", "region", "city", "district", "locality", "neighborhood"]).default("locality"),
+}).passthrough();
+
+const marketProfileSchema = z.object({
+    countryCode: nullableTrimmedString,
+    countryName: nullableTrimmedString,
+    locale: nullableTrimmedString,
+    currencyCode: nullableTrimmedString,
+    supportedLanguages: z.array(z.string().trim().min(1)).default([]),
+    serviceAreas: z.array(marketServiceAreaSchema).default([]),
+}).passthrough().default({});
+
 const publicSiteSchema = z.object({
     domain: nullableTrimmedString,
     locationName: nullableTrimmedString,
     locationTimeZone: nullableTrimmedString,
     theme: themeSchema,
     contactInfo: contactInfoSchema.default({}),
+    marketProfile: marketProfileSchema,
     navLinks: z.array(navLinkSchema).default([]),
     footerLinks: z.array(navLinkSchema).default([]),
     socialLinks: z.array(z.object({

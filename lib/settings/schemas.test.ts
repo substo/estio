@@ -4,6 +4,45 @@ import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH
 import { SETTINGS_DOMAINS } from "./constants";
 import { validateSettingsPayload } from "./schemas";
 
+test("location public-site settings support an international market profile", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, {
+        theme: {},
+        marketProfile: {
+            countryCode: "AE",
+            countryName: "United Arab Emirates",
+            locale: "ar-AE",
+            currencyCode: "AED",
+            supportedLanguages: ["ar", "en"],
+            serviceAreas: [
+                {
+                    id: "dubai-marina",
+                    label: "Dubai Marina",
+                    aliases: ["مرسى دبي"],
+                    parentId: "dubai",
+                    kind: "locality",
+                },
+            ],
+        },
+    }) as any;
+
+    assert.equal(payload.marketProfile.currencyCode, "AED");
+    assert.deepEqual(payload.marketProfile.supportedLanguages, ["ar", "en"]);
+    assert.equal(payload.marketProfile.serviceAreas[0].aliases[0], "مرسى دبي");
+});
+
+test("location public-site settings keep market profile optional for legacy locations", () => {
+    const payload = validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, { theme: {} }) as any;
+
+    assert.deepEqual(payload.marketProfile, {
+        countryCode: null,
+        countryName: null,
+        locale: null,
+        currencyCode: null,
+        supportedLanguages: [],
+        serviceAreas: [],
+    });
+});
+
 test("location AI settings schema fills defaults for legacy payloads", () => {
     const payload = validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_AI, {
         googleAiModel: GEMINI_FLASH_LATEST_ALIAS,

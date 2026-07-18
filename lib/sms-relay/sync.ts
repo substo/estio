@@ -19,6 +19,7 @@ import db from "@/lib/db";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { findContactsByPhoneDigitsWithFallback } from "@/lib/contacts/phone-lookup";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
+import { queueInboundPropertyFeedback } from "@/lib/property-match-campaigns/feedback-service";
 
 type SmsRelayInboundDeps = {
     db?: any;
@@ -28,6 +29,7 @@ type SmsRelayInboundDeps = {
         ghlAccessToken: string;
         rawFrom: string;
     }) => Promise<string | undefined>;
+    queueInboundPropertyFeedback?: typeof queueInboundPropertyFeedback;
 };
 
 // ---------------------------------------------------------------------------
@@ -212,6 +214,15 @@ export async function processSmsRelayInbound(
     console.log(
         `[SmsRelay Sync] Created inbound message ${message.id} in conversation ${conversation.id}`
     );
+
+    const queuePropertyFeedback = deps.queueInboundPropertyFeedback
+        ?? (deps.db ? null : queueInboundPropertyFeedback);
+    queuePropertyFeedback?.({
+        locationId,
+        contactId: contact.id,
+        conversationId: conversation.id,
+        messageId: message.id,
+    });
 
     // 7. Publish realtime SSE event
     void publishRealtime({
