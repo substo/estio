@@ -6,10 +6,13 @@ import db from "../lib/db";
 import { maskIpAddress, verifyDeviceTunnelToken } from "../lib/device-tunnel/auth";
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
+import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
 
 const PORT = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_PORT || 3220), 1);
 const INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
 const GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || `gateway-${process.pid}`).trim();
+const WHATSAPP_BRIDGE_URL = String(process.env.WHATSAPP_WEB_BRIDGE_URL || "http://127.0.0.1:3218").replace(/\/+$/, "");
+const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON_SECRET || "").trim();
 const MAX_STREAMS_PER_DEVICE = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_STREAMS || 64), 1);
 const MAX_FRAME_BYTES = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_FRAME_BYTES || 512 * 1024), 64 * 1024);
 const ALLOWED_SUFFIXES = parseAllowedTunnelSuffixes(process.env.DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES);
@@ -55,6 +58,25 @@ function extractBearer(req: IncomingMessage) {
     return String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
 }
 
+async function ensureWhatsAppBrowserStarted(sessionId: string, locationId: string) {
+    if (!WHATSAPP_BRIDGE_SECRET) {
+        throw new Error("WHATSAPP_WEB_BRIDGE_SECRET is not configured");
+    }
+    const response = await fetch(`${WHATSAPP_BRIDGE_URL}/sessions/${encodeURIComponent(sessionId)}/start`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "x-whatsapp-web-bridge-secret": WHATSAPP_BRIDGE_SECRET,
+        },
+        body: JSON.stringify({ locationId }),
+        signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) {
+        throw new Error(`WhatsApp bridge rejected tunnel session start (${response.status})`);
+    }
+    console.info(`[Device Tunnel] Requested WhatsApp browser start for ${sessionId}`);
+}
+
 async function readSmallJson(req: IncomingMessage) {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -89,19 +111,21 @@ function closeStream(device: ConnectedDevice, streamId: string, notifyDevice = t
 
 function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "proxyPort">) {
     const proxyServer = createTcpServer((socket) => {
-        let phase: "greeting" | "request" | "stream" = "greeting";
+        const state = new Socks5ConnectionState();
         let buffer = Buffer.alloc(0);
         let streamId = "";
 
         const fail = (replyCode = 0x01) => {
-            if (phase === "request") socket.write(Buffer.from([0x05, replyCode, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+            if (state.shouldWriteFailure(Boolean(streamId && deviceBase.pendingOpen.has(streamId)))) {
+                socket.write(Buffer.from([0x05, replyCode, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+            }
             socket.destroy();
             if (streamId) closeStream(deviceBase as ConnectedDevice, streamId);
         };
 
         socket.on("data", (chunk) => {
             const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            if (phase === "stream") {
+            if (state.isStreaming) {
                 try {
                     deviceBase.bytesToDevice += BigInt(chunkBuffer.length);
                     deviceBase.lastBrowserTrafficAt = new Date();
@@ -114,7 +138,7 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
 
             buffer = Buffer.concat([buffer, chunkBuffer]);
             while (buffer.length) {
-                if (phase === "greeting") {
+                if (state.phase === "greeting") {
                     if (buffer.length < 2) return;
                     const methodsLength = buffer[1];
                     if (buffer.length < 2 + methodsLength) return;
@@ -122,7 +146,7 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
                     buffer = buffer.subarray(2 + methodsLength);
                     socket.write(Buffer.from([0x05, supportsNoAuth ? 0x00 : 0xff]));
                     if (!supportsNoAuth) return socket.destroy();
-                    phase = "request";
+                    state.acceptGreeting();
                     continue;
                 }
 
@@ -141,6 +165,10 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
 
                 streamId = randomUUID();
                 deviceBase.streams.set(streamId, socket);
+                // SOCKS clients wait for the success response before sending TLS.
+                // Mark the request as a byte stream before resuming the socket so
+                // encrypted application data is never parsed as a second handshake.
+                state.acceptConnectRequest();
                 socket.pause();
                 const timeout = setTimeout(() => fail(0x04), 20_000);
                 deviceBase.pendingOpen.set(streamId, timeout);
@@ -222,16 +250,30 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
     }
     devicesByBridgeSession.set(device.bridgeSessionId, device);
     const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const egressIpMasked = maskIpAddress(forwardedFor || String(req.socket.remoteAddress || ""));
     await (db as any).deviceTunnelBinding.update({
         where: { id: binding.id },
         data: {
             status: "online",
             gatewayNodeId: GATEWAY_NODE_ID,
-            egressIpMasked: maskIpAddress(forwardedFor || String(req.socket.remoteAddress || "")),
+            egressIpMasked,
             lastConnectedAt: new Date(),
             lastSeenAt: new Date(),
             lastError: null,
         },
+    });
+    console.info("[Device Tunnel] Android relay connected", {
+        bindingId: binding.id,
+        deviceId: binding.deviceId,
+        sessionId: device.bridgeSessionId,
+        gatewayNodeId: GATEWAY_NODE_ID,
+        egressIpMasked,
+    });
+    void ensureWhatsAppBrowserStarted(device.bridgeSessionId, binding.locationId).catch((error) => {
+        console.warn(
+            `[Device Tunnel] Failed to start WhatsApp browser for ${device.bridgeSessionId}:`,
+            (error as any)?.message || error,
+        );
     });
 
     ws.on("message", async (raw) => {

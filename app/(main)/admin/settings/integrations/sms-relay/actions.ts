@@ -9,6 +9,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
+import { requireSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -133,13 +134,16 @@ export async function updateDevice(
     data: { label?: string; phoneNumber?: string }
 ): Promise<void> {
     const location = await getSmsRelayLocation({ required: true });
+    const normalizedPhoneNumber = typeof data.phoneNumber === "string" && data.phoneNumber.trim()
+        ? requireSmsRelayPhoneNumber(data.phoneNumber)
+        : null;
 
     await (db as any).smsRelayDevice.updateMany({
         where: { id: deviceId, locationId: location.id },
         data: {
             ...(data.label ? { label: data.label.trim() } : {}),
             ...(typeof data.phoneNumber === "string"
-                ? { phoneNumber: data.phoneNumber.trim() || null }
+                ? { phoneNumber: normalizedPhoneNumber }
                 : {}),
         },
     });

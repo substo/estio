@@ -44,6 +44,8 @@ class MainActivity : AppCompatActivity() {
         Manifest.permission.SEND_SMS,
         Manifest.permission.RECEIVE_SMS,
         Manifest.permission.READ_SMS,
+        Manifest.permission.READ_PHONE_NUMBERS,
+        Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.POST_NOTIFICATIONS,
         Manifest.permission.CAMERA
     )
@@ -200,6 +202,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val req = com.estio.simrelay.api.PairRequest(
                     pair_code = code,
+                    phone_number = SimPhoneNumberDetector.detect(this@MainActivity),
                     tunnel_public_key = DeviceKeyManager.publicKeyBase64(),
                     app_version = BuildConfig.VERSION_NAME,
                     capabilities = listOf("sms_relay", "whatsapp_egress")

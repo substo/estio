@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { hashPairCode, generateDeviceToken, hashDeviceToken } from "@/lib/sms-relay/auth";
 import { validateTunnelPublicKey } from "@/lib/device-tunnel/auth";
+import { normalizeSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,7 @@ export async function POST(req: NextRequest) {
             "sms_relay",
             ...(tunnelPublicKey && requestedCapabilities.includes("whatsapp_egress") ? ["whatsapp_egress"] : []),
         ]));
+        const detectedPhoneNumber = normalizeSmsRelayPhoneNumber(phone_number);
 
         // Find the device awaiting pairing with this code
         const device = await (db as any).smsRelayDevice.findFirst({
@@ -87,7 +89,7 @@ export async function POST(req: NextRequest) {
                 deviceApiTokenHash: tokenHash,
                 devicePushToken: device_push_token ?? null,
                 label: device_label ?? device.label,
-                phoneNumber: phone_number ?? device.phoneNumber ?? null,
+                phoneNumber: detectedPhoneNumber ?? device.phoneNumber ?? null,
                 capabilities: acceptedCapabilities,
                 appVersion: typeof app_version === "string" ? app_version.trim().slice(0, 64) || null : null,
                 tunnelPublicKey: tunnelPublicKey || null,

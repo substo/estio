@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { getWhatsAppWebBridgeHealth } from "@/lib/whatsapp/web-bridge";
 
 export const dynamic = "force-dynamic";
 
@@ -11,28 +12,34 @@ export async function GET() {
     const location = await getLocationContext();
     if (!location) return NextResponse.json({ error: "No location" }, { status: 404 });
 
-    const session = await (db as any).whatsAppWebBridgeSession.findUnique({
-        where: { locationId: location.id },
-        include: {
-            tunnelBinding: {
-                include: {
-                    device: {
-                        select: {
-                            id: true,
-                            label: true,
-                            platform: true,
-                            status: true,
-                            capabilities: true,
-                            appVersion: true,
-                            lastSeenAt: true,
-                            tunnelRevokedAt: true,
+    const [session, bridgeHealth] = await Promise.all([
+        (db as any).whatsAppWebBridgeSession.findUnique({
+            where: { locationId: location.id },
+            include: {
+                tunnelBinding: {
+                    include: {
+                        device: {
+                            select: {
+                                id: true,
+                                label: true,
+                                platform: true,
+                                status: true,
+                                capabilities: true,
+                                appVersion: true,
+                                lastSeenAt: true,
+                                tunnelRevokedAt: true,
+                            },
                         },
                     },
                 },
             },
-        },
-    });
+        }),
+        getWhatsAppWebBridgeHealth().catch(() => null),
+    ]);
     const binding = session?.tunnelBinding || null;
+    const workerSession = (bridgeHealth?.sessions || []).find((candidate: any) =>
+        candidate?.sessionId === session?.sessionId || candidate?.locationId === location.id
+    );
     const fresh = Boolean(binding?.lastSeenAt && Date.now() - new Date(binding.lastSeenAt).getTime() < 45_000);
     const proof = binding?.lastVerifiedAt ? {
         verifiedAt: binding.lastVerifiedAt,
@@ -51,7 +58,9 @@ export async function GET() {
     } : null;
     return NextResponse.json({
         egressMode: session?.egressMode || "server",
-        browserStatus: session?.status || "disconnected",
+        browserStatus: workerSession?.ready
+            ? "ready"
+            : workerSession?.status || session?.status || "disconnected",
         tunnelStatus: binding?.status === "online" && fresh ? "online" : binding ? "offline" : "unbound",
         binding: serializableBinding,
         proof,

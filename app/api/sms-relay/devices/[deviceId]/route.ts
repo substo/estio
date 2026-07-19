@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { requireSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
 
 export const dynamic = "force-dynamic";
 
@@ -99,7 +100,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
             updateData.label = body.label.trim();
         }
         if (typeof body.phoneNumber === "string") {
-            updateData.phoneNumber = body.phoneNumber.trim() || null;
+            try {
+                updateData.phoneNumber = body.phoneNumber.trim()
+                    ? requireSmsRelayPhoneNumber(body.phoneNumber)
+                    : null;
+            } catch (error: any) {
+                return NextResponse.json({ error: error?.message || "Invalid phone number" }, { status: 400 });
+            }
         }
 
         const updated = await (db as any).smsRelayDevice.update({

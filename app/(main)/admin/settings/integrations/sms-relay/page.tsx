@@ -19,6 +19,13 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import QRCode from "qrcode";
 import {
     getSmsRelayDevices,
@@ -80,6 +87,15 @@ function formatNetworkType(value: string | null | undefined): string {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function formatBrowserStatus(value: string | null | undefined): string {
+    const status = String(value || "disconnected").toLowerCase();
+    if (status === "ready") return "WhatsApp browser ready";
+    if (["starting", "loading", "authenticated", "reconnecting"].includes(status)) {
+        return "WhatsApp browser starting";
+    }
+    return "WhatsApp browser offline";
+}
+
 type WhatsAppEgressStatus = {
     egressMode: "server" | "device_tunnel";
     browserStatus: string;
@@ -138,7 +154,8 @@ function PairingModal({
     onPaired: () => void;
 }) {
     const [label, setLabel] = useState("Android Device");
-    const [step, setStep] = useState<"form" | "scanning">("form");
+    const [step, setStep] = useState<"form" | "scanning" | "phone">("form");
+    const [phoneNumber, setPhoneNumber] = useState("");
     const [pairData, setPairData] = useState<{
         pairCode: string;
         qrPayload: string;
@@ -192,7 +209,12 @@ function PairingModal({
             const matched = devices.find((d) => d.id === pairData.deviceId && d.paired);
             if (matched) {
                 clearInterval(pollingRef.current!);
-                onPaired();
+                if (matched.phoneNumber) {
+                    onPaired();
+                } else {
+                    setError(null);
+                    setStep("phone");
+                }
             }
         }, 3000);
         return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
@@ -201,21 +223,37 @@ function PairingModal({
     const mins = String(Math.floor(countdown / 60)).padStart(2, "0");
     const secs = String(countdown % 60).padStart(2, "0");
 
+    const handlePhoneNumberSave = () => {
+        if (!pairData || !phoneNumber.trim()) return;
+        setError(null);
+        startTransition(async () => {
+            try {
+                await updateDevice(pairData.deviceId, { phoneNumber });
+                onPaired();
+            } catch (err: any) {
+                setError(err?.message || "Failed to save the mobile number");
+            }
+        });
+    };
+
     return (
-        <div style={styles.modalOverlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
-            <div style={styles.modal}>
-                <div style={styles.modalHeader}>
-                    <div>
-                        <h2 style={styles.modalTitle}>Pair Android Device</h2>
-                        <p style={styles.modalSubtitle}>
-                            Connect a physical Android phone as an SMS channel
-                        </p>
-                    </div>
-                    <button style={styles.closeBtn} onClick={onClose}>✕</button>
-                </div>
+        <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+            <DialogContent className="max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-[640px] gap-0 overflow-x-hidden overflow-y-auto rounded-2xl p-0 sm:w-full">
+                <DialogHeader className="border-b border-slate-100 px-5 pb-4 pr-14 pt-5 text-left sm:px-7 sm:pt-6">
+                    <DialogTitle className="text-xl font-bold text-slate-900">Pair Android Device</DialogTitle>
+                    <DialogDescription className="text-sm text-slate-500">
+                        Connect a physical Android phone for SMS and WhatsApp network relay.
+                    </DialogDescription>
+                </DialogHeader>
 
                 {step === "form" && (
-                    <div style={styles.modalBody}>
+                    <form
+                        className="px-5 py-5 sm:px-7 sm:pb-7"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            if (!isPending && label.trim()) handleInitiate();
+                        }}
+                    >
                         <div style={styles.field}>
                             <label style={styles.label}>Device Label</label>
                             <input
@@ -231,31 +269,46 @@ function PairingModal({
                         </div>
                         {error && <p style={styles.errorText}>{error}</p>}
                         <button
+                            type="submit"
                             style={isPending ? styles.btnPrimary.loading : styles.btnPrimary.default}
-                            onClick={handleInitiate}
                             disabled={isPending || !label.trim()}
                         >
                             {isPending ? "Generating…" : "Generate QR Code →"}
                         </button>
-                    </div>
+                    </form>
                 )}
 
                 {step === "scanning" && pairData && (
-                    <div style={styles.modalBody}>
-                        <div style={styles.qrSection}>
+                    <div className="px-5 py-5 sm:px-7 sm:pb-7">
+                        <div className="mb-5 grid min-w-0 items-center justify-items-center gap-5 md:grid-cols-[180px_minmax(0,1fr)] md:justify-items-stretch">
                             {qrDataUrl ? (
-                                <img src={qrDataUrl} alt="Pairing QR Code" style={styles.qrImage} />
+                                <img
+                                    src={qrDataUrl}
+                                    alt="Scan this QR code with the Estio SIM Relay app"
+                                    className="block h-44 w-44 max-w-full rounded-xl border border-slate-200 sm:h-[180px] sm:w-[180px]"
+                                />
                             ) : (
-                                <div style={styles.qrPlaceholder}>Generating QR…</div>
+                                <div className="flex h-44 w-44 max-w-full items-center justify-center rounded-xl bg-slate-100 text-sm text-slate-400 sm:h-[180px] sm:w-[180px]">
+                                    Generating QR…
+                                </div>
                             )}
-                            <div style={styles.qrMeta}>
-                                <p style={styles.orText}>or enter code manually</p>
-                                <div style={styles.pairCode}>
+                            <div className="min-w-0 w-full text-center">
+                                <p className="mb-2.5 text-xs text-slate-400">or enter code manually</p>
+                                <div
+                                    className="mx-auto grid w-full max-w-[246px] grid-cols-6 gap-1.5"
+                                    aria-label={`Pairing code ${pairData.pairCode.split("").join(" ")}`}
+                                >
                                     {pairData.pairCode.split("").map((ch, i) => (
-                                        <span key={i} style={styles.pairCodeChar}>{ch}</span>
+                                        <span
+                                            key={i}
+                                            aria-hidden="true"
+                                            className="flex h-10 min-w-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 font-mono text-lg font-bold text-slate-800 sm:h-[42px] sm:text-xl"
+                                        >
+                                            {ch}
+                                        </span>
                                     ))}
                                 </div>
-                                <p style={styles.expiresText}>
+                                <p className={`mt-2.5 text-xs ${countdown > 0 ? "text-slate-400" : "font-medium text-amber-600"}`} aria-live="polite">
                                     {countdown > 0
                                         ? `Expires in ${mins}:${secs}`
                                         : "⚠️ Code expired — close and try again"}
@@ -268,17 +321,62 @@ function PairingModal({
                                 <li>Install the SIM Relay app (APK)</li>
                                 <li>Open the app → tap <strong>Pair with Estio</strong></li>
                                 <li>Scan the QR code or type the code above</li>
-                                <li>Grant SMS permissions when prompted</li>
+                                <li>Grant the requested SMS and phone-number permissions</li>
                             </ol>
                         </div>
-                        <div style={styles.waitingRow}>
+                        <div className="flex items-center justify-center gap-2.5 text-center">
                             <div style={styles.spinner} />
                             <span style={styles.waitingText}>Waiting for device to complete pairing…</span>
                         </div>
                     </div>
                 )}
-            </div>
-        </div>
+
+                {step === "phone" && pairData && (
+                    <form
+                        className="px-5 py-5 sm:px-7 sm:pb-7"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            if (!isPending && phoneNumber.trim()) handlePhoneNumberSave();
+                        }}
+                    >
+                        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                            <p className="m-0 text-sm font-semibold text-amber-950">Phone connected — one detail is missing</p>
+                            <p className="mb-0 mt-1.5 text-sm leading-5 text-amber-900">
+                                Android could not read the number from the SIM. Some carriers do not store it on the SIM,
+                                even when phone permissions are granted.
+                            </p>
+                        </div>
+                        <div style={styles.field}>
+                            <label htmlFor="paired-device-phone-number" style={styles.label}>Mobile phone number</label>
+                            <input
+                                id="paired-device-phone-number"
+                                type="tel"
+                                inputMode="tel"
+                                autoComplete="tel"
+                                style={styles.input}
+                                value={phoneNumber}
+                                onChange={(event) => setPhoneNumber(event.target.value)}
+                                placeholder="e.g. +35799123456"
+                                aria-describedby="paired-device-phone-help"
+                                autoFocus
+                            />
+                            <p id="paired-device-phone-help" style={styles.hint}>
+                                Use international format. Estio needs this to identify the SIM line and route SMS
+                                conversations to the correct phone. It does not change your WhatsApp account number.
+                            </p>
+                        </div>
+                        {error && <p role="alert" style={styles.errorText}>{error}</p>}
+                        <button
+                            type="submit"
+                            style={isPending ? styles.btnPrimary.loading : styles.btnPrimary.default}
+                            disabled={isPending || !phoneNumber.trim()}
+                        >
+                            {isPending ? "Saving…" : "Save number and finish"}
+                        </button>
+                    </form>
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -730,6 +828,12 @@ export default function SmsRelaySettingsPage() {
                                 {egressStatus.tunnelStatus === "online" ? "Phone tunnel online" : "Phone tunnel offline"}
                             </span>
                         )}
+                        {egressStatus?.egressMode === "device_tunnel" && (
+                            <span style={egressStatus.browserStatus === "ready" ? styles.badge.online : styles.badge.pending}>
+                                <span style={egressStatus.browserStatus === "ready" ? styles.dot.online : styles.dot.pending} />
+                                {formatBrowserStatus(egressStatus.browserStatus)}
+                            </span>
+                        )}
                         <select
                             aria-label="WhatsApp egress device"
                             disabled={egressBusy}
@@ -751,8 +855,22 @@ export default function SmsRelaySettingsPage() {
                 </div>
                 {egressStatus?.egressMode === "device_tunnel" && (
                     <div style={styles.egressBody}>
-                        <div style={styles.routeBanner}>
-                            <span style={{ fontWeight: 700, color: "#166534" }}>Enforced route</span>
+                        <div style={{
+                            ...styles.routeBanner,
+                            ...(egressStatus.tunnelStatus === "online" && egressStatus.browserStatus === "ready"
+                                ? {}
+                                : { background: "#fffbeb", borderColor: "#fde68a" }),
+                        }}>
+                            <span style={{
+                                fontWeight: 700,
+                                color: egressStatus.tunnelStatus === "online" && egressStatus.browserStatus === "ready"
+                                    ? "#166534"
+                                    : "#92400e",
+                            }}>
+                                {egressStatus.tunnelStatus === "online" && egressStatus.browserStatus === "ready"
+                                    ? "Enforced route"
+                                    : "Route not ready"}
+                            </span>
                             <span style={{ color: "#475569" }}>WhatsApp Web (Chromium) → local SOCKS5 → encrypted Android WebSocket → WhatsApp</span>
                         </div>
                         <div style={styles.proofGrid}>
@@ -1231,33 +1349,6 @@ const styles = {
         } as React.CSSProperties,
     },
 
-    // Modal
-    modalOverlay: {
-        position: "fixed" as const, inset: 0,
-        background: "rgba(15,23,42,0.55)", backdropFilter: "blur(4px)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        zIndex: 9999, padding: 24,
-    },
-    modal: {
-        background: "#fff", borderRadius: 16,
-        boxShadow: "0 25px 60px rgba(0,0,0,0.2)",
-        width: "100%", maxWidth: 560,
-        maxHeight: "90vh", overflowY: "auto" as const,
-    },
-    modalHeader: {
-        display: "flex", alignItems: "flex-start",
-        justifyContent: "space-between",
-        padding: "24px 28px 0",
-    } as React.CSSProperties,
-    modalTitle: { fontSize: 20, fontWeight: 700, color: "#0f172a", margin: 0 },
-    modalSubtitle: { fontSize: 13, color: "#64748b", marginTop: 4 },
-    closeBtn: {
-        background: "transparent", border: "none",
-        fontSize: 18, color: "#94a3b8", cursor: "pointer",
-        lineHeight: 1, padding: 4,
-    } as React.CSSProperties,
-    modalBody: { padding: "20px 28px 28px" },
-
     field: { marginBottom: 16 },
     label: { display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 },
     input: {
@@ -1269,29 +1360,6 @@ const styles = {
     hint: { fontSize: 12, color: "#94a3b8", marginTop: 4 },
     errorText: { fontSize: 13, color: "#ef4444", marginBottom: 12 },
 
-    qrSection: {
-        display: "flex", gap: 24, alignItems: "center",
-        marginBottom: 20, justifyContent: "center",
-    } as React.CSSProperties,
-    qrImage: { width: 180, height: 180, borderRadius: 12, border: "1px solid #e2e8f0" },
-    qrPlaceholder: {
-        width: 180, height: 180, borderRadius: 12,
-        background: "#f1f5f9", display: "flex",
-        alignItems: "center", justifyContent: "center",
-        fontSize: 13, color: "#94a3b8",
-    } as React.CSSProperties,
-    qrMeta: { textAlign: "center" as const },
-    orText: { fontSize: 12, color: "#94a3b8", margin: "0 0 10px" },
-    pairCode: { display: "flex", gap: 6, justifyContent: "center", marginBottom: 10 },
-    pairCodeChar: {
-        width: 36, height: 42, borderRadius: 8,
-        background: "#f1f5f9", border: "1px solid #e2e8f0",
-        display: "inline-flex", alignItems: "center", justifyContent: "center",
-        fontSize: 20, fontWeight: 700, fontFamily: "monospace",
-        color: "#1e293b",
-    } as React.CSSProperties,
-    expiresText: { fontSize: 12, color: "#94a3b8", margin: 0 },
-
     stepsList: {
         background: "#f8fafc", borderRadius: 10,
         padding: "14px 18px", marginBottom: 20,
@@ -1299,10 +1367,6 @@ const styles = {
     stepsTitle: { fontSize: 13, fontWeight: 600, color: "#374151", margin: "0 0 8px" },
     olList: { margin: 0, paddingLeft: 20, fontSize: 13, color: "#64748b", lineHeight: 1.8 },
 
-    waitingRow: {
-        display: "flex", alignItems: "center",
-        gap: 10, justifyContent: "center",
-    } as React.CSSProperties,
     spinner: {
         width: 18, height: 18, borderRadius: "50%",
         border: "2px solid #e2e8f0",

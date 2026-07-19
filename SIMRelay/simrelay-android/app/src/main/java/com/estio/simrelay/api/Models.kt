@@ -2,6 +2,7 @@ package com.estio.simrelay.api
 
 data class PairRequest(
     val pair_code: String,
+    val phone_number: String? = null,
     val tunnel_public_key: String? = null,
     val app_version: String? = null,
     val capabilities: List<String> = listOf("sms_relay")
