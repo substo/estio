@@ -2,6 +2,18 @@
 
 This subsystem routes an explicitly bound WhatsApp Web browser session through the paired Android device's active network. It does not make the browser a mobile WhatsApp client, associate an IP address with a SIM number, or modify browser fingerprints.
 
+## Delivery progress
+
+Last updated: 2026-07-19.
+
+- PR 1, node registry and PostgreSQL fenced-lease primitives, is deployed as commit `6c53c5e` with migration `20260719160000_device_tunnel_node_registry_leases`.
+- PR 2, distributed outbound rate limiting and per-session dispatch serialization, is deployed as commit `0d6c77a` with migration `20260719180000_whatsapp_distributed_rate_limits`.
+- Production remains on the compatibility path: distributed placement is off and outbound rate limiting is disabled by default. The gateway registry is live, but leases do not yet control browser ownership.
+- PR 3 is next: node-scoped token claims, assignment-aware endpoint routing, gateway epoch checks, and the corresponding Android token/client update.
+- PRs 4–7 remain: runtime lease enforcement and drain, movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
+
+See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
+
 ## Required production configuration
 
 ```dotenv
@@ -33,7 +45,7 @@ After deploying the node-registry migration, verify the node's `status`, `lastHe
 - `shadow` evaluates and records Redis sliding-window counters but does not delay sends; Redis errors are logged and allowed in this mode.
 - `enforce` serializes provider dispatch per WhatsApp session with Redis plus a PostgreSQL safety lock. Redis failure fails closed and reschedules the outbox row without increasing `attemptCount`.
 
-The default policy applies session limits of 3 sends per 10 seconds, 6 per minute, 120 per hour, and 100 per day for sessions younger than seven days or 500 per day for established sessions. Recipient limits are 3 per minute and 20 per day. Daily limits surface as pending review. `WhatsAppRateLimitPolicy.limits` can override the named values documented in `lib/whatsapp/rate-limit.ts`; keep overrides conservative and review consent, complaints, account age, and delivery quality before raising them.
+The default policy applies session limits of 3 sends per 10 seconds, 6 per minute, 120 per hour, and 100 per day for sessions younger than seven days or 500 per day for established sessions. Recipient limits are 3 per minute and 20 per day. Daily limits are delayed until the next window and surface a “pending review” reason; there is not yet a durable manual approval queue. `WhatsAppRateLimitPolicy.limits` can override the named values documented in `lib/whatsapp/rate-limit.ts`; keep overrides conservative and review consent, complaints, account age, and delivery quality before raising them.
 
 Rate-limited outbox rows use status `rate_limited`, retain their current provider `attemptCount`, and expose `rateLimitReason`, `rateLimitNextEligibleAt`, and jittered `scheduledAt` values to the conversations UI. Enable `shadow` first, observe at least one complete daily cycle, then enable `enforce` only after Redis and queue dashboards are healthy.
 
@@ -57,6 +69,8 @@ Disabling the binding returns the session to server egress; this is an explicit 
 ## Operational limitations
 
 - The active production path remains single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. The node registry and fenced-lease primitives are present for phased rollout, but routing and runtime lease enforcement remain disabled while `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`.
+- Rate-limit schema, Redis counters, dispatch locks, queue rescheduling, and admin UI support are deployed, but production enforcement remains off until the required shadow observation cycle is completed.
+- Cross-node failover is not safe yet: tokens are not node/epoch scoped, runtime leases do not stop stale browsers, and session authentication is still stored on the local host. These are PRs 3, 4, and 5 respectively.
 - The current allowlist may need additions when WhatsApp changes media/CDN hostnames. Add only observed, reviewed suffixes through `DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES`.
 - Legal/Meta approval and an internal pilot remain required before exposing this transport to customer scale.
 

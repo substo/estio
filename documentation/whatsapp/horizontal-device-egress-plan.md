@@ -10,6 +10,41 @@ The tenant boundary is `locationId`. Multiple staff members using the same Estio
 
 This design improves tenant isolation and removes the shared Hetzner egress IP from device-tunnel traffic. It is not a browser-fingerprint evasion system and does not make `whatsapp-web.js` an officially supported WhatsApp API. Meta policy review, consent, anti-abuse controls, and an official Cloud API option remain required.
 
+## Implementation status
+
+Last updated: 2026-07-19.
+
+| Phase | Status | Production state |
+|---|---|---|
+| PR 1 — Node registry and fenced lease primitives | Complete (`6c53c5e`) | Migrated and deployed; registry heartbeat is live; distributed placement remains disabled. |
+| PR 2 — Distributed rate limiter | Complete (`0d6c77a`) | Migrated and deployed; limiter defaults to `disabled` pending the shadow rollout. |
+| PR 3 — Node-scoped device tokens and routing | Not started | Existing global tunnel URL and token contract remain active. |
+| PR 4 — Co-located runtime ownership | Not started | Lease primitives exist but do not yet fence gateway/bridge runtime ownership. |
+| PR 5 — Durable session-auth placement | Not started | Production still uses host-local `LocalAuth`. |
+| PR 6 — Multi-node deployment and operations | Not started | One production egress node is registered. |
+| PR 7 — Cleanup and security review | Not started | Single-node compatibility code remains required. |
+
+The production data path is intentionally unchanged after PRs 1–2. `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` preserves single-node routing, and an absent or invalid `WHATSAPP_RATE_LIMIT_MODE` resolves to `disabled`. Do not enable distributed placement until PRs 3–5 are complete. Rate limiting may be advanced independently from `disabled` to `shadow`, observed for at least one complete daily window, and then moved to `enforce` after Redis and queue telemetry are healthy.
+
+### Implemented in PR 1
+
+- Migration `20260719160000_device_tunnel_node_registry_leases` added `DeviceTunnelGatewayNode`, assignment fields on `DeviceTunnelBinding`, and `DeviceTunnelSessionLease`.
+- `lib/device-tunnel/gateway-node-registry.ts` registers stable node identity and uses `startedAt` fencing so an old process cannot overwrite a replacement process's heartbeat.
+- `lib/device-tunnel/distributed-placement.ts` contains deterministic healthy-node selection, stable-assignment preference, capacity checks, and monotonic assignment epochs.
+- `lib/device-tunnel/session-lease.ts` provides PostgreSQL-backed acquire, renew, and expire operations scoped by binding, session, node, assignment epoch, owner, and lease epoch.
+- `scripts/device-tunnel-gateway.ts` registers and heartbeats the current production gateway without changing token routing or bridge ownership.
+- Concurrency tests cover competing owners, stale renewals, epoch takeover, node health, capacity, and heartbeat fencing.
+
+### Implemented in PR 2
+
+- Migration `20260719180000_whatsapp_distributed_rate_limits` added per-location `WhatsAppRateLimitPolicy`, `WhatsAppOutboundDispatchLock`, and user-visible rate-limit fields on `WhatsAppOutboundOutbox`.
+- `lib/whatsapp/rate-limit.ts` implements an atomic Redis sorted-set sliding-window decision across all session and recipient windows. Redis keys contain hashed scopes rather than phone numbers or database IDs.
+- `lib/whatsapp/dispatch-serialization.ts` combines a token-scoped Redis mutex with an expiring PostgreSQL safety lock so only one provider dispatch for a session proceeds at a time in enforcement mode.
+- `processWhatsAppOutboundOutboxJob` evaluates limits immediately before provider dispatch. A denied or fail-closed send becomes `rate_limited`, is rescheduled with jitter, and does not increment `attemptCount`.
+- BullMQ retries use distinct job IDs so a delayed retry cannot collide with the currently active job and disappear.
+- Conversation loading and realtime patches expose the reason and exact next-eligible time to administrators.
+- Focused tests cover atomic concurrent workers, lock contention, Redis failures, shadow behavior, retry identity, outbox attempt preservation, and UI state. The production build passed before deployment.
+
 ## Recommended architecture decision
 
 Use co-located **egress worker nodes**. Each node runs:
@@ -53,7 +88,7 @@ Egress worker node B
 
 ## Control-plane data model
 
-Add a migration in a first behavior-preserving PR.
+The PR 1 and PR 2 portions of this model are now present in production. Items explicitly described as future work belong to PRs 3–7.
 
 ### `DeviceTunnelGatewayNode`
 
@@ -82,7 +117,7 @@ Acquire and renew leases using a conditional database update. The epoch is a fen
 
 ### `WhatsAppRateLimitPolicy` and audit counters
 
-Store policy overrides and trust tier in PostgreSQL. Keep hot counters in Redis. Persist aggregated hourly/daily usage asynchronously for support, billing, and abuse investigations.
+Policy overrides and trust tier are stored in PostgreSQL, while hot counters are stored in Redis. Persisted aggregated hourly/daily usage remains future observability work for PR 6.
 
 Avoid storing one database row per tunnel frame or TCP stream.
 
@@ -135,7 +170,7 @@ Do not copy a live Chromium profile between nodes. Test crash recovery and auth 
 
 ## Strict rate limits
 
-Implement atomic Redis token buckets/sliding windows in `lib/whatsapp/rate-limit.ts`. Apply limits in the outbound worker immediately before provider dispatch, after tunnel readiness, and before opening a proof window.
+PR 2 implemented atomic Redis sliding windows in `lib/whatsapp/rate-limit.ts`. The outbound worker applies them immediately before provider dispatch, after transport/tunnel readiness resolution and before the provider send or proof operation.
 
 Initial pilot defaults, configurable by trust tier:
 
@@ -145,15 +180,17 @@ Initial pilot defaults, configurable by trust tier:
 | Session burst | 3 sends / 10 seconds | Reschedule |
 | Session sustained | 6 sends / minute | Reschedule |
 | Session hourly | 120 sends / hour | Reschedule |
-| New session daily, first 7 days | 100 sends / day | Block pending review |
-| Established session daily | 500 sends / day | Block pending review |
-| Per recipient | 3 sends / minute, 20 / day | Reschedule/block |
+| New session daily, first 7 days | 100 sends / day | Delay to next window; label pending review |
+| Established session daily | 500 sends / day | Delay to next window; label pending review |
+| Per recipient | 3 sends / minute, 20 / day | Reschedule |
 | Tunnel reconnect attempts | 10 / 10 minutes per binding | Back off |
 | Challenge requests | 10 / 10 minutes per device and source IP | HTTP 429 |
 | Simultaneous TCP streams | 32 per device initially | Reject stream |
 | Pending stream opens | 8 per device | Reject stream |
 
 Use full-jitter scheduling and return the next eligible time. A rate-limit decision must not increment `attemptCount`. If Redis is unavailable, fail closed for new sends and token/challenge issuance while allowing established tunnel traffic long enough to recover.
+
+Current PR 2 behavior reschedules daily-limit rows at the next eligible time and includes “pending review” in the administrator-visible reason. It does not yet provide a durable manual approval queue. If product policy requires explicit approval before a daily-limited row can resume, add that workflow as a separately reviewed PR before customer enforcement.
 
 These are product safety defaults, not techniques for bypassing WhatsApp controls. Add administrative raising of limits only after account-age, opt-in, complaint, and delivery-quality review. Never randomize fingerprints or sending behavior to evade detection.
 
@@ -208,6 +245,8 @@ Alert on lease conflicts, node capacity above 80%, proof success below target, q
 
 ### PR 1 — Node registry and fenced lease primitives
 
+**Status: complete, deployed, and verified.** Commit `6c53c5e`; migration `20260719160000_device_tunnel_node_registry_leases`.
+
 - Add the node, assignment, and lease schema/migration.
 - Add pure placement and epoch/lease helpers with concurrency tests.
 - Register and heartbeat the existing single gateway as one stable node.
@@ -215,55 +254,108 @@ Alert on lease conflicts, node capacity above 80%, proof success below target, q
 
 Acceptance: two simulated owners cannot both acquire/renew a lease; the current production tunnel still works unchanged.
 
+Result: acceptance passed. The production gateway is registered and online, the existing WhatsApp session remained ready through deployment, and the compatibility flag remains off.
+
 ### PR 2 — Distributed rate limiter
+
+**Status: complete, deployed, and verified.** Commit `0d6c77a`; migration `20260719180000_whatsapp_distributed_rate_limits`.
 
 - Add Redis-backed atomic limits and policy resolution.
 - Integrate with `processWhatsAppOutboundOutboxJob` so limited jobs are rescheduled without attempts.
-- Add per-session serialization in BullMQ and a database safety check.
+- Add per-session serialization in the BullMQ worker using Redis plus a database safety check.
 - Add admin-visible reason and next eligible time.
 
 Acceptance: concurrent workers cannot exceed a session limit; Redis failure blocks new sends safely; no job is lost or double-sent.
 
+Result: acceptance passed in focused concurrency tests and the production build. Schema and code are live with enforcement disabled. Operational completion requires a shadow observation window before enabling `enforce`; this does not block PR 3.
+
 ### PR 3 — Node-scoped device tokens and routing
+
+**Status: next implementation PR.** This activates assignment-aware routing but must not yet activate automatic cross-node browser failover.
 
 - Assign bindings to a healthy node.
 - Return the assigned node URL from `/api/device-relay/v1/tunnel-token`.
 - Add `nodeId`, `sessionId`, epoch, audience, and JTI claims.
 - Update Android models/client and retain exponential backoff with full jitter.
+- Validate assignment and epoch at token issuance and again at the gateway; a database change after token issuance must fence reconnect.
+- Reduce tunnel JWT lifetime from 15 minutes to 5 minutes and add bounded JTI replay protection for exchanges/reconnects.
+- Preserve the current single-node path behind `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`; provide an explicit canary allowlist before a global flag.
+
+Expected migration: none if the PR 1 assignment fields are sufficient. Add a migration only if replay records or canary assignment state require durable storage; do not overload node metadata JSON for authoritative state.
+
+Primary code surfaces: `app/api/admin/whatsapp-egress/bind/route.ts`, `app/api/device-relay/v1/tunnel-token/route.ts`, `lib/device-tunnel/auth.ts`, gateway authentication/connection handling, and the Android tunnel token/client models.
 
 Acceptance: the wrong node rejects the token; reassignment causes Android to reconnect to the new endpoint; revoked epochs cannot reconnect.
 
+Rollback: turn distributed placement off. Existing single-node tokens and routing must continue to work without decrementing or reusing assignment epochs.
+
 ### PR 4 — Co-located runtime ownership
+
+**Status: pending PR 3.** This is the first phase that makes the PR 1 lease authoritative at runtime.
 
 - Make gateway and bridge use the same node identity and lease.
 - Require a valid lease before returning the local SOCKS endpoint or starting Chromium.
 - Stop browser/streams on lease loss.
 - Add graceful drain endpoints and deployment hooks.
+- Bind browser readiness and proof-window creation to the current lease epoch; stale processes must be unable to report readiness or accept new proof work.
+- Renew leases on a bounded cadence and fail closed after two missed renewals. Release is best-effort; expiry and epoch fencing remain authoritative.
+- Keep queued messages in `blocked_egress` during ownership gaps and preserve the PR 2 rate-limit attempt semantics.
+
+Expected migration: normally none. Add durable drain/audit fields only if the existing node, binding, and lease schema cannot represent the operational transition cleanly.
 
 Acceptance: forced lease loss stops the old browser; only the new owner becomes ready; queued sends remain blocked during the gap.
 
+Rollback: disable lease enforcement only after draining any canary owner. Never run old and new ownership modes concurrently for the same session.
+
 ### PR 5 — Durable session-auth placement
+
+**Status: pending architecture/provider decision and PR 4.** Host-local `LocalAuth` is the blocker to safe cross-node reassignment.
 
 - Implement encrypted per-session persistent volume attach/detach.
 - Add auth integrity checks, backup, restore, and `relink_required` behavior.
 - Document recovery time and manual break-glass steps.
+- Select and document the storage/volume provider, single-writer guarantees, encryption-key ownership, backup retention, and attach/detach timeout before coding.
+- Move a volume only after the previous runtime is fenced and all Chromium processes using it are stopped; never copy a live profile.
+- Record non-secret auth placement and recovery state in PostgreSQL and immutable audit events.
+
+Expected migration: auth-placement state, recovery status, integrity/version metadata, and audit records. Secrets and profile contents must not be stored in PostgreSQL.
 
 Acceptance: hard-kill one node and restore the session on another without two active browsers or a corrupted profile.
 
+Rollback: reattach the last known-good encrypted volume to its prior fenced node or mark `relink_required`; do not start with an unverified copied profile.
+
 ### PR 6 — Multi-node deployment and operations
+
+**Status: pending PRs 3–5.** This provisions the second real node and exercises the complete failure path.
 
 - Provision at least two egress nodes in one region.
 - Add node-specific WSS DNS/TLS, capacity-aware placement, drain tooling, dashboards, and alerts.
 - Run load, reconnect-storm, slow-device, Redis-outage, database-latency, and node-loss tests.
 - Canary with internal accounts, then a small opted-in customer cohort.
+- Add persisted hourly/daily rate-limit aggregates and dashboards for delays, blocks, Redis errors, queue age, and session lock contention.
+- Monitor version skew and prevent placement onto incompatible or quarantined nodes.
+- Rehearse node drain, hard failure, rollback, auth restore, and relink-required runbooks before customer canary expansion.
+
+Expected infrastructure/data changes: node-specific DNS/TLS and deployment configuration; operational metric/audit storage may require a migration. No shared cross-node SOCKS mesh is part of this PR.
 
 Acceptance: documented SLOs pass during the canary and rollback is rehearsed.
 
+Rollback: stop new placement, drain canary bindings, fence their current epochs, and return them to the original healthy node. Server-egress fallback remains prohibited.
+
 ### PR 7 — Cleanup and security review
+
+**Status: final phase after the migration window.** Do not remove compatibility paths until all production bindings use the multi-node contract and rollback has been rehearsed.
 
 - Extract shared gateway/lease/rate-limit mechanics from scripts into tested service modules.
 - Remove single-node compatibility code after the migration window.
 - Complete threat-model, dependency, privacy, and Meta-policy review.
+- Remove obsolete configuration only after production configuration and runbooks are updated; reject ambiguous mixed-mode startup.
+- Review JWT replay boundaries, tenant scoping, lease/epoch fencing, SSRF/DNS rebinding controls, auth-volume key access, log redaction, and audit immutability.
+- Resolve or explicitly accept production dependency audit findings, including the critical findings currently reported by `npm audit`, before broad customer rollout.
+
+Expected migration: only cleanup/backfill constraints proven safe by production data. Destructive column/table removal should be a separate, reversible migration after a full release window.
+
+Acceptance: the threat model is signed off, dependency/privacy/policy findings have owners and dispositions, no deprecated runtime path remains active, and a clean install/build/test/deploy succeeds.
 
 ## Rollout and rollback
 
@@ -291,9 +383,9 @@ Rollback must preserve binding epochs. Disable new placement and move canary bin
 - node drain with queued and in-flight messages;
 - auth-volume move, corrupt profile, and relink-required recovery.
 
-## First task for the next agent
+## Next implementation task
 
-Implement **PR 1 only**. Start by reading:
+Implement **PR 3 only**. PRs 1 and 2 are already deployed; do not recreate their migrations or enable PR 4 ownership behavior in the same change. Start by reading:
 
 - `documentation/whatsapp/android-device-egress.md`
 - `scripts/device-tunnel-gateway.ts`
@@ -303,6 +395,6 @@ Implement **PR 1 only**. Start by reading:
 - `app/api/device-relay/v1/tunnel-token/route.ts`
 - the `WhatsAppWebBridgeSession`, `SmsRelayDevice`, and `DeviceTunnelBinding` Prisma models
 
-Keep the existing production data path unchanged. Add migration, node heartbeat/registry, fenced lease primitives, unit/concurrency tests, feature flag, and operational documentation. Do not start PR 2 or change Android routing in the same diff.
+Keep the existing production data path unchanged when `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`. Implement assignment-aware bind/token routing, node/epoch/audience/JTI validation, the Android contract update, wrong-node and stale-epoch tests, and operational documentation. Do not start PR 4 lease enforcement or PR 5 auth-volume movement in the same diff.
 
-Before handoff, run focused device-tunnel tests, Prisma validation/generation, `git diff --check`, and the production build. Request security review specifically for lease fencing, tenant scoping, and token claims.
+Before handoff, run focused device-tunnel and token tests, Android unit/build checks, Prisma validation/generation if schema changes, `git diff --check`, and the production build. Request security review specifically for tenant scoping, node/audience/epoch validation, token replay, redirect/routing trust, and compatibility-flag rollback.
