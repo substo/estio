@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "module";
+import { execFileSync } from "child_process";
 import { rm } from "fs/promises";
 import path from "path";
 import qrcode from "qrcode";
@@ -68,6 +69,29 @@ const MEDIA_DOWNLOAD_RETRY_BACKOFF_MS = Math.max(
     Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_DOWNLOAD_RETRY_BACKOFF_MS || 1_000),
     100,
 );
+
+function detectChromiumUserAgent() {
+    const configured = String(process.env.WHATSAPP_WEB_BRIDGE_USER_AGENT || "").trim();
+    if (configured) return configured;
+    try {
+        const puppeteer = require("puppeteer");
+        const versionOutput = execFileSync(puppeteer.executablePath(), ["--version"], {
+            encoding: "utf8",
+            timeout: 5_000,
+        });
+        const version = String(versionOutput).match(/\b(\d+\.\d+\.\d+\.\d+)\b/)?.[1];
+        if (version) {
+            const platform = process.platform === "darwin" ? "Macintosh; Intel Mac OS X 10_15_7" : "X11; Linux x86_64";
+            return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
+        }
+    } catch (error: any) {
+        console.warn("[WhatsApp Web Bridge] Could not detect the bundled Chromium version:", error?.message || error);
+    }
+    // Avoid whatsapp-web.js's legacy Chrome 101 default if version detection is unavailable.
+    return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+}
+
+const BROWSER_USER_AGENT = detectChromiumUserAgent();
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     let timeout: NodeJS.Timeout | null = null;
@@ -624,6 +648,7 @@ async function startSession(sessionId: string, locationId: string) {
     const tunnelProxy = await getDeviceTunnelProxy(sessionId, locationId);
     const { Client, LocalAuth } = require("whatsapp-web.js");
     const client = new Client({
+        userAgent: BROWSER_USER_AGENT,
         authStrategy: new LocalAuth({
             clientId: sessionId,
             dataPath: SESSION_DIR,
@@ -641,7 +666,7 @@ async function startSession(sessionId: string, locationId: string) {
                 "--disable-gpu",
                 ...(tunnelProxy ? [
                     `--proxy-server=socks5://${tunnelProxy.proxyHost}:${tunnelProxy.proxyPort}`,
-                    "--host-resolver-rules=MAP * ~NOTFOUND",
+                    `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${tunnelProxy.proxyHost}`,
                     "--disable-quic",
                 ] : []),
             ],
