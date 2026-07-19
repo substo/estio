@@ -475,6 +475,7 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
         contactName: contactIdentity.displayName || message?._data?.verifiedName || message?._data?.notifyName || "",
         contactIdentity,
         hasMedia: Boolean(message?.hasMedia),
+        ack: Number(message?.ack ?? message?._data?.ack ?? 0),
     };
 
     if (message?.hasMedia) {
@@ -806,7 +807,8 @@ async function sendMessage(sessionId: string, payload: any) {
                 `WhatsApp media send ${sessionId}`
             ));
             const messageId = sent?.id?._serialized || sent?.id?.id || "";
-            const egressProof = await recordDeviceTunnelSendProof(session, messageId, proofNonce);
+            const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
+            const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
             return { messageId, egressProof };
         } catch (error: any) {
             throw new Error(`WhatsApp Web media send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
@@ -823,7 +825,8 @@ async function sendMessage(sessionId: string, payload: any) {
             `WhatsApp text send ${sessionId}`
         ));
         const messageId = sent?.id?._serialized || sent?.id?.id || "";
-        const egressProof = await recordDeviceTunnelSendProof(session, messageId, proofNonce);
+        const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
+        const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
         if (preview.shouldRequestPreview) {
             const sentLinks = Array.isArray(sent?.links) ? sent.links.length : null;
             console.log("[WhatsApp Web Bridge] Text URL send completed", {

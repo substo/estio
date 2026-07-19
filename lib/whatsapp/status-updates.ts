@@ -29,6 +29,30 @@ function isProviderConfirmedStatus(status: string) {
     return status === "sent" || status === "delivered" || status === "read";
 }
 
+const DELIVERY_STATUS_RANK: Record<string, number> = {
+    sent: 1,
+    delivered: 2,
+    read: 3,
+};
+
+export function resolveMonotonicWhatsAppDeliveryStatus(currentStatus: string, nextStatus: string) {
+    const current = String(currentStatus || "").trim().toLowerCase();
+    const next = String(nextStatus || "").trim().toLowerCase();
+    const currentRank = DELIVERY_STATUS_RANK[current] || 0;
+    const nextRank = DELIVERY_STATUS_RANK[next] || 0;
+
+    if (currentRank > 0 && nextRank > 0 && currentRank > nextRank) return current;
+    if (currentRank > 0 && next === "failed") return current;
+    return next || current;
+}
+
+function getWhatsAppDeliveryStatusAdvanceFilter(nextStatus: string) {
+    if (nextStatus === "sent") return { notIn: ["delivered", "read"] };
+    if (nextStatus === "delivered") return { not: "read" };
+    if (nextStatus === "failed") return { notIn: ["sent", "delivered", "read"] };
+    return undefined;
+}
+
 async function applyOutboundOutboxStatusFromProviderAck(args: {
     messageId: string;
     status: string;
@@ -74,79 +98,92 @@ async function applyOutboundOutboxStatusFromProviderAck(args: {
 
 export async function processStatusUpdate(wamId: string, rawStatus: string) {
     const status = mapWhatsAppDeliveryStatus(rawStatus);
-    if (!status) return;
+    if (!status) return { matched: false, status: "" };
 
     console.log(`[WhatsApp Sync] Updating status for ${wamId}: ${rawStatus} -> ${status}`);
 
-    const updateResult = await db.message.updateMany({
+    const existingMessage = await (db as any).message.findFirst({
         where: { wamId },
-        data: { status: status }
+        select: { id: true, status: true },
+    });
+    if (!existingMessage?.id) return { matched: false, status };
+
+    const statusAdvanceFilter = getWhatsAppDeliveryStatusAdvanceFilter(status);
+    await db.message.updateMany({
+        where: {
+            id: existingMessage.id,
+            ...(statusAdvanceFilter ? { status: statusAdvanceFilter } : {}),
+        },
+        data: { status },
     });
 
-    if (updateResult.count > 0) {
-        const messageWithConversation = await (db as any).message.findFirst({
-            where: { wamId },
-            select: {
-                id: true,
-                wamId: true,
-                clientMessageId: true,
-                createdAt: true,
-                outboundWhatsAppOutbox: {
-                    select: {
-                        id: true,
-                        status: true,
-                    },
-                },
-                conversation: {
-                    select: {
-                        ghlConversationId: true,
-                        locationId: true,
-                    },
+    const messageWithConversation = await (db as any).message.findFirst({
+        where: { id: existingMessage.id },
+        select: {
+            id: true,
+            status: true,
+            wamId: true,
+            clientMessageId: true,
+            createdAt: true,
+            outboundWhatsAppOutbox: {
+                select: {
+                    id: true,
+                    status: true,
                 },
             },
-        });
-
-        const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
-        const locationId = (messageWithConversation as any)?.conversation?.locationId;
-        const createdAtMs = Date.parse(String((messageWithConversation as any)?.createdAt || ""));
-        const outboxUpdateResult = await applyOutboundOutboxStatusFromProviderAck({
-            messageId: String((messageWithConversation as any)?.id || ""),
-            status,
-            rawStatus,
-        }).catch((error: any) => {
-            console.warn("[WhatsApp Sync] Failed to update outbound outbox from provider ack:", error?.message || error);
-            return null;
-        });
-        const outboxUpdated = Number((outboxUpdateResult as any)?.count || 0);
-        const nextOutboxStatus = outboxUpdated > 0
-            ? (status === "failed" ? "failed" : "completed")
-            : String((messageWithConversation as any)?.outboundWhatsAppOutbox?.status || "");
-        logWhatsAppSendLifecycle("status_webhook_received", {
-            messageId: (messageWithConversation as any)?.id || null,
-            clientMessageId: (messageWithConversation as any)?.clientMessageId || null,
-            wamId,
-            rawStatus,
-            status,
-            outboxStatus: nextOutboxStatus || null,
-            status_webhook_lag_ms: Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
-            total_to_delivered_ms: status === "delivered" && Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
-        });
-        if (conversationId && locationId) {
-            void publishConversationRealtimeEvent({
-                locationId,
-                conversationId,
-                type: "message.status",
-                payload: {
-                    messageId: (messageWithConversation as any).id,
-                    wamId: (messageWithConversation as any).wamId || wamId,
-                    clientMessageId: (messageWithConversation as any).clientMessageId || null,
-                    status,
-                    rawStatus,
-                    outboxStatus: nextOutboxStatus || undefined,
+            conversation: {
+                select: {
+                    ghlConversationId: true,
+                    locationId: true,
                 },
-            });
-        }
+            },
+        },
+    });
+
+    if (!messageWithConversation?.id) return { matched: false, status };
+
+    const appliedStatus = String((messageWithConversation as any).status || status);
+    const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
+    const locationId = (messageWithConversation as any)?.conversation?.locationId;
+    const createdAtMs = Date.parse(String((messageWithConversation as any)?.createdAt || ""));
+    const outboxUpdateResult = await applyOutboundOutboxStatusFromProviderAck({
+        messageId: String((messageWithConversation as any)?.id || ""),
+        status: appliedStatus,
+        rawStatus,
+    }).catch((error: any) => {
+        console.warn("[WhatsApp Sync] Failed to update outbound outbox from provider ack:", error?.message || error);
+        return null;
+    });
+    const outboxUpdated = Number((outboxUpdateResult as any)?.count || 0);
+    const nextOutboxStatus = outboxUpdated > 0
+        ? (appliedStatus === "failed" ? "failed" : "completed")
+        : String((messageWithConversation as any)?.outboundWhatsAppOutbox?.status || "");
+    logWhatsAppSendLifecycle("status_webhook_received", {
+        messageId: (messageWithConversation as any)?.id || null,
+        clientMessageId: (messageWithConversation as any)?.clientMessageId || null,
+        wamId,
+        rawStatus,
+        status: appliedStatus,
+        outboxStatus: nextOutboxStatus || null,
+        status_webhook_lag_ms: Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
+        total_to_delivered_ms: appliedStatus === "delivered" && Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
+    });
+    if (conversationId && locationId) {
+        void publishConversationRealtimeEvent({
+            locationId,
+            conversationId,
+            type: "message.status",
+            payload: {
+                messageId: (messageWithConversation as any).id,
+                wamId: (messageWithConversation as any).wamId || wamId,
+                clientMessageId: (messageWithConversation as any).clientMessageId || null,
+                status: appliedStatus,
+                rawStatus,
+                outboxStatus: nextOutboxStatus || undefined,
+            },
+        });
     }
+    return { matched: true, status: appliedStatus };
 }
 
 export async function updateWhatsAppCloudStatus(location: any, statusEvent: any) {

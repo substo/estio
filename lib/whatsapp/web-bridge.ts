@@ -382,6 +382,7 @@ export async function clearWhatsAppWebBridgeSession(locationId: string) {
 export async function sendWhatsAppWebBridgeMessage(input: {
     locationId: string;
     to: string;
+    proofMessageId?: string | null;
     text?: string | null;
     mediaUrl?: string | null;
     mimetype?: string | null;
@@ -401,6 +402,7 @@ export async function sendWhatsAppWebBridgeMessage(input: {
         body: JSON.stringify({
             locationId: input.locationId,
             to: chatId,
+            proofMessageId: input.proofMessageId || null,
             text: input.text || "",
             mediaUrl: input.mediaUrl || null,
             mimetype: input.mimetype || null,

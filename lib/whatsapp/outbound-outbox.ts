@@ -45,6 +45,14 @@ export function resolveWhatsAppOutboundCompletionState(args: { transport: string
     };
 }
 
+export function resolveWhatsAppDispatchAckTimeoutState(messageStatus: string) {
+    const status = String(messageStatus || "").trim().toLowerCase();
+    const providerConfirmed = status === "sent" || status === "delivered" || status === "read";
+    return providerConfirmed
+        ? { outboxStatus: "completed", shouldMarkMessageUnconfirmed: false }
+        : { outboxStatus: "delivery_unconfirmed", shouldMarkMessageUnconfirmed: status === "dispatch_accepted" };
+}
+
 function normalizeError(error: unknown): string {
     if (error instanceof Error) return error.message;
     try {
@@ -216,17 +224,14 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         });
 
         const completionState = resolveWhatsAppOutboundCompletionState({ transport, wamId });
-        const { awaitsProviderAck, messageStatus, outboxStatus } = completionState;
+        const { messageStatus, outboxStatus } = completionState;
         try {
-            await (db as any).message.update({
-                where: { id: row.messageId },
-                data: {
-                    wamId,
-                    ghlMessageId: wamId,
-                    status: messageStatus,
-                    updatedAt: new Date(),
-                },
-            });
+            if (wamId) {
+                await (db as any).message.update({
+                    where: { id: row.messageId },
+                    data: { wamId, ghlMessageId: wamId, updatedAt: new Date() },
+                });
+            }
         } catch (error) {
             if (!isUniqueConstraintError(error)) throw error;
 
@@ -237,18 +242,21 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 })
                 : null;
             if (!existingByWam?.id) throw error;
-
-            await db.message.update({
-                where: { id: row.messageId },
-                data: {
-                    status: messageStatus,
-                    updatedAt: new Date(),
-                },
-            }).catch(() => undefined);
         }
 
-        await (db as any).whatsAppOutboundOutbox.update({
-            where: { id: row.id },
+        await db.message.updateMany({
+            where: {
+                id: row.messageId,
+                status: { in: ["sending", "queued", "pending", "processing", "dispatch_accepted", "delivery_unconfirmed"] },
+            },
+            data: {
+                status: messageStatus,
+                updatedAt: new Date(),
+            },
+        });
+
+        await (db as any).whatsAppOutboundOutbox.updateMany({
+            where: { id: row.id, status: "processing" },
             data: {
                 status: outboxStatus,
                 processedAt: completionState.processedAt,
@@ -258,6 +266,23 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 lockedBy: null,
             },
         });
+
+        const settledState = await (db as any).whatsAppOutboundOutbox.findUnique({
+            where: { id: row.id },
+            select: {
+                status: true,
+                message: { select: { status: true, wamId: true } },
+            },
+        });
+        const settledMessageStatus = String(settledState?.message?.status || messageStatus);
+        const settledOutboxStatus = String(settledState?.status || outboxStatus);
+        const settledWamId = String(settledState?.message?.wamId || wamId || "") || null;
+        const settledDeliveryUnconfirmed = settledMessageStatus === "delivery_unconfirmed";
+        const settledSyncStatus = settledDeliveryUnconfirmed
+            ? "pending"
+            : settledMessageStatus === "failed"
+                ? "failed"
+                : "synced";
 
         await (db as any).messageSync.upsert({
             where: {
@@ -273,14 +298,14 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 locationId: row.locationId,
                 provider,
                 providerAccountId,
-                providerMessageId: wamId,
+                providerMessageId: settledWamId,
                 providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
-                status: completionState.deliveryUnconfirmed ? "pending" : "synced",
+                status: settledSyncStatus,
                 remoteUpdatedAt: new Date(),
                 lastSyncedAt: new Date(),
                 metadata: {
                     transport,
-                    deliveryUnconfirmed: completionState.deliveryUnconfirmed,
+                    deliveryUnconfirmed: settledDeliveryUnconfirmed,
                     pricingIntent: payload?.pricingIntent || null,
                     templateName: payload?.templateName || null,
                     templateLanguage: payload?.templateLanguage || null,
@@ -288,15 +313,15 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 },
             },
             update: {
-                providerMessageId: wamId,
+                ...(settledWamId ? { providerMessageId: settledWamId } : {}),
                 providerThreadId: row.conversation?.ghlConversationId || row.conversationId,
-                status: completionState.deliveryUnconfirmed ? "pending" : "synced",
+                status: settledSyncStatus,
                 remoteUpdatedAt: new Date(),
                 lastSyncedAt: new Date(),
                 lastError: null,
                 metadata: {
                     transport,
-                    deliveryUnconfirmed: completionState.deliveryUnconfirmed,
+                    deliveryUnconfirmed: settledDeliveryUnconfirmed,
                     pricingIntent: payload?.pricingIntent || null,
                     templateName: payload?.templateName || null,
                     templateLanguage: payload?.templateLanguage || null,
@@ -330,10 +355,10 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             mode: row.kind,
             messageId: row.messageId,
             clientMessageId: row.message?.clientMessageId || null,
-            wamId,
-            status: messageStatus,
+            wamId: settledWamId,
+            status: settledMessageStatus,
             outboxJobId: row.id,
-            outboxStatus,
+            outboxStatus: settledOutboxStatus,
             attemptCount,
             provider_send_ms: providerSendMs,
             total_to_sent_ms: Number.isFinite(messageCreatedAtMs) ? Date.now() - messageCreatedAtMs : null,
@@ -516,11 +541,35 @@ export async function recoverStaleWhatsAppOutboundOutboxLocks() {
         select: {
             id: true,
             messageId: true,
+            message: {
+                select: { status: true },
+            },
         },
         take: 250,
     });
-    const unconfirmedOutboxIds = unconfirmedRows.map((row: any) => String(row.id));
-    const unconfirmedMessageIds = unconfirmedRows.map((row: any) => String(row.messageId));
+    const confirmedRows = unconfirmedRows.filter((row: any) =>
+        resolveWhatsAppDispatchAckTimeoutState(row.message?.status).outboxStatus === "completed"
+    );
+    const timedOutRows = unconfirmedRows.filter((row: any) =>
+        resolveWhatsAppDispatchAckTimeoutState(row.message?.status).outboxStatus === "delivery_unconfirmed"
+    );
+    const confirmedOutboxIds = confirmedRows.map((row: any) => String(row.id));
+    const unconfirmedOutboxIds = timedOutRows.map((row: any) => String(row.id));
+    const unconfirmedMessageIds = timedOutRows
+        .filter((row: any) => resolveWhatsAppDispatchAckTimeoutState(row.message?.status).shouldMarkMessageUnconfirmed)
+        .map((row: any) => String(row.messageId));
+    if (confirmedOutboxIds.length > 0) {
+        await (db as any).whatsAppOutboundOutbox.updateMany({
+            where: { id: { in: confirmedOutboxIds }, status: "dispatch_accepted" },
+            data: {
+                status: "completed",
+                processedAt: now,
+                lastError: null,
+                lockedAt: null,
+                lockedBy: null,
+            },
+        });
+    }
     if (unconfirmedOutboxIds.length > 0) {
         const message = `WhatsApp Web dispatch accepted but no delivery ack arrived within ${Math.round(DISPATCH_ACK_TIMEOUT_MS / 1000)} seconds.`;
         await db.$transaction([
@@ -545,7 +594,7 @@ export async function recoverStaleWhatsAppOutboundOutboxLocks() {
             }),
         ]);
     }
-    return Number(recovered?.count || 0) + unconfirmedOutboxIds.length;
+    return Number(recovered?.count || 0) + unconfirmedRows.length;
 }
 
 export async function listDueWhatsAppOutboundOutboxIds(limit = 200): Promise<string[]> {

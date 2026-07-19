@@ -211,6 +211,7 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
                 const response = await sendWhatsAppWebBridgeMessage({
                     locationId: row.locationId,
                     to: webBridgeRecipient,
+                    proofMessageId: row.messageId,
                     text,
                 });
                 wamId = response?.messageId ? String(response.messageId) : null;
@@ -220,6 +221,7 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
                 const response = await sendWhatsAppWebBridgeMessage({
                     locationId: row.locationId,
                     to: webBridgeRecipient,
+                    proofMessageId: row.messageId,
                     mediaUrl: signedMediaUrl,
                     mimetype: contentType,
                     fileName,

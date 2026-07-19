@@ -71,6 +71,16 @@ async function markValidBridgeWebhookReceived(locationId: string, sessionId: str
     });
 }
 
+async function processBridgeStatusUpdateWithAdoptionRetry(wamId: string, status: string) {
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const result = await processStatusUpdate(wamId, status);
+        if (result.matched || attempt === maxAttempts) return result;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return { matched: false, status };
+}
+
 export async function POST(req: NextRequest) {
     if (!isAuthorized(req)) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -135,7 +145,7 @@ export async function POST(req: NextRequest) {
             await markValidBridgeWebhookReceived(locationId, sessionId);
             const wamId = String(body?.messageId || body?.wamId || "").trim();
             const status = normalizeWhatsAppWebBridgeAckStatus(body?.ack);
-            if (wamId && status) await processStatusUpdate(wamId, status);
+            if (wamId && status) await processBridgeStatusUpdateWithAdoptionRetry(wamId, status);
             return NextResponse.json({ status: "processed" });
         }
 
@@ -161,6 +171,13 @@ export async function POST(req: NextRequest) {
             }
 
             const result = await processNormalizedMessage(normalizedMessage.normalized);
+
+            if (message.fromMe) {
+                const snapshotStatus = normalizeWhatsAppWebBridgeAckStatus(message.ack);
+                if (wamId && snapshotStatus) {
+                    await processBridgeStatusUpdateWithAdoptionRetry(wamId, snapshotStatus);
+                }
+            }
 
             if (message.hasMedia && message.media?.data && result?.status !== "deferred_unresolved_lid") {
                 const { ingestWhatsAppWebBridgeMediaAttachment } = await import("@/lib/whatsapp/web-bridge-media");
