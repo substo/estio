@@ -10,17 +10,20 @@ Configured market facts are authoritative. For existing locations that have not 
 
 Location administrators configure the market context in Site Settings. Service areas form a hierarchy and may include local-language names, alternate spellings, transliterations, and other aliases. The same place label in another location's profile has no effect on this location.
 
+Place matching is Unicode-aware and confined to the current location's configured or inventory-derived vocabulary. Currency is taken from the property or the current market context; the system must not silently default an unknown international listing to EUR or another server-side assumption.
+
 The central question is:
 
 > If an experienced agent reviewed everything currently known about this contact, would sending this particular property be sensible?
 
-The system should answer with three operational outcomes:
+The system should answer with four decision outcomes:
 
 - **Send now** — strong, current evidence supports the match and no blocker exists.
 - **Potential — review** — the property is plausibly relevant, but one or more meaningful facts remain uncertain.
 - **Disqualified** — a clear conflict or eligibility blocker makes the property unsuitable.
+- **Insufficient information** — the contact may be eligible, but there is not enough concrete evidence to recommend this property.
 
-Contacts with no useful matching evidence belong in **Insufficient information**, not Potential.
+Processing, profile verification, already-shared detection, and human review statuses are operational workflow states around these decisions; they are not additional kinds of property fit.
 
 ## Why the campaign profile exists
 
@@ -34,6 +37,23 @@ The profile is not a single free-form AI summary. It has two separate parts:
 2. **Property interaction profile** — what properties the contact has encountered and how the contact responded.
 
 Human-readable summaries are generated from these profiles for agents and AI review. The structured evidence remains the source of truth.
+
+## What is implemented today
+
+The current implementation provides:
+
+- a reusable, stored profile for each contact, separated into eligibility, current requirements, and property interactions;
+- profile states that distinguish ready, sparse, and ineligible contacts;
+- conservative use of legacy CRM requirements until they have been freshly assessed;
+- neutral recording of properties sent by an agent;
+- explicit positive and negative property reactions linked to one resolved property;
+- similarity comparison against the latest explicit reaction to previously liked or rejected properties;
+- deterministic structured matching followed by narrow AI review for ambiguous cases;
+- location-scoped international market context and multilingual feedback classification;
+- separate handling for unverified profiles, already-shared properties, processing candidates, reviewable matches, and clear non-matches;
+- incremental profile refresh plus periodic reconciliation for missing, outdated, or stale profiles.
+
+The implementation does not yet learn from every possible behavioral event. Property clicks, completed viewings, offers, conversions, and agent campaign rejections are useful future signals, but they are not currently treated as established contact preferences unless they also produce explicit evidence captured by the profile.
 
 ## Core principles
 
@@ -78,7 +98,7 @@ Agent activity and client preference must remain separate.
 
 - Property sent by an agent: neutral exposure.
 - No response: neutral or weak evidence, never a rejection by itself.
-- Client asks questions, requests a viewing, clicks repeatedly, or says they like it: positive evidence.
+- Client asks questions, requests a viewing, or says they like it: positive evidence.
 - Client explicitly rejects it or explains what is wrong: negative evidence.
 
 Recommendations must not learn preferences merely from what the agency previously chose to send.
@@ -99,46 +119,40 @@ Weak inferred preferences should decay over time. Explicit exclusions and confir
 
 The requirement profile represents the contact's current search state. It may include:
 
-- buyer, renter, or other goal;
-- actively searching, paused, completed, or unknown status;
-- districts and local areas;
+- buyer or renter goal;
+- search eligibility, including whether the contact has stopped searching;
+- districts, cities, and local areas;
 - acceptable property types;
-- minimum or exact bedroom requirements;
-- target, minimum, and maximum budget;
-- minimum or preferred internal and plot size;
-- condition or construction-stage preferences;
-- required features;
-- soft lifestyle preferences;
-- investment criteria such as target yield;
-- explicit exclusions;
-- criteria requiring clarification.
+- bedroom requirements;
+- minimum and maximum budget;
+- condition preferences;
+- other requirement details and a human-readable summary.
+
+Size, features, lifestyle preferences, exclusions, investment criteria, and clarification needs can currently be carried in the detailed requirement text and interpreted during matching. They may become first-class structured profile criteria later when enough reliable evidence exists.
 
 The profile should distinguish exact meaning. For example:
 
-- “Must be in Peyia” is a hard area constraint.
-- “Prefer Peyia but open to nearby villages” is a soft area preference.
-- “Asked about one Peyia villa” is historical interest, not automatically a general location requirement.
+- “Must be in Dubai Marina” is a hard area constraint.
+- “Prefer central Madrid but open to nearby suburbs” is a soft area preference.
+- “Asked about one Algarve villa” is historical interest, not automatically a general location requirement.
 - “Pool would be nice” is soft.
 - “Must have a private pool” is hard.
 
 ## Property interaction profile
 
-The interaction profile records exposure and feedback over time. Typical events include:
+The interaction profile currently records:
 
-- original property enquiry;
 - property sent by an agent;
-- property opened or clicked;
 - question or reply about a property;
 - explicit like or dislike;
 - rejection with a reason;
-- viewing requested;
-- viewing completed;
-- offer, reservation, purchase, or rental;
-- campaign recommendation approved or rejected by an agent.
+- viewing requested.
 
-The system should learn from reasons, not only outcomes. “Too expensive,” “wrong part of Paphos,” “needs to be larger,” and “I only want commercial property” provide more useful matching information than a generic negative response.
+The profile can be extended later with original enquiries, opens or clicks, completed viewings, offers, reservations, purchases, rentals, and campaign-review outcomes. Those events should affect recommendations only after their meaning and provenance are trustworthy.
 
-Interactions should influence recommendations according to their reliability and recency. Explicit client feedback is stronger than inferred browsing behavior. A viewing request is stronger than a single click. Agent-sent exposure alone remains neutral.
+The system should learn from reasons, not only outcomes. “Too expensive,” “wrong city or neighborhood,” “needs to be larger,” and “I only want commercial property” provide more useful matching information than a generic negative response.
+
+Interactions should influence recommendations according to their reliability and recency. Explicit client feedback is stronger than inferred engagement behavior. A viewing request is stronger than a weak engagement signal. Agent-sent exposure alone remains neutral.
 
 ### Comparing with previous properties
 
@@ -149,6 +163,8 @@ A close match to a positively received property is one grounding fit signal, not
 When the contact gives multiple reactions to the same property, matching uses the newest explicit reaction. Earlier reactions remain in the evidence history for auditability but do not act as simultaneous current preferences.
 
 Properties merely sent by an agent are excluded from preference similarity. This prevents the system from learning the agency's previous choices as though they were the contact's preferences.
+
+Existing CRM lists of properties marked interested or inspected can preserve useful historical references during migration. They do not create rich similarity evidence unless the system also has a property snapshot and a trustworthy reaction. Existing emailed or sent-property lists remain neutral exposure.
 
 ## Profile updates
 
@@ -162,9 +178,10 @@ Relevant activity includes:
 - agent notes that clearly record what the client said;
 - call or voice-note transcripts;
 - property links or references resolved from a conversation;
-- viewing and offer activity;
 - explicit agent corrections;
-- campaign review feedback.
+- a campaign property being marked as sent.
+
+Viewing outcomes, offers, conversions, clicks, and agent review feedback are planned evidence sources rather than assumed current preferences.
 
 Update rules:
 
@@ -181,6 +198,20 @@ The profile must never be rewritten from outbound agent messages as though the c
 Short property feedback such as “interested,” “too expensive,” or “can we arrange a viewing?” becomes an interaction signal only when it resolves to exactly one property. The property may be identified in the inbound message itself or in a recent property-bearing outbound message. If multiple properties are present, any reference is unresolved, or the reply is only a generic “yes” or “no,” the system records no preference and leaves the message available for human review.
 
 Trusted manual notes may use agent wording such as “Client is interested” or “Customer wants to view.” These are recorded as observed evidence, while a completed transcript from an inbound client voice message is direct evidence. Editing or deleting the source note, or regenerating a transcript with different meaning, replaces or removes the derived interaction so stale feedback does not remain in the campaign profile.
+
+### Profile freshness and reconciliation
+
+Each stored profile records which profile format produced it, which version of the contact it covers, and the latest requirement or interaction evidence included. A stored profile is reused only while it is current enough for the contact. If the contact changed after the profile was built, matching rebuilds the interpretation from current evidence instead of trusting the stale cache.
+
+Relevant activity rebuilds the affected contact profile directly. A guarded periodic maintenance process also rebuilds profiles that are missing, use an older profile format, or have not been refreshed recently. This reconciliation is bounded and location-aware so it does not turn campaign creation into a full-CRM rebuild.
+
+### Profile verification lifecycle
+
+Only a contact verified as a genuine buyer or renter can enter the actionable recommendation and drafting flow. Known owners, agents, partners, operational contacts, stopped searchers, and other non-leads are excluded early.
+
+Lead-like contacts whose identity is still uncertain are kept in a separate **Needs profile verification** state rather than being silently recommended or permanently discarded. If verification later confirms the contact as a lead, blocked campaign candidates can be rebuilt and reopened using the now-current profile.
+
+Stale requirements receive similar care. An old hard mismatch does not automatically become a permanent rejection when the stored requirements may no longer reflect the conversation. The candidate is held for conversation-aware review unless an independent eligibility blocker exists.
 
 ## Property profile and validation
 
@@ -215,8 +246,9 @@ Typical disqualifications include:
 - incompatible hard property-type requirement;
 - hard bedroom or size shortfall;
 - price outside an explicit hard budget;
-- property already shared with the contact;
-- property explicitly rejected before.
+- explicit required feature missing.
+
+A property already shared with the contact is excluded from recommendation but kept in a distinct **Already shared** state. A similar previously rejected property creates a reason-aware warning for review; it is not automatically treated as a permanent hard disqualification.
 
 Unknown values should not disqualify, but they also should not add positive score.
 
@@ -224,14 +256,14 @@ Unknown values should not disqualify, but they also should not add positive scor
 
 Rank remaining candidates using comparable dimensions:
 
-- location fit and distance;
+- location fit within the configured service-area hierarchy;
 - closeness to target budget;
 - type compatibility;
 - bedroom and size fit;
 - required and preferred features;
 - similarity to properties with positive feedback;
 - similarity to properties with negative feedback;
-- search recency and activity;
+- recent explicit search intent;
 - requirement completeness and freshness.
 
 The score ranks plausible contacts. It cannot cancel a hard blocker.
@@ -283,6 +315,24 @@ Contains contacts with a clear blocker. The UI should group these by reason and 
 
 Contains eligible-looking contacts with no concrete property-fit evidence. These contacts may need qualification, but they are not campaign recommendations.
 
+This is a logical decision outcome even where the current interface groups sparse or failed candidates into a broader non-match view.
+
+### Needs profile verification
+
+Contains lead-like contacts that cannot yet be trusted as actionable buyers or renters. They cannot enter drafting or sending until verification succeeds. Verification can reopen their campaign candidates later; this is not a permanent rejection.
+
+### Already shared
+
+Contains contacts whose prior messages already include the same property reference or listing URL. They are excluded to prevent duplicate outreach, but prior sharing remains neutral and does not imply that the contact liked or rejected the property.
+
+### Processing and failed analysis
+
+Candidates still awaiting analysis remain outside human review until processing completes. A failed AI review does not appear as a recommendation or Potential candidate; it stays non-actionable until it can be retried or reviewed through an explicit recovery flow.
+
+### Human workflow states
+
+After analysis, agent decisions such as approved, rejected, skipped, and sent are tracked separately from the matching verdict. Marking a property as sent adds neutral exposure to the reusable profile. Approvals and campaign rejections remain workflow outcomes, but they do not yet become contact-preference evidence automatically.
+
 ## Human control and explainability
 
 Every surfaced contact should answer:
@@ -294,7 +344,7 @@ Every surfaced contact should answer:
 - Which messages, notes, or interactions support the decision?
 - Why did the contact enter this queue?
 
-Agent actions such as approve, reject, move to Potential, or correct a requirement should be recorded. Corrections should improve the reusable profile rather than affect only one campaign.
+Agent actions such as approve, reject, move to Potential, or correct a requirement should be recorded. Explicit requirement corrections should improve the reusable profile rather than affect only one campaign. Campaign review outcomes may become learning signals later, once the product defines how to distinguish a bad recommendation from a contact preference.
 
 ## Learning and evaluation
 
@@ -324,12 +374,16 @@ A campaign should:
 
 1. validate the property once;
 2. load current contact profiles;
-3. apply database-level eligibility and hard filters;
-4. score a reduced candidate set;
+3. apply database-level identity and eligibility prefilters;
+4. apply deterministic hard comparisons and score the reduced candidate set;
 5. call AI only for a small ambiguous shortlist;
 6. produce the final queues.
 
 This makes campaign cost and latency depend mainly on the plausible shortlist rather than the total number of CRM contacts.
+
+### Operational observability
+
+Campaign collection and analysis stages should expose timing and outcome counts so slowdowns can be traced to contact collection, profile verification, deterministic matching, or AI review. AI scoring and multilingual feedback classification should record location-scoped model usage and outcome metadata for cost control and quality evaluation. Periodic profile reconciliation should report rebuilt, failed, and remaining profiles rather than failing silently.
 
 ## Safety and failure behavior
 
@@ -346,10 +400,10 @@ This makes campaign cost and latency depend mainly on the plausible shortlist ra
 
 1. Validate property extraction and fail closed on malformed listings.
 2. Create and backfill campaign profiles from existing structured requirements and known interactions.
-3. Maintain profiles from new messages, notes, transcripts, and viewing activity.
+3. Maintain profiles from new messages, notes, transcripts, explicit property feedback, and sent-property exposure.
 4. Add deterministic candidate generation and queue semantics.
 5. Restrict AI to ambiguous finalists.
-6. Capture agent and client outcomes.
+6. Expand outcome capture to reliable viewing, offer, conversion, click, and campaign-review signals.
 7. Calibrate thresholds using real campaign review data.
 8. Introduce learned ranking only after the feedback set is trustworthy.
 
