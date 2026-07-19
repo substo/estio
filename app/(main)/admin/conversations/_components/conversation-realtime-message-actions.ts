@@ -14,6 +14,8 @@ export type RealtimeMessagePatchPayload = {
     scheduledAt?: string;
     attemptCount?: number | null;
     lastError?: string | null;
+    rateLimitReason?: string | null;
+    rateLimitNextEligibleAt?: string | null;
 };
 
 export type RealtimeMessagePatchResult = {
@@ -50,6 +52,10 @@ export function normalizeRealtimeMessagePatchPayload(payload: Record<string, unk
         scheduledAt: String(payload?.scheduledAt || "").trim(),
         attemptCount: Number.isFinite(Number(payload?.attemptCount)) ? Number(payload?.attemptCount) : null,
         lastError: payload?.lastError ? String(payload.lastError) : null,
+        rateLimitReason: payload?.rateLimitReason ? String(payload.rateLimitReason) : null,
+        rateLimitNextEligibleAt: payload?.rateLimitNextEligibleAt
+            ? String(payload.rateLimitNextEligibleAt)
+            : null,
     };
 }
 
@@ -95,6 +101,10 @@ export function applyRealtimeMessagePatchToMessages(
                     ...(normalized.scheduledAt ? { scheduledAt: normalized.scheduledAt } : {}),
                     ...(normalized.attemptCount !== null ? { attemptCount: normalized.attemptCount } : {}),
                     ...(normalized.lastError ? { lastError: normalized.lastError } : {}),
+                    ...(normalized.rateLimitReason ? { rateLimitReason: normalized.rateLimitReason } : {}),
+                    ...(normalized.rateLimitNextEligibleAt
+                        ? { rateLimitNextEligibleAt: normalized.rateLimitNextEligibleAt }
+                        : {}),
                 },
             } : {}),
         } as Message;

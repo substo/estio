@@ -6,12 +6,31 @@ import { Prisma } from "@prisma/client";
 import { dispatchWhatsAppOutbound } from "@/lib/whatsapp/outbound-dispatch";
 import { classifyOutboundSendFailure } from "@/lib/conversations/outbound-send-failure";
 import { isDeviceEgressOfflineError } from "@/lib/device-tunnel/status";
+import {
+    buildWhatsAppRateLimitWindows,
+    createWhatsAppRateLimitMember,
+    evaluateWhatsAppRateLimit,
+    getWhatsAppRateLimitMode,
+    getWhatsAppRateLimitStore,
+    resolveWhatsAppRateLimitPolicyValues,
+    type WhatsAppRateLimitDecision,
+} from "@/lib/whatsapp/rate-limit";
+import {
+    acquireWhatsAppDispatchGuard,
+    createPrismaWhatsAppDispatchLockStore,
+    getWhatsAppRedisDispatchLockStore,
+    releaseWhatsAppDispatchGuard,
+    type WhatsAppDispatchGuard,
+    type WhatsAppDatabaseDispatchLockStore,
+    type WhatsAppRedisDispatchLockStore,
+} from "@/lib/whatsapp/dispatch-serialization";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
 const STALE_PROCESSING_LOCK_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
 const DISPATCH_ACK_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_DISPATCH_ACK_TIMEOUT_MS || 2 * 60 * 1000), 30_000);
+const DISPATCH_LOCK_TTL_MS = Math.max(Number(process.env.WHATSAPP_OUTBOUND_DISPATCH_LOCK_TTL_MS || 5 * 60 * 1000), 60_000);
 
-export type WhatsAppOutboundOutboxProcessOutcome = "success" | "failed" | "dead" | "skipped";
+export type WhatsAppOutboundOutboxProcessOutcome = "success" | "failed" | "deferred" | "dead" | "skipped";
 
 export type WhatsAppOutboundOutboxProcessResult = {
     outcome: WhatsAppOutboundOutboxProcessOutcome;
@@ -78,6 +97,105 @@ function computeBackoffMs(attemptCount: number): number {
     return Math.round(baseSeconds * 1000 * jitter);
 }
 
+function computeSerializationDelayMs() {
+    return 1_000 + Math.floor(Math.random() * 2_000);
+}
+
+class WhatsAppRateLimitDeferredError extends Error {
+    constructor(readonly decision: WhatsAppRateLimitDecision) {
+        super(decision.reason || "WhatsApp rate limit reached");
+        this.name = "WhatsAppRateLimitDeferredError";
+    }
+}
+
+export function buildWhatsAppRateLimitDeferralUpdate(args: {
+    reason: string;
+    scheduledAt: Date;
+    nextEligibleAt: Date;
+}) {
+    return {
+        status: "rate_limited",
+        scheduledAt: args.scheduledAt,
+        lockedAt: null,
+        lockedBy: null,
+        lastError: args.reason,
+        rateLimitReason: args.reason,
+        rateLimitNextEligibleAt: args.nextEligibleAt,
+    };
+}
+
+async function deferWhatsAppOutboundWithoutAttempt(args: {
+    row: any;
+    reason: string;
+    retryDelayMs: number;
+    nextEligibleAt?: Date | null;
+}) {
+    const retryDelayMs = Math.max(1_000, Math.trunc(args.retryDelayMs));
+    const scheduledAt = new Date(Date.now() + retryDelayMs);
+    const nextEligibleAt = args.nextEligibleAt || scheduledAt;
+    await (db as any).whatsAppOutboundOutbox.updateMany({
+        where: { id: args.row.id, status: "processing" },
+        data: buildWhatsAppRateLimitDeferralUpdate({ reason: args.reason, scheduledAt, nextEligibleAt }),
+    });
+    logWhatsAppSendLifecycle("rate_limit_deferred", {
+        messageId: args.row.messageId,
+        outboxJobId: args.row.id,
+        attemptCount: Number(args.row.attemptCount || 0),
+        reason: args.reason,
+        nextEligibleAt: nextEligibleAt.toISOString(),
+        scheduledAt: scheduledAt.toISOString(),
+    });
+    void publishConversationRealtimeEvent({
+        locationId: args.row.locationId,
+        conversationId: args.row.conversationId,
+        type: "message.status",
+        payload: {
+            channel: "whatsapp",
+            mode: args.row.kind,
+            messageId: args.row.messageId,
+            clientMessageId: args.row.message?.clientMessageId || null,
+            status: "sending",
+            outboxJobId: args.row.id,
+            outboxStatus: "rate_limited",
+            attemptCount: Number(args.row.attemptCount || 0),
+            scheduledAt: scheduledAt.toISOString(),
+            rateLimitReason: args.reason,
+            rateLimitNextEligibleAt: nextEligibleAt.toISOString(),
+            lastError: args.reason,
+        },
+    });
+    return { outcome: "deferred" as const, requeueDelayMs: retryDelayMs, error: args.reason };
+}
+
+async function resolveOutboundRateLimitContext(row: any) {
+    const transport = String(row.transport || "web_bridge");
+    const session = transport === "web_bridge"
+        ? await (db as any).whatsAppWebBridgeSession.findUnique({
+            where: { locationId: row.locationId },
+            select: { id: true, createdAt: true },
+        })
+        : null;
+    const policyRow = await (db as any).whatsAppRateLimitPolicy.findUnique({
+        where: { locationId: row.locationId },
+        select: { enabled: true, trustTier: true, limits: true },
+    }).catch(() => null);
+    const sessionScope = session?.id || `${transport}:${row.locationId}`;
+    const recipientScope = String(row.contact?.phone || row.contactId || row.conversationId || "unknown");
+    const now = new Date();
+    return {
+        enabled: policyRow?.enabled !== false,
+        sessionScope,
+        dispatchScopeKey: `whatsapp:${sessionScope}`,
+        policy: resolveWhatsAppRateLimitPolicyValues({
+            trustTier: policyRow?.trustTier || null,
+            sessionCreatedAt: session?.createdAt || row.location?.createdAt || row.createdAt || now,
+            now,
+            overrides: policyRow?.limits && typeof policyRow.limits === "object" ? policyRow.limits : null,
+        }),
+        recipientScope,
+    };
+}
+
 function isRetryableOutboundError(error: unknown): boolean {
     const classification = classifyOutboundSendFailure(error);
     if (classification.code === "WHATSAPP_NUMBER_NOT_FOUND") return false;
@@ -137,13 +255,15 @@ export async function processWhatsAppOutboundOutboxJob(args: {
     const lockClaim = await (db as any).whatsAppOutboundOutbox.updateMany({
         where: {
             id: outboxId,
-            status: { in: ["pending", "failed", "blocked_egress"] },
+            status: { in: ["pending", "failed", "blocked_egress", "rate_limited"] },
             scheduledAt: { lte: now },
         },
         data: {
             status: "processing",
             lockedAt: now,
             lockedBy: args.workerId,
+            rateLimitReason: null,
+            rateLimitNextEligibleAt: null,
         },
     });
 
@@ -171,6 +291,10 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
     const payload = (row.payload || {}) as any;
     const attemptCount = Number(row.attemptCount || 0) + 1;
+    const rateLimitMode = getWhatsAppRateLimitMode();
+    let dispatchGuard: WhatsAppDispatchGuard | null = null;
+    let redisDispatchStore: WhatsAppRedisDispatchLockStore | null = null;
+    let databaseDispatchStore: WhatsAppDatabaseDispatchLockStore | null = null;
     const messageCreatedAtMs = Date.parse(String(payload?.messageCreatedAt || row.message?.createdAt || ""));
     const scheduledAtMs = row.scheduledAt ? new Date(row.scheduledAt).getTime() : NaN;
     logWhatsAppSendLifecycle("worker_picked_job", {
@@ -202,6 +326,37 @@ export async function processWhatsAppOutboundOutboxJob(args: {
     });
 
     try {
+        const rateLimitContext = rateLimitMode === "disabled" ? null : await resolveOutboundRateLimitContext(row);
+        const effectiveRateLimitMode = rateLimitContext?.enabled ? rateLimitMode : "disabled";
+        if (effectiveRateLimitMode === "enforce") {
+            try {
+                redisDispatchStore = await getWhatsAppRedisDispatchLockStore();
+                databaseDispatchStore = createPrismaWhatsAppDispatchLockStore(db as any);
+                dispatchGuard = await acquireWhatsAppDispatchGuard({
+                    redisStore: redisDispatchStore,
+                    databaseStore: databaseDispatchStore,
+                    scopeKey: rateLimitContext!.dispatchScopeKey,
+                    locationId: row.locationId,
+                    outboxId: row.id,
+                    ownerId: args.workerId,
+                    ttlMs: DISPATCH_LOCK_TTL_MS,
+                });
+            } catch (error) {
+                return await deferWhatsAppOutboundWithoutAttempt({
+                    row,
+                    reason: `Rate-limit safety service unavailable; send held safely. ${normalizeError(error)}`,
+                    retryDelayMs: 60_000,
+                });
+            }
+            if (!dispatchGuard) {
+                return await deferWhatsAppOutboundWithoutAttempt({
+                    row,
+                    reason: "Another message for this WhatsApp session is currently sending.",
+                    retryDelayMs: computeSerializationDelayMs(),
+                });
+            }
+        }
+
         const providerSendStartedAtMs = Date.now();
         logWhatsAppSendLifecycle("provider_dispatch_started", {
             clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
@@ -210,7 +365,39 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             transport: row.transport,
             kind: row.kind,
         });
-        const { transport, provider, providerAccountId, wamId } = await dispatchWhatsAppOutbound(row);
+        const { transport, provider, providerAccountId, wamId } = await dispatchWhatsAppOutbound(row, {
+            beforeProviderDispatch: async () => {
+                if (effectiveRateLimitMode === "disabled" || !rateLimitContext) return;
+                try {
+                    const store = await getWhatsAppRateLimitStore();
+                    const decision = await evaluateWhatsAppRateLimit({
+                        store,
+                        mode: effectiveRateLimitMode,
+                        windows: buildWhatsAppRateLimitWindows({
+                            sessionScope: rateLimitContext.sessionScope,
+                            recipientScope: rateLimitContext.recipientScope,
+                            policy: rateLimitContext.policy,
+                        }),
+                        member: createWhatsAppRateLimitMember(row.id, attemptCount),
+                    });
+                    if (!decision.allowed) throw new WhatsAppRateLimitDeferredError(decision);
+                } catch (error) {
+                    if (error instanceof WhatsAppRateLimitDeferredError) throw error;
+                    if (effectiveRateLimitMode === "shadow") {
+                        console.warn("[WhatsApp Rate Limit] Shadow evaluation unavailable; dispatch continuing:", error);
+                        return;
+                    }
+                    throw new WhatsAppRateLimitDeferredError({
+                        allowed: false,
+                        mode: "enforce",
+                        reason: `Rate-limit safety service unavailable; send held safely. ${normalizeError(error)}`,
+                        action: "reschedule",
+                        nextEligibleAt: new Date(Date.now() + 60_000),
+                        retryDelayMs: 60_000,
+                    });
+                }
+            },
+        });
         const providerSendMs = Date.now() - providerSendStartedAtMs;
         logWhatsAppSendLifecycle("provider_dispatch_completed", {
             clientMessageId: row.message?.clientMessageId || payload?.clientMessageId || null,
@@ -262,6 +449,8 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 processedAt: completionState.processedAt,
                 attemptCount,
                 lastError: completionState.lastError,
+                rateLimitReason: null,
+                rateLimitNextEligibleAt: null,
                 lockedAt: null,
                 lockedBy: null,
             },
@@ -380,6 +569,14 @@ export async function processWhatsAppOutboundOutboxJob(args: {
 
         return { outcome: "success" };
     } catch (error) {
+        if (error instanceof WhatsAppRateLimitDeferredError) {
+            return await deferWhatsAppOutboundWithoutAttempt({
+                row,
+                reason: error.decision.reason || "WhatsApp rate limit reached.",
+                retryDelayMs: error.decision.retryDelayMs,
+                nextEligibleAt: error.decision.nextEligibleAt,
+            });
+        }
         const message = normalizeError(error);
         if (isDeviceEgressOfflineError(error)) {
             const retryDelayMs = 60_000;
@@ -512,6 +709,14 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         });
 
         return { outcome: "dead", error: message };
+    } finally {
+        if (dispatchGuard && redisDispatchStore && databaseDispatchStore) {
+            await releaseWhatsAppDispatchGuard({
+                guard: dispatchGuard,
+                redisStore: redisDispatchStore,
+                databaseStore: databaseDispatchStore,
+            });
+        }
     }
 }
 
@@ -600,7 +805,7 @@ export async function recoverStaleWhatsAppOutboundOutboxLocks() {
 export async function listDueWhatsAppOutboundOutboxIds(limit = 200): Promise<string[]> {
     const rows = await (db as any).whatsAppOutboundOutbox.findMany({
         where: {
-            status: { in: ["pending", "failed", "blocked_egress"] },
+            status: { in: ["pending", "failed", "blocked_egress", "rate_limited"] },
             scheduledAt: { lte: new Date() },
         },
         orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],

@@ -36,6 +36,7 @@ function resolveWhatsAppSendState(status: string | null | undefined, outboxStatu
 
     if (normalizedOutbox === "pending") return "queued";
     if (normalizedOutbox === "processing") return "sending";
+    if (normalizedOutbox === "rate_limited") return "retrying";
     if (normalizedOutbox === "failed") return "retrying";
     if (normalizedOutbox === "dead") return "failed";
     if (normalizedOutbox === "completed") return "sent";
@@ -442,6 +443,8 @@ export async function fetchMessagesForResolvedConversation(args: {
                     scheduledAt: true,
                     attemptCount: true,
                     lastError: true,
+                    rateLimitReason: true,
+                    rateLimitNextEligibleAt: true,
                     processedAt: true,
                     lockedAt: true,
                 },
@@ -625,6 +628,10 @@ export async function fetchMessagesForResolvedConversation(args: {
                         : null,
                     attemptCount: Number((m as any).outboundWhatsAppOutbox.attemptCount || 0),
                     lastError: (m as any).outboundWhatsAppOutbox.lastError || null,
+                    rateLimitReason: (m as any).outboundWhatsAppOutbox.rateLimitReason || null,
+                    rateLimitNextEligibleAt: (m as any).outboundWhatsAppOutbox.rateLimitNextEligibleAt
+                        ? new Date((m as any).outboundWhatsAppOutbox.rateLimitNextEligibleAt).toISOString()
+                        : null,
                     processedAt: (m as any).outboundWhatsAppOutbox.processedAt
                         ? new Date((m as any).outboundWhatsAppOutbox.processedAt).toISOString()
                         : null,

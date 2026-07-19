@@ -82,6 +82,8 @@ export interface Message {
         scheduledAt?: string | null;
         attemptCount?: number;
         lastError?: string | null;
+        rateLimitReason?: string | null;
+        rateLimitNextEligibleAt?: string | null;
         processedAt?: string | null;
         lockedAt?: string | null;
     };

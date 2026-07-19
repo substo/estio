@@ -2,9 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    buildWhatsAppRateLimitDeferralUpdate,
     resolveWhatsAppDispatchAckTimeoutState,
     resolveWhatsAppOutboundCompletionState,
 } from "./outbound-outbox";
+
+test("rate-limit deferral does not consume a provider attempt", () => {
+    const update = buildWhatsAppRateLimitDeferralUpdate({
+        reason: "Session burst limit reached",
+        scheduledAt: new Date("2026-07-19T12:00:12.000Z"),
+        nextEligibleAt: new Date("2026-07-19T12:00:10.000Z"),
+    });
+    assert.equal(update.status, "rate_limited");
+    assert.equal("attemptCount" in update, false);
+    assert.equal(update.rateLimitReason, "Session burst limit reached");
+});
 
 test("web bridge completion without provider id is delivery-unconfirmed and terminal", () => {
     const state = resolveWhatsAppOutboundCompletionState({

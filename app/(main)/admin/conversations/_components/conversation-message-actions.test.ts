@@ -186,6 +186,24 @@ test('deriveOutboundWhatsAppUiState maps queued and scheduled states clearly', (
     assert.equal(scheduled?.detail, 'Scheduled in 7s');
 });
 
+test('deriveOutboundWhatsAppUiState exposes rate-limit reason without incrementing retry state', () => {
+    const limited = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        outboxState: {
+            id: 'job-1',
+            status: 'rate_limited',
+            scheduledAt: '2026-05-21T10:00:10.000Z',
+            attemptCount: 0,
+            rateLimitReason: 'Session burst limit reached',
+            rateLimitNextEligibleAt: '2026-05-21T10:00:10.000Z',
+        },
+    } as any, { nowMs: Date.parse('2026-05-21T10:00:00.000Z') });
+    assert.equal(limited?.label, 'Rate limited');
+    assert.equal(limited?.detail, 'Session burst limit reached');
+    assert.equal(limited?.retryAttempt, 0);
+    assert.equal(limited?.canResend, false);
+});
+
 test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, delivered, and read', () => {
     assert.equal(deriveOutboundWhatsAppUiState({
         ...baseMessage,

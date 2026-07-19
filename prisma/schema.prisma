@@ -70,6 +70,8 @@ model Location {
   whatsappOutboundOutboxJobs    WhatsAppOutboundOutbox[]
   whatsappChannels              WhatsAppChannel[]
   whatsappWebBridgeSessions     WhatsAppWebBridgeSession[]
+  whatsappRateLimitPolicy       WhatsAppRateLimitPolicy?
+  whatsappOutboundDispatchLocks WhatsAppOutboundDispatchLock[]
   whatsappTemplates             WhatsAppTemplate[]
   whatsappIdentityMaps          WhatsAppIdentityMap[]
   whatsappCallAttempts          WhatsAppCallAttempt[]
@@ -3164,13 +3166,15 @@ model WhatsAppOutboundOutbox {
   kind      String // text | image | audio | document | template
   payload   Json
 
-  status       String    @default("pending") // pending | processing | completed | failed | dead
+  status       String    @default("pending") // pending | processing | rate_limited | blocked_egress | dispatch_accepted | delivery_unconfirmed | completed | failed | dead
   scheduledAt  DateTime  @default(now())
   lockedAt     DateTime?
   lockedBy     String?
   processedAt  DateTime?
   attemptCount Int       @default(0)
   lastError    String?   @db.Text
+  rateLimitReason         String?   @db.Text
+  rateLimitNextEligibleAt DateTime?
 
   idempotencyKey String @unique
 
@@ -3182,6 +3186,38 @@ model WhatsAppOutboundOutbox {
   @@index([status, scheduledAt])
   @@index([locationId, status, scheduledAt])
   @@index([conversationId, status, scheduledAt])
+}
+
+model WhatsAppRateLimitPolicy {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String @unique
+  enabled    Boolean @default(true)
+  trustTier  String  @default("new") // new | established | reviewed
+  limits     Json?
+  metadata   Json?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, trustTier])
+}
+
+model WhatsAppOutboundDispatchLock {
+  scopeKey String @id
+
+  locationId String
+  ownerId    String
+  outboxId   String
+  acquiredAt DateTime
+  renewedAt  DateTime
+  expiresAt  DateTime
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, expiresAt])
+  @@index([expiresAt])
 }
 
 model WhatsAppCallAttempt {

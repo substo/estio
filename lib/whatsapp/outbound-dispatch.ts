@@ -90,7 +90,9 @@ async function createSignedMediaUrl(payload: any) {
     return { signedMediaUrl, contentType, fileName };
 }
 
-export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutboundDispatchResult> {
+export async function dispatchWhatsAppOutbound(row: any, options?: {
+    beforeProviderDispatch?: (context: { transport: string; providerAccountId: string }) => Promise<void>;
+}): Promise<WhatsAppOutboundDispatchResult> {
     const payload = (row.payload || {}) as any;
     const transport = String(row.transport || "web_bridge").trim() || "web_bridge";
     let actualTransport = transport;
@@ -112,6 +114,7 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
         const channel = await getDefaultWhatsAppCloudChannel(row.locationId);
         const channelId = channel?.id || null;
         providerAccountId = String(channel?.phoneNumberId || row.location?.whatsappPhoneNumberId || "default");
+        await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
 
         if (row.kind === "text") {
             const text = String(payload?.text || row.message?.body || "");
@@ -167,6 +170,7 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
             actualTransport = "cloud_api";
             provider = WHATSAPP_CLOUD_PROVIDER;
             providerAccountId = String(fallbackChannel?.phoneNumberId || "default");
+            await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
             if (row.kind === "text") {
                 const text = String(payload?.text || row.message?.body || "");
                 if (!text.trim()) throw new Error("Cannot send empty WhatsApp message body.");
@@ -203,6 +207,8 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
                 throw new Error("WhatsApp templates require Cloud API transport.");
             }
 
+            await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
+
             if (row.kind === "text") {
                 const text = String(payload?.text || row.message?.body || "");
                 if (!text.trim()) {
@@ -233,6 +239,7 @@ export async function dispatchWhatsAppOutbound(row: any): Promise<WhatsAppOutbou
     } else if (transport === "twilio") {
         provider = "twilio";
         providerAccountId = String(row.location?.twilioAccountSid || "default");
+        await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
         const text = String(payload?.text || row.message?.body || "");
         if (!text.trim()) {
             throw new Error("Cannot send empty WhatsApp message body.");

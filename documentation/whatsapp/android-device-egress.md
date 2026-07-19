@@ -14,6 +14,7 @@ DEVICE_TUNNEL_GATEWAY_NODE_ID=cyprus-egress-1
 DEVICE_TUNNEL_GATEWAY_REGION=cyprus
 DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS=100
 DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false
+WHATSAPP_RATE_LIMIT_MODE=disabled
 ```
 
 `deploy-local-build.sh` starts the gateway when both secrets exist and adds the Caddy `/device-tunnel/*` WebSocket route. Apply the Prisma migration before binding a device. Rebuild and distribute the Android application so it can enroll its hardware-backed key.
@@ -23,6 +24,18 @@ The SIM Relay integration page shows the live tunnel state and the last verified
 The gateway registers `DEVICE_TUNNEL_GATEWAY_NODE_ID` in PostgreSQL and heartbeats every 15 seconds. Use one stable ID per deployed gateway; do not derive it from a PID or container restart. Keep `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` during the PR 1 rollout. With the flag disabled, node registry fields are populated but assignment and lease enforcement are not activated, so the existing single-host browser-to-loopback-SOCKS path remains unchanged. Enabling the flag requires an explicit node ID and is reserved for the later routing/ownership phases.
 
 After deploying the node-registry migration, verify the node's `status`, `lastHeartbeatAt`, `activeSessions`, configured URLs, region, capacity, and version in `DeviceTunnelGatewayNode`. A heartbeat update is scoped to both node ID and process `startedAt`; an older process cannot overwrite a replacement process's heartbeat.
+
+## Distributed outbound rate limits
+
+`WHATSAPP_RATE_LIMIT_MODE` supports a phased rollout:
+
+- `disabled` keeps the current production send path unchanged and does not contact the limiter.
+- `shadow` evaluates and records Redis sliding-window counters but does not delay sends; Redis errors are logged and allowed in this mode.
+- `enforce` serializes provider dispatch per WhatsApp session with Redis plus a PostgreSQL safety lock. Redis failure fails closed and reschedules the outbox row without increasing `attemptCount`.
+
+The default policy applies session limits of 3 sends per 10 seconds, 6 per minute, 120 per hour, and 100 per day for sessions younger than seven days or 500 per day for established sessions. Recipient limits are 3 per minute and 20 per day. Daily limits surface as pending review. `WhatsAppRateLimitPolicy.limits` can override the named values documented in `lib/whatsapp/rate-limit.ts`; keep overrides conservative and review consent, complaints, account age, and delivery quality before raising them.
+
+Rate-limited outbox rows use status `rate_limited`, retain their current provider `attemptCount`, and expose `rateLimitReason`, `rateLimitNextEligibleAt`, and jittered `scheduledAt` values to the conversations UI. Enable `shadow` first, observe at least one complete daily cycle, then enable `enforce` only after Redis and queue dashboards are healthy.
 
 ## Activation
 

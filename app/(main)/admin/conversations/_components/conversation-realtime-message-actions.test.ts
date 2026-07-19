@@ -71,6 +71,8 @@ test('applyRealtimeMessagePatchToMessages carries outbox state updates', () => {
         scheduledAt: '2026-05-24T10:00:05.000Z',
         attemptCount: 2,
         lastError: 'temporary provider error',
+        rateLimitReason: 'Session burst limit reached',
+        rateLimitNextEligibleAt: '2026-05-24T10:00:04.000Z',
     });
 
     assert.equal(result.matched, true);
@@ -79,6 +81,8 @@ test('applyRealtimeMessagePatchToMessages carries outbox state updates', () => {
     assert.equal((result.messages[0] as any).outboxState.scheduledAt, '2026-05-24T10:00:05.000Z');
     assert.equal((result.messages[0] as any).outboxState.attemptCount, 2);
     assert.equal((result.messages[0] as any).outboxState.lastError, 'temporary provider error');
+    assert.equal((result.messages[0] as any).outboxState.rateLimitReason, 'Session burst limit reached');
+    assert.equal((result.messages[0] as any).outboxState.rateLimitNextEligibleAt, '2026-05-24T10:00:04.000Z');
 });
 
 test('applyRealtimeMessagePatchToMessages replaces optimistic body and translation state', () => {

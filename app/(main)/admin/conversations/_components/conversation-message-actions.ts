@@ -41,7 +41,7 @@ type FailureFallbackUiState = {
 };
 
 export type OutboundWhatsAppUiState = {
-    label: "Queued" | "Scheduled" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "Delivery unconfirmed" | "Failed" | "SMS fallback available";
+    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Sent, confirming" | "Delivered" | "Read" | "Retrying" | "Delivery unconfirmed" | "Failed" | "SMS fallback available";
     tone: OutboundWhatsAppUiTone;
     icon: OutboundWhatsAppUiIcon;
     detail: string | null;
@@ -85,6 +85,8 @@ export function deriveOutboundWhatsAppUiState(message: {
         scheduledAt?: string | null;
         attemptCount?: number | null;
         lastError?: string | null;
+        rateLimitReason?: string | null;
+        rateLimitNextEligibleAt?: string | null;
     } | null;
 }, options?: {
     smsRelayEnabled?: boolean;
@@ -102,6 +104,7 @@ export function deriveOutboundWhatsAppUiState(message: {
         ? Number(message.outboxState?.attemptCount)
         : null;
     const lastError = normalizeString(message.outboxState?.lastError) || null;
+    const rateLimitReason = normalizeString(message.outboxState?.rateLimitReason) || lastError;
 
     const fallbackState = getWhatsAppFailureFallbackUiState({
         message,
@@ -220,6 +223,23 @@ export function deriveOutboundWhatsAppUiState(message: {
             tone: "warning",
             icon: "alert",
             detail: scheduledDelaySeconds > 0 ? `Retrying automatically in ${scheduledDelaySeconds}s` : "Retrying automatically",
+            showSpinner: true,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
+    if (outboxStatus === "rate_limited") {
+        return {
+            label: "Rate limited",
+            tone: "warning",
+            icon: "clock",
+            detail: rateLimitReason || (scheduledDelaySeconds > 0
+                ? `Eligible for retry in ${scheduledDelaySeconds}s`
+                : "Waiting for the next safe send window"),
             showSpinner: true,
             canResend: false,
             canSmsFallback: false,

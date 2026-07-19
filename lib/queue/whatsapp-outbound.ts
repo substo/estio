@@ -43,13 +43,16 @@ async function getQueueInstance() {
     }
 }
 
-function getOutboxQueueJobId(outboxId: string): string {
-    return buildQueueJobId("outbox", outboxId);
+export function getOutboxQueueJobId(outboxId: string, requeueKey?: string): string {
+    return requeueKey
+        ? buildQueueJobId("outbox", outboxId, "retry", requeueKey)
+        : buildQueueJobId("outbox", outboxId);
 }
 
 export async function enqueueWhatsAppOutboundOutboxJob(args: {
     outboxId: string;
     delayMs?: number;
+    requeueKey?: string;
 }) {
     const outboxId = String(args.outboxId || "").trim();
     if (!outboxId) {
@@ -58,7 +61,7 @@ export async function enqueueWhatsAppOutboundOutboxJob(args: {
 
     const queue = await getQueueInstance();
     const delayMs = Math.max(Number(args.delayMs || 0), 0);
-    const jobId = getOutboxQueueJobId(outboxId);
+    const jobId = getOutboxQueueJobId(outboxId, args.requeueKey);
 
     try {
         await queue.add(
@@ -101,10 +104,14 @@ export async function initWhatsAppOutboundWorker() {
                     workerId,
                 });
 
-                if (result.outcome === "failed" && Number(result.requeueDelayMs || 0) >= 0) {
+                if (["failed", "deferred"].includes(result.outcome) && Number(result.requeueDelayMs || 0) >= 0) {
                     await enqueueWhatsAppOutboundOutboxJob({
                         outboxId,
                         delayMs: Number(result.requeueDelayMs || 0),
+                        // The currently active BullMQ job still owns the canonical ID.
+                        // A unique retry ID prevents a false duplicate from dropping
+                        // the delayed retry before the active job is removed.
+                        requeueKey: randomUUID(),
                     });
                 }
             },
