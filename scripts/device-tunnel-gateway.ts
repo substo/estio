@@ -1,0 +1,408 @@
+import { createServer as createHttpServer, IncomingMessage, ServerResponse } from "node:http";
+import { createServer as createTcpServer, Socket } from "node:net";
+import { createHash, randomUUID } from "node:crypto";
+import { WebSocket, WebSocketServer } from "ws";
+import db from "../lib/db";
+import { maskIpAddress, verifyDeviceTunnelToken } from "../lib/device-tunnel/auth";
+import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
+import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
+
+const PORT = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_PORT || 3220), 1);
+const INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
+const GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || `gateway-${process.pid}`).trim();
+const MAX_STREAMS_PER_DEVICE = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_STREAMS || 64), 1);
+const MAX_FRAME_BYTES = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_FRAME_BYTES || 512 * 1024), 64 * 1024);
+const ALLOWED_SUFFIXES = parseAllowedTunnelSuffixes(process.env.DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES);
+
+type TunnelFrame = {
+    type: string;
+    streamId?: string;
+    host?: string;
+    port?: number;
+    data?: string;
+    ok?: boolean;
+    error?: string;
+    networkType?: string;
+};
+
+type ConnectedDevice = {
+    bindingId: string;
+    deviceId: string;
+    bridgeSessionId: string;
+    ws: WebSocket;
+    proxyServer: ReturnType<typeof createTcpServer>;
+    proxyPort: number;
+    streams: Map<string, Socket>;
+    pendingOpen: Map<string, NodeJS.Timeout>;
+    bytesToDevice: bigint;
+    bytesFromDevice: bigint;
+    lastBrowserTrafficAt: Date | null;
+    proofStarts: Map<string, TunnelSendSnapshot>;
+};
+
+const devicesByBridgeSession = new Map<string, ConnectedDevice>();
+
+function isInternalAuthorized(req: IncomingMessage) {
+    return Boolean(INTERNAL_SECRET) && req.headers["x-device-tunnel-secret"] === INTERNAL_SECRET;
+}
+
+function json(res: ServerResponse, status: number, payload: unknown) {
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(payload));
+}
+
+function extractBearer(req: IncomingMessage) {
+    return String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+}
+
+async function readSmallJson(req: IncomingMessage) {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of req) {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += value.length;
+        if (size > 16 * 1024) throw new Error("Request body too large");
+        chunks.push(value);
+    }
+    if (!chunks.length) return {};
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function sendFrame(device: ConnectedDevice, frame: TunnelFrame) {
+    if (device.ws.readyState !== WebSocket.OPEN) throw new Error("Device tunnel is disconnected");
+    const serialized = JSON.stringify(frame);
+    if (Buffer.byteLength(serialized) > MAX_FRAME_BYTES) throw new Error("Tunnel frame exceeds configured limit");
+    device.ws.send(serialized);
+}
+
+function closeStream(device: ConnectedDevice, streamId: string, notifyDevice = true) {
+    const stream = device.streams.get(streamId);
+    device.streams.delete(streamId);
+    const pending = device.pendingOpen.get(streamId);
+    if (pending) clearTimeout(pending);
+    device.pendingOpen.delete(streamId);
+    stream?.destroy();
+    if (notifyDevice && (stream || pending) && device.ws.readyState === WebSocket.OPEN) {
+        device.ws.send(JSON.stringify({ type: "close", streamId }));
+    }
+}
+
+function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "proxyPort">) {
+    const proxyServer = createTcpServer((socket) => {
+        let phase: "greeting" | "request" | "stream" = "greeting";
+        let buffer = Buffer.alloc(0);
+        let streamId = "";
+
+        const fail = (replyCode = 0x01) => {
+            if (phase === "request") socket.write(Buffer.from([0x05, replyCode, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+            socket.destroy();
+            if (streamId) closeStream(deviceBase as ConnectedDevice, streamId);
+        };
+
+        socket.on("data", (chunk) => {
+            const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            if (phase === "stream") {
+                try {
+                    deviceBase.bytesToDevice += BigInt(chunkBuffer.length);
+                    deviceBase.lastBrowserTrafficAt = new Date();
+                    sendFrame(deviceBase as ConnectedDevice, { type: "data", streamId, data: chunkBuffer.toString("base64") });
+                } catch {
+                    fail();
+                }
+                return;
+            }
+
+            buffer = Buffer.concat([buffer, chunkBuffer]);
+            while (buffer.length) {
+                if (phase === "greeting") {
+                    if (buffer.length < 2) return;
+                    const methodsLength = buffer[1];
+                    if (buffer.length < 2 + methodsLength) return;
+                    const supportsNoAuth = buffer.subarray(2, 2 + methodsLength).includes(0x00);
+                    buffer = buffer.subarray(2 + methodsLength);
+                    socket.write(Buffer.from([0x05, supportsNoAuth ? 0x00 : 0xff]));
+                    if (!supportsNoAuth) return socket.destroy();
+                    phase = "request";
+                    continue;
+                }
+
+                if (buffer.length < 5) return;
+                if (buffer[0] !== 0x05 || buffer[1] !== 0x01 || buffer[2] !== 0x00) return fail(0x07);
+                const addressType = buffer[3];
+                if (addressType !== 0x03) return fail(0x08);
+                const hostLength = buffer[4];
+                const requestLength = 5 + hostLength + 2;
+                if (buffer.length < requestLength) return;
+                const host = buffer.subarray(5, 5 + hostLength).toString("utf8");
+                const port = buffer.readUInt16BE(5 + hostLength);
+                buffer = buffer.subarray(requestLength);
+                if (!isAllowedTunnelTarget({ host, port, allowedSuffixes: ALLOWED_SUFFIXES })) return fail(0x02);
+                if (deviceBase.streams.size >= MAX_STREAMS_PER_DEVICE) return fail(0x01);
+
+                streamId = randomUUID();
+                deviceBase.streams.set(streamId, socket);
+                socket.pause();
+                const timeout = setTimeout(() => fail(0x04), 20_000);
+                deviceBase.pendingOpen.set(streamId, timeout);
+                try {
+                    sendFrame(deviceBase as ConnectedDevice, { type: "open", streamId, host, port });
+                } catch {
+                    return fail(0x01);
+                }
+                return;
+            }
+        });
+
+        socket.on("close", () => {
+            if (streamId) closeStream(deviceBase as ConnectedDevice, streamId);
+        });
+        socket.on("error", () => undefined);
+    });
+    return proxyServer;
+}
+
+async function disconnectDevice(device: ConnectedDevice, reason: string) {
+    const isCurrentConnection = devicesByBridgeSession.get(device.bridgeSessionId) === device;
+    if (isCurrentConnection) devicesByBridgeSession.delete(device.bridgeSessionId);
+    for (const streamId of Array.from(device.streams.keys())) closeStream(device, streamId, false);
+    device.proxyServer.close();
+    if (!isCurrentConnection) return;
+    await (db as any).deviceTunnelBinding.updateMany({
+        where: { id: device.bindingId },
+        data: { status: "offline", lastError: reason, gatewayNodeId: null },
+    }).catch(() => undefined);
+}
+
+async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
+    const token = extractBearer(req);
+    const tokenPayload = verifyDeviceTunnelToken(token);
+    const binding = await (db as any).deviceTunnelBinding.findFirst({
+        where: {
+            id: tokenPayload.bindingId,
+            deviceId: tokenPayload.deviceId,
+            locationId: tokenPayload.locationId,
+            device: {
+                paired: true,
+                tunnelRevokedAt: null,
+                tunnelCredentialVersion: tokenPayload.credentialVersion,
+            },
+        },
+        include: { session: { select: { sessionId: true, egressMode: true } } },
+    });
+    if (!binding || binding.session.egressMode !== "device_tunnel") throw new Error("Tunnel binding is not active");
+
+    const streams = new Map<string, Socket>();
+    const pendingOpen = new Map<string, NodeJS.Timeout>();
+    const base = {
+        bindingId: binding.id,
+        deviceId: binding.deviceId,
+        bridgeSessionId: binding.session.sessionId,
+        ws,
+        streams,
+        pendingOpen,
+        bytesToDevice: 0n,
+        bytesFromDevice: 0n,
+        lastBrowserTrafficAt: null,
+        proofStarts: new Map(),
+    };
+    const proxyServer = createSocksProxy(base);
+    proxyServer.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+        proxyServer.once("listening", resolve);
+        proxyServer.once("error", reject);
+    });
+    const address = proxyServer.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind tunnel proxy");
+    const device: ConnectedDevice = { ...base, proxyServer, proxyPort: address.port };
+
+    const existing = devicesByBridgeSession.get(device.bridgeSessionId);
+    if (existing) {
+        existing.ws.close(4001, "Replaced by a newer device connection");
+        await disconnectDevice(existing, "Tunnel connection replaced");
+    }
+    devicesByBridgeSession.set(device.bridgeSessionId, device);
+    const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    await (db as any).deviceTunnelBinding.update({
+        where: { id: binding.id },
+        data: {
+            status: "online",
+            gatewayNodeId: GATEWAY_NODE_ID,
+            egressIpMasked: maskIpAddress(forwardedFor || String(req.socket.remoteAddress || "")),
+            lastConnectedAt: new Date(),
+            lastSeenAt: new Date(),
+            lastError: null,
+        },
+    });
+
+    ws.on("message", async (raw) => {
+        if (raw instanceof Buffer && raw.length > MAX_FRAME_BYTES) return ws.close(1009, "Frame too large");
+        let frame: TunnelFrame;
+        try {
+            frame = JSON.parse(raw.toString());
+        } catch {
+            return ws.close(1003, "Invalid frame");
+        }
+        const streamId = String(frame.streamId || "");
+        if (frame.type === "hello" || frame.type === "pong") {
+            await (db as any).deviceTunnelBinding.updateMany({
+                where: { id: binding.id },
+                data: {
+                    status: "online",
+                    lastSeenAt: new Date(),
+                    ...(frame.networkType ? { networkType: String(frame.networkType).slice(0, 32) } : {}),
+                },
+            }).catch(() => undefined);
+            return;
+        }
+        if (!streamId || !device.streams.has(streamId)) return;
+        const socket = device.streams.get(streamId)!;
+        if (frame.type === "open_result") {
+            const pending = device.pendingOpen.get(streamId);
+            if (pending) clearTimeout(pending);
+            device.pendingOpen.delete(streamId);
+            if (!frame.ok) {
+                device.streams.delete(streamId);
+                socket.end(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+                return;
+            }
+            socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+            socket.resume();
+            return;
+        }
+        if (frame.type === "data" && frame.data) {
+            const data = Buffer.from(frame.data, "base64");
+            if (data.length > MAX_FRAME_BYTES) return closeStream(device, streamId);
+            device.bytesFromDevice += BigInt(data.length);
+            socket.write(data);
+            return;
+        }
+        if (frame.type === "close") closeStream(device, streamId, false);
+    });
+
+    ws.on("close", () => void disconnectDevice(device, "Device tunnel disconnected"));
+    ws.on("error", () => void disconnectDevice(device, "Device tunnel websocket failed"));
+    ws.send(JSON.stringify({ type: "ready", bindingId: binding.id, gatewayNodeId: GATEWAY_NODE_ID }));
+}
+
+const server = createHttpServer(async (req, res) => {
+    const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+    if (url.pathname === "/health") {
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        return json(res, 200, { ok: true, gatewayNodeId: GATEWAY_NODE_ID, connectedDevices: devicesByBridgeSession.size });
+    }
+    const proofStartMatch = url.pathname.match(/^\/sessions\/([^/]+)\/send-proof-start$/);
+    if (proofStartMatch && req.method === "POST") {
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        const bridgeSessionId = decodeURIComponent(proofStartMatch[1]);
+        const device = devicesByBridgeSession.get(bridgeSessionId);
+        if (!device || device.ws.readyState !== WebSocket.OPEN) {
+            return json(res, 503, { error: "Assigned Android tunnel is offline" });
+        }
+        const now = new Date();
+        for (const [nonce, snapshot] of device.proofStarts) {
+            if (now.getTime() - snapshot.startedAt.getTime() > 120_000) device.proofStarts.delete(nonce);
+        }
+        const proofNonce = randomUUID();
+        device.proofStarts.set(proofNonce, {
+            startedAt: now,
+            bytesToDevice: device.bytesToDevice,
+            bytesFromDevice: device.bytesFromDevice,
+        });
+        return json(res, 200, { proofNonce });
+    }
+    const proofMatch = url.pathname.match(/^\/sessions\/([^/]+)\/verify-send$/);
+    if (proofMatch && req.method === "POST") {
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        const bridgeSessionId = decodeURIComponent(proofMatch[1]);
+        const device = devicesByBridgeSession.get(bridgeSessionId);
+        if (!device || device.ws.readyState !== WebSocket.OPEN) {
+            return json(res, 503, { error: "Assigned Android tunnel is offline" });
+        }
+        const body = await readSmallJson(req).catch(() => null);
+        const messageId = String(body?.messageId || "").trim();
+        const proofNonce = String(body?.proofNonce || "").trim();
+        if (!messageId || !proofNonce) return json(res, 400, { error: "Missing messageId or proofNonce" });
+        const snapshot = device.proofStarts.get(proofNonce);
+        device.proofStarts.delete(proofNonce);
+        if (!snapshot) {
+            return json(res, 409, { error: "Send proof window expired" });
+        }
+        const trafficAt = device.lastBrowserTrafficAt;
+        const traffic = calculateTunnelSendProof({
+            snapshot,
+            now: new Date(),
+            lastBrowserTrafficAt: trafficAt,
+            bytesToDevice: device.bytesToDevice,
+            bytesFromDevice: device.bytesFromDevice,
+        });
+        if (!traffic || !trafficAt) {
+            return json(res, 409, { error: "No browser traffic crossed the Android tunnel during this send" });
+        }
+        const { bytesToDevice, bytesFromDevice } = traffic;
+        const verifiedAt = new Date();
+        const messageHash = createHash("sha256").update(messageId).digest("hex").slice(0, 16);
+        const binding = await (db as any).deviceTunnelBinding.update({
+            where: { id: device.bindingId },
+            data: {
+                lastTrafficAt: trafficAt,
+                lastVerifiedAt: verifiedAt,
+                lastProofMessageHash: messageHash,
+                lastProofBytesToDevice: bytesToDevice,
+                lastProofBytesFromDevice: bytesFromDevice,
+            },
+            select: { egressIpMasked: true, networkType: true, gatewayNodeId: true },
+        }).catch(() => null);
+        if (!binding) return json(res, 500, { error: "Could not persist tunnel send proof" });
+        return json(res, 200, {
+            verified: true,
+            verifiedAt: verifiedAt.toISOString(),
+            trafficAt: trafficAt.toISOString(),
+            messageHash,
+            bytesToDevice: bytesToDevice.toString(),
+            bytesFromDevice: bytesFromDevice.toString(),
+            egressIpMasked: binding.egressIpMasked,
+            networkType: binding.networkType,
+            gatewayNodeId: binding.gatewayNodeId,
+        });
+    }
+    const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
+    if (sessionMatch && req.method === "GET") {
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        const bridgeSessionId = decodeURIComponent(sessionMatch[1]);
+        const device = devicesByBridgeSession.get(bridgeSessionId);
+        if (!device || device.ws.readyState !== WebSocket.OPEN) {
+            return json(res, 503, { error: "Assigned Android tunnel is offline" });
+        }
+        return json(res, 200, {
+            ready: true,
+            proxyHost: "127.0.0.1",
+            proxyPort: device.proxyPort,
+            bindingId: device.bindingId,
+        });
+    }
+    return json(res, 404, { error: "Not found" });
+});
+
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+server.on("upgrade", (req, socket, head) => {
+    const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+    if (url.pathname !== "/v1/device") return socket.destroy();
+    wss.handleUpgrade(req, socket, head, (ws) => {
+        void acceptDevice(ws, req).catch((error) => {
+            console.warn("[Device Tunnel] Rejected device connection:", error?.message || error);
+            ws.close(4003, "Unauthorized tunnel connection");
+        });
+    });
+});
+
+server.listen(PORT, "127.0.0.1", () => {
+    console.log(`[Device Tunnel] Gateway ${GATEWAY_NODE_ID} listening on 127.0.0.1:${PORT}`);
+});
+
+setInterval(() => {
+    for (const device of devicesByBridgeSession.values()) {
+        if (device.ws.readyState === WebSocket.OPEN) {
+            device.ws.send(JSON.stringify({ type: "ping" }));
+        }
+    }
+}, 20_000).unref?.();

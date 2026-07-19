@@ -50,7 +50,7 @@ class RelayForegroundService : Service() {
 
         isRunning = true
 
-        val prefs = getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
+        val prefs = SecurePrefs.get(this)
         val token = prefs.getString("device_token", null)
         val baseUrl = prefs.getString("base_url", "https://estio.co")
         

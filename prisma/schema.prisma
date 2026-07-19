@@ -111,6 +111,7 @@ model Location {
   // SIM Relay
   smsRelayDevices    SmsRelayDevice[]
   smsRelayOutboxJobs SmsRelayOutbox[]
+  deviceTunnelBindings DeviceTunnelBinding[]
 
   // CRM Integration (Location-wide settings)
   crmUrl            String?
@@ -3295,9 +3296,11 @@ model WhatsAppWebBridgeSession {
   lastSeenAt        DateTime?
   lastError         String?  @db.Text
   isDefaultOutbound Boolean  @default(false)
+  egressMode        String   @default("server") // server | device_tunnel
   metadata          Json?
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  tunnelBinding DeviceTunnelBinding?
 
   @@unique([locationId])
   @@unique([sessionId])
@@ -3891,20 +3894,60 @@ model SmsRelayDevice {
   phoneNumber     String?   // E.164 of the SIM, e.g. "+35799123456"
   platform        String    @default("android") // android | ios (future)
   status          String    @default("offline") // online | offline | error
-  pairTokenHash   String?   // SHA-256 of temporary 6-char pair code
+  pairTokenHash   String?   // SHA-256 of temporary pairing code
+  pairExpiresAt   DateTime?
+  pairAttemptCount Int      @default(0)
   paired          Boolean   @default(false)
   deviceApiTokenHash String? @db.Text // SHA-256 hash of the issued long-lived JWT
   devicePushToken String?   // FCM token for push notifications (optional)
+  capabilities    String[]  @default(["sms_relay"])
+  appVersion      String?
+  tunnelPublicKey String?   @db.Text
+  tunnelCredentialVersion Int @default(1)
+  tunnelRevokedAt DateTime?
+  tunnelChallengeHash String?
+  tunnelChallengeExpiresAt DateTime?
   lastSeenAt      DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   location   Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
   outboxJobs SmsRelayOutbox[]
+  tunnelBinding DeviceTunnelBinding?
 
   @@index([locationId, status])
   @@index([locationId, paired])
   @@index([pairTokenHash])
+}
+
+model DeviceTunnelBinding {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  deviceId   String @unique
+  sessionId  String @unique
+
+  status             String   @default("offline") // offline | connecting | online | degraded | revoked
+  networkType        String?  // wifi | cellular | ethernet | other | unknown
+  gatewayNodeId      String?
+  egressIpMasked     String?
+  lastConnectedAt    DateTime?
+  lastSeenAt         DateTime?
+  lastTrafficAt      DateTime?
+  lastVerifiedAt     DateTime?
+  lastProofMessageHash String?
+  lastProofBytesToDevice BigInt?
+  lastProofBytesFromDevice BigInt?
+  lastError          String?  @db.Text
+
+  location Location                    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  device   SmsRelayDevice              @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  session  WhatsAppWebBridgeSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, status])
+  @@index([status, lastSeenAt])
 }
 
 model SmsRelayOutbox {

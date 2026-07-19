@@ -4,6 +4,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PATCH
 
 interface ApiService {
     @POST("/api/sms-relay/gateway/pair")
@@ -21,6 +22,12 @@ interface ApiService {
     @POST("/api/sms-relay/gateway/manual-outbound")
     suspend fun reportManualOutboundSms(@Body request: ManualOutboundSmsRequest): Response<Void>
 
-    @POST("/api/sms-relay/gateway/heartbeat")
+    @PATCH("/api/sms-relay/gateway/heartbeat")
     suspend fun heartbeat(): Response<Void>
+
+    @POST("/api/device-relay/v1/tunnel-token")
+    suspend fun getTunnelChallenge(@Body request: TunnelTokenRequest): Response<TunnelChallengeResponse>
+
+    @POST("/api/device-relay/v1/tunnel-token")
+    suspend fun exchangeTunnelChallenge(@Body request: TunnelTokenRequest): Response<TunnelTokenResponse>
 }

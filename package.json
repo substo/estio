@@ -10,6 +10,7 @@
         "start:scrape-worker": "node scripts/start-scrape-worker.js",
         "start:viewing-live-relay": "tsx scripts/start-viewing-live-relay.ts",
         "start:whatsapp-web-bridge": "tsx scripts/whatsapp-web-bridge-service.ts",
+        "start:device-tunnel-gateway": "tsx scripts/device-tunnel-gateway.ts",
         "ops:viewings:retention": "tsx scripts/cleanup-viewing-session-retention.ts",
         "lint": "next lint",
         "settings:backfill": "tsx scripts/settings/backfill.ts",
@@ -133,6 +134,7 @@
         "web-push": "^3.6.7",
         "whatsapp-chat-parser": "^4.0.2",
         "whatsapp-web.js": "^1.34.7",
+        "ws": "^8.21.1",
         "zod": "^3.23.5"
     },
     "devDependencies": {
@@ -143,6 +145,7 @@
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
         "@types/uuid": "^10.0.0",
+        "@types/ws": "^8.18.1",
         "autoprefixer": "latest",
         "cheerio": "^1.1.2",
         "eslint": "latest",

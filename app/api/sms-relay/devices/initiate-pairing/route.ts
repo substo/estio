@@ -4,7 +4,7 @@
  * Called by the Estio web UI (Settings → Integrations → SIM Relay)
  * to start pairing a new Android device.
  *
- * Generates a one-time 6-character pair code + QR payload and stores
+ * Generates a one-time 12-character pair code + QR payload and stores
  * only the SHA-256 hash. The pair code expires in 10 minutes (enforced
  * on the /pair endpoint by checking pairTokenHash + paired=false).
  *
@@ -53,6 +53,8 @@ export async function POST(req: NextRequest) {
                 locationId: location.id,
                 label,
                 pairTokenHash,
+                pairExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+                pairAttemptCount: 0,
                 paired: false,
                 status: "offline",
             },
@@ -63,7 +65,6 @@ export async function POST(req: NextRequest) {
             baseUrl,
             pairCode,
             deviceId: device.id,
-            // expires in 10 minutes — informational only, not enforced in QR
             expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
         });
 

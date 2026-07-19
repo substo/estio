@@ -54,6 +54,53 @@ function formatDate(iso: string | null): string {
     return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function formatDateTime(iso: string | null): string {
+    if (!iso) return "Not yet";
+    return new Date(iso).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+}
+
+function formatBytes(value: string | null | undefined): string {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatNetworkType(value: string | null | undefined): string {
+    const normalized = String(value || "unknown").toLowerCase();
+    if (normalized === "cellular") return "Mobile data";
+    if (normalized === "wifi") return "Wi-Fi";
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+type WhatsAppEgressStatus = {
+    egressMode: "server" | "device_tunnel";
+    browserStatus: string;
+    tunnelStatus: "online" | "offline" | "unbound";
+    binding: null | {
+        device: { id: string; label: string; appVersion?: string | null };
+        egressIpMasked?: string | null;
+        networkType?: string | null;
+    };
+    proof: null | {
+        verifiedAt: string;
+        trafficAt: string | null;
+        messageHash: string | null;
+        bytesToDevice: string;
+        bytesFromDevice: string;
+        egressIpMasked: string | null;
+        networkType: string | null;
+        gatewayNodeId: string | null;
+    };
+};
+
 function StatusPill({ status, paired, isServiceActive }: { status: string; paired: boolean; isServiceActive: boolean }) {
     if (!paired) {
         return (
@@ -499,17 +546,21 @@ export default function SmsRelaySettingsPage() {
     const [togglingEnabled, setTogglingEnabled] = useState(false);
     const [, startTransition] = useTransition();
     const [tick, setTick] = useState(0);
+    const [egressStatus, setEgressStatus] = useState<WhatsAppEgressStatus | null>(null);
+    const [egressBusy, setEgressBusy] = useState(false);
 
     const reload = useCallback(() => {
         startTransition(async () => {
-            const [devs, st, isEnabled] = await Promise.all([
+            const [devs, st, isEnabled, egressResponse] = await Promise.all([
                 getSmsRelayDevices(),
                 getSmsRelayStats(),
                 getSmsRelayToggle(),
+                fetch("/api/admin/whatsapp-egress/status", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
             ]);
             setDevices(devs);
             setStats(st);
             setEnabled(isEnabled);
+            setEgressStatus(egressResponse);
             setLoading(false);
             setTick((t) => t + 1);
         });
@@ -541,6 +592,34 @@ export default function SmsRelaySettingsPage() {
             await unlinkDevice(deviceId);
             reload();
         });
+    };
+
+    const bindWhatsAppEgress = async (deviceId: string) => {
+        setEgressBusy(true);
+        try {
+            const response = await fetch("/api/admin/whatsapp-egress/bind", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ deviceId }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result?.error || "Failed to bind WhatsApp network relay");
+            reload();
+        } catch (error: any) {
+            window.alert(error?.message || "Failed to bind WhatsApp network relay");
+        } finally {
+            setEgressBusy(false);
+        }
+    };
+
+    const unbindWhatsAppEgress = async () => {
+        setEgressBusy(true);
+        try {
+            await fetch("/api/admin/whatsapp-egress/bind", { method: "DELETE" });
+            reload();
+        } finally {
+            setEgressBusy(false);
+        }
     };
 
     return (
@@ -629,6 +708,95 @@ export default function SmsRelaySettingsPage() {
                         <p style={styles.infoText}>All SMS appear as conversations in Estio</p>
                     </div>
                 </div>
+            </div>
+
+            <div style={styles.egressCard}>
+                <div style={styles.egressHeader}>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                        <span style={styles.egressIcon}>🔐</span>
+                        <div>
+                            <p style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>WhatsApp phone egress</p>
+                            <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>
+                                {egressStatus?.egressMode === "device_tunnel"
+                                    ? `Bound to ${egressStatus.binding?.device.label || "Android device"}`
+                                    : "WhatsApp Web is currently using server egress."}
+                            </p>
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {egressStatus?.egressMode === "device_tunnel" && (
+                            <span style={egressStatus.tunnelStatus === "online" ? styles.badge.online : styles.badge.offline}>
+                                <span style={egressStatus.tunnelStatus === "online" ? styles.dot.online : styles.dot.offline} />
+                                {egressStatus.tunnelStatus === "online" ? "Phone tunnel online" : "Phone tunnel offline"}
+                            </span>
+                        )}
+                        <select
+                            aria-label="WhatsApp egress device"
+                            disabled={egressBusy}
+                            value={egressStatus?.binding?.device?.id || ""}
+                            onChange={(event) => event.target.value && void bindWhatsAppEgress(event.target.value)}
+                            style={{ ...styles.input, margin: 0, width: 230 }}
+                        >
+                            <option value="">Select Android device…</option>
+                            {devices.filter((device) => device.capabilities.includes("whatsapp_egress")).map((device) => (
+                                <option key={device.id} value={device.id}>{device.label}</option>
+                            ))}
+                        </select>
+                        {egressStatus?.egressMode === "device_tunnel" && (
+                            <button style={styles.btnSm.ghost} disabled={egressBusy} onClick={() => void unbindWhatsAppEgress()}>
+                                Disable
+                            </button>
+                        )}
+                    </div>
+                </div>
+                {egressStatus?.egressMode === "device_tunnel" && (
+                    <div style={styles.egressBody}>
+                        <div style={styles.routeBanner}>
+                            <span style={{ fontWeight: 700, color: "#166534" }}>Enforced route</span>
+                            <span style={{ color: "#475569" }}>WhatsApp Web (Chromium) → local SOCKS5 → encrypted Android WebSocket → WhatsApp</span>
+                        </div>
+                        <div style={styles.proofGrid}>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Phone connection IP</span>
+                                <span style={styles.proofValue}>{egressStatus.proof?.egressIpMasked || egressStatus.binding?.egressIpMasked || "Waiting for phone…"}</span>
+                                <span style={styles.proofHint}>Masked public IP observed by the gateway</span>
+                            </div>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Phone network</span>
+                                <span style={styles.proofValue}>{formatNetworkType(egressStatus.proof?.networkType || egressStatus.binding?.networkType)}</span>
+                                <span style={styles.proofHint}>Reported by Android</span>
+                            </div>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Last verified tunneled send</span>
+                                <span style={{ ...styles.proofValue, color: egressStatus.proof ? "#15803d" : "#b45309" }}>
+                                    {egressStatus.proof ? formatDateTime(egressStatus.proof.verifiedAt) : "No proof yet"}
+                                </span>
+                                <span style={styles.proofHint}>
+                                    {egressStatus.proof ? `${formatLastSeen(egressStatus.proof.verifiedAt)} · gateway-confirmed traffic` : "Send a WhatsApp message to generate a receipt"}
+                                </span>
+                            </div>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Send receipt</span>
+                                <span style={{ ...styles.proofValue, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                                    {egressStatus.proof?.messageHash ? `wa-${egressStatus.proof.messageHash}` : "—"}
+                                </span>
+                                <span style={styles.proofHint}>One-way message identifier; no content stored</span>
+                            </div>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Traffic during this send</span>
+                                <span style={styles.proofValue}>
+                                    ↑ {formatBytes(egressStatus.proof?.bytesToDevice)} · ↓ {formatBytes(egressStatus.proof?.bytesFromDevice)}
+                                </span>
+                                <span style={styles.proofHint}>Byte increase inside the gateway send window</span>
+                            </div>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Gateway node</span>
+                                <span style={styles.proofValue}>{egressStatus.proof?.gatewayNodeId || "—"}</span>
+                                <span style={styles.proofHint}>Server that issued the receipt</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Stats */}
@@ -741,6 +909,67 @@ const styles = {
     } as React.CSSProperties,
     infoText: { fontSize: 13, color: "#1e40af", margin: 0, maxWidth: 200 },
     infoArrow: { color: "#93c5fd", fontWeight: 700, fontSize: 18 },
+
+    egressCard: {
+        background: "#fff",
+        border: "1px solid #cbd5e1",
+        borderRadius: 12,
+        marginBottom: 24,
+        overflow: "hidden",
+        boxShadow: "0 1px 3px rgba(15, 23, 42, 0.05)",
+    } as React.CSSProperties,
+    egressHeader: {
+        padding: 18,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        flexWrap: "wrap",
+    } as React.CSSProperties,
+    egressIcon: {
+        width: 38,
+        height: 38,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 10,
+        background: "#ecfdf5",
+        fontSize: 18,
+    } as React.CSSProperties,
+    egressBody: {
+        padding: "0 18px 18px",
+        borderTop: "1px solid #e2e8f0",
+    } as React.CSSProperties,
+    routeBanner: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        flexWrap: "wrap",
+        margin: "16px 0",
+        padding: "10px 12px",
+        borderRadius: 8,
+        background: "#f0fdf4",
+        border: "1px solid #bbf7d0",
+        fontSize: 12,
+    } as React.CSSProperties,
+    proofGrid: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+        gap: 12,
+    } as React.CSSProperties,
+    proofItem: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        padding: 12,
+        borderRadius: 8,
+        background: "#f8fafc",
+        border: "1px solid #e2e8f0",
+        minWidth: 0,
+    } as React.CSSProperties,
+    proofLabel: { fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" } as React.CSSProperties,
+    proofValue: { fontSize: 13, color: "#0f172a", fontWeight: 650, overflowWrap: "anywhere" } as React.CSSProperties,
+    proofHint: { fontSize: 11, color: "#94a3b8" } as React.CSSProperties,
 
     statsGrid: {
         display: "grid",

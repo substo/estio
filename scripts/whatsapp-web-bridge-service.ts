@@ -21,6 +21,8 @@ const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-
 const PORT = Number(process.env.WHATSAPP_WEB_BRIDGE_PORT || 3218);
 const APP_WEBHOOK_URL = String(process.env.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL || "http://127.0.0.1:3000/api/webhooks/whatsapp-web-bridge");
 const SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON_SECRET || "").trim();
+const DEVICE_TUNNEL_GATEWAY_URL = String(process.env.DEVICE_TUNNEL_GATEWAY_URL || "http://127.0.0.1:3220").replace(/\/+$/, "");
+const DEVICE_TUNNEL_INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
 const SESSION_DIR = String(process.env.WHATSAPP_WEB_BRIDGE_SESSION_DIR || path.join(process.cwd(), ".data", "whatsapp-web-sessions"));
 const APP_WEBHOOK_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_INLINE_MEDIA_BYTES = Math.floor(APP_WEBHOOK_BODY_LIMIT_BYTES * 0.6);
@@ -38,6 +40,7 @@ type ManagedSession = {
     lastError?: string | null;
     lastWebhookSuccessAt?: Date | null;
     lastWebhookErrorAt?: Date | null;
+    deviceTunnelBindingId?: string | null;
     restarting?: boolean;
 };
 
@@ -552,10 +555,73 @@ async function getPhone(client: any) {
     return String(wid).replace(/@(c\.us|s\.whatsapp\.net)$/i, "") || null;
 }
 
+async function getDeviceTunnelProxy(sessionId: string, locationId: string) {
+    const session = await (db as any).whatsAppWebBridgeSession.findUnique({
+        where: { locationId },
+        select: { egressMode: true },
+    }).catch(() => null);
+    if (session?.egressMode !== "device_tunnel") return null;
+    if (!DEVICE_TUNNEL_INTERNAL_SECRET) {
+        const error: any = new Error("WhatsApp Android egress is required but DEVICE_TUNNEL_INTERNAL_SECRET is not configured.");
+        error.code = "DEVICE_EGRESS_OFFLINE";
+        throw error;
+    }
+
+    const response = await fetch(`${DEVICE_TUNNEL_GATEWAY_URL}/sessions/${encodeURIComponent(sessionId)}`, {
+        headers: { "x-device-tunnel-secret": DEVICE_TUNNEL_INTERNAL_SECRET },
+        signal: AbortSignal.timeout(5_000),
+    }).catch(() => null);
+    if (!response?.ok) {
+        const error: any = new Error("The assigned Android WhatsApp network relay is offline.");
+        error.code = "DEVICE_EGRESS_OFFLINE";
+        throw error;
+    }
+    const payload = await response.json();
+    const proxyHost = String(payload?.proxyHost || "").trim();
+    const proxyPort = Number(payload?.proxyPort || 0);
+    if (!payload?.ready || proxyHost !== "127.0.0.1" || !Number.isInteger(proxyPort) || proxyPort <= 0) {
+        const error: any = new Error("The Android WhatsApp network relay returned an invalid proxy endpoint.");
+        error.code = "DEVICE_EGRESS_OFFLINE";
+        throw error;
+    }
+    return { proxyHost, proxyPort, bindingId: String(payload?.bindingId || "") };
+}
+
+async function beginDeviceTunnelSendProof(session: ManagedSession) {
+    if (!session.deviceTunnelBindingId || !DEVICE_TUNNEL_INTERNAL_SECRET) return null;
+    const response = await fetch(`${DEVICE_TUNNEL_GATEWAY_URL}/sessions/${encodeURIComponent(session.sessionId)}/send-proof-start`, {
+        method: "POST",
+        headers: { "x-device-tunnel-secret": DEVICE_TUNNEL_INTERNAL_SECRET },
+        signal: AbortSignal.timeout(5_000),
+    }).catch(() => null);
+    if (!response?.ok) return null;
+    const payload = await response.json().catch(() => null);
+    return String(payload?.proofNonce || "").trim() || null;
+}
+
+async function recordDeviceTunnelSendProof(session: ManagedSession, messageId: string, proofNonce: string | null) {
+    if (!session.deviceTunnelBindingId || !messageId || !proofNonce || !DEVICE_TUNNEL_INTERNAL_SECRET) return null;
+    const response = await fetch(`${DEVICE_TUNNEL_GATEWAY_URL}/sessions/${encodeURIComponent(session.sessionId)}/verify-send`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "x-device-tunnel-secret": DEVICE_TUNNEL_INTERNAL_SECRET,
+        },
+        body: JSON.stringify({ messageId, proofNonce }),
+        signal: AbortSignal.timeout(5_000),
+    }).catch(() => null);
+    if (!response?.ok) {
+        console.warn(`[WhatsApp Web Bridge] Send succeeded but tunnel proof was unavailable for ${session.sessionId}.`);
+        return null;
+    }
+    return response.json().catch(() => null);
+}
+
 async function startSession(sessionId: string, locationId: string) {
     const existing = sessions.get(sessionId);
     if (existing) return existing;
 
+    const tunnelProxy = await getDeviceTunnelProxy(sessionId, locationId);
     const { Client, LocalAuth } = require("whatsapp-web.js");
     const client = new Client({
         authStrategy: new LocalAuth({
@@ -573,6 +639,11 @@ async function startSession(sessionId: string, locationId: string) {
                 "--no-first-run",
                 "--no-zygote",
                 "--disable-gpu",
+                ...(tunnelProxy ? [
+                    `--proxy-server=socks5://${tunnelProxy.proxyHost}:${tunnelProxy.proxyPort}`,
+                    "--host-resolver-rules=MAP * ~NOTFOUND",
+                    "--disable-quic",
+                ] : []),
             ],
         },
     });
@@ -589,6 +660,7 @@ async function startSession(sessionId: string, locationId: string) {
         lastError: null,
         lastWebhookSuccessAt: null,
         lastWebhookErrorAt: null,
+        deviceTunnelBindingId: tunnelProxy?.bindingId || null,
     };
     sessions.set(sessionId, managed);
 
@@ -700,6 +772,7 @@ async function sendMessage(sessionId: string, payload: any) {
             throw new Error(`WhatsApp Web could not read the signed media URL. Re-upload or resend the attachment. ${error?.message || ""}`.trim());
         }
         try {
+            const proofNonce = await beginDeviceTunnelSendProof(session);
             const sent = await withStaleRecovery(session, () => withTimeout(
                 session.client.sendMessage(to, media, {
                     caption: payload.caption || payload.text || undefined,
@@ -707,7 +780,9 @@ async function sendMessage(sessionId: string, payload: any) {
                 MEDIA_OPERATION_TIMEOUT_MS,
                 `WhatsApp media send ${sessionId}`
             ));
-            return { messageId: sent?.id?._serialized || sent?.id?.id || "" };
+            const messageId = sent?.id?._serialized || sent?.id?.id || "";
+            const egressProof = await recordDeviceTunnelSendProof(session, messageId, proofNonce);
+            return { messageId, egressProof };
         } catch (error: any) {
             throw new Error(`WhatsApp Web media send failed. Confirm the recipient is on WhatsApp and the bridge is still connected. ${error?.message || ""}`.trim());
         }
@@ -716,12 +791,14 @@ async function sendMessage(sessionId: string, payload: any) {
     try {
         const text = String(payload.text || "");
         const preview = getWhatsAppLinkPreviewDecision(text);
+        const proofNonce = await beginDeviceTunnelSendProof(session);
         const sent = await withStaleRecovery(session, () => withTimeout(
             session.client.sendMessage(to, text, preview.shouldRequestPreview ? { linkPreview: true } : undefined),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`
         ));
         const messageId = sent?.id?._serialized || sent?.id?.id || "";
+        const egressProof = await recordDeviceTunnelSendProof(session, messageId, proofNonce);
         if (preview.shouldRequestPreview) {
             const sentLinks = Array.isArray(sent?.links) ? sent.links.length : null;
             console.log("[WhatsApp Web Bridge] Text URL send completed", {
@@ -735,6 +812,7 @@ async function sendMessage(sessionId: string, payload: any) {
         }
         return {
             messageId,
+            egressProof,
             linkPreviewRequested: preview.shouldRequestPreview,
             linkPreviewHost: preview.host,
             sentLinksCount: Array.isArray(sent?.links) ? sent.links.length : undefined,

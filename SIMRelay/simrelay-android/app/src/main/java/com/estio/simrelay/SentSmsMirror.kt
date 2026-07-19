@@ -9,7 +9,7 @@ import java.security.MessageDigest
 import java.util.Locale
 
 class SentSmsMirror(private val context: Context) {
-    private val prefs = context.getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
+    private val prefs = SecurePrefs.get(context)
     private val relaySuppression = mutableMapOf<String, Long>()
 
     fun suppressRelaySend(destination: String, body: String) {

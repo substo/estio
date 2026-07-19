@@ -19,6 +19,8 @@ VIEWING_RELAY_APP_NAME="estio-viewing-live-relay"
 VIEWING_RELAY_DEFAULT_PORT=8788
 WHATSAPP_BRIDGE_APP_NAME="estio-whatsapp-web-bridge"
 WHATSAPP_BRIDGE_DEFAULT_PORT=3218
+DEVICE_TUNNEL_GATEWAY_APP_NAME="estio-device-tunnel-gateway"
+DEVICE_TUNNEL_GATEWAY_DEFAULT_PORT=3220
 WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
 WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
 WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
@@ -146,7 +148,7 @@ ENDSSH
 # Step 0: Determine Active/Target Slots
 echo "🔍 Checking server state..."
 CURRENT_SYMLINK_COLOR=$(ssh $SSH_OPTS $SERVER "if [ -L '$SYMLINK_PATH' ]; then LINK=\$(readlink '$SYMLINK_PATH'); if [[ \"\$LINK\" == *'-blue'* ]]; then echo blue; elif [[ \"\$LINK\" == *'-green'* ]]; then echo green; else echo none; fi; else echo none; fi")
-CURRENT_CADDY_PORT=$(ssh $SSH_OPTS $SERVER "if [ -f /etc/caddy/Caddyfile ]; then grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true; fi")
+CURRENT_CADDY_PORT=$(ssh $SSH_OPTS $SERVER "if [ -f /etc/caddy/Caddyfile ]; then grep -Eo 'reverse_proxy[[:space:]]+localhost:(3001|3002)' /etc/caddy/Caddyfile | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true; fi")
 
 if [ "$CURRENT_CADDY_PORT" = "$BLUE_PORT" ]; then
     CURRENT_COLOR="blue"
@@ -329,6 +331,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     VIEWING_RELAY_DEFAULT_PORT="$VIEWING_RELAY_DEFAULT_PORT"
     WHATSAPP_BRIDGE_APP_NAME="$WHATSAPP_BRIDGE_APP_NAME"
     WHATSAPP_BRIDGE_DEFAULT_PORT="$WHATSAPP_BRIDGE_DEFAULT_PORT"
+    DEVICE_TUNNEL_GATEWAY_APP_NAME="$DEVICE_TUNNEL_GATEWAY_APP_NAME"
+    DEVICE_TUNNEL_GATEWAY_DEFAULT_PORT="$DEVICE_TUNNEL_GATEWAY_DEFAULT_PORT"
     WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT"
     WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS="$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS"
     WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS="$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS"
@@ -358,6 +362,14 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         RAW_WHATSAPP_BRIDGE_PORT=\$(grep -E '^WHATSAPP_WEB_BRIDGE_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]' || true)
         if [[ "\$RAW_WHATSAPP_BRIDGE_PORT" =~ ^[0-9]+$ ]]; then
             WHATSAPP_BRIDGE_PORT="\$RAW_WHATSAPP_BRIDGE_PORT"
+        fi
+    fi
+
+    DEVICE_TUNNEL_GATEWAY_PORT="\$DEVICE_TUNNEL_GATEWAY_DEFAULT_PORT"
+    if [ -f "\$TARGET_DIR/.env" ]; then
+        RAW_DEVICE_TUNNEL_GATEWAY_PORT=\$(grep -E '^DEVICE_TUNNEL_GATEWAY_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]' || true)
+        if [[ "\$RAW_DEVICE_TUNNEL_GATEWAY_PORT" =~ ^[0-9]+$ ]]; then
+            DEVICE_TUNNEL_GATEWAY_PORT="\$RAW_DEVICE_TUNNEL_GATEWAY_PORT"
         fi
     fi
 
@@ -418,6 +430,25 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
             echo "🔌 Added viewing relay websocket route to Caddy (port \$VIEWING_RELAY_PORT)."
         fi
 
+        if ! grep -q 'IDX_DEVICE_TUNNEL_BEGIN' /etc/caddy/Caddyfile; then
+            awk -v tunnel_port="\$DEVICE_TUNNEL_GATEWAY_PORT" '
+                BEGIN { inserted = 0 }
+                {
+                    print \$0
+                    if (!inserted && \$0 ~ /^estio\.co[[:space:]]*\{[[:space:]]*$/) {
+                        print "    # IDX_DEVICE_TUNNEL_BEGIN"
+                        print "    handle_path /device-tunnel/* {"
+                        print "        reverse_proxy 127.0.0.1:" tunnel_port
+                        print "    }"
+                        print "    # IDX_DEVICE_TUNNEL_END"
+                        print ""
+                        inserted = 1
+                    }
+                }
+            ' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile
+            echo "🔐 Added Android device tunnel websocket route to Caddy (port \$DEVICE_TUNNEL_GATEWAY_PORT)."
+        fi
+
         sed -E -i "s#localhost:(3001|3002)#localhost:\$TARGET_PORT#g" /etc/caddy/Caddyfile
         sed -E -i "s#reverse_proxy[[:space:]]+localhost([[:space:]]|$)#reverse_proxy localhost:\$TARGET_PORT\\\\1#g" /etc/caddy/Caddyfile
 
@@ -450,7 +481,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     if [ "\$SOAK_FAILED" -eq 1 ]; then
         echo "❌ Post-switch soak failed. Rolling back traffic."
         if [ -n "\$ACTIVE_PORT" ] && [ -f /etc/caddy/Caddyfile ]; then
-            sed -E -i "s#localhost:[0-9]+#localhost:\$ACTIVE_PORT#g" /etc/caddy/Caddyfile
+            sed -E -i "s#localhost:(3001|3002)#localhost:\$ACTIVE_PORT#g" /etc/caddy/Caddyfile
             sed -E -i "s#reverse_proxy[[:space:]]+localhost([[:space:]]|$)#reverse_proxy localhost:\$ACTIVE_PORT\\\\1#g" /etc/caddy/Caddyfile
             caddy validate --config /etc/caddy/Caddyfile
             systemctl reload caddy || systemctl restart caddy
@@ -632,6 +663,34 @@ NODE
         pm2 describe "\$VIEWING_RELAY_APP_NAME" || true
         pm2 logs "\$VIEWING_RELAY_APP_NAME" --lines 120 --nostream || true
         exit 1
+    fi
+
+    if [ -n "\${DEVICE_TUNNEL_JWT_SECRET:-}" ] && [ -n "\${DEVICE_TUNNEL_INTERNAL_SECRET:-}" ]; then
+        echo "🔐 Ensuring Android device tunnel gateway is running (\$DEVICE_TUNNEL_GATEWAY_APP_NAME) on :\$DEVICE_TUNNEL_GATEWAY_PORT..."
+        if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
+            pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
+        fi
+        NODE_ENV=production PROCESS_ROLE=device-tunnel-gateway DEVICE_TUNNEL_GATEWAY_PORT="\$DEVICE_TUNNEL_GATEWAY_PORT" \
+            pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway
+        TUNNEL_GATEWAY_READY=0
+        for i in \$(seq 1 45); do
+            if curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" > /dev/null 2>&1; then
+                TUNNEL_GATEWAY_READY=1
+                echo "✅ Android device tunnel gateway is healthy"
+                break
+            fi
+            sleep 1
+        done
+        if [ "\$TUNNEL_GATEWAY_READY" -ne 1 ]; then
+            pm2 logs "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --lines 120 --nostream || true
+            echo "❌ Android device tunnel gateway failed readiness checks."
+            exit 1
+        fi
+    else
+        if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
+            pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
+        fi
+        echo "⚠️  Android device tunnel gateway is disabled; configure DEVICE_TUNNEL_JWT_SECRET and DEVICE_TUNNEL_INTERNAL_SECRET to enable it."
     fi
 
     echo "📱 Ensuring WhatsApp Web Bridge process is running (\$WHATSAPP_BRIDGE_APP_NAME) on :\$WHATSAPP_BRIDGE_PORT..."
@@ -887,7 +946,7 @@ if [ "\$CURRENT_TOKEN" != "\$DEPLOY_TOKEN" ]; then
     exit 0
 fi
 
-LIVE_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\1/' || true)
+LIVE_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:(3001|3002)' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\1/' || true)
 if [ "\$LIVE_PORT" = "\$ACTIVE_PORT" ]; then
     exit 0
 fi
@@ -901,7 +960,7 @@ DRAIN_EOF
             nohup "\$DRAIN_SCRIPT" >/dev/null 2>&1 &
             echo "⏳ Scheduled old process drain: \$ACTIVE_APP_NAME in \$DRAIN_SECONDS seconds"
         else
-            LIVE_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:[0-9]+' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true)
+            LIVE_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:(3001|3002)' /etc/caddy/Caddyfile 2>/dev/null | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true)
             if [ "\$LIVE_PORT" = "\$ACTIVE_PORT" ]; then
                 echo "⚠️  Skipping immediate drain for \$ACTIVE_APP_NAME because it appears to be live on :\$LIVE_PORT"
             else

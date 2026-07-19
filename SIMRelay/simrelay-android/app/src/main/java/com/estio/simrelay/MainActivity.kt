@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
@@ -83,13 +84,16 @@ class MainActivity : AppCompatActivity() {
         btnToggleService.setOnClickListener {
             if (RelayForegroundService.isRunning) {
                 stopService(Intent(this, RelayForegroundService::class.java))
+                stopService(Intent(this, TunnelForegroundService::class.java))
                 Toast.makeText(this, "Service Stopped", Toast.LENGTH_SHORT).show()
             } else {
                 val intent = Intent(this, RelayForegroundService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(intent)
+                    startForegroundService(Intent(this, TunnelForegroundService::class.java))
                 } else {
                     startService(intent)
+                    startService(Intent(this, TunnelForegroundService::class.java))
                 }
                 Toast.makeText(this, "Service Started", Toast.LENGTH_SHORT).show()
             }
@@ -99,7 +103,8 @@ class MainActivity : AppCompatActivity() {
 
         btnUnpair.setOnClickListener {
             stopService(Intent(this, RelayForegroundService::class.java))
-            val prefs = getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
+            stopService(Intent(this, TunnelForegroundService::class.java))
+            val prefs = SecurePrefs.get(this)
             prefs.edit().clear().apply()
             updateUI()
             Toast.makeText(this, "Device Unpaired", Toast.LENGTH_SHORT).show()
@@ -128,6 +133,10 @@ class MainActivity : AppCompatActivity() {
                         val json = JSONObject(rawValue)
                         val pairCode = json.getString("pairCode")
                         val baseUrl = json.optString("baseUrl", "https://estio.co")
+                        if (!isAllowedBaseUrl(baseUrl)) {
+                            Toast.makeText(this, "QR code uses an untrusted Estio server", Toast.LENGTH_LONG).show()
+                            return@addOnSuccessListener
+                        }
                         etPairingCode.setText(pairCode)
                         pairDevice(pairCode, baseUrl)
                     } catch (e: Exception) {
@@ -141,7 +150,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateUI() {
-        val prefs = getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
+        val prefs = SecurePrefs.get(this)
         val token = prefs.getString("device_token", null)
         val baseUrl = prefs.getString("base_url", "https://estio.co")
         
@@ -177,6 +186,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pairDevice(code: String, baseUrl: String) {
+        if (!isAllowedBaseUrl(baseUrl)) {
+            Toast.makeText(this, "Untrusted Estio server URL", Toast.LENGTH_LONG).show()
+            return
+        }
         btnPair.isEnabled = false
         btnScanQr.isEnabled = false
         
@@ -185,12 +198,17 @@ class MainActivity : AppCompatActivity() {
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val req = com.estio.simrelay.api.PairRequest(code)
+                val req = com.estio.simrelay.api.PairRequest(
+                    pair_code = code,
+                    tunnel_public_key = DeviceKeyManager.publicKeyBase64(),
+                    app_version = BuildConfig.VERSION_NAME,
+                    capabilities = listOf("sms_relay", "whatsapp_egress")
+                )
                 val response = ApiClient.api.pairDevice(req)
                 withContext(Dispatchers.Main) {
                     if (response.isSuccessful && response.body() != null) {
                         val token = response.body()!!.device_api_token
-                        val prefs = getSharedPreferences("estio_prefs", Context.MODE_PRIVATE)
+                        val prefs = SecurePrefs.get(this@MainActivity)
                         prefs.edit()
                             .putString("device_token", token)
                             .putString("base_url", baseUrl)
@@ -203,8 +221,10 @@ class MainActivity : AppCompatActivity() {
                         val intent = Intent(this@MainActivity, RelayForegroundService::class.java)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             startForegroundService(intent)
+                            startForegroundService(Intent(this@MainActivity, TunnelForegroundService::class.java))
                         } else {
                             startService(intent)
+                            startService(Intent(this@MainActivity, TunnelForegroundService::class.java))
                         }
                         updateUI()
                     } else {
@@ -220,6 +240,16 @@ class MainActivity : AppCompatActivity() {
                     btnScanQr.isEnabled = true
                 }
             }
+        }
+    }
+
+    private fun isAllowedBaseUrl(value: String): Boolean {
+        return try {
+            val uri = Uri.parse(value)
+            val host = uri.host?.lowercase() ?: return false
+            uri.scheme == "https" && (host == "estio.co" || host.endsWith(".estio.co")) && uri.userInfo == null
+        } catch (_: Exception) {
+            false
         }
     }
 }

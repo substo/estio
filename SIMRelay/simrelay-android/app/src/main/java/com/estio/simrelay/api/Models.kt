@@ -1,12 +1,36 @@
 package com.estio.simrelay.api
 
 data class PairRequest(
-    val pair_code: String
+    val pair_code: String,
+    val tunnel_public_key: String? = null,
+    val app_version: String? = null,
+    val capabilities: List<String> = listOf("sms_relay")
 )
 
 data class PairResponse(
     val device_api_token: String,
-    val device_id: String
+    val device_id: String,
+    val capabilities: List<String> = emptyList(),
+    val tunnel_enabled: Boolean = false
+)
+
+data class TunnelTokenRequest(
+    val action: String,
+    val challenge: String? = null,
+    val signature: String? = null
+)
+
+data class TunnelChallengeResponse(
+    val challenge: String,
+    val expiresAt: String,
+    val credentialVersion: Int
+)
+
+data class TunnelTokenResponse(
+    val tunnelToken: String,
+    val gatewayUrl: String,
+    val expiresInSeconds: Int,
+    val bindingId: String
 )
 
 data class Job(

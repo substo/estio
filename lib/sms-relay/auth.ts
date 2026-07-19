@@ -33,12 +33,12 @@ function getWebhookSecret(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Generates a random 6-character uppercase alphanumeric pair code.
+ * Generates a random 12-character hexadecimal pair code (48 bits).
  * Returns both the raw code (shown to user / encoded in QR) and its
  * SHA-256 hash (stored in DB — raw code is never persisted).
  */
 export function generatePairCode(): { pairCode: string; pairTokenHash: string } {
-    const pairCode = crypto.randomBytes(3).toString("hex").toUpperCase(); // 6 chars
+    const pairCode = crypto.randomBytes(6).toString("hex").toUpperCase();
     const pairTokenHash = crypto.createHash("sha256").update(pairCode).digest("hex");
     return { pairCode, pairTokenHash };
 }

@@ -21,6 +21,8 @@ export type SmsRelayDevice = {
     platform: string;
     status: string;
     paired: boolean;
+    capabilities: string[];
+    appVersion: string | null;
     lastSeenAt: string | null;
     createdAt: string;
 };
@@ -67,6 +69,8 @@ export async function getSmsRelayDevices(): Promise<SmsRelayDevice[]> {
             platform: true,
             status: true,
             paired: true,
+            capabilities: true,
+            appVersion: true,
             lastSeenAt: true,
             createdAt: true,
         },
@@ -102,12 +106,14 @@ export async function initiatePairing(
             locationId: location.id,
             label: label.trim() || "Android Device",
             pairTokenHash,
+            pairExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+            pairAttemptCount: 0,
             paired: false,
             status: "offline",
         },
     });
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://estio.co";
     const qrPayload = JSON.stringify({
         baseUrl,
         pairCode,

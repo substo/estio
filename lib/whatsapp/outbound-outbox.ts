@@ -5,6 +5,7 @@ import { enqueueGhlMessageMirror } from "@/lib/integrations/provider-outbox-enqu
 import { Prisma } from "@prisma/client";
 import { dispatchWhatsAppOutbound } from "@/lib/whatsapp/outbound-dispatch";
 import { classifyOutboundSendFailure } from "@/lib/conversations/outbound-send-failure";
+import { isDeviceEgressOfflineError } from "@/lib/device-tunnel/status";
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
 const STALE_PROCESSING_LOCK_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
@@ -128,7 +129,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
     const lockClaim = await (db as any).whatsAppOutboundOutbox.updateMany({
         where: {
             id: outboxId,
-            status: { in: ["pending", "failed"] },
+            status: { in: ["pending", "failed", "blocked_egress"] },
             scheduledAt: { lte: now },
         },
         data: {
@@ -355,6 +356,39 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         return { outcome: "success" };
     } catch (error) {
         const message = normalizeError(error);
+        if (isDeviceEgressOfflineError(error)) {
+            const retryDelayMs = 60_000;
+            const nextScheduledAt = new Date(Date.now() + retryDelayMs);
+            await (db as any).whatsAppOutboundOutbox.update({
+                where: { id: row.id },
+                data: {
+                    status: "blocked_egress",
+                    lastError: message,
+                    scheduledAt: nextScheduledAt,
+                    lockedAt: null,
+                    lockedBy: null,
+                },
+            });
+            await db.message.update({
+                where: { id: row.messageId },
+                data: { status: "blocked_egress", updatedAt: new Date() },
+            }).catch(() => undefined);
+            void publishConversationRealtimeEvent({
+                locationId: row.locationId,
+                conversationId: row.conversationId,
+                type: "message.status",
+                payload: {
+                    channel: "whatsapp",
+                    messageId: row.messageId,
+                    status: "blocked_egress",
+                    outboxJobId: row.id,
+                    outboxStatus: "blocked_egress",
+                    scheduledAt: nextScheduledAt.toISOString(),
+                    lastError: message,
+                },
+            });
+            return { outcome: "failed", requeueDelayMs: retryDelayMs, error: message };
+        }
         const retryable = isRetryableOutboundError(error);
         const canRetry = retryable && attemptCount < MAX_OUTBOX_ATTEMPTS;
 
@@ -517,7 +551,7 @@ export async function recoverStaleWhatsAppOutboundOutboxLocks() {
 export async function listDueWhatsAppOutboundOutboxIds(limit = 200): Promise<string[]> {
     const rows = await (db as any).whatsAppOutboundOutbox.findMany({
         where: {
-            status: { in: ["pending", "failed"] },
+            status: { in: ["pending", "failed", "blocked_egress"] },
             scheduledAt: { lte: new Date() },
         },
         orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
