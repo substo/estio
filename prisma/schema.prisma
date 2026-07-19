@@ -3301,11 +3301,35 @@ model WhatsAppWebBridgeSession {
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   tunnelBinding DeviceTunnelBinding?
+  tunnelLease DeviceTunnelSessionLease?
 
   @@unique([locationId])
   @@unique([sessionId])
   @@index([locationId, isDefaultOutbound])
   @@index([status])
+}
+
+model DeviceTunnelGatewayNode {
+  id        String   @id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  region             String   @default("default")
+  publicUrl          String?
+  internalUrl        String?
+  status             String   @default("offline") // online | draining | offline | quarantined
+  capacitySessions   Int      @default(1)
+  activeSessions     Int      @default(0)
+  version            String?
+  startedAt          DateTime
+  lastHeartbeatAt    DateTime
+  metadata           Json?
+
+  tunnelBindings DeviceTunnelBinding[]
+  sessionLeases  DeviceTunnelSessionLease[]
+
+  @@index([region, status, lastHeartbeatAt])
+  @@index([status, lastHeartbeatAt])
 }
 
 model WhatsAppTemplate {
@@ -3932,6 +3956,10 @@ model DeviceTunnelBinding {
   status             String   @default("offline") // offline | connecting | online | degraded | revoked
   networkType        String?  // wifi | cellular | ethernet | other | unknown
   gatewayNodeId      String?
+  assignmentEpoch    Int      @default(0)
+  assignedAt         DateTime?
+  desiredState       String   @default("active") // active | draining | disabled
+  drainRequestedAt   DateTime?
   egressIpMasked     String?
   lastConnectedAt    DateTime?
   lastSeenAt         DateTime?
@@ -3945,9 +3973,35 @@ model DeviceTunnelBinding {
   location Location                    @relation(fields: [locationId], references: [id], onDelete: Cascade)
   device   SmsRelayDevice              @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   session  WhatsAppWebBridgeSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  gatewayNode DeviceTunnelGatewayNode? @relation(fields: [gatewayNodeId], references: [id], onDelete: SetNull)
+  sessionLease DeviceTunnelSessionLease?
 
   @@index([locationId, status])
   @@index([status, lastSeenAt])
+  @@index([gatewayNodeId, desiredState])
+}
+
+model DeviceTunnelSessionLease {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessionId       String @unique
+  bindingId       String @unique
+  gatewayNodeId   String
+  ownerInstanceId String
+  epoch           Int
+  acquiredAt      DateTime
+  renewedAt       DateTime
+  expiresAt       DateTime
+  state           String @default("acquiring") // acquiring | active | draining | expired
+
+  session     WhatsAppWebBridgeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  binding     DeviceTunnelBinding      @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  gatewayNode DeviceTunnelGatewayNode  @relation(fields: [gatewayNodeId], references: [id], onDelete: Restrict)
+
+  @@index([gatewayNodeId, state, expiresAt])
+  @@index([state, expiresAt])
 }
 
 model SmsRelayOutbox {

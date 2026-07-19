@@ -7,10 +7,23 @@ import { maskIpAddress, verifyDeviceTunnelToken } from "../lib/device-tunnel/aut
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
 import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
+import { registerDeviceTunnelGatewayNode, heartbeatDeviceTunnelGatewayNode } from "../lib/device-tunnel/gateway-node-registry";
+import { isDistributedDeviceTunnelPlacementEnabled } from "../lib/device-tunnel/distributed-placement";
 
 const PORT = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_PORT || 3220), 1);
 const INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
-const GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || `gateway-${process.pid}`).trim();
+const DISTRIBUTED_PLACEMENT = isDistributedDeviceTunnelPlacementEnabled();
+const CONFIGURED_GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || "").trim();
+if (DISTRIBUTED_PLACEMENT && !CONFIGURED_GATEWAY_NODE_ID) {
+    throw new Error("DEVICE_TUNNEL_GATEWAY_NODE_ID is required when distributed placement is enabled");
+}
+const GATEWAY_NODE_ID = CONFIGURED_GATEWAY_NODE_ID || "device-tunnel-gateway-single";
+const GATEWAY_STARTED_AT = new Date();
+const GATEWAY_REGION = String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "default").trim() || "default";
+const GATEWAY_PUBLIC_URL = String(process.env.DEVICE_TUNNEL_PUBLIC_URL || "").trim() || null;
+const GATEWAY_INTERNAL_URL = String(process.env.DEVICE_TUNNEL_GATEWAY_INTERNAL_URL || `http://127.0.0.1:${PORT}`).trim();
+const GATEWAY_CAPACITY_SESSIONS = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS || 100), 1);
+const GATEWAY_VERSION = String(process.env.RELEASE_VERSION || process.env.npm_package_version || "").trim() || null;
 const WHATSAPP_BRIDGE_URL = String(process.env.WHATSAPP_WEB_BRIDGE_URL || "http://127.0.0.1:3218").replace(/\/+$/, "");
 const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON_SECRET || "").trim();
 const MAX_STREAMS_PER_DEVICE = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_STREAMS || 64), 1);
@@ -437,9 +450,39 @@ server.on("upgrade", (req, socket, head) => {
     });
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-    console.log(`[Device Tunnel] Gateway ${GATEWAY_NODE_ID} listening on 127.0.0.1:${PORT}`);
+async function startGateway() {
+    await registerDeviceTunnelGatewayNode(db as any, {
+        id: GATEWAY_NODE_ID,
+        region: GATEWAY_REGION,
+        publicUrl: GATEWAY_PUBLIC_URL,
+        internalUrl: GATEWAY_INTERNAL_URL,
+        capacitySessions: GATEWAY_CAPACITY_SESSIONS,
+        version: GATEWAY_VERSION,
+        startedAt: GATEWAY_STARTED_AT,
+        metadata: { runtime: "device-tunnel-gateway" },
+    });
+    server.listen(PORT, "127.0.0.1", () => {
+        console.log(`[Device Tunnel] Gateway ${GATEWAY_NODE_ID} listening on 127.0.0.1:${PORT}`);
+    });
+}
+
+void startGateway().catch((error) => {
+    console.error("[Device Tunnel] Gateway node registration failed:", error?.message || error);
+    process.exitCode = 1;
 });
+
+setInterval(() => {
+    void heartbeatDeviceTunnelGatewayNode({
+        db: db as any,
+        nodeId: GATEWAY_NODE_ID,
+        startedAt: GATEWAY_STARTED_AT,
+        activeSessions: devicesByBridgeSession.size,
+    }).then((updated) => {
+        if (!updated) console.warn(`[Device Tunnel] Gateway node ${GATEWAY_NODE_ID} heartbeat was fenced`);
+    }).catch((error) => {
+        console.warn("[Device Tunnel] Gateway node heartbeat failed:", error?.message || error);
+    });
+}, 15_000).unref?.();
 
 setInterval(() => {
     for (const device of devicesByBridgeSession.values()) {

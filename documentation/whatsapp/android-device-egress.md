@@ -10,11 +10,19 @@ DEVICE_TUNNEL_INTERNAL_SECRET=<independent random secret, at least 32 bytes>
 DEVICE_TUNNEL_PUBLIC_URL=wss://estio.co/device-tunnel
 DEVICE_TUNNEL_GATEWAY_PORT=3220
 DEVICE_TUNNEL_GATEWAY_URL=http://127.0.0.1:3220
+DEVICE_TUNNEL_GATEWAY_NODE_ID=cyprus-egress-1
+DEVICE_TUNNEL_GATEWAY_REGION=cyprus
+DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS=100
+DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false
 ```
 
 `deploy-local-build.sh` starts the gateway when both secrets exist and adds the Caddy `/device-tunnel/*` WebSocket route. Apply the Prisma migration before binding a device. Rebuild and distribute the Android application so it can enroll its hardware-backed key.
 
 The SIM Relay integration page shows the live tunnel state and the last verified WhatsApp send. Immediately before a send, the gateway snapshots the assigned tunnel's byte counters and issues a one-time nonce. A proof is written only after WhatsApp Web reports success and the gateway confirms that browser-to-phone bytes increased inside that send window. The receipt contains a truncated one-way message hash, masked phone connection IP, network type, gateway node, per-send traffic delta, and timestamps; it does not store message content or the recipient.
+
+The gateway registers `DEVICE_TUNNEL_GATEWAY_NODE_ID` in PostgreSQL and heartbeats every 15 seconds. Use one stable ID per deployed gateway; do not derive it from a PID or container restart. Keep `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` during the PR 1 rollout. With the flag disabled, node registry fields are populated but assignment and lease enforcement are not activated, so the existing single-host browser-to-loopback-SOCKS path remains unchanged. Enabling the flag requires an explicit node ID and is reserved for the later routing/ownership phases.
+
+After deploying the node-registry migration, verify the node's `status`, `lastHeartbeatAt`, `activeSessions`, configured URLs, region, capacity, and version in `DeviceTunnelGatewayNode`. A heartbeat update is scoped to both node ID and process `startedAt`; an older process cannot overwrite a replacement process's heartbeat.
 
 ## Activation
 
@@ -35,6 +43,8 @@ Disabling the binding returns the session to server egress; this is an explicit 
 
 ## Operational limitations
 
-- The initial gateway is single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. Horizontal sharding requires a separate internal browser-to-gateway transport and distributed session leases.
+- The active production path remains single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. The node registry and fenced-lease primitives are present for phased rollout, but routing and runtime lease enforcement remain disabled while `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`.
 - The current allowlist may need additions when WhatsApp changes media/CDN hostnames. Add only observed, reviewed suffixes through `DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES`.
 - Legal/Meta approval and an internal pilot remain required before exposing this transport to customer scale.
+
+See [Horizontal WhatsApp device-egress implementation plan](./horizontal-device-egress-plan.md) for the multi-node ownership, rate-limit, failover, and rollout design.
