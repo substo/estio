@@ -573,12 +573,17 @@ async function fetchChatMessagesWithOpaqueFallback(session: ManagedSession, chat
                 const chat = collections?.Chat?.get(targetWid)
                     || collections?.Chat?.get(targetChatId);
                 if (!chat) return [];
-                const includeMessage = (message: any) => !message?.isNotification;
-                let messages = chat.msgs.getModelsArray().filter(includeMessage);
+                // Keep filters inline. The TypeScript runtime transpiler can inject a
+                // module-scoped naming helper for a locally assigned callback, but that
+                // helper does not exist when Puppeteer serializes this closure in-page.
+                let messages = chat.msgs.getModelsArray().filter((message: any) => !message?.isNotification);
                 while (messages.length < targetLimit) {
                     const loaded = await (window as any).require("WAWebChatLoadMessages").loadEarlierMsgs({ chat });
                     if (!loaded?.length) break;
-                    messages = [...loaded.filter(includeMessage), ...messages];
+                    messages = [
+                        ...loaded.filter((message: any) => !message?.isNotification),
+                        ...messages,
+                    ];
                 }
                 messages.sort((left: any, right: any) => Number(left?.t || 0) - Number(right?.t || 0));
                 return messages.slice(-targetLimit).map((message: any) => {
