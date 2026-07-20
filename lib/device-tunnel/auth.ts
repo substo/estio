@@ -2,14 +2,20 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
 const CHALLENGE_TTL_MS = 2 * 60 * 1000;
-const TUNNEL_TOKEN_TTL = "15m";
+export const DEVICE_TUNNEL_TOKEN_AUDIENCE = "device-tunnel-gateway";
+export const DEVICE_TUNNEL_TOKEN_TTL_SECONDS = 5 * 60;
 
 export type DeviceTunnelTokenPayload = {
+    aud: string;
+    nodeId: string;
+    sessionId: string;
     deviceId: string;
     locationId: string;
     bindingId: string;
+    assignmentEpoch: number;
     credentialVersion: number;
     purpose: "device_tunnel";
+    jti: string;
     iat: number;
     exp: number;
 };
@@ -70,29 +76,65 @@ export function verifyTunnelChallengeSignature(args: {
 }
 
 export function issueDeviceTunnelToken(args: {
+    nodeId: string;
+    sessionId: string;
     deviceId: string;
     locationId: string;
     bindingId: string;
+    assignmentEpoch: number;
     credentialVersion: number;
 }): string {
+    if (
+        !args.nodeId
+        || !args.sessionId
+        || !args.deviceId
+        || !args.locationId
+        || !args.bindingId
+        || !Number.isSafeInteger(args.assignmentEpoch)
+        || args.assignmentEpoch < 0
+    ) {
+        throw new Error("Device tunnel token scope is invalid");
+    }
     return jwt.sign(
         {
+            nodeId: args.nodeId,
+            sessionId: args.sessionId,
             deviceId: args.deviceId,
             locationId: args.locationId,
             bindingId: args.bindingId,
+            assignmentEpoch: args.assignmentEpoch,
             credentialVersion: args.credentialVersion,
             purpose: "device_tunnel",
         },
         getTunnelJwtSecret(),
-        { algorithm: "HS256", expiresIn: TUNNEL_TOKEN_TTL },
+        {
+            algorithm: "HS256",
+            audience: DEVICE_TUNNEL_TOKEN_AUDIENCE,
+            jwtid: crypto.randomUUID(),
+            expiresIn: DEVICE_TUNNEL_TOKEN_TTL_SECONDS,
+        },
     );
 }
 
-export function verifyDeviceTunnelToken(token: string): DeviceTunnelTokenPayload {
+export function verifyDeviceTunnelToken(token: string, expectedNodeId?: string): DeviceTunnelTokenPayload {
     const payload = jwt.verify(token, getTunnelJwtSecret(), {
         algorithms: ["HS256"],
+        audience: DEVICE_TUNNEL_TOKEN_AUDIENCE,
     }) as DeviceTunnelTokenPayload;
     if (payload.purpose !== "device_tunnel") throw new Error("Invalid tunnel token purpose");
+    if (
+        !payload.nodeId
+        || !payload.sessionId
+        || !payload.deviceId
+        || !payload.locationId
+        || !payload.bindingId
+        || !payload.jti
+        || !Number.isSafeInteger(payload.assignmentEpoch)
+        || payload.assignmentEpoch < 0
+    ) {
+        throw new Error("Tunnel token scope is incomplete");
+    }
+    if (expectedNodeId && payload.nodeId !== expectedNodeId) throw new Error("Tunnel token belongs to another gateway node");
     return payload;
 }
 

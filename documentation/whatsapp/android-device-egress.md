@@ -8,8 +8,8 @@ Last updated: 2026-07-19.
 
 - PR 1, node registry and PostgreSQL fenced-lease primitives, is deployed as commit `6c53c5e` with migration `20260719160000_device_tunnel_node_registry_leases`.
 - PR 2, distributed outbound rate limiting and per-session dispatch serialization, is deployed as commit `0d6c77a` with migration `20260719180000_whatsapp_distributed_rate_limits`.
+- PR 3, node-scoped tokens and assignment-aware routing, is complete on `clean-history` and pending review/deployment. It required no migration.
 - Production remains on the compatibility path: distributed placement is off and outbound rate limiting is disabled by default. The gateway registry is live, but leases do not yet control browser ownership.
-- PR 3 is next: node-scoped token claims, assignment-aware endpoint routing, gateway epoch checks, and the corresponding Android token/client update.
 - PRs 4–7 remain: runtime lease enforcement and drain, movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
 
 See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
@@ -25,6 +25,7 @@ DEVICE_TUNNEL_GATEWAY_URL=http://127.0.0.1:3220
 DEVICE_TUNNEL_GATEWAY_NODE_ID=cyprus-egress-1
 DEVICE_TUNNEL_GATEWAY_REGION=cyprus
 DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS=100
+DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES=10000
 DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false
 WHATSAPP_RATE_LIMIT_MODE=disabled
 ```
@@ -34,6 +35,8 @@ WHATSAPP_RATE_LIMIT_MODE=disabled
 The SIM Relay integration page shows the live tunnel state and the last verified WhatsApp send. Immediately before a send, the gateway snapshots the assigned tunnel's byte counters and issues a one-time nonce. A proof is written only after WhatsApp Web reports success and the gateway confirms that browser-to-phone bytes increased inside that send window. The receipt contains a truncated one-way message hash, masked phone connection IP, network type, gateway node, per-send traffic delta, and timestamps; it does not store message content or the recipient.
 
 The gateway registers `DEVICE_TUNNEL_GATEWAY_NODE_ID` in PostgreSQL and heartbeats every 15 seconds. Use one stable ID per deployed gateway; do not derive it from a PID or container restart. Keep `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` during the PR 1 rollout. With the flag disabled, node registry fields are populated but assignment and lease enforcement are not activated, so the existing single-host browser-to-loopback-SOCKS path remains unchanged. Enabling the flag requires an explicit node ID and is reserved for the later routing/ownership phases.
+
+PR 3 keeps that flag-off routing behavior: token exchange returns the global `DEVICE_TUNNEL_PUBLIC_URL`, and gateway connect/disconnect observations may continue updating `gatewayNodeId` as before. With distributed placement enabled in a later controlled phase, bind/token exchange keeps an eligible current assignment or selects a healthy online, non-draining node with capacity. The binding row is locked transactionally; a node ownership change increments `assignmentEpoch`, while a stable assignment does not. The endpoint returns the assigned registry node's validated WSS URL. Node URLs must be credential-free WebSocket URLs with no query or fragment; production accepts only `wss://`.
 
 After deploying the node-registry migration, verify the node's `status`, `lastHeartbeatAt`, `activeSessions`, configured URLs, region, capacity, and version in `DeviceTunnelGatewayNode`. A heartbeat update is scoped to both node ID and process `startedAt`; an older process cannot overwrite a replacement process's heartbeat.
 
@@ -61,7 +64,10 @@ Disabling the binding returns the session to server egress; this is an explicit 
 ## Security properties
 
 - Android keeps its P-256 private key in Android Keystore.
-- A valid SMS Relay device token can request a short-lived challenge, but only a signature from the enrolled device key can exchange it for a 15-minute tunnel token.
+- A valid SMS Relay device token can request a short-lived challenge, but only a signature from the enrolled device key can exchange it for a five-minute tunnel token.
+- Tunnel JWTs contain `aud`, `nodeId`, `sessionId`, `bindingId`, `deviceId`, `locationId`, `assignmentEpoch`, `jti`, `iat`, and `exp`. Issuance rechecks the tenant, current device token hash and credential version, enrolled key, binding, and session egress mode after consuming the one-time challenge; distributed issuance also rechecks assignment, node health, and the registry WSS URL. Every successful device-key enrollment increments `tunnelCredentialVersion`, so an older token cannot survive re-pairing.
+- The gateway verifies signature and audience, rejects tokens for another node, and rechecks current tenant/device/binding/session/assignment epoch and device credential state before creating a proxy. Each JTI is consumed once per gateway process. Expired entries are purged; the cache is bounded by `DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES` and fails closed when full. A process restart clears only this bounded replay cache; durable wrong-node, credential-version, and assignment-epoch fencing still applies.
+- Android accepts only credential-free `wss://` endpoints returned by the token exchange. Every reconnect obtains a new challenge and token, so reassignment supplies the new node URL. Failed reconnects retain exponential backoff capped at 60 seconds with full jitter.
 - The gateway listens locally behind Caddy, creates loopback-only SOCKS endpoints, allows domain-form WhatsApp/Meta destinations on port 443, rejects literal IP targets, and limits concurrent streams and frame size.
 - Browser sessions configured for device egress have an explicit SOCKS proxy, remote DNS enforcement, and QUIC disabled so they cannot bypass the TCP tunnel.
 - Tunnel loss blocks Web Bridge outbox rows. Cloud fallback requires detected coexistence, the same sender number, and an open customer-service window (or an eligible template).
@@ -70,7 +76,7 @@ Disabling the binding returns the session to server egress; this is an explicit 
 
 - The active production path remains single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. The node registry and fenced-lease primitives are present for phased rollout, but routing and runtime lease enforcement remain disabled while `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`.
 - Rate-limit schema, Redis counters, dispatch locks, queue rescheduling, and admin UI support are deployed, but production enforcement remains off until the required shadow observation cycle is completed.
-- Cross-node failover is not safe yet: tokens are not node/epoch scoped, runtime leases do not stop stale browsers, and session authentication is still stored on the local host. These are PRs 3, 4, and 5 respectively.
+- Cross-node browser failover is not safe yet: tokens and reconnect routing are now node/assignment-epoch scoped, but PR 4 runtime leases do not yet stop stale browsers and PR 5 session authentication is still stored on the local host. Do not enable multi-node automatic failover.
 - The current allowlist may need additions when WhatsApp changes media/CDN hostnames. Add only observed, reviewed suffixes through `DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES`.
 - Legal/Meta approval and an internal pilot remain required before exposing this transport to customer scale.
 

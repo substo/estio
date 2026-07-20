@@ -4,6 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import db from "../lib/db";
 import { maskIpAddress, verifyDeviceTunnelToken } from "../lib/device-tunnel/auth";
+import { authorizeDeviceTunnelGatewayConnection } from "../lib/device-tunnel/gateway-authorization";
+import { BoundedJtiReplayCache } from "../lib/device-tunnel/jti-replay-cache";
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
 import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
@@ -44,6 +46,7 @@ type TunnelFrame = {
 type ConnectedDevice = {
     bindingId: string;
     deviceId: string;
+    assignmentEpoch: number;
     bridgeSessionId: string;
     ws: WebSocket;
     proxyServer: ReturnType<typeof createTcpServer>;
@@ -57,6 +60,10 @@ type ConnectedDevice = {
 };
 
 const devicesByBridgeSession = new Map<string, ConnectedDevice>();
+const configuredJtiCacheEntries = Number(process.env.DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES || 10_000);
+const consumedTunnelJtis = new BoundedJtiReplayCache(
+    Number.isSafeInteger(configuredJtiCacheEntries) && configuredJtiCacheEntries > 0 ? configuredJtiCacheEntries : 10_000,
+);
 
 function isInternalAuthorized(req: IncomingMessage) {
     return Boolean(INTERNAL_SECRET) && req.headers["x-device-tunnel-secret"] === INTERNAL_SECRET;
@@ -209,34 +216,40 @@ async function disconnectDevice(device: ConnectedDevice, reason: string) {
     device.proxyServer.close();
     if (!isCurrentConnection) return;
     await (db as any).deviceTunnelBinding.updateMany({
-        where: { id: device.bindingId },
-        data: { status: "offline", lastError: reason, gatewayNodeId: null },
+        where: {
+            id: device.bindingId,
+            ...(DISTRIBUTED_PLACEMENT ? {
+                gatewayNodeId: GATEWAY_NODE_ID,
+                assignmentEpoch: device.assignmentEpoch,
+            } : {}),
+        },
+        data: {
+            status: "offline",
+            lastError: reason,
+            ...(!DISTRIBUTED_PLACEMENT ? { gatewayNodeId: null } : {}),
+        },
     }).catch(() => undefined);
 }
 
 async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
     const token = extractBearer(req);
-    const tokenPayload = verifyDeviceTunnelToken(token);
-    const binding = await (db as any).deviceTunnelBinding.findFirst({
-        where: {
-            id: tokenPayload.bindingId,
-            deviceId: tokenPayload.deviceId,
-            locationId: tokenPayload.locationId,
-            device: {
-                paired: true,
-                tunnelRevokedAt: null,
-                tunnelCredentialVersion: tokenPayload.credentialVersion,
-            },
-        },
-        include: { session: { select: { sessionId: true, egressMode: true } } },
+    const tokenPayload = verifyDeviceTunnelToken(token, GATEWAY_NODE_ID);
+    const binding = await authorizeDeviceTunnelGatewayConnection({
+        db: db as any,
+        token: tokenPayload,
+        gatewayNodeId: GATEWAY_NODE_ID,
+        distributedPlacement: DISTRIBUTED_PLACEMENT,
     });
-    if (!binding || binding.session.egressMode !== "device_tunnel") throw new Error("Tunnel binding is not active");
+    if (!consumedTunnelJtis.consume(tokenPayload.jti, tokenPayload.exp)) {
+        throw new Error("Tunnel token was already used");
+    }
 
     const streams = new Map<string, Socket>();
     const pendingOpen = new Map<string, NodeJS.Timeout>();
     const base = {
         bindingId: binding.id,
         deviceId: binding.deviceId,
+        assignmentEpoch: tokenPayload.assignmentEpoch,
         bridgeSessionId: binding.session.sessionId,
         ws,
         streams,
@@ -264,17 +277,28 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
     devicesByBridgeSession.set(device.bridgeSessionId, device);
     const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
     const egressIpMasked = maskIpAddress(forwardedFor || String(req.socket.remoteAddress || ""));
-    await (db as any).deviceTunnelBinding.update({
-        where: { id: binding.id },
+    const connected = await (db as any).deviceTunnelBinding.updateMany({
+        where: {
+            id: binding.id,
+            deviceId: tokenPayload.deviceId,
+            sessionId: tokenPayload.sessionId,
+            locationId: tokenPayload.locationId,
+            assignmentEpoch: tokenPayload.assignmentEpoch,
+            ...(DISTRIBUTED_PLACEMENT ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
+        },
         data: {
             status: "online",
-            gatewayNodeId: GATEWAY_NODE_ID,
+            ...(!DISTRIBUTED_PLACEMENT ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
             egressIpMasked,
             lastConnectedAt: new Date(),
             lastSeenAt: new Date(),
             lastError: null,
         },
     });
+    if (Number(connected?.count || 0) !== 1) {
+        await disconnectDevice(device, "Tunnel assignment changed during connection");
+        throw new Error("Tunnel assignment changed during connection");
+    }
     console.info("[Device Tunnel] Android relay connected", {
         bindingId: binding.id,
         deviceId: binding.deviceId,
@@ -300,7 +324,11 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         const streamId = String(frame.streamId || "");
         if (frame.type === "hello" || frame.type === "pong") {
             await (db as any).deviceTunnelBinding.updateMany({
-                where: { id: binding.id },
+                where: {
+                    id: binding.id,
+                    assignmentEpoch: device.assignmentEpoch,
+                    ...(DISTRIBUTED_PLACEMENT ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
+                },
                 data: {
                     status: "online",
                     lastSeenAt: new Date(),

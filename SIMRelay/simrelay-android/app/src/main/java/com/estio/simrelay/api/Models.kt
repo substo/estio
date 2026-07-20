@@ -31,7 +31,9 @@ data class TunnelTokenResponse(
     val tunnelToken: String,
     val gatewayUrl: String,
     val expiresInSeconds: Int,
-    val bindingId: String
+    val bindingId: String,
+    val nodeId: String,
+    val assignmentEpoch: Int
 )
 
 data class Job(

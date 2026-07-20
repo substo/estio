@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
                 capabilities: acceptedCapabilities,
                 appVersion: typeof app_version === "string" ? app_version.trim().slice(0, 64) || null : null,
                 tunnelPublicKey: tunnelPublicKey || null,
+                ...(tunnelPublicKey ? { tunnelCredentialVersion: { increment: 1 } } : {}),
                 tunnelRevokedAt: null,
                 status: "online",
                 lastSeenAt: new Date(),

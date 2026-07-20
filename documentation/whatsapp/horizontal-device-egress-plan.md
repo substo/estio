@@ -18,13 +18,17 @@ Last updated: 2026-07-19.
 |---|---|---|
 | PR 1 — Node registry and fenced lease primitives | Complete (`6c53c5e`) | Migrated and deployed; registry heartbeat is live; distributed placement remains disabled. |
 | PR 2 — Distributed rate limiter | Complete (`0d6c77a`) | Migrated and deployed; limiter defaults to `disabled` pending the shadow rollout. |
-| PR 3 — Node-scoped device tokens and routing | Not started | Existing global tunnel URL and token contract remain active. |
+| PR 3 — Node-scoped device tokens and routing | Complete on `clean-history`; pending review/deployment | Compatibility mode still returns the global URL; distributed placement remains disabled in production. |
 | PR 4 — Co-located runtime ownership | Not started | Lease primitives exist but do not yet fence gateway/bridge runtime ownership. |
 | PR 5 — Durable session-auth placement | Not started | Production still uses host-local `LocalAuth`. |
 | PR 6 — Multi-node deployment and operations | Not started | One production egress node is registered. |
 | PR 7 — Cleanup and security review | Not started | Single-node compatibility code remains required. |
 
 The production data path is intentionally unchanged after PRs 1–2. `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` preserves single-node routing, and an absent or invalid `WHATSAPP_RATE_LIMIT_MODE` resolves to `disabled`. Do not enable distributed placement until PRs 3–5 are complete. Rate limiting may be advanced independently from `disabled` to `shadow`, observed for at least one complete daily window, and then moved to `enforce` after Redis and queue telemetry are healthy.
+
+PR 3 is implemented without a migration. Binding assignment is row-locked in PostgreSQL, retains an eligible current node, and increments `assignmentEpoch` only when `gatewayNodeId` changes. Five-minute tunnel JWTs contain audience, node, session, binding, device, tenant, assignment epoch, JTI, issued-at, and expiry claims. The gateway revalidates those claims against current binding, session, device credential, node health, and assignment state before accepting a WebSocket. Its per-process JTI cache purges expired entries, has a configurable hard bound, and fails closed rather than evicting an unexpired replay fence. Android validates and uses each exchange response's WSS URL, requests a fresh challenge/token for every reconnect, and applies exponential backoff with full jitter.
+
+With `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`, token exchange continues to return `DEVICE_TUNNEL_PUBLIC_URL`, does not assign or rebalance bindings, and the gateway preserves the existing single-node observation writes. The new five-minute scoped token contract applies in both modes. No production flag, rate-limit mode, lease ownership, Chromium behavior, session-auth storage, or node count is changed by PR 3.
 
 ### Implemented in PR 1
 
@@ -271,7 +275,7 @@ Result: acceptance passed in focused concurrency tests and the production build.
 
 ### PR 3 — Node-scoped device tokens and routing
 
-**Status: next implementation PR.** This activates assignment-aware routing but must not yet activate automatic cross-node browser failover.
+**Status: complete on `clean-history`, pending review and deployment.** This adds assignment-aware routing but does not activate automatic cross-node browser failover.
 
 - Assign bindings to a healthy node.
 - Return the assigned node URL from `/api/device-relay/v1/tunnel-token`.
@@ -288,6 +292,8 @@ Primary code surfaces: `app/api/admin/whatsapp-egress/bind/route.ts`, `app/api/d
 Acceptance: the wrong node rejects the token; reassignment causes Android to reconnect to the new endpoint; revoked epochs cannot reconnect.
 
 Rollback: turn distributed placement off. Existing single-node tokens and routing must continue to work without decrementing or reusing assignment epochs.
+
+Result: no migration was required. Assignment uses `SELECT ... FOR UPDATE` on the binding and the PR 1 stable placement helper. Issuance and gateway acceptance validate the same tenant/device/binding/session/epoch scope; distributed acceptance additionally requires the configured gateway to be the healthy assigned node. JWT audience is `device-tunnel-gateway`, lifetime is five minutes, and each JTI is accepted once per gateway process. Replay state is capped by `DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES` (default 10,000); after expired entries are removed, a full cache rejects new connections until capacity becomes available. A gateway process restart clears this best-effort cache, while node and assignment-epoch checks remain durable. Android accepts only credential-free `wss://` node URLs and obtains a new URL with every fresh token exchange. Focused TypeScript and Android unit/build checks cover stable/capacity placement, concurrency, complete claims, wrong audience/node/scope/epoch, credential revocation/version fencing, bounded replay, reassigned URLs, full jitter, and flag-off compatibility.
 
 ### PR 4 — Co-located runtime ownership
 

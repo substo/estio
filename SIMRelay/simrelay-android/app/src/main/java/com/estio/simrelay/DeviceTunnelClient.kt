@@ -36,9 +36,10 @@ class DeviceTunnelClient(
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
     @Volatile private var webSocket: WebSocket? = null
+    private val reconnectPolicy = DeviceTunnelReconnectPolicy()
 
     suspend fun runForever() {
-        var backoffMs = 5_000L
+        var backoffCapMs = reconnectPolicy.initialCap()
         while (scope.isActive) {
             try {
                 val challengeResponse = ApiClient.api.getTunnelChallenge(TunnelTokenRequest(action = "challenge"))
@@ -50,12 +51,17 @@ class DeviceTunnelClient(
                 )
                 val config = tokenResponse.body()
                     ?: throw IllegalStateException("Tunnel token unavailable (${tokenResponse.code()})")
-                backoffMs = 5_000L
-                connectOnce(config.gatewayUrl, config.tunnelToken)
+                val opened = connectOnce(DeviceTunnelRouting.endpoint(config), config.tunnelToken)
+                if (opened) {
+                    backoffCapMs = reconnectPolicy.initialCap()
+                } else {
+                    delay(reconnectPolicy.fullJitterDelay(backoffCapMs))
+                    backoffCapMs = reconnectPolicy.nextCap(backoffCapMs)
+                }
             } catch (_: Exception) {
                 closeStreams()
-                delay(backoffMs)
-                backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
+                delay(reconnectPolicy.fullJitterDelay(backoffCapMs))
+                backoffCapMs = reconnectPolicy.nextCap(backoffCapMs)
             }
         }
     }
@@ -72,23 +78,22 @@ class DeviceTunnelClient(
         client.dispatcher.executorService.shutdown()
     }
 
-    private suspend fun connectOnce(gatewayUrl: String, token: String) = suspendCancellableCoroutine { continuation ->
-        val endpoint = gatewayUrl.trimEnd('/').let {
-            if (it.endsWith("/v1/device")) it else "$it/v1/device"
-        }
+    private suspend fun connectOnce(endpoint: String, token: String) = suspendCancellableCoroutine { continuation ->
         val request = Request.Builder()
             .url(endpoint)
             .header("Authorization", "Bearer $token")
             .build()
         var completed = false
+        var opened = false
         fun finish() {
             if (completed) return
             completed = true
             closeStreams()
-            if (continuation.isActive) continuation.resume(Unit)
+            if (continuation.isActive) continuation.resume(opened)
         }
         val listener = object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
+                opened = true
                 webSocket = ws
                 ws.send(JSONObject().put("type", "hello").put("networkType", networkType()).toString())
             }

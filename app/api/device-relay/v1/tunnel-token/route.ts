@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { extractDeviceFromAuthHeader, hashDeviceToken } from "@/lib/sms-relay/auth";
 import {
+    DEVICE_TUNNEL_TOKEN_TTL_SECONDS,
     generateTunnelChallenge,
     hashTunnelChallenge,
     issueDeviceTunnelToken,
     verifyTunnelChallengeSignature,
 } from "@/lib/device-tunnel/auth";
+import { assignDeviceTunnelBindingToGateway } from "@/lib/device-tunnel/assignment";
+import { isDistributedDeviceTunnelPlacementEnabled } from "@/lib/device-tunnel/distributed-placement";
+import { resolveDeviceTunnelTokenRouting } from "@/lib/device-tunnel/token-routing";
 
 export const dynamic = "force-dynamic";
 
@@ -92,24 +96,80 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Challenge was already used" }, { status: 409 });
     }
 
-    const token = issueDeviceTunnelToken({
-        deviceId: device.id,
-        locationId: device.locationId,
-        bindingId: device.tunnelBinding.id,
-        credentialVersion: Number(device.tunnelCredentialVersion || 1),
+    const current = await (db as any).smsRelayDevice.findFirst({
+        where: {
+            id: payload.deviceId,
+            locationId: payload.locationId,
+            paired: true,
+            deviceApiTokenHash: hashDeviceToken(rawDeviceToken),
+            tunnelRevokedAt: null,
+            capabilities: { has: "whatsapp_egress" },
+            tunnelCredentialVersion: device.tunnelCredentialVersion,
+        },
+        include: {
+            tunnelBinding: {
+                include: {
+                    session: { select: { id: true, locationId: true, egressMode: true } },
+                    gatewayNode: { select: { id: true, publicUrl: true } },
+                },
+            },
+        },
     });
-    const gatewayUrl = String(process.env.DEVICE_TUNNEL_PUBLIC_URL || "").trim();
-    const validGatewayScheme = process.env.NODE_ENV === "production"
-        ? gatewayUrl.startsWith("wss://")
-        : /^wss?:\/\//.test(gatewayUrl);
-    if (!gatewayUrl || !validGatewayScheme) {
+    if (
+        !current?.tunnelPublicKey
+        || !current.tunnelBinding
+        || current.tunnelBinding.locationId !== current.locationId
+        || current.tunnelBinding.deviceId !== current.id
+        || current.tunnelBinding.session?.locationId !== current.locationId
+        || current.tunnelBinding.session?.egressMode !== "device_tunnel"
+    ) {
+        return NextResponse.json({ error: "Device binding authorization changed" }, { status: 403 });
+    }
+
+    const distributedPlacement = isDistributedDeviceTunnelPlacementEnabled();
+    let binding = current.tunnelBinding;
+    if (distributedPlacement) {
+        try {
+            const assignment = await assignDeviceTunnelBindingToGateway({
+                db: db as any,
+                bindingId: binding.id,
+                region: String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "").trim() || null,
+            });
+            binding = {
+                ...binding,
+                gatewayNodeId: assignment.gatewayNodeId,
+                assignmentEpoch: assignment.assignmentEpoch,
+                gatewayNode: assignment.gatewayNode,
+            };
+        } catch {
+            return NextResponse.json({ error: "No healthy device tunnel gateway is available" }, { status: 503 });
+        }
+    }
+
+    let nodeId: string;
+    let gatewayUrl: string;
+    try {
+        ({ nodeId, gatewayUrl } = resolveDeviceTunnelTokenRouting({ distributedPlacement, binding }));
+    } catch {
         return NextResponse.json({ error: "Device tunnel gateway is not configured" }, { status: 503 });
     }
+
+    const token = issueDeviceTunnelToken({
+        nodeId,
+        sessionId: binding.sessionId,
+        deviceId: current.id,
+        locationId: current.locationId,
+        bindingId: binding.id,
+        assignmentEpoch: Number(binding.assignmentEpoch || 0),
+        credentialVersion: Number(current.tunnelCredentialVersion || 1),
+    });
 
     return NextResponse.json({
         tunnelToken: token,
         gatewayUrl,
-        expiresInSeconds: 15 * 60,
-        bindingId: device.tunnelBinding.id,
+        expiresInSeconds: DEVICE_TUNNEL_TOKEN_TTL_SECONDS,
+        bindingId: binding.id,
+        nodeId,
+        assignmentEpoch: Number(binding.assignmentEpoch || 0),
     });
 }

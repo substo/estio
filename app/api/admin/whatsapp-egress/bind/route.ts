@@ -3,6 +3,8 @@ import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { buildWhatsAppWebBridgeSessionId, stopWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
+import { assignDeviceTunnelBindingToGateway } from "@/lib/device-tunnel/assignment";
+import { isDistributedDeviceTunnelPlacementEnabled } from "@/lib/device-tunnel/distributed-placement";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +48,8 @@ export async function POST(req: NextRequest) {
         update: { egressMode: "device_tunnel" },
     });
 
-    const binding = await db.$transaction(async (tx: any) => {
+    const distributedPlacement = isDistributedDeviceTunnelPlacementEnabled();
+    let binding = await db.$transaction(async (tx: any) => {
         await tx.deviceTunnelBinding.deleteMany({
             where: {
                 OR: [
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
                 deviceId,
                 status: "offline",
                 networkType: null,
-                gatewayNodeId: null,
+                ...(!distributedPlacement ? { gatewayNodeId: null } : {}),
                 egressIpMasked: null,
                 lastConnectedAt: null,
                 lastSeenAt: null,
@@ -80,6 +83,23 @@ export async function POST(req: NextRequest) {
             },
         });
     });
+
+    if (distributedPlacement) {
+        try {
+            binding = await assignDeviceTunnelBindingToGateway({
+                db: db as any,
+                bindingId: binding.id,
+                region: String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "").trim() || null,
+            }) as any;
+        } catch (error: any) {
+            console.warn("[Device Tunnel] WhatsApp egress binding has no eligible gateway", {
+                locationId: location.id,
+                bindingId: binding.id,
+                reason: error?.message || "assignment_failed",
+            });
+            return NextResponse.json({ error: "No healthy device tunnel gateway is available" }, { status: 503 });
+        }
+    }
 
     console.info("[Device Tunnel] WhatsApp egress binding changed", {
         actorUserId: userId,
