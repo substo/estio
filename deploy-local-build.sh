@@ -665,6 +665,36 @@ NODE
         exit 1
     fi
 
+    WHATSAPP_BRIDGE_SESSION_DIR="\${WHATSAPP_WEB_BRIDGE_SESSION_DIR:-$WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT}"
+    case "\$WHATSAPP_BRIDGE_SESSION_DIR" in
+        /*) ;;
+        *) echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR must be an absolute path"; exit 1 ;;
+    esac
+    if [ "\$WHATSAPP_BRIDGE_SESSION_DIR" = "/" ] || [ "\$WHATSAPP_BRIDGE_SESSION_DIR" = "/home" ] || [ "\$WHATSAPP_BRIDGE_SESSION_DIR" = "/home/martin" ]; then
+        echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR is too broad for scoped Chromium cleanup"
+        exit 1
+    fi
+    if echo "\$WHATSAPP_BRIDGE_SESSION_DIR" | grep -Eq '/estio-app(-blue|-green)?(/|$)'; then
+        echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR must be outside release directories. Current: \$WHATSAPP_BRIDGE_SESSION_DIR"
+        exit 1
+    fi
+    if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
+        echo "🛑 Stopping the WhatsApp browser before replacing its gateway generation"
+        pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
+    fi
+    WHATSAPP_PROFILE_PATTERN="\$WHATSAPP_BRIDGE_SESSION_DIR/session-"
+    if pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then
+        echo "🧹 Terminating Chromium children scoped to the persistent WhatsApp session directory"
+        pkill -TERM -f "\$WHATSAPP_PROFILE_PATTERN" 2>/dev/null || true
+        for _ in \$(seq 1 30); do
+            if ! pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then break; fi
+            sleep 1
+        done
+        if pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then
+            pkill -KILL -f "\$WHATSAPP_PROFILE_PATTERN" 2>/dev/null || true
+        fi
+    fi
+
     if [ -n "\${DEVICE_TUNNEL_JWT_SECRET:-}" ] && [ -n "\${DEVICE_TUNNEL_INTERNAL_SECRET:-}" ]; then
         echo "🔐 Ensuring Android device tunnel gateway is running (\$DEVICE_TUNNEL_GATEWAY_APP_NAME) on :\$DEVICE_TUNNEL_GATEWAY_PORT..."
         if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
@@ -694,13 +724,7 @@ NODE
     fi
 
     echo "📱 Ensuring WhatsApp Web Bridge process is running (\$WHATSAPP_BRIDGE_APP_NAME) on :\$WHATSAPP_BRIDGE_PORT..."
-    WHATSAPP_BRIDGE_SESSION_DIR="\${WHATSAPP_WEB_BRIDGE_SESSION_DIR:-$WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT}"
     mkdir -p "\$WHATSAPP_BRIDGE_SESSION_DIR"
-    if echo "\$WHATSAPP_BRIDGE_SESSION_DIR" | grep -Eq '/estio-app(-blue|-green)?(/|$)'; then
-        echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR must be outside release directories. Current: \$WHATSAPP_BRIDGE_SESSION_DIR"
-        exit 1
-    fi
-
     stop_orphaned_whatsapp_bridge_browsers() {
         local session_pattern="\$WHATSAPP_BRIDGE_SESSION_DIR/session-"
         if ! pgrep -f "\$session_pattern" > /dev/null 2>&1; then
@@ -795,7 +819,7 @@ NODE
     CURRENT_BRIDGE_SESSION_DIR=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CWD=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.pm_cwd || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CODE_HASH=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || "");' 2>/dev/null || true)
-    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-payload.ts lib/whatsapp/web-bridge-readiness.ts lib/whatsapp/web-bridge-runtime-health.ts lib/whatsapp/web-bridge-stale.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
+    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-*.ts lib/whatsapp/session-auth-*.ts lib/device-tunnel/runtime-ownership.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
     BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
 
     if [ -n "\$BRIDGE_HEALTH_JSON" ] && whatsapp_bridge_has_ready_session "\$BRIDGE_HEALTH_JSON" && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ] && [ -n "\$EXPECTED_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_BRIDGE_CODE_HASH" = "\$EXPECTED_BRIDGE_CODE_HASH" ]; then
@@ -818,7 +842,7 @@ NODE
         fi
         stop_orphaned_whatsapp_bridge_browsers
         NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
-            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
+            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --kill-timeout 200000 --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
     fi
     echo "📱 WhatsApp Web Bridge app webhook: \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"
 

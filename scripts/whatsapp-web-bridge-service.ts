@@ -27,6 +27,11 @@ import {
     validateDeviceTunnelRuntimeOwnershipDescriptor,
     type DeviceTunnelRuntimeOwnership,
 } from "../lib/device-tunnel/runtime-ownership";
+import { validateEncryptedWhatsAppSessionAuthConfiguration } from "../lib/whatsapp/session-auth-placement";
+import { SessionAuthPlacementStore } from "../lib/whatsapp/session-auth-store";
+import { WhatsAppSessionAuthCoordinator } from "../lib/whatsapp/session-auth-coordinator";
+import { R2SessionAuthObjectStore, getSessionAuthObjectStoreConfig } from "../lib/whatsapp/session-auth-object-store";
+import { GoogleSessionAuthKeyWrapper } from "../lib/whatsapp/session-auth-kms";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -42,6 +47,16 @@ if (RUNTIME_LEASE_ENFORCEMENT && (!GATEWAY_NODE_ID || !RUNTIME_OWNER_INSTANCE_ID
     throw new Error("The bridge requires DEVICE_TUNNEL_GATEWAY_NODE_ID and DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID when runtime lease enforcement is enabled");
 }
 const SESSION_DIR = String(process.env.WHATSAPP_WEB_BRIDGE_SESSION_DIR || path.join(process.cwd(), ".data", "whatsapp-web-sessions"));
+const SESSION_AUTH_CONFIGURATION = validateEncryptedWhatsAppSessionAuthConfiguration();
+const SESSION_AUTH_COORDINATOR = SESSION_AUTH_CONFIGURATION.active
+    ? new WhatsAppSessionAuthCoordinator({
+        store: new SessionAuthPlacementStore(db as any),
+        objectStore: new R2SessionAuthObjectStore(getSessionAuthObjectStoreConfig()),
+        keyWrapper: new GoogleSessionAuthKeyWrapper(SESSION_AUTH_CONFIGURATION.kmsKeyPath),
+        kmsKeyName: SESSION_AUTH_CONFIGURATION.kmsKeyPath,
+        dataPath: SESSION_DIR,
+    })
+    : null;
 const APP_WEBHOOK_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_INLINE_MEDIA_BYTES = Math.floor(APP_WEBHOOK_BODY_LIMIT_BYTES * 0.6);
 
@@ -68,6 +83,10 @@ type ManagedSession = {
     ownership?: DeviceTunnelRuntimeOwnership | null;
     ownershipValid?: boolean;
     restarting?: boolean;
+    shuttingDown?: boolean;
+    authPlacement?: any;
+    authDurableReady?: boolean;
+    initialCheckpointInFlight?: boolean;
 };
 
 const sessions = new Map<string, ManagedSession>();
@@ -91,6 +110,7 @@ const NON_READY_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_NON_R
 const PROTOCOL_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_PROTOCOL_TIMEOUT_MS || 120_000), 30_000);
 const INITIALIZE_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_INITIALIZE_TIMEOUT_MS || 45_000), 10_000);
 const OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_OPERATION_TIMEOUT_MS || 30_000), 5_000);
+const SESSION_AUTH_STOP_TIMEOUT_MS = SESSION_AUTH_COORDINATOR ? 190_000 : OPERATION_TIMEOUT_MS;
 const MEDIA_OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_OPERATION_TIMEOUT_MS || 60_000), 10_000);
 const SESSION_RESTART_BACKOFF_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_SESSION_RESTART_BACKOFF_MS || 15_000), 1_000);
 const MAX_SESSION_RESTART_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_SESSION_RESTART_ATTEMPTS || 5), 1);
@@ -318,7 +338,8 @@ function serializeManagedSession(session: ManagedSession) {
         lastSuccessAt: session.lastActiveProbeSuccessAt,
         maxAgeMs: ACTIVE_PROBE_STALE_MS,
     });
-    const ready = Boolean(session.ready && runtimeReady && activeProbeFresh);
+    const durableReady = !SESSION_AUTH_COORDINATOR || session.authDurableReady === true;
+    const ready = Boolean(session.ready && runtimeReady && activeProbeFresh && durableReady);
     return {
         sessionId: session.sessionId,
         locationId: session.locationId,
@@ -337,6 +358,10 @@ function serializeManagedSession(session: ManagedSession) {
         lastActiveProbeErrorAt: session.lastActiveProbeErrorAt?.toISOString?.() || null,
         gatewayGeneration: session.gatewayGeneration || null,
         lastError: session.lastError || null,
+        sessionAuthMode: SESSION_AUTH_CONFIGURATION.mode,
+        authDurableReady: durableReady,
+        authGeneration: Number(session.authPlacement?.currentGeneration || 0),
+        authEpoch: Number(session.authPlacement?.authEpoch || 0),
     };
 }
 
@@ -434,9 +459,40 @@ async function fenceManagedSession(session: ManagedSession, reason: string) {
     if (sessions.get(session.sessionId) !== session) return;
     sessions.delete(session.sessionId);
     session.ready = false;
-    session.ownershipValid = false;
     markSessionEvent(session, "blocked_egress", reason);
-    await session.client?.destroy?.().catch(() => null);
+    await quiesceManagedSession(session, true).catch(async () => {
+        await session.client?.destroy?.().catch(() => null);
+        if (SESSION_AUTH_COORDINATOR) await SESSION_AUTH_COORDINATOR.discardLocalProfile(session.sessionId).catch(() => null);
+    });
+    session.ownershipValid = false;
+}
+
+async function quiesceManagedSession(session: ManagedSession, checkpoint: boolean, allowInitialCheckpoint = false) {
+    session.shuttingDown = true;
+    session.ready = false;
+    sessions.delete(session.sessionId);
+    const destroy = async () => { await session.client?.destroy?.().catch(() => null); };
+    if (
+        checkpoint
+        && SESSION_AUTH_COORDINATOR
+        && session.authPlacement
+        && session.ownership
+        && (session.authDurableReady || allowInitialCheckpoint)
+    ) {
+        session.authPlacement = await SESSION_AUTH_COORDINATOR.checkpointAndDetach({
+            placement: session.authPlacement,
+            ownership: session.ownership,
+            bridgeSessionId: session.sessionId,
+            quiesce: destroy,
+        });
+        return;
+    }
+    await destroy();
+    if (SESSION_AUTH_COORDINATOR && session.authPlacement && !session.authDurableReady) {
+        session.authPlacement = await SESSION_AUTH_COORDINATOR.abandonUndurableProfile(session.authPlacement, session.sessionId);
+    } else if (SESSION_AUTH_COORDINATOR) {
+        await SESSION_AUTH_COORDINATOR.discardLocalProfile(session.sessionId);
+    }
 }
 
 async function refreshRuntimeSessionOwnerships() {
@@ -481,11 +537,10 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
     });
     const { sessionId, locationId } = session;
     try {
-        sessions.delete(sessionId);
-        await session.client?.destroy?.().catch(() => null);
+        await quiesceManagedSession(session, true);
     } finally {
         setTimeout(() => {
-            startSession(sessionId, locationId).catch((restartError: any) => {
+            startSession(sessionId, locationId, session.ownership).catch((restartError: any) => {
                 console.error(`[WhatsApp Web Bridge] Failed to restart stale session ${sessionId}:`, restartError?.message || restartError);
             });
         }, SESSION_RESTART_BACKOFF_MS);
@@ -997,6 +1052,9 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
     }
 
     const tunnelProxy = await getDeviceTunnelProxy(sessionId, locationId, expectedOwnership);
+    const authAttachment = SESSION_AUTH_COORDINATOR && tunnelProxy?.ownership
+        ? await SESSION_AUTH_COORDINATOR.attach({ ownership: tunnelProxy.ownership, bridgeSessionId: sessionId })
+        : null;
     const { Client, LocalAuth } = require("whatsapp-web.js");
     const client = new Client({
         userAgent: BROWSER_USER_AGENT,
@@ -1045,6 +1103,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         deviceTunnelBindingId: tunnelProxy?.bindingId || null,
         ownership: tunnelProxy?.ownership || null,
         ownershipValid: !RUNTIME_LEASE_ENFORCEMENT || !tunnelProxy || Boolean(tunnelProxy.ownership),
+        authPlacement: authAttachment?.placement || null,
+        authDurableReady: !SESSION_AUTH_COORDINATOR || Boolean(authAttachment?.durableReady),
+        shuttingDown: false,
+        initialCheckpointInFlight: false,
     };
     sessions.set(sessionId, managed);
 
@@ -1085,11 +1147,27 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         markSessionEvent(managed, "ready");
         managed.lastReadyAt = new Date();
         console.log(`[WhatsApp Web Bridge] Ready ${sessionId}`);
-        await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
-        await activelyProbeManagedSession(managed, true);
+        const probed = await activelyProbeManagedSession(managed, true);
+        if (SESSION_AUTH_COORDINATOR && !managed.authDurableReady) {
+            if (!probed || managed.initialCheckpointInFlight) return;
+            managed.initialCheckpointInFlight = true;
+            markSessionEvent(managed, "checkpointing");
+            try {
+                await quiesceManagedSession(managed, true, true);
+                await startSession(sessionId, locationId, managed.ownership);
+            } catch (error: any) {
+                console.error(`[WhatsApp Web Bridge] Initial durable checkpoint failed for ${sessionId}`, {
+                    code: String(error?.code || "SESSION_AUTH_CHECKPOINT_FAILED").slice(0, 64),
+                    name: String(error?.name || "Error").slice(0, 64),
+                });
+            }
+            return;
+        }
+        if (probed) await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
     });
 
     client.on("disconnected", async (reason: string) => {
+        if (managed.shuttingDown) return;
         managed.ready = false;
         markSessionEvent(managed, "disconnected", reason);
         console.warn(`[WhatsApp Web Bridge] Disconnected ${sessionId}:`, reason);
@@ -1140,9 +1218,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
 async function stopSession(sessionId: string) {
     const session = sessions.get(sessionId);
     sessions.delete(sessionId);
-    if (session?.client) {
-        await session.client.destroy().catch(() => null);
-    }
+    if (session?.client) await quiesceManagedSession(session, true);
 }
 
 async function sendMessage(sessionId: string, payload: any) {
@@ -1184,16 +1260,19 @@ async function sendMessage(sessionId: string, payload: any) {
     try {
         const text = String(payload.text || "");
         const preview = getWhatsAppLinkPreviewDecision(text);
+        const linkPreviewRequested = typeof payload.linkPreview === "boolean"
+            ? payload.linkPreview
+            : preview.shouldRequestPreview;
         const proofNonce = await beginDeviceTunnelSendProof(session);
         const sent = await withStaleRecovery(session, () => withTimeout(
-            session.client.sendMessage(to, text, preview.shouldRequestPreview ? { linkPreview: true } : undefined),
+            session.client.sendMessage(to, text, { linkPreview: linkPreviewRequested }),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`
         ));
         const messageId = sent?.id?._serialized || sent?.id?.id || "";
         const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
         const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
-        if (preview.shouldRequestPreview) {
+        if (linkPreviewRequested) {
             const sentLinks = Array.isArray(sent?.links) ? sent.links.length : null;
             console.log("[WhatsApp Web Bridge] Text URL send completed", {
                 sessionId,
@@ -1207,7 +1286,7 @@ async function sendMessage(sessionId: string, payload: any) {
         return {
             messageId,
             egressProof,
-            linkPreviewRequested: preview.shouldRequestPreview,
+            linkPreviewRequested,
             linkPreviewHost: preview.host,
             sentLinksCount: Array.isArray(sent?.links) ? sent.links.length : undefined,
         };
@@ -1373,6 +1452,7 @@ const server = createServer(async (req, res) => {
                 sessionCount: sessions.size,
                 sessions: Array.from(sessions.values()).map(serializeManagedSession),
                 sessionDir: SESSION_DIR,
+                sessionAuthMode: SESSION_AUTH_CONFIGURATION.mode,
                 maxInlineMediaBytes: MAX_INLINE_MEDIA_BYTES,
                 protocolTimeoutMs: PROTOCOL_TIMEOUT_MS,
             });
@@ -1388,6 +1468,7 @@ const server = createServer(async (req, res) => {
                 readySessionCount: readySessions.length,
                 sessions: serializedSessions,
                 sessionDir: SESSION_DIR,
+                sessionAuthMode: SESSION_AUTH_CONFIGURATION.mode,
             });
         }
 
@@ -1415,13 +1496,31 @@ const server = createServer(async (req, res) => {
                 await fenceManagedSession(session, "Runtime ownership was fenced");
                 return json(res, 200, { success: true, sessionId });
             }
+            if (req.method === "POST" && parts[2] === "auth-rollback") {
+                if (!SESSION_AUTH_COORDINATOR) return json(res, 409, { error: "Durable session auth is not active." });
+                const body = await readJson(req);
+                const locationId = String(body.locationId || "").trim();
+                const ownership = validateDeviceTunnelRuntimeOwnershipDescriptor(body.ownership);
+                if (ownership.locationId !== locationId) return json(res, 400, { error: "Rollback location scope does not match ownership." });
+                await withTimeout(stopSession(sessionId), SESSION_AUTH_STOP_TIMEOUT_MS, `WhatsApp rollback stop session ${sessionId}`);
+                const placement = await (db as any).whatsAppSessionAuthPlacement.findUnique({ where: { sessionId: ownership.sessionId } });
+                if (!placement) return json(res, 404, { error: "Session-auth placement was not found." });
+                await SESSION_AUTH_COORDINATOR.rollbackToPrevious(placement.id, ownership);
+                startSession(sessionId, locationId, ownership).catch(() => null);
+                return json(res, 202, { success: true, sessionId, status: "restoring_previous" });
+            }
             if (req.method === "POST" && parts[2] === "stop") {
-                await withTimeout(stopSession(sessionId), OPERATION_TIMEOUT_MS, `WhatsApp stop session ${sessionId}`);
+                await withTimeout(stopSession(sessionId), SESSION_AUTH_STOP_TIMEOUT_MS, `WhatsApp stop session ${sessionId}`);
                 return json(res, 200, { success: true, sessionId });
             }
             if (req.method === "POST" && parts[2] === "clear") {
-                await withTimeout(stopSession(sessionId), OPERATION_TIMEOUT_MS, `WhatsApp clear stop session ${sessionId}`);
-                await rm(path.join(SESSION_DIR, `session-${sessionId}`), { recursive: true, force: true }).catch(() => null);
+                await withTimeout(stopSession(sessionId), SESSION_AUTH_STOP_TIMEOUT_MS, `WhatsApp clear stop session ${sessionId}`);
+                if (SESSION_AUTH_COORDINATOR) {
+                    const placement = await (db as any).whatsAppSessionAuthPlacement.findUnique({ where: { sessionId } });
+                    if (placement) await SESSION_AUTH_COORDINATOR.requireRelink(placement.id, sessionId);
+                } else {
+                    await rm(path.join(SESSION_DIR, `session-${sessionId}`), { recursive: true, force: true }).catch(() => null);
+                }
                 return json(res, 200, { success: true, sessionId });
             }
             if (req.method === "POST" && parts[2] === "send") {
@@ -1518,3 +1617,17 @@ async function bootstrapPersistedSessions() {
 }
 
 void bootstrapPersistedSessions();
+
+let gracefulShutdownStarted = false;
+async function gracefullyShutdown(signal: string) {
+    if (gracefulShutdownStarted) return;
+    gracefulShutdownStarted = true;
+    server.close();
+    console.log(`[WhatsApp Web Bridge] ${signal} received; checkpointing owned sessions.`);
+    const active = Array.from(sessions.values());
+    await Promise.allSettled(active.map((session) => quiesceManagedSession(session, true)));
+    process.exit(0);
+}
+
+process.once("SIGTERM", () => { void gracefullyShutdown("SIGTERM"); });
+process.once("SIGINT", () => { void gracefullyShutdown("SIGINT"); });

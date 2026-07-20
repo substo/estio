@@ -88,7 +88,9 @@ export class R2SessionAuthObjectStore {
             region: "auto",
             endpoint: config.endpoint,
             forcePathStyle: true,
-            requestHandler: new NodeHttpHandler({ connectionTimeout: 5_000, requestTimeout: 120_000 }),
+            // A detach performs both an immutable PUT and a read-back GET. Keep each
+            // request below half of the 180-second fenced detach deadline.
+            requestHandler: new NodeHttpHandler({ connectionTimeout: 5_000, requestTimeout: 60_000 }),
             credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
         });
     }

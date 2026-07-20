@@ -20,7 +20,7 @@ Last updated: 2026-07-20.
 | PR 2 — Distributed rate limiter | Complete (`0d6c77a`) | Migrated and deployed; limiter defaults to `disabled` pending the shadow rollout. |
 | PR 3 — Node-scoped device tokens and routing | Complete and deployed (`a2bcb4a`) | Verified on the compatibility path; the global URL remains active and distributed placement remains disabled. |
 | PR 4 — Co-located runtime ownership | Complete and code deployed (`86cf242`) | No migration; runtime enforcement remains unset/off and is inactive while distributed placement is off. |
-| PR 5 — Durable session-auth placement | Architecture selected; implementation in progress | Production still uses host-local `LocalAuth`; the encrypted snapshot path is not enabled. |
+| PR 5 — Durable session-auth placement | Implementation complete; verification pending final commit | Production still uses host-local `LocalAuth`; the encrypted snapshot path is not enabled and its migration is not deployed. |
 | PR 6 — Multi-node deployment and operations | Not started | One production egress node is registered. |
 | PR 7 — Cleanup and security review | Not started | Single-node compatibility code remains required. |
 
@@ -340,7 +340,7 @@ Result: the gateway owns the PostgreSQL lease and the co-located bridge consumes
 
 ### PR 5 — Durable session-auth placement
 
-**Status: architecture selected; implementation in progress.** Host-local `LocalAuth` remains the production authority until the encrypted snapshot mode passes the full acceptance matrix.
+**Status: implementation complete on `clean-history`, not deployed or enabled.** Host-local `LocalAuth` remains the production authority until PR 6 provisions the provider, applies the migration, and an explicit canary approval passes the full acceptance matrix.
 
 - Implement the quiesced encrypted R2 snapshot attach/checkpoint/detach provider described above.
 - Add auth integrity checks, backup, restore, and `relink_required` behavior.
@@ -357,16 +357,23 @@ Lifecycle regression requirement: the restored browser must bind to the replacem
 
 Rollback: restore the last-known-good verified encrypted generation to its prior fenced node or mark `relink_required`; do not start with an unverified or live-copied profile.
 
-Foundation slice implemented in this PR:
+Implemented in this PR:
 
 - Migration `20260720120000_whatsapp_session_auth_placement` adds authoritative per-session placement, immutable encrypted generations, monotonic `authEpoch`, bounded operation ownership, recovery status, integrity metadata, and append-only audit events. PostgreSQL contains no profile content or plaintext encryption key.
 - `lib/whatsapp/session-auth-placement.ts` makes the durable mode an explicit `encrypted_snapshot` opt-in that is inactive unless distributed placement and runtime lease enforcement are also explicitly enabled. It defines 120-second attach and 180-second detach deadlines plus exact tenant/node/assignment/owner/lease/auth fencing.
 - `lib/whatsapp/session-auth-crypto.ts` and `session-auth-kms.ts` implement scoped AES-256-GCM envelope encryption with a dedicated exact-match KMS key, ciphertext/plaintext digests, size bounds, and data-key zeroing.
 - `lib/whatsapp/session-auth-object-store.ts` requires separate auth-bucket R2 credentials, pins the endpoint to the configured Cloudflare account, uses opaque immutable generation keys, and rejects object operations outside the managed prefix.
-- `lib/whatsapp/session-auth-archive.ts` rejects traversal, absolute/Windows paths, symbolic links, excessive entry counts, excessive expansion, and missing required Chromium profile directories before extraction.
-- The provider remains deliberately unwired from the bridge in this slice. The next slice must implement stopped-browser checkpoint/restore, exact profile-lock and orphan-child verification, transactional placement claims/audits, retention, and recovery as one lifecycle. Until that lands, `WHATSAPP_SESSION_AUTH_MODE` remains `local`, the new tables remain unused, and production behavior is unchanged.
+- `lib/whatsapp/session-auth-archive.ts` creates archives only from stopped profiles, excludes Chromium singleton files, rejects traversal, absolute/Windows paths, symbolic links, excessive entry counts/expansion, and missing required stores, and restores through a same-filesystem staging rename with rollback.
+- `lib/whatsapp/session-auth-store.ts` owns serializable PostgreSQL attach/detach claims. Every mutation is conditional on exact tenant, database session, binding, gateway node, assignment epoch, owner instance, lease epoch, auth epoch, and operation ID. Stale-owner takeover is allowed only after the prior runtime lease is no longer authoritative; it increments `authEpoch` and restores only a verified snapshot.
+- `lib/whatsapp/session-auth-coordinator.ts` performs stop/checkpoint/encrypt/immutable-upload/read-back/decrypt/archive-inspect/publish/delete in that order. Restore validates the stored generation before atomic attachment. A corrupt current generation is quarantined and recovery tries older verified generations within a bounded loop; exhaustion becomes `relink_required`.
+- A newly QR-linked session is deliberately not externally ready until its active browser probe and authenticated webhook heartbeat pass, generation 1 is checkpointed and read-verified, the local profile is removed, and a single browser restores from that generation.
+- Retention preserves the current and last-known-good generations, explicit holds, seven daily and four weekly recovery points, and the superseded last-known-good generation for at least 30 days. Object deletion is claimed transactionally and rechecks that the generation is not current before deletion.
+- Authenticated break-glass rollback first performs the normal stopped-browser checkpoint, then transactionally selects the newest older verified/retained generation under the exact active runtime ownership, increments `authEpoch`, audits the change, and restores through the ordinary integrity/readiness gates. Direct database epoch edits and live-profile copies are prohibited.
+- Exact profile-scoped Chromium discovery and termination prevents an orphan child or singleton lock from crossing attach/detach. The bridge handles SIGTERM/SIGINT with a bounded checkpoint, and deployment grants the 180-second detach window.
+- Deployment now stops the bridge and exact persistent-profile Chromium children before replacing the gateway generation, waits for gateway health/Android proxy recreation, starts one bridge, and retains active browser plus webhook freshness as readiness. Its bridge code hash includes all session-auth and bridge runtime files.
+- Local mode bypasses every provider operation. Until a later explicitly approved canary, `WHATSAPP_SESSION_AUTH_MODE` remains `local`, the new tables remain unused, distributed placement and runtime lease enforcement remain off, and production behavior is unchanged.
 
-Verification for the foundation slice: 92/92 focused device-tunnel, session-auth, and bridge tests passed; targeted TypeScript checking passed; Prisma validation and generation passed; Android `testDebugUnitTest` and `assembleDebug` passed; the gateway and bridge production-style bundles passed, including inspection that transformed page closures contain neither `getMessageModel()` nor a Node-side transpiler helper reference; `git diff --check` and the production build passed. The Next.js build skipped its built-in type-validation phase, consistent with the existing build configuration.
+Verification for the completed implementation: 96/96 focused device-tunnel, session-auth, and bridge tests pass, including real archive round-trip, exact orphan matching, retention protection, and the transactional attach/checkpoint/rollback sequence. Targeted strict TypeScript checking, Prisma validation/generation, Android `testDebugUnitTest` plus `assembleDebug`, shell validation, the production build, and the production-style gateway/bridge bundles pass. Inspection confirms the transformed `page.evaluate` closure remains inline and contains no Node-side transpiler helper or `getMessageModel()` call. Full repository `tsc --noEmit` still exhausts memory without diagnostics and is not treated as a pass.
 
 ### PR 6 — Multi-node deployment and operations
 
@@ -398,6 +405,8 @@ Rollback: stop new placement, drain canary bindings, fence their current epochs,
 - Remove obsolete configuration only after production configuration and runbooks are updated; reject ambiguous mixed-mode startup.
 - Review JWT replay boundaries, tenant scoping, lease/epoch fencing, SSRF/DNS rebinding controls, auth-volume key access, log redaction, and audit immutability.
 - Resolve or explicitly accept production dependency audit findings, including the critical findings currently reported by `npm audit`, before broad customer rollout.
+
+The latest PR 5 dependency install reports 40 audit findings (1 low, 13 moderate, 23 high, and 3 critical) after `archiver` and `unzipper` became direct runtime dependencies instead of optional transitive `whatsapp-web.js` dependencies. No automatic audit fix was applied. PR 7 must review the exact advisory paths or replace the archive implementation before broad rollout; the three critical findings remain an activation blocker requiring an explicit disposition.
 
 Expected migration: only cleanup/backfill constraints proven safe by production data. Destructive column/table removal should be a separate, reversible migration after a full release window.
 
