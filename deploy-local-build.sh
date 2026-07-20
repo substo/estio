@@ -261,6 +261,8 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
 echo "🔧 Setting up environment variables..."
 # Upload the env file directly via SSH pipe (more robust with multiplexing)
 ssh $SSH_OPTS $SERVER "cat > $TARGET_DIR/.env" < .env.prod
+SERVER_SECRET_ENV_FILE="${SERVER_SECRET_ENV_FILE:-/root/.config/estio/whatsapp-session-auth-node.env}"
+ssh $SSH_OPTS $SERVER "if [ -f '$SERVER_SECRET_ENV_FILE' ]; then node '$TARGET_DIR/scripts/ops/merge-secret-env.js' '$TARGET_DIR/.env' '$SERVER_SECRET_ENV_FILE'; fi"
 
 # Step 4.5: Ensure Log Rotation is Configured
 echo "🔄 Verifying Log Rotation Configuration..."
