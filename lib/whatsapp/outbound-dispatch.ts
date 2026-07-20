@@ -115,7 +115,9 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
             if (!text.trim()) {
                 throw new Error("Cannot send empty WhatsApp message body.");
             }
-            const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text, channelId);
+            const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text, channelId, {
+                previewUrl: typeof payload?.linkPreviewRequested === "boolean" ? payload.linkPreviewRequested : null,
+            });
             wamId = extractCloudWamId(response);
         } else if (row.kind === "template") {
             const templateName = String(payload?.templateName || "").trim();
@@ -168,7 +170,9 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
             if (row.kind === "text") {
                 const text = String(payload?.text || row.message?.body || "");
                 if (!text.trim()) throw new Error("Cannot send empty WhatsApp message body.");
-                const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text, fallbackChannel!.id);
+                const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text, fallbackChannel!.id, {
+                    previewUrl: typeof payload?.linkPreviewRequested === "boolean" ? payload.linkPreviewRequested : null,
+                });
                 wamId = extractCloudWamId(response);
             } else if (row.kind === "template") {
                 const response = await sendWhatsAppCloudTemplate(row.locationId, normalizedPhone, {
@@ -213,6 +217,7 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
                     to: webBridgeRecipient,
                     proofMessageId: row.messageId,
                     text,
+                    linkPreview: typeof payload?.linkPreviewRequested === "boolean" ? payload.linkPreviewRequested : null,
                 });
                 wamId = response?.messageId ? String(response.messageId) : null;
             } else {

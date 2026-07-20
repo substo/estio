@@ -36,6 +36,17 @@ test("buildCloudTextPayload requests URL previews for HTTP links", () => {
     });
 });
 
+test("buildCloudTextPayload honors persisted preview intent", () => {
+    assert.equal(
+        buildCloudTextPayload("+1 (555) 123-4567", "hello https://example.com/listing", { previewUrl: true }).text.preview_url,
+        true,
+    );
+    assert.equal(
+        buildCloudTextPayload("+1 (555) 123-4567", "hello https://example.com/listing", { previewUrl: false }).text.preview_url,
+        false,
+    );
+});
+
 test("buildCloudMediaPayload supports document metadata", () => {
     const payload = buildCloudMediaPayload("+357 99 000000", {
         mediaType: "document",

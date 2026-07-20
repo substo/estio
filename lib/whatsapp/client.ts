@@ -322,7 +322,7 @@ async function graphRequest<T = any>(
     return json as T;
 }
 
-export function buildCloudTextPayload(to: string, body: string) {
+export function buildCloudTextPayload(to: string, body: string, options?: { previewUrl?: boolean | null }) {
     const recipient = normalizeWhatsAppRecipient(to);
     const preview = getWhatsAppLinkPreviewDecision(body);
     return {
@@ -331,7 +331,7 @@ export function buildCloudTextPayload(to: string, body: string) {
         to: recipient,
         type: "text",
         text: {
-            preview_url: preview.shouldRequestPreview,
+            preview_url: options?.previewUrl ?? preview.shouldRequestPreview,
             body: String(body || ""),
         },
     };
@@ -392,8 +392,14 @@ async function sendCloudPayload(locationId: string, payload: Record<string, any>
     });
 }
 
-export async function sendWhatsAppCloudText(locationId: string, to: string, body: string, channelId?: string | null) {
-    return sendCloudPayload(locationId, buildCloudTextPayload(to, body), channelId);
+export async function sendWhatsAppCloudText(
+    locationId: string,
+    to: string,
+    body: string,
+    channelId?: string | null,
+    options?: { previewUrl?: boolean | null }
+) {
+    return sendCloudPayload(locationId, buildCloudTextPayload(to, body, options), channelId);
 }
 
 export async function sendWhatsAppCloudMedia(

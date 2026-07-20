@@ -8,6 +8,7 @@ import { getReadyWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
+import { getWhatsAppLinkPreviewDecision } from "@/lib/whatsapp/link-preview";
 
 export const SCHEDULED_MESSAGE_CHANNELS = ["WhatsApp", "SMS_RELAY"] as const;
 export type ScheduledMessageChannel = typeof SCHEDULED_MESSAGE_CHANNELS[number];
@@ -479,6 +480,7 @@ async function dispatchWhatsAppScheduledMessage(row: any) {
         throw new Error("This WhatsApp conversation is outside the 24-hour customer service window. Send an approved template instead.");
     }
 
+    const linkPreview = getWhatsAppLinkPreviewDecision(row.body);
     const result = await enqueueWhatsAppOutbound({
         locationId: row.locationId,
         conversationInternalId: resolved.conversation.id,
@@ -489,6 +491,7 @@ async function dispatchWhatsAppScheduledMessage(row: any) {
         source: "scheduled_message",
         transport: transportState.transport,
         clientMessageId: `scheduled_${row.id}_${randomUUID()}`,
+        linkPreviewRequested: linkPreview.shouldRequestPreview,
     });
 
     return result.messageId;

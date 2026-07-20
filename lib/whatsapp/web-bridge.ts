@@ -430,6 +430,7 @@ export async function sendWhatsAppWebBridgeMessage(input: {
     mimetype?: string | null;
     fileName?: string | null;
     caption?: string | null;
+    linkPreview?: boolean | null;
 }) {
     const session = await getReadyWhatsAppWebBridgeSession(input.locationId);
     if (!session) {
@@ -450,6 +451,7 @@ export async function sendWhatsAppWebBridgeMessage(input: {
             mimetype: input.mimetype || null,
             fileName: input.fileName || null,
             caption: input.caption || null,
+            linkPreview: input.linkPreview ?? null,
         }),
     });
 }

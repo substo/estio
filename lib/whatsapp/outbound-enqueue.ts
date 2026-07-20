@@ -6,6 +6,7 @@ import { processWhatsAppOutboundOutboxJob } from "@/lib/whatsapp/outbound-outbox
 import type { WhatsAppOutboundKind, WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { toR2Uri } from "@/lib/whatsapp/media-r2";
+import { getWhatsAppLinkPreviewDecision } from "@/lib/whatsapp/link-preview";
 
 export type { WhatsAppOutboundKind, WhatsAppTransport };
 
@@ -33,6 +34,7 @@ type EnqueueWhatsAppOutboundInput = {
     templateCategory?: string | null;
     templateComponents?: WhatsAppTemplateComponent[] | null;
     pricingIntent?: string | null;
+    linkPreviewRequested?: boolean | null;
 };
 
 export type EnqueueWhatsAppOutboundResult = {
@@ -158,6 +160,9 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     const normalizedBody = normalizeBody(input.body) || (kind === "template" && templateName ? `[Template: ${templateName}]` : "");
     const transport = input.transport || "cloud_api";
     const clientMessageId = normalizeClientMessageId(input.clientMessageId);
+    const linkPreviewRequested = kind === "text"
+        ? input.linkPreviewRequested ?? getWhatsAppLinkPreviewDecision(normalizedBody).shouldRequestPreview
+        : false;
     logWhatsAppSendLifecycle("enqueue_started", {
         clientMessageId,
         locationId,
@@ -270,6 +275,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                         templateCategory: input.templateCategory ? String(input.templateCategory) : undefined,
                         templateComponents: input.templateComponents || undefined,
                         pricingIntent: input.pricingIntent ? String(input.pricingIntent) : undefined,
+                        linkPreviewRequested: kind === "text" ? linkPreviewRequested : undefined,
                     },
                 },
                 select: {
