@@ -158,7 +158,11 @@ function verifyNoRedirect(url: URL, address: string, family: number) {
         const request = https.request({
             protocol: "https:", hostname: url.hostname, servername: url.hostname, port: 443,
             path: `${url.pathname}/health`, method: "GET", timeout: 8_000,
-            lookup: (_hostname, _options, callback) => callback(null, address, family as 4 | 6),
+            lookup: (_hostname, options, callback: any) => {
+                const resolved = { address, family: family as 4 | 6 };
+                if (options?.all) callback(null, [resolved]);
+                else callback(null, resolved.address, resolved.family);
+            },
         }, (response) => {
             response.resume();
             const status = Number(response.statusCode || 0);
