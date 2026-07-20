@@ -567,7 +567,11 @@ async function fetchChatMessagesWithOpaqueFallback(session: ManagedSession, chat
         }
         try {
             const models = await withTimeout(session.client.pupPage.evaluate(async (targetChatId: string, targetLimit: number) => {
-                const chat = await (window as any).WWebJS.getChat(targetChatId, { getAsModel: false });
+                const collections = (window as any).require("WAWebCollections");
+                const widFactory = (window as any).require("WAWebWidFactory");
+                const targetWid = widFactory.createWid(targetChatId);
+                const chat = collections?.Chat?.get(targetWid)
+                    || collections?.Chat?.get(targetChatId);
                 if (!chat) return [];
                 const includeMessage = (message: any) => !message?.isNotification;
                 let messages = chat.msgs.getModelsArray().filter(includeMessage);
@@ -577,10 +581,38 @@ async function fetchChatMessagesWithOpaqueFallback(session: ManagedSession, chat
                     messages = [...loaded.filter(includeMessage), ...messages];
                 }
                 messages.sort((left: any, right: any) => Number(left?.t || 0) - Number(right?.t || 0));
-                return messages.slice(-targetLimit).map((message: any) => (window as any).WWebJS.getMessageModel(message));
+                return messages.slice(-targetLimit).map((message: any) => {
+                    // Do not call WWebJS.getMessageModel() here. A single malformed cached
+                    // message can make whatsapp-web.js throw the opaque `r` error while
+                    // serializing the whole history. These fields are intentionally the
+                    // minimum needed by our webhook serializer and remain per-message safe.
+                    const id = String(message?.id?._serialized || message?.id || "");
+                    const remote = String(message?.id?.remote?._serialized || message?.id?.remote || targetChatId);
+                    const fromMe = Boolean(message?.id?.fromMe ?? message?.fromMe);
+                    const type = String(message?.type || "text");
+                    const mediaData = message?.mediaData || {};
+                    return {
+                        id: { _serialized: id },
+                        from: fromMe ? "" : remote,
+                        to: fromMe ? remote : "",
+                        fromMe,
+                        body: String(message?.body || ""),
+                        type,
+                        timestamp: Number(message?.t || message?.timestamp || 0),
+                        hasMedia: Boolean(message?.isMedia || message?.mediaData || message?.directPath),
+                        ack: Number(message?.ack || 0),
+                        _data: {
+                            caption: String(message?.caption || ""),
+                            notifyName: String(message?.notifyName || message?.pushName || ""),
+                            pushName: String(message?.pushName || ""),
+                            mimetype: String(message?.mimetype || mediaData?.mimetype || ""),
+                            filename: String(message?.filename || message?.title || ""),
+                            size: Number(message?.size || mediaData?.size || 0),
+                        },
+                    };
+                });
             }, chatId, limit), OPERATION_TIMEOUT_MS, `WhatsApp raw message fetch ${session.sessionId}`);
-            const { Message } = require("whatsapp-web.js");
-            return (models || []).map((model: any) => new Message(session.client, model));
+            return models || [];
         } catch (fallbackError) {
             if (shouldRestartWhatsAppWebBridgeSession(fallbackError)) {
                 await restartStaleSession(session, fallbackError);
