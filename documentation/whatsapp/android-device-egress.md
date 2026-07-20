@@ -9,8 +9,9 @@ Last updated: 2026-07-20.
 - PR 1, node registry and PostgreSQL fenced-lease primitives, is deployed as commit `6c53c5e` with migration `20260719160000_device_tunnel_node_registry_leases`.
 - PR 2, distributed outbound rate limiting and per-session dispatch serialization, is deployed as commit `0d6c77a` with migration `20260719180000_whatsapp_distributed_rate_limits`.
 - PR 3, node-scoped tokens and assignment-aware routing, is deployed and verified as commit `a2bcb4a`. It required no migration.
-- PR 4, co-located runtime ownership, is complete on `clean-history` and pending review/deployment. It required no migration and its enforcement flag defaults to off.
-- Production remains on the compatibility path: distributed placement and runtime lease enforcement are off, and outbound rate limiting is disabled by default. The PR 3 deployment preserved the healthy single-node tunnel and existing WhatsApp Web browser session.
+- PR 4, co-located runtime ownership, is code-deployed from `86cf242`. It required no migration; distributed placement and runtime lease enforcement remain unset/off, so its authoritative lease path is inactive.
+- The 2026-07-20 ingress lifecycle hotfix is deployed through `ed8fd87` (`272f265`, `1c67a31`, and `ed8fd87`). Active readiness, gateway-generation rebinding, orphan Chromium cleanup, and safe `r` fallbacks restored live history access; the bounded backfill replayed 21 recent messages with zero failures.
+- Production remains on the compatibility path: distributed placement and runtime lease enforcement are off, and outbound rate limiting is disabled by default. The deployments preserved one healthy Android tunnel and did not add a node.
 - PRs 5–7 remain: movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
 
 See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
