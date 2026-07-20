@@ -21,10 +21,10 @@ Last updated: 2026-07-20.
 | PR 3 — Node-scoped device tokens and routing | Complete and deployed (`a2bcb4a`) | Verified on the compatibility path; the global URL remains active and distributed placement remains disabled. |
 | PR 4 — Co-located runtime ownership | Complete and code deployed (`86cf242`) | No migration; runtime enforcement remains unset/off and is inactive while distributed placement is off. |
 | PR 5 — Durable session-auth placement | Complete (`b0b3bbd`, `1dc79cc`) | Migration `20260720120000_whatsapp_session_auth_placement` is applied; production still uses host-local `LocalAuth` and encrypted snapshots remain inactive. |
-| PR 6 — Multi-node deployment and operations | Complete and deployed inactive | Operational code is deployed on the existing node; no second node, R2 provider, DNS/TLS endpoint, or canary is active. |
+| PR 6 — Multi-node deployment and operations | Complete and deployed inactive | Operational code is deployed; KMS and private R2 are provisioned, but no second node, node-2 DNS/TLS endpoint, workload credentials, or canary is active. |
 | PR 7 — Cleanup and security review | Complete and deployed (`75ebba7`, `b31764c`) | Production passed compatibility health/history checks; all four controls remain explicitly off/local/disabled. |
 
-The production data path remains intentionally on the compatibility path. PR 5/6/7 code and all 63 migrations are deployed, but distributed placement and runtime lease enforcement are explicitly false, session auth is explicitly `local`, and rate limiting is explicitly `disabled`. The dedicated KMS key now exists at `projects/gen-lang-client-0081045346/locations/global/keyRings/estio-whatsapp-auth-keyring/cryptoKeys/whatsapp-session-auth`; its enabled symmetric version 1 rotates every 90 days. The two node service accounts have exact-key encrypter/decrypter access, no project-level roles, and no user-managed keys. Workload authentication delivery intentionally waits for node 2. Private R2, node-2 DNS/TLS, exact canary scope, and required owner dispositions remain activation blockers.
+The production data path remains intentionally on the compatibility path. PR 5/6/7 code and all 63 migrations are deployed, but distributed placement and runtime lease enforcement are explicitly false, session auth is explicitly `local`, and rate limiting is explicitly `disabled`. The dedicated KMS key now exists at `projects/gen-lang-client-0081045346/locations/global/keyRings/estio-whatsapp-auth-keyring/cryptoKeys/whatsapp-session-auth`; its enabled symmetric version 1 rotates every 90 days. The two node service accounts have exact-key encrypter/decrypter access, no project-level roles, and no user-managed keys. Private R2 bucket `estio-whatsapp-session-auth-prod` is provisioned under account `a5d668404eee09103a32d81b8b7dc172` with bucket-item read/write credentials. The application adapter independently passed immutable PUT rejection, byte-for-byte read-back, delete, and post-delete absence checks; no test object remains. Node-2 provisioning/DNS/TLS, per-node KMS and R2 credential delivery, exact canary scope, and required owner dispositions remain activation blockers.
 
 The 2026-07-20 ingress lifecycle hotfix is deployed through `ed8fd87` (implementation commits `272f265`, `1c67a31`, and `ed8fd87`). It adds gateway-generation rebinding, active browser-plus-webhook readiness, orphan Chromium cleanup, and safe chat/history fallbacks for opaque `whatsapp-web.js` `r` failures. Production verification returned 709 chats, fetched 20 messages from the newest one-to-one chat, and replayed 21 recent messages with zero failures. No feature flag was enabled and no migration was added.
 
@@ -340,7 +340,7 @@ Result: the gateway owns the PostgreSQL lease and the co-located bridge consumes
 
 ### PR 5 — Durable session-auth placement
 
-**Status: implementation and migration deployed; not enabled.** Host-local `LocalAuth` remains the production authority until private R2 and node workload authentication are ready and an explicit canary approval passes the full acceptance matrix.
+**Status: implementation and migration deployed; providers provisioned; not enabled.** Host-local `LocalAuth` remains the production authority until node 2 and per-node workload authentication are ready and an explicit canary approval passes the full acceptance matrix.
 
 - Implement the quiesced encrypted R2 snapshot attach/checkpoint/detach provider described above.
 - Add auth integrity checks, backup, restore, and `relink_required` behavior.
@@ -377,7 +377,7 @@ Verification for the completed implementation: 96/96 focused device-tunnel, sess
 
 ### PR 6 — Multi-node deployment and operations
 
-**Status: implementation deployed inactive; not activated.** The code and runbook prepare a second node and full failure rehearsal. The PR 5 migration is applied, but no second node, node-2 DNS/TLS, private R2 provider, distributed control, or canary is active.
+**Status: implementation deployed inactive; not activated.** The code and runbook prepare a second node and full failure rehearsal. The PR 5 migration, KMS, and private R2 are ready, but no second node, node-2 DNS/TLS, workload credential delivery, distributed control, or canary is active.
 
 - Provision at least two egress nodes in one region.
 - Add node-specific WSS DNS/TLS, capacity-aware placement, drain tooling, dashboards, and alerts.

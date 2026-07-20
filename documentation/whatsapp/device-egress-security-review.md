@@ -9,7 +9,7 @@ Last updated: 2026-07-20. This is the PR 7 engineering review. It is not legal a
 - The unofficial `whatsapp-web.js` transport requires written Product, Legal/Policy, Privacy, and Security-owner disposition before canary activation. Engineering cannot represent it as Meta-approved.
 - Prisma 6.19 verifies all 63 production migrations are current. The prior schema-engine ambiguity is resolved.
 - The dedicated exact-key KMS resource is provisioned with enabled symmetric version 1 and 90-day rotation. Both node service accounts have exact-key encrypter/decrypter access, no project roles, and no user-managed keys. Workload authentication delivery remains pending until node 2 exists.
-- Private R2, second-node DNS/TLS, an exact canary, and Product/Legal-Policy/Privacy/Security dispositions remain activation blockers.
+- Private R2 is provisioned and independently passed the application's immutable write/read/delete preflight. Second-node DNS/TLS, per-node credential delivery, an exact canary, and Product/Legal-Policy/Privacy/Security dispositions remain activation blockers.
 
 ## Trust boundaries and authority
 
@@ -153,4 +153,4 @@ These entries were not accepted as safe. They remain Security/dependency-owner t
 
 ## Remaining activation blockers
 
-Private R2 and its bucket-scoped credentials are absent; node 2 and its DNS/TLS endpoint are absent; per-node workload authentication is undecided; no exact approved canary exists; and Product/Legal-Policy/Privacy/Security dispositions remain outstanding. The dedicated KMS resource, migration, backup, compatibility deployment, and live compatibility verification are complete. Distributed placement, runtime leases, encrypted snapshots, and rate limiting remain inactive.
+Node 2 and its DNS/TLS endpoint are absent; per-node KMS/R2 credential delivery is undecided; no exact approved canary exists; the user-owned R2 token needs a named owner and replacement procedure; and Product/Legal-Policy/Privacy/Security dispositions remain outstanding. The dedicated KMS resource, private bucket and scoped R2 credential, provider preflight, migration, backup, compatibility deployment, and live compatibility verification are complete. Distributed placement, runtime leases, encrypted snapshots, and rate limiting remain inactive.
