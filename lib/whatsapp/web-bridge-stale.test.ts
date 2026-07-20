@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeRecoverableMediaError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
     isWhatsAppWebBridgeStaleError,
     shouldRestartWhatsAppWebBridgeSession,
 } from "./web-bridge-stale";
+
+test("classifies bridge request failures without exposing error messages", () => {
+    assert.equal(classifyWhatsAppWebBridgeRequestError(new Error("r")), "WHATSAPP_OPAQUE_RUNTIME");
+    assert.equal(classifyWhatsAppWebBridgeRequestError(new Error("WhatsApp Web session is not ready.")), "WHATSAPP_SESSION_NOT_READY");
+    assert.equal(classifyWhatsAppWebBridgeRequestError(new Error("Chat not found")), "WHATSAPP_CHAT_NOT_FOUND");
+    assert.equal(classifyWhatsAppWebBridgeRequestError(new Error("operation timed out after 30000ms")), "WHATSAPP_OPERATION_TIMEOUT");
+    assert.equal(classifyWhatsAppWebBridgeRequestError(new Error("Execution context was destroyed")), "WHATSAPP_BROWSER_CONTEXT_LOST");
+    assert.equal(classifyWhatsAppWebBridgeRequestError(new Error("recipient +357 999 secret")), null);
+});
 
 test("isWhatsAppWebBridgeStaleError detects Puppeteer stale page failures", () => {
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Attempted to use detached Frame 'ABC'.")), true);

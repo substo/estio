@@ -11,6 +11,7 @@ import {
     getStaleWhatsAppWebBridgeNonReadyReason,
 } from "../lib/whatsapp/web-bridge-readiness";
 import {
+    classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
     isWhatsAppWebBridgeRecoverableMediaError,
     shouldRestartWhatsAppWebBridgeSession,
@@ -1644,10 +1645,19 @@ const server = createServer(async (req, res) => {
 
         return json(res, 404, { error: "Not found." });
     } catch (error: any) {
+        const classifiedCode = classifyWhatsAppWebBridgeRequestError(error);
+        if (classifiedCode) error.code = classifiedCode;
         const sanitized = sanitizeOperationalError({
             error,
             fallbackCode: "BRIDGE_REQUEST_FAILED",
-            allowlistedCodes: new Set(["DEVICE_EGRESS_OFFLINE"]),
+            allowlistedCodes: new Set([
+                "DEVICE_EGRESS_OFFLINE",
+                "WHATSAPP_BROWSER_CONTEXT_LOST",
+                "WHATSAPP_CHAT_NOT_FOUND",
+                "WHATSAPP_OPAQUE_RUNTIME",
+                "WHATSAPP_OPERATION_TIMEOUT",
+                "WHATSAPP_SESSION_NOT_READY",
+            ]),
         });
         const deviceEgressOffline = sanitized.code === "DEVICE_EGRESS_OFFLINE";
         console.error("[WhatsApp Web Bridge] Request failed", sanitized);
