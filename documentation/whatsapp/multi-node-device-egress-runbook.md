@@ -6,6 +6,8 @@ Last updated: 2026-07-20. This runbook includes the PR 7 cleanup review. It does
 
 Do not deploy, apply migration `20260720120000_whatsapp_session_auth_placement`, provision a node or provider, change DNS/TLS, or enable a feature control without explicit approval for that exact mutation. Code deployment with all four controls off and canary activation are separate approvals. Rate limiting is never enabled as a side effect.
 
+Current production checkpoint (2026-07-20): PR 5/6/7 code is deployed, migration `20260720120000_whatsapp_session_auth_placement` is applied and Prisma reports all 63 migrations current, and compatibility browser/Android tunnel/chat/history checks pass. The four controls below remain explicitly off/local/disabled. The dedicated KMS key and its two key-scoped node identities are provisioned and independently verified; node workload authentication is intentionally deferred until node 2 exists. Private R2, node-2 DNS/TLS, an exact canary scope, and required owner dispositions remain blockers. No canary is active.
+
 The four controls are:
 
 ```dotenv
@@ -39,6 +41,8 @@ Review the output before placing it on a node. The generator deliberately omits 
 ## KMS and R2 design
 
 Create one dedicated Google Cloud KMS key ring/key for WhatsApp session auth, separate from application and database keys. Use a distinct service account per egress node. Grant only `cloudkms.cryptoKeyEncrypterDecrypter` on the exact crypto key; do not grant project-wide KMS admin, key-ring admin, or access to unrelated keys. Record key rotation and disable/destroy schedules, but never destroy a key version while a retained generation references it.
+
+Provisioned KMS resource: `projects/gen-lang-client-0081045346/locations/global/keyRings/estio-whatsapp-auth-keyring/cryptoKeys/whatsapp-session-auth`. It has purpose `ENCRYPT_DECRYPT`, enabled `GOOGLE_SYMMETRIC_ENCRYPTION` version 1, and a 90-day rotation period. `estio-wa-egress-1@gen-lang-client-0081045346.iam.gserviceaccount.com` and `estio-wa-egress-2@gen-lang-client-0081045346.iam.gserviceaccount.com` have exact-key `roles/cloudkms.cryptoKeyEncrypterDecrypter`, no project-level roles, and no user-managed keys. The exact-key policy also includes the infrastructure owner user; Security owns whether that administrative binding remains. Do not create or distribute workload credentials until the per-node federation/protected-credential decision is recorded.
 
 Create one private Cloudflare R2 auth bucket with public access disabled. Create bucket-only credentials that can read, create, and delete objects only in that bucket. Do not reuse media R2 credentials. Application object keys are opaque, generation-specific, and immutable; a preflight write uses a unique disposable key, verifies PUT plus read-back bytes/etag, and deletes only that key. Provider write tests are production mutations and require separate approval.
 

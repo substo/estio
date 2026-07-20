@@ -4,11 +4,12 @@ Last updated: 2026-07-20. This is the PR 7 engineering review. It is not legal a
 
 ## Decision summary
 
-- Production remains on the single-node compatibility path. No PR 5/6/7 code was deployed, no migration was applied, no provider or node was provisioned, and no control or canary was enabled by this review.
+- Production remains on the single-node compatibility path. PR 5/6/7 code is deployed and migration `20260720120000_whatsapp_session_auth_placement` is applied, but all four controls remain explicitly off/local/disabled and no canary is active.
 - The three critical production dependency findings are resolved in the PR 7 dependency graph. The post-change production-only audit contains 25 findings (1 low, 11 moderate, 13 high, 0 critical). Canary activation remains blocked if any critical finding returns; Security owns the remaining triage.
 - The unofficial `whatsapp-web.js` transport requires written Product, Legal/Policy, Privacy, and Security-owner disposition before canary activation. Engineering cannot represent it as Meta-approved.
-- Migration status is still unverified because the prior read-only Prisma schema-engine check failed. This remains a rollout blocker.
-- KMS, private R2, second-node DNS/TLS, the PR 5 migration, deployment with controls off, and one exact canary each remain separately approved mutations.
+- Prisma 6.19 verifies all 63 production migrations are current. The prior schema-engine ambiguity is resolved.
+- The dedicated exact-key KMS resource is provisioned with enabled symmetric version 1 and 90-day rotation. Both node service accounts have exact-key encrypter/decrypter access, no project roles, and no user-managed keys. Workload authentication delivery remains pending until node 2 exists.
+- Private R2, second-node DNS/TLS, an exact canary, and Product/Legal-Policy/Privacy/Security dispositions remain activation blockers.
 
 ## Trust boundaries and authority
 
@@ -148,8 +149,8 @@ These entries were not accepted as safe. They remain Security/dependency-owner t
 - Prisma validate/generate, targeted strict TypeScript checks, deployment shell syntax, static/template/dry-run operator commands, production-style gateway/bridge/API bundles, and `git diff --check` passed.
 - Transformed bridge closure inspection found none of `getMessageModel()`, `__name`, or `__async`.
 - Production build passed. It explicitly skips type validation and retains a dynamic protobuf import warning; full-repository `tsc --noEmit` is not claimed as passing.
-- No deployment, migration, provider write, infrastructure/DNS/TLS change, distributed control, rate-limit activation, canary, or other production mutation occurred.
+- At the PR 7 review checkpoint, no production mutation occurred. A later approved rollout deployed PR 5/6/7, applied the migration from a validated backup, and verified compatibility health/history with all four controls off/local/disabled.
 
 ## Remaining activation blockers
 
-PR 5/6/7 not deployed; migration pending/unverified; providers absent; second node and DNS/TLS absent; no exact approved canary; no policy/privacy/security-owner approval; no production preflight/backup; and no explicit production mutation approval. Production remains unchanged.
+Private R2 and its bucket-scoped credentials are absent; node 2 and its DNS/TLS endpoint are absent; per-node workload authentication is undecided; no exact approved canary exists; and Product/Legal-Policy/Privacy/Security dispositions remain outstanding. The dedicated KMS resource, migration, backup, compatibility deployment, and live compatibility verification are complete. Distributed placement, runtime leases, encrypted snapshots, and rate limiting remain inactive.
