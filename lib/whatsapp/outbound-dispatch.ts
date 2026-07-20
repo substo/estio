@@ -9,6 +9,7 @@ import {
 } from "@/lib/whatsapp/client";
 import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
 import {
+    getWhatsAppWebBridgeConversationChatId,
     isResolvedWhatsAppWebBridgeChatAvailable,
     resolveWhatsAppWebBridgeChatForPhone,
     sendWhatsAppWebBridgeMessage,
@@ -43,19 +44,12 @@ function extractTwilioMessageId(response: any): string | null {
 }
 
 async function resolveWebBridgeRecipient(row: any, normalizedPhone: string) {
-    let webBridgeConversationChatId = "";
-    if ((!normalizedPhone || normalizedPhone.length < 7) && row.conversationId) {
-        const sync = await (db as any).conversationSync.findFirst({
-            where: {
-                conversationId: row.conversationId,
-                provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
-                providerConversationId: { not: null },
-            },
-            select: { providerConversationId: true },
-            orderBy: { updatedAt: "desc" },
-        }).catch(() => null);
-        webBridgeConversationChatId = String(sync?.providerConversationId || "").trim();
-    }
+    const webBridgeConversationChatId = row.conversationId
+        ? await getWhatsAppWebBridgeConversationChatId({
+            locationId: row.locationId,
+            conversationId: row.conversationId,
+        })
+        : "";
     if (webBridgeConversationChatId) return webBridgeConversationChatId;
 
     if (normalizedPhone && normalizedPhone.length >= 7) {

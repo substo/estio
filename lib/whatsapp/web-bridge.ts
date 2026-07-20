@@ -359,6 +359,38 @@ export function isResolvedWhatsAppWebBridgeChatAvailable(result: WhatsAppWebBrid
     return true;
 }
 
+export function selectWhatsAppWebBridgeConversationChatId(
+    syncRows: Array<{ providerConversationId?: string | null }> | null | undefined,
+) {
+    for (const row of syncRows || []) {
+        const chatId = normalizeWhatsAppWebChatId(row?.providerConversationId);
+        if (chatId) return chatId;
+    }
+    return "";
+}
+
+export async function getWhatsAppWebBridgeConversationChatId(input: {
+    locationId: string;
+    conversationId: string;
+}) {
+    const locationId = String(input.locationId || "").trim();
+    const conversationId = String(input.conversationId || "").trim();
+    if (!locationId || !conversationId) return "";
+
+    const rows = await (db as any).conversationSync.findMany({
+        where: {
+            locationId,
+            conversationId,
+            provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+            providerConversationId: { not: null },
+        },
+        select: { providerConversationId: true },
+        orderBy: { updatedAt: "desc" },
+        take: 2,
+    }).catch(() => []);
+    return selectWhatsAppWebBridgeConversationChatId(rows);
+}
+
 export async function stopWhatsAppWebBridgeSession(locationId: string) {
     const session = await getWhatsAppWebBridgeSession(locationId);
     if (!session) return { success: true, skipped: true };

@@ -168,6 +168,7 @@ import {
     getWhatsAppWebBridgeHealth,
     getWhatsAppWebBridgeSession,
     getReadyWhatsAppWebBridgeSession,
+    getWhatsAppWebBridgeConversationChatId,
     isResolvedWhatsAppWebBridgeChatAvailable,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
@@ -5044,9 +5045,14 @@ export async function sendReply(
 
             if (transportState.transport === "web_bridge") {
                 try {
+                    const preferredChatId = await getWhatsAppWebBridgeConversationChatId({
+                        locationId: location.id,
+                        conversationId: conversation.id,
+                    });
                     const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
                         locationId: location.id,
                         phone: contact.phone,
+                        preferredChatId,
                     });
                     if (!isResolvedWhatsAppWebBridgeChatAvailable(resolvedChat)) {
                         return {
@@ -8126,9 +8132,14 @@ async function resolveConversationChannelCapabilitiesForLocation(
         const mode = await resolveLocationWhatsAppProviderMode(location.id);
         if (mode === "web_bridge") {
             try {
+                const preferredChatId = await getWhatsAppWebBridgeConversationChatId({
+                    locationId: location.id,
+                    conversationId,
+                });
                 const resolved = await resolveWhatsAppWebBridgeChatForPhone({
                     locationId: location.id,
                     phone: phoneValue,
+                    preferredChatId,
                 });
                 whatsAppCapability = isResolvedWhatsAppWebBridgeChatAvailable(resolved)
                     ? availableChannel()

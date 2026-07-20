@@ -35,7 +35,7 @@ test("channel capability cache key changes when contact identity changes", () =>
 
     assert.equal(
         buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled: true }),
-        "estio:conversation-channel-capabilities:v1:conv_1:35797428827:lead@example.com:relay-on"
+        "estio:conversation-channel-capabilities:v2:conv_1:35797428827:lead@example.com:relay-on"
     );
     assert.notEqual(
         buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled: true }),

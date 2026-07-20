@@ -15,7 +15,7 @@ import {
     type ConversationChannelCapabilities,
 } from "@/lib/conversations/channel-capabilities";
 
-const CHANNEL_CAPABILITY_CACHE_PREFIX = "estio:conversation-channel-capabilities:v1";
+const CHANNEL_CAPABILITY_CACHE_PREFIX = "estio:conversation-channel-capabilities:v2";
 const CHANNEL_CAPABILITY_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 export type WhatsAppEligibilityState =

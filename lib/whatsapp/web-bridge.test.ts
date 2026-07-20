@@ -5,6 +5,7 @@ import {
     isResolvedWhatsAppWebBridgeChatAvailable,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
+    selectWhatsAppWebBridgeConversationChatId,
 } from "@/lib/whatsapp/web-bridge";
 import {
     decodeBridgeBase64Payload,
@@ -66,6 +67,17 @@ test("resolved web bridge availability rejects synthetic phone fallback", () => 
         chatId: "35796407286@c.us",
         source: "getNumberId",
     }), true);
+});
+
+test("conversation sync chat selection prefers a valid provider identity", () => {
+    assert.equal(selectWhatsAppWebBridgeConversationChatId([
+        { providerConversationId: null },
+        { providerConversationId: "123456789@lid" },
+    ]), "123456789@lid");
+    assert.equal(selectWhatsAppWebBridgeConversationChatId([
+        { providerConversationId: "status@broadcast" },
+        { providerConversationId: "35796407286@c.us" },
+    ]), "35796407286@c.us");
 });
 
 test("normalizeBridgeMediaType accepts common media and document mimetypes", () => {
