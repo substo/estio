@@ -4,11 +4,11 @@ This subsystem routes an explicitly bound WhatsApp Web browser session through t
 
 ## Delivery progress
 
-Last updated: 2026-07-19.
+Last updated: 2026-07-20.
 
 - PR 1, node registry and PostgreSQL fenced-lease primitives, is deployed as commit `6c53c5e` with migration `20260719160000_device_tunnel_node_registry_leases`.
 - PR 2, distributed outbound rate limiting and per-session dispatch serialization, is deployed as commit `0d6c77a` with migration `20260719180000_whatsapp_distributed_rate_limits`.
-- PR 3, node-scoped tokens and assignment-aware routing, is complete on `clean-history` and pending review/deployment. It required no migration.
+- PR 3, node-scoped tokens and assignment-aware routing, is complete in commit `a2bcb4a`, pushed to `clean-history`, and pending review/deployment. It required no migration.
 - Production remains on the compatibility path: distributed placement is off and outbound rate limiting is disabled by default. The gateway registry is live, but leases do not yet control browser ownership.
 - PRs 4–7 remain: runtime lease enforcement and drain, movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
 
