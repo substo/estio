@@ -22,7 +22,7 @@ WHATSAPP_BRIDGE_DEFAULT_PORT=3218
 DEVICE_TUNNEL_GATEWAY_APP_NAME="estio-device-tunnel-gateway"
 DEVICE_TUNNEL_GATEWAY_DEFAULT_PORT=3220
 WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
-WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-5}"
+WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-40}"
 WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
 WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS:-180}"
 WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS:-5}"
@@ -701,6 +701,22 @@ NODE
         exit 1
     fi
 
+    stop_orphaned_whatsapp_bridge_browsers() {
+        local session_pattern="\$WHATSAPP_BRIDGE_SESSION_DIR/session-"
+        if ! pgrep -f "\$session_pattern" > /dev/null 2>&1; then
+            return
+        fi
+        echo "🧹 Stopping orphaned WhatsApp Chromium processes before browser rebinding"
+        pkill -TERM -f "\$session_pattern" 2>/dev/null || true
+        for _ in \$(seq 1 10); do
+            if ! pgrep -f "\$session_pattern" > /dev/null 2>&1; then
+                return
+            fi
+            sleep 1
+        done
+        pkill -KILL -f "\$session_pattern" 2>/dev/null || true
+    }
+
     WHATSAPP_BRIDGE_APP_WEBHOOK_URL=""
     if [ -f "\$SYMLINK_PATH/.env" ]; then
         WHATSAPP_BRIDGE_APP_WEBHOOK_URL=\$(grep -E '^WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL=' "\$SYMLINK_PATH/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d '"' | tr -d "'" || true)
@@ -748,7 +764,7 @@ const payload = {
         locationId: session.locationId || null,
         status: session.status || null,
         ready: Boolean(session.ready),
-        phone: session.phone || null,
+        phoneMasked: session.phone ? '***' + String(session.phone).slice(-4) : null,
         lastEventAt: session.lastEventAt || null,
         lastReadyAt: session.lastReadyAt || null,
         lastError: session.lastError || null,
@@ -779,10 +795,10 @@ NODE
     CURRENT_BRIDGE_SESSION_DIR=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CWD=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.pm_cwd || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CODE_HASH=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || "");' 2>/dev/null || true)
-    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-payload.ts lib/whatsapp/web-bridge-readiness.ts lib/whatsapp/web-bridge-stale.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
+    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-payload.ts lib/whatsapp/web-bridge-readiness.ts lib/whatsapp/web-bridge-runtime-health.ts lib/whatsapp/web-bridge-stale.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
     BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
 
-    if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ] && [ -n "\$EXPECTED_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_BRIDGE_CODE_HASH" = "\$EXPECTED_BRIDGE_CODE_HASH" ]; then
+    if [ -n "\$BRIDGE_HEALTH_JSON" ] && whatsapp_bridge_has_ready_session "\$BRIDGE_HEALTH_JSON" && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ] && [ -n "\$EXPECTED_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_BRIDGE_CODE_HASH" = "\$EXPECTED_BRIDGE_CODE_HASH" ]; then
         echo "✅ WhatsApp Web Bridge service is already reachable; preserving existing browser session"
     else
         if [ -n "\$BRIDGE_HEALTH_JSON" ] && [ -n "\$CURRENT_BRIDGE_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" != "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ]; then
@@ -800,6 +816,7 @@ NODE
         if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
             pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
         fi
+        stop_orphaned_whatsapp_bridge_browsers
         NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
             pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
     fi
@@ -884,7 +901,7 @@ console.log('📱 WhatsApp Web Bridge health: ok=' + Boolean(health.ok) + ' sess
 for (const session of sessions) {
     const status = String(session.status || 'unknown');
     const ready = Boolean(session.ready);
-    const phone = session.phone || 'not available';
+    const phone = session.phone ? '***' + String(session.phone).slice(-4) : 'not available';
     const locationId = session.locationId || 'unknown location';
     const lastWebhookSuccessMs = Date.parse(String(session.lastWebhookSuccessAt || ''));
     const lastWebhookErrorMs = Date.parse(String(session.lastWebhookErrorAt || ''));

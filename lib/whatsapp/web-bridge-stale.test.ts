@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     isWhatsAppWebBridgeRecoverableMediaError,
+    isWhatsAppWebBridgeOpaqueRuntimeError,
     isWhatsAppWebBridgeStaleError,
     shouldRestartWhatsAppWebBridgeSession,
 } from "./web-bridge-stale";
@@ -10,6 +11,11 @@ test("isWhatsAppWebBridgeStaleError detects Puppeteer stale page failures", () =
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Attempted to use detached Frame 'ABC'.")), true);
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Execution context was destroyed, most likely because of a navigation.")), true);
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Protocol error (Runtime.callFunctionOn): Target closed.")), true);
+    assert.equal(isWhatsAppWebBridgeStaleError(new Error("r")), true);
+    assert.equal(
+        isWhatsAppWebBridgeStaleError(new Error("Device tunnel gateway generation changed; the browser proxy must be rebound.")),
+        true,
+    );
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("WhatsApp Web session is not ready.")), false);
     assert.equal(isWhatsAppWebBridgeStaleError(new Error("Recipient is not on WhatsApp.")), false);
 });
@@ -27,6 +33,12 @@ test("isWhatsAppWebBridgeRecoverableMediaError detects opaque WhatsApp Web media
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("WhatsApp Web session is not ready.")), true);
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Protocol error: Target closed")), true);
     assert.equal(isWhatsAppWebBridgeRecoverableMediaError(new Error("Recipient is not on WhatsApp.")), false);
+});
+
+test("opaque runtime error detection is exact", () => {
+    assert.equal(isWhatsAppWebBridgeOpaqueRuntimeError(new Error("r")), true);
+    assert.equal(isWhatsAppWebBridgeOpaqueRuntimeError(new Error(" R ")), true);
+    assert.equal(isWhatsAppWebBridgeOpaqueRuntimeError(new Error("Recipient is not on WhatsApp.")), false);
 });
 
 test("media fetch isolation does not restart the WhatsApp Web Bridge session", () => {
@@ -47,10 +59,10 @@ test("media fetch isolation does not restart the WhatsApp Web Bridge session", (
     );
 });
 
-test("bridge fetch recovery does not restart for opaque media fetch failures", () => {
+test("bridge fetch recovery restarts for opaque non-media failures", () => {
     assert.equal(
         shouldRestartWhatsAppWebBridgeSession(new Error("r")),
-        false,
+        true,
     );
     assert.equal(
         shouldRestartWhatsAppWebBridgeSession(

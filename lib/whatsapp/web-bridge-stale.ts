@@ -7,6 +7,7 @@ const STALE_BROWSER_ERROR_PATTERNS = [
     "browser has disconnected",
     "navigation failed because browser has disconnected",
     "page closed",
+    "device tunnel gateway generation changed",
 ];
 
 const RECOVERABLE_MEDIA_ERROR_PATTERNS = [
@@ -18,8 +19,12 @@ const RECOVERABLE_MEDIA_ERROR_PATTERNS = [
 ];
 
 export function isWhatsAppWebBridgeStaleError(error: unknown) {
-    const message = String((error as any)?.message || error || "").toLowerCase();
-    return STALE_BROWSER_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+    const message = String((error as any)?.message || error || "").trim().toLowerCase();
+    return message === "r" || STALE_BROWSER_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+}
+
+export function isWhatsAppWebBridgeOpaqueRuntimeError(error: unknown) {
+    return String((error as any)?.message || error || "").trim().toLowerCase() === "r";
 }
 
 export function isWhatsAppWebBridgeRecoverableMediaError(error: unknown) {

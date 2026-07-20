@@ -43,6 +43,7 @@ const RUNTIME_LEASE_RENEW_INTERVAL_MS = Math.min(
     Math.floor(RUNTIME_LEASE_TTL_MS / 2),
 );
 const GATEWAY_STARTED_AT = new Date();
+const GATEWAY_GENERATION = randomUUID();
 const GATEWAY_REGION = String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "default").trim() || "default";
 const GATEWAY_PUBLIC_URL = String(process.env.DEVICE_TUNNEL_PUBLIC_URL || "").trim() || null;
 const GATEWAY_INTERNAL_URL = String(process.env.DEVICE_TUNNEL_GATEWAY_INTERNAL_URL || `http://127.0.0.1:${PORT}`).trim();
@@ -518,7 +519,12 @@ const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
     if (url.pathname === "/health") {
         if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
-        return json(res, 200, { ok: true, gatewayNodeId: GATEWAY_NODE_ID, connectedDevices: devicesByBridgeSession.size });
+        return json(res, 200, {
+            ok: true,
+            gatewayNodeId: GATEWAY_NODE_ID,
+            gatewayGeneration: GATEWAY_GENERATION,
+            connectedDevices: devicesByBridgeSession.size,
+        });
     }
     const proofStartMatch = url.pathname.match(/^\/sessions\/([^/]+)\/send-proof-start$/);
     if (proofStartMatch && req.method === "POST") {
@@ -631,6 +637,7 @@ const server = createHttpServer(async (req, res) => {
             proxyHost: "127.0.0.1",
             proxyPort: device.proxyPort,
             bindingId: device.bindingId,
+            gatewayGeneration: GATEWAY_GENERATION,
             ...(device.ownership ? { ownership: device.ownership } : {}),
         });
     }

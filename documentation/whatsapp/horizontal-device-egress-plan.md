@@ -99,6 +99,8 @@ Egress worker node B
 8. Rate-limited jobs are rescheduled without consuming a send attempt and without being marked failed.
 9. Provider IDs, local idempotency keys, and monotonic acknowledgements prevent duplicate sends and status regression.
 10. Full public IPs, message content, recipients, tunnel tokens, and device secrets are not written to operational logs.
+11. A browser is bound to one gateway process generation. Gateway restart, replacement, or failover invalidates the old loopback proxy, fully terminates the old browser tree, releases the profile lock, and forces browser recreation before readiness can return.
+12. Browser readiness requires both an active WhatsApp Web operation and a fresh successful application-webhook heartbeat; process reachability and cached event flags are never sufficient.
 
 ## Control-plane data model
 
@@ -340,6 +342,8 @@ Expected migration: auth-placement state, recovery status, integrity/version met
 
 Acceptance: hard-kill one node and restore the session on another without two active browsers or a corrupted profile.
 
+Lifecycle regression requirement: the restored browser must bind to the replacement gateway generation, complete an active WhatsApp Web probe, and deliver a webhook heartbeat before session-auth restoration is reported ready. A preserved browser from the prior generation must remain fenced even if its cached state says ready, and no orphan Chromium child may retain the old profile lock during volume detach/attach.
+
 Rollback: reattach the last known-good encrypted volume to its prior fenced node or mark `relink_required`; do not start with an unverified copied profile.
 
 ### PR 6 — Multi-node deployment and operations
@@ -357,6 +361,8 @@ Rollback: reattach the last known-good encrypted volume to its prior fenced node
 Expected infrastructure/data changes: node-specific DNS/TLS and deployment configuration; operational metric/audit storage may require a migration. No shared cross-node SOCKS mesh is part of this PR.
 
 Acceptance: documented SLOs pass during the canary and rollback is rehearsed.
+
+Deployment regression requirement: restart only the gateway while initially preserving the bridge, then verify that generation mismatch removes readiness, terminates the full old Chromium tree, recreates exactly one browser against the new proxy after Android reconnect, and restores both active WhatsApp Web access and webhook heartbeat freshness. Repeat during drain, crash, and blue/green release replacement; a superficial `/health` response must not pass the canary. Include a cached chat whose full `whatsapp-web.js` model serialization throws opaque `r`; the lightweight/raw-model history fallback must succeed without a restart loop, while `r` from both primary and fallback operations must fence the stale browser.
 
 Rollback: stop new placement, drain canary bindings, fence their current epochs, and return them to the original healthy node. Server-egress fallback remains prohibited.
 
@@ -399,6 +405,10 @@ Rollback must preserve binding epochs. Disable new placement and move canary bin
 - allowlist bypass, DNS rebinding, literal IP, private IP, and oversized frame attempts;
 - out-of-order WhatsApp acknowledgements and worker/webhook races;
 - node drain with queued and in-flight messages;
+- gateway restart while the bridge process survives, including deleted blue/green release cwd and replaced loopback proxy;
+- bridge exit with an orphan Chromium child retaining the persistent-profile lock;
+- cached browser `ready` with failed active chat access or stale application webhook heartbeat;
+- opaque `whatsapp-web.js` `r` from stale runtime versus one failing full chat-model serialization versus isolated media recovery;
 - auth-volume move, corrupt profile, and relink-required recovery.
 
 ## Next implementation task

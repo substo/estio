@@ -76,6 +76,17 @@ async function markValidBridgeWebhookReceived(locationId: string, sessionId: str
     });
 }
 
+async function markBridgeHeartbeatReceived(locationId: string, sessionId: string) {
+    const result = await (db as any).whatsAppWebBridgeSession.updateMany({
+        where: { locationId, sessionId },
+        data: {
+            lastSeenAt: new Date(),
+            lastError: null,
+        },
+    });
+    return Number(result?.count || 0) === 1;
+}
+
 async function processBridgeStatusUpdateWithAdoptionRetry(wamId: string, status: string) {
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -166,6 +177,13 @@ export async function POST(req: NextRequest) {
                 isDefaultOutbound: event === "ready" ? true : undefined,
                 metadata: body?.metadata || null,
             } as any);
+            return NextResponse.json({ status: "processed" });
+        }
+
+        if (event === "heartbeat") {
+            if (!await markBridgeHeartbeatReceived(locationId, sessionId)) {
+                return NextResponse.json({ error: "WhatsApp Web session is not registered" }, { status: 409 });
+            }
             return NextResponse.json({ status: "processed" });
         }
 

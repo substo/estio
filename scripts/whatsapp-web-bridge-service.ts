@@ -11,10 +11,14 @@ import {
     getStaleWhatsAppWebBridgeNonReadyReason,
 } from "../lib/whatsapp/web-bridge-readiness";
 import {
+    isWhatsAppWebBridgeOpaqueRuntimeError,
     isWhatsAppWebBridgeRecoverableMediaError,
-    isWhatsAppWebBridgeStaleError,
     shouldRestartWhatsAppWebBridgeSession,
 } from "../lib/whatsapp/web-bridge-stale";
+import {
+    didDeviceTunnelGatewayGenerationChange,
+    isWhatsAppWebBridgeActiveProbeFresh,
+} from "../lib/whatsapp/web-bridge-runtime-health";
 import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
 import {
     isDeviceTunnelRuntimeLeaseEnforcementActive,
@@ -54,6 +58,12 @@ type ManagedSession = {
     lastError?: string | null;
     lastWebhookSuccessAt?: Date | null;
     lastWebhookErrorAt?: Date | null;
+    gatewayGeneration?: string | null;
+    activeProbeHealthy?: boolean;
+    lastActiveProbeAt?: Date | null;
+    lastActiveProbeSuccessAt?: Date | null;
+    lastActiveProbeErrorAt?: Date | null;
+    activeProbeInFlight?: Promise<boolean> | null;
     deviceTunnelBindingId?: string | null;
     ownership?: DeviceTunnelRuntimeOwnership | null;
     ownershipValid?: boolean;
@@ -68,6 +78,14 @@ const MAX_INLINE_MEDIA_BYTES = Math.min(
 );
 const SUPPORTED_INLINE_MEDIA_TYPES = new Set(["image", "audio", "ptt", "document", "video"]);
 const WATCHDOG_INTERVAL_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_WATCHDOG_INTERVAL_MS || 60_000), 15_000);
+const ACTIVE_PROBE_REUSE_MS = Math.min(
+    Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_ACTIVE_PROBE_REUSE_MS || 10_000), 1_000),
+    WATCHDOG_INTERVAL_MS,
+);
+const ACTIVE_PROBE_STALE_MS = Math.max(
+    Number(process.env.WHATSAPP_WEB_BRIDGE_ACTIVE_PROBE_STALE_MS || WATCHDOG_INTERVAL_MS * 3),
+    WATCHDOG_INTERVAL_MS * 2,
+);
 const QR_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_QR_STALE_MS || 90_000), 30_000);
 const NON_READY_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_NON_READY_STALE_MS || DEFAULT_WEB_BRIDGE_NON_READY_STALE_MS), 30_000);
 const PROTOCOL_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_PROTOCOL_TIMEOUT_MS || 120_000), 30_000);
@@ -233,7 +251,7 @@ async function readJson(req: IncomingMessage) {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function emitEvent(payload: Record<string, any>) {
+async function emitEvent(payload: Record<string, any>, timeoutMs?: number) {
     const prepared = prepareWhatsAppWebBridgeWebhookPayload({
         payload,
         maxBodyBytes: APP_WEBHOOK_BODY_LIMIT_BYTES,
@@ -251,6 +269,7 @@ async function emitEvent(payload: Record<string, any>) {
             ...(SECRET ? { "x-whatsapp-web-bridge-secret": SECRET } : {}),
         },
         body: prepared.body,
+        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     });
     if (!response.ok) {
         const text = await response.text().catch(() => "");
@@ -267,41 +286,129 @@ function markSessionEvent(session: ManagedSession, status: string, error?: unkno
     session.lastError = error ? String((error as any)?.message || error) : null;
 }
 
-async function emitSessionEvent(session: ManagedSession, payload: Record<string, any>) {
+async function emitSessionEvent(
+    session: ManagedSession,
+    payload: Record<string, any>,
+    options?: { timeoutMs?: number },
+) {
     try {
         await assertManagedSessionOwnership(session);
         await emitEvent({
             ...payload,
             ...(RUNTIME_LEASE_ENFORCEMENT && session.deviceTunnelBindingId ? { ownership: session.ownership } : {}),
-        });
+        }, options?.timeoutMs);
         session.lastWebhookSuccessAt = new Date();
         if (session.lastWebhookErrorAt && session.lastWebhookSuccessAt > session.lastWebhookErrorAt) {
             session.lastError = null;
         }
+        return true;
     } catch (error: any) {
         session.lastWebhookErrorAt = new Date();
         session.lastError = error?.message || "Failed to emit bridge webhook event.";
         session.lastEventAt = new Date();
         console.error(`[WhatsApp Web Bridge] Failed to emit ${payload.event || "event"} for ${session.sessionId}:`, error?.message || error);
+        return false;
     }
 }
 
 function serializeManagedSession(session: ManagedSession) {
     const runtimeReady = !RUNTIME_LEASE_ENFORCEMENT || !session.deviceTunnelBindingId || session.ownershipValid === true;
+    const activeProbeFresh = isWhatsAppWebBridgeActiveProbeFresh({
+        healthy: Boolean(session.activeProbeHealthy),
+        lastSuccessAt: session.lastActiveProbeSuccessAt,
+        maxAgeMs: ACTIVE_PROBE_STALE_MS,
+    });
+    const ready = Boolean(session.ready && runtimeReady && activeProbeFresh);
     return {
         sessionId: session.sessionId,
         locationId: session.locationId,
-        ready: Boolean(session.ready && runtimeReady),
+        ready,
         phone: session.phone || null,
-        status: session.ready && runtimeReady ? "ready" : (session.status || "starting"),
+        status: ready ? "ready" : (session.ready ? "stale" : (session.status || "starting")),
         restarting: Boolean(session.restarting),
         startedAt: session.startedAt.toISOString(),
         lastEventAt: session.lastEventAt?.toISOString?.() || null,
         lastReadyAt: session.lastReadyAt?.toISOString?.() || null,
         lastWebhookSuccessAt: session.lastWebhookSuccessAt?.toISOString?.() || null,
         lastWebhookErrorAt: session.lastWebhookErrorAt?.toISOString?.() || null,
+        activeProbeHealthy: Boolean(session.activeProbeHealthy),
+        lastActiveProbeAt: session.lastActiveProbeAt?.toISOString?.() || null,
+        lastActiveProbeSuccessAt: session.lastActiveProbeSuccessAt?.toISOString?.() || null,
+        lastActiveProbeErrorAt: session.lastActiveProbeErrorAt?.toISOString?.() || null,
+        gatewayGeneration: session.gatewayGeneration || null,
         lastError: session.lastError || null,
     };
+}
+
+async function getDeviceTunnelGatewayGeneration() {
+    if (!DEVICE_TUNNEL_INTERNAL_SECRET) {
+        throw createRuntimeOwnershipUnavailableError("WhatsApp Android egress gateway authentication is unavailable.");
+    }
+    const response = await fetch(`${DEVICE_TUNNEL_GATEWAY_URL}/health`, {
+        headers: { "x-device-tunnel-secret": DEVICE_TUNNEL_INTERNAL_SECRET },
+        signal: AbortSignal.timeout(5_000),
+    }).catch(() => null);
+    const payload = response?.ok ? await response.json().catch(() => null) : null;
+    const generation = String(payload?.gatewayGeneration || "").trim();
+    if (!generation) {
+        throw createRuntimeOwnershipUnavailableError("WhatsApp Android egress gateway generation is unavailable.");
+    }
+    return generation;
+}
+
+async function activelyProbeManagedSession(session: ManagedSession, force = false) {
+    if (!session.ready || session.restarting || !session.client) return false;
+    if (session.activeProbeInFlight) return session.activeProbeInFlight;
+    const lastProbeAt = session.lastActiveProbeAt?.getTime() || 0;
+    if (!force && session.activeProbeHealthy && Date.now() - lastProbeAt < ACTIVE_PROBE_REUSE_MS) {
+        return true;
+    }
+
+    const probe = (async () => {
+        session.lastActiveProbeAt = new Date();
+        try {
+            await assertManagedSessionOwnership(session);
+            if (session.deviceTunnelBindingId) {
+                const gatewayGeneration = await getDeviceTunnelGatewayGeneration();
+                if (didDeviceTunnelGatewayGenerationChange({
+                    deviceTunnelBindingId: session.deviceTunnelBindingId,
+                    sessionGeneration: session.gatewayGeneration,
+                    gatewayGeneration,
+                })) {
+                    throw new Error("Device tunnel gateway generation changed; the browser proxy must be rebound.");
+                }
+            }
+            await getLightweightChats(session.client);
+            const webhookHealthy = await emitSessionEvent(session, {
+                event: "heartbeat",
+                locationId: session.locationId,
+                sessionId: session.sessionId,
+            }, { timeoutMs: 5_000 });
+            if (!webhookHealthy) throw new Error("WhatsApp Web app webhook heartbeat failed.");
+            session.activeProbeHealthy = true;
+            session.lastActiveProbeSuccessAt = new Date();
+            session.lastActiveProbeErrorAt = null;
+            return true;
+        } catch (error: any) {
+            session.activeProbeHealthy = false;
+            session.lastActiveProbeErrorAt = new Date();
+            session.lastError = error?.message || String(error || "WhatsApp Web active readiness probe failed.");
+            if (shouldRestartWhatsAppWebBridgeSession(error)) {
+                await restartStaleSession(session, error);
+            }
+            return false;
+        }
+    })();
+    session.activeProbeInFlight = probe;
+    try {
+        return await probe;
+    } finally {
+        if (session.activeProbeInFlight === probe) session.activeProbeInFlight = null;
+    }
+}
+
+async function activelyProbeReadySessions(force = false) {
+    await Promise.all(Array.from(sessions.values()).map((session) => activelyProbeManagedSession(session, force)));
 }
 
 function createRuntimeOwnershipUnavailableError(message = "WhatsApp Android egress runtime ownership is unavailable.") {
@@ -397,6 +504,91 @@ async function withStaleRecovery<T>(
             await restartStaleSession(session, error);
         }
         throw error;
+    }
+}
+
+async function getLightweightChats(client: any) {
+    return withTimeout(client.pupPage.evaluate(() => {
+        const chats = (window as any).require("WAWebCollections")?.Chat?.getModelsArray?.() || [];
+        return chats.map((chat: any) => ({
+            id: { _serialized: String(chat?.id?._serialized || chat?.id || "") },
+            name: String(chat?.name || chat?.formattedTitle || ""),
+            formattedTitle: String(chat?.formattedTitle || chat?.name || ""),
+            isGroup: Boolean(chat?.groupMetadata || /@g\.us$/i.test(String(chat?.id?._serialized || ""))),
+            unreadCount: Number(chat?.unreadCount || 0),
+            timestamp: Number(chat?.t || chat?.timestamp || 0),
+            archived: Boolean(chat?.archive || chat?.archived),
+            pinned: Boolean(chat?.pin || chat?.pinned),
+        }));
+    }), OPERATION_TIMEOUT_MS, "WhatsApp lightweight chat list");
+}
+
+async function getChatsWithOpaqueFallback(session: ManagedSession) {
+    try {
+        return await withTimeout(
+            session.client.getChats(),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp chat list ${session.sessionId}`,
+        );
+    } catch (error) {
+        if (!isWhatsAppWebBridgeOpaqueRuntimeError(error)) {
+            if (shouldRestartWhatsAppWebBridgeSession(error)) await restartStaleSession(session, error);
+            throw error;
+        }
+        try {
+            return await getLightweightChats(session.client);
+        } catch (fallbackError) {
+            if (shouldRestartWhatsAppWebBridgeSession(fallbackError)) {
+                await restartStaleSession(session, fallbackError);
+            } else {
+                await restartStaleSession(session, error);
+            }
+            throw fallbackError;
+        }
+    }
+}
+
+async function fetchChatMessagesWithOpaqueFallback(session: ManagedSession, chatId: string, limit: number) {
+    try {
+        const chat = await withTimeout(
+            session.client.getChatById(chatId),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp get chat ${session.sessionId}`,
+        );
+        return await withTimeout(
+            chat.fetchMessages({ limit }),
+            OPERATION_TIMEOUT_MS,
+            `WhatsApp fetch messages ${session.sessionId}`,
+        );
+    } catch (error) {
+        if (!isWhatsAppWebBridgeOpaqueRuntimeError(error)) {
+            if (shouldRestartWhatsAppWebBridgeSession(error)) await restartStaleSession(session, error);
+            throw error;
+        }
+        try {
+            const models = await withTimeout(session.client.pupPage.evaluate(async (targetChatId: string, targetLimit: number) => {
+                const chat = await (window as any).WWebJS.getChat(targetChatId, { getAsModel: false });
+                if (!chat) return [];
+                const includeMessage = (message: any) => !message?.isNotification;
+                let messages = chat.msgs.getModelsArray().filter(includeMessage);
+                while (messages.length < targetLimit) {
+                    const loaded = await (window as any).require("WAWebChatLoadMessages").loadEarlierMsgs({ chat });
+                    if (!loaded?.length) break;
+                    messages = [...loaded.filter(includeMessage), ...messages];
+                }
+                messages.sort((left: any, right: any) => Number(left?.t || 0) - Number(right?.t || 0));
+                return messages.slice(-targetLimit).map((message: any) => (window as any).WWebJS.getMessageModel(message));
+            }, chatId, limit), OPERATION_TIMEOUT_MS, `WhatsApp raw message fetch ${session.sessionId}`);
+            const { Message } = require("whatsapp-web.js");
+            return (models || []).map((model: any) => new Message(session.client, model));
+        } catch (fallbackError) {
+            if (shouldRestartWhatsAppWebBridgeSession(fallbackError)) {
+                await restartStaleSession(session, fallbackError);
+            } else {
+                await restartStaleSession(session, error);
+            }
+            throw fallbackError;
+        }
     }
 }
 
@@ -690,7 +882,17 @@ async function getDeviceTunnelProxy(
             throw createRuntimeOwnershipUnavailableError();
         }
     }
-    return { proxyHost, proxyPort, bindingId: String(payload?.bindingId || ""), ownership };
+    const gatewayGeneration = String(payload?.gatewayGeneration || "").trim();
+    if (!gatewayGeneration) {
+        throw createRuntimeOwnershipUnavailableError("The Android egress gateway did not provide a process generation.");
+    }
+    return {
+        proxyHost,
+        proxyPort,
+        bindingId: String(payload?.bindingId || ""),
+        gatewayGeneration,
+        ownership,
+    };
 }
 
 async function beginDeviceTunnelSendProof(session: ManagedSession) {
@@ -736,6 +938,21 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
             && !sameDeviceTunnelRuntimeOwnership(existing.ownership, expectedOwnership)
         ) {
             await fenceManagedSession(existing, "Runtime ownership changed");
+        } else if (existing.deviceTunnelBindingId) {
+            const gatewayGeneration = await getDeviceTunnelGatewayGeneration();
+            if (didDeviceTunnelGatewayGenerationChange({
+                deviceTunnelBindingId: existing.deviceTunnelBindingId,
+                sessionGeneration: existing.gatewayGeneration,
+                gatewayGeneration,
+            })) {
+                await restartStaleSession(
+                    existing,
+                    new Error("Device tunnel gateway generation changed; the browser proxy must be rebound."),
+                );
+                return existing;
+            }
+            await assertManagedSessionOwnership(existing);
+            return existing;
         } else {
             await assertManagedSessionOwnership(existing);
             return existing;
@@ -782,6 +999,12 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         lastError: null,
         lastWebhookSuccessAt: null,
         lastWebhookErrorAt: null,
+        gatewayGeneration: tunnelProxy?.gatewayGeneration || null,
+        activeProbeHealthy: false,
+        lastActiveProbeAt: null,
+        lastActiveProbeSuccessAt: null,
+        lastActiveProbeErrorAt: null,
+        activeProbeInFlight: null,
         deviceTunnelBindingId: tunnelProxy?.bindingId || null,
         ownership: tunnelProxy?.ownership || null,
         ownershipValid: !RUNTIME_LEASE_ENFORCEMENT || !tunnelProxy || Boolean(tunnelProxy.ownership),
@@ -826,6 +1049,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         managed.lastReadyAt = new Date();
         console.log(`[WhatsApp Web Bridge] Ready ${sessionId}`);
         await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
+        await activelyProbeManagedSession(managed, true);
     });
 
     client.on("disconnected", async (reason: string) => {
@@ -960,14 +1184,13 @@ async function listChats(sessionId: string) {
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
     await assertManagedSessionOwnership(session);
 
-    const chats = await withStaleRecovery(session, () => withTimeout(
-        session.client.getChats(),
-        OPERATION_TIMEOUT_MS,
-        `WhatsApp chat list ${sessionId}`
-    ));
+    const chats = await getChatsWithOpaqueFallback(session);
     return Promise.all((chats || []).map(async (chat: any) => {
         const chatId = chat?.id?._serialized || chat?.id?.user || "";
-        const contactIdentity = await buildContactIdentity(chat, chatId);
+        const contactIdentity = await buildContactIdentity(
+            chat?.client ? chat : { ...chat, client: session.client },
+            chatId,
+        );
         return {
         id: chatId,
         name: chat?.name || chat?.formattedTitle || contactIdentity.displayName || chat?.id?.user || "",
@@ -1020,18 +1243,7 @@ async function fetchMessages(sessionId: string, payload: any) {
         }
     }
 
-    const messages = await withStaleRecovery(session, async () => {
-        const chat = await withTimeout(
-            session.client.getChatById(chatId),
-            OPERATION_TIMEOUT_MS,
-            `WhatsApp get chat ${sessionId}`
-        );
-        return withTimeout(
-            chat.fetchMessages({ limit }),
-            OPERATION_TIMEOUT_MS,
-            `WhatsApp fetch messages ${sessionId}`
-        );
-    });
+    const messages = await fetchChatMessagesWithOpaqueFallback(session, chatId, limit);
     if (targetMessageId) {
         return Promise.all((messages || []).map((message: any) => {
             const messageId = getSerializedMessageId(message);
@@ -1080,17 +1292,16 @@ async function resolveChatForPhone(sessionId: string, payload: any) {
         return { chatId: numberChatId, source: "getNumberId" };
     }
 
-    const chats = await withStaleRecovery(session, () => withTimeout(
-        session.client.getChats(),
-        OPERATION_TIMEOUT_MS,
-        `WhatsApp resolve chat scan ${sessionId}`
-    ));
+    const chats = await getChatsWithOpaqueFallback(session);
     for (const chat of chats || []) {
         if (chat?.isGroup) continue;
         const chatId = jidFromId(chat?.id);
         if (!chatId) continue;
 
-        const identity = await buildContactIdentity(chat, chatId);
+        const identity = await buildContactIdentity(
+            chat?.client ? chat : { ...chat, client: session.client },
+            chatId,
+        );
         const candidates = [
             identity.phoneJid,
             identity.number,
@@ -1118,6 +1329,7 @@ const server = createServer(async (req, res) => {
 
         if (req.method === "GET" && url.pathname === "/health") {
             await refreshRuntimeSessionOwnerships();
+            await activelyProbeReadySessions();
             return json(res, 200, {
                 ok: true,
                 uptimeSeconds: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
@@ -1131,6 +1343,7 @@ const server = createServer(async (req, res) => {
 
         if (req.method === "GET" && url.pathname === "/ready") {
             await refreshRuntimeSessionOwnerships();
+            await activelyProbeReadySessions();
             const serializedSessions = Array.from(sessions.values()).map(serializeManagedSession);
             const readySessions = serializedSessions.filter((session) => session.ready);
             return json(res, readySessions.length > 0 ? 200 : 503, {
@@ -1241,26 +1454,7 @@ setInterval(() => {
             continue;
         }
         if (!session.ready || session.restarting || !session.client) continue;
-        withStaleRecovery(session, async () => {
-            if (typeof session.client.getState === "function") {
-                await withTimeout(
-                    session.client.getState(),
-                    OPERATION_TIMEOUT_MS,
-                    `WhatsApp watchdog state ${session.sessionId}`
-                );
-            } else {
-                await withTimeout(
-                    session.client.getChats(),
-                    OPERATION_TIMEOUT_MS,
-                    `WhatsApp watchdog chats ${session.sessionId}`
-                );
-            }
-        }).catch((error: any) => {
-            if (!isWhatsAppWebBridgeStaleError(error)) {
-                session.lastError = error?.message || String(error || "WhatsApp Web watchdog failed.");
-                console.warn(`[WhatsApp Web Bridge] Watchdog check failed for ${session.sessionId}:`, session.lastError);
-            }
-        });
+        void activelyProbeManagedSession(session, true);
     }
 }, WATCHDOG_INTERVAL_MS).unref?.();
 
@@ -1271,7 +1465,7 @@ setInterval(() => {
 async function bootstrapPersistedSessions() {
     const rows = await (db as any).whatsAppWebBridgeSession.findMany({
         where: {
-            status: { in: ["ready", "authenticated", "starting", "qr"] },
+            status: { in: ["ready", "authenticated", "starting", "restarting", "qr"] },
         },
         select: { sessionId: true, locationId: true },
     }).catch((error: any) => {
