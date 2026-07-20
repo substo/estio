@@ -12,7 +12,8 @@ Last updated: 2026-07-20.
 - PR 4, co-located runtime ownership, is code-deployed from `86cf242`. It required no migration; distributed placement and runtime lease enforcement remain unset/off, so its authoritative lease path is inactive.
 - The 2026-07-20 ingress lifecycle hotfix is deployed through `ed8fd87` (`272f265`, `1c67a31`, and `ed8fd87`). Active readiness, gateway-generation rebinding, orphan Chromium cleanup, and safe `r` fallbacks restored live history access; the bounded backfill replayed 21 recent messages with zero failures.
 - Production remains on the compatibility path: distributed placement and runtime lease enforcement are off, and outbound rate limiting is disabled by default. The deployments preserved one healthy Android tunnel and did not add a node.
-- PRs 5–7 remain: movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
+- PR 5's storage architecture is selected and implementation is in progress: immutable quiesced profile snapshots in private R2, AES-256-GCM envelope encryption under a dedicated Google Cloud KMS key, and PostgreSQL single-writer placement fencing. PRs 6–7 remain two-node operations/canary, then compatibility cleanup and final security review.
+- The PR 5 foundation migration and tested placement/crypto/KMS/R2/archive primitives are implemented. They remain unwired from the bridge so production still uses the existing host-local directory; the next slice must add the complete stopped-browser checkpoint/restore lifecycle before the durable mode can be enabled.
 
 See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
 
@@ -35,6 +36,13 @@ DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT=false
 # DEVICE_TUNNEL_RUNTIME_LEASE_TTL_MS=30000
 # DEVICE_TUNNEL_RUNTIME_LEASE_RENEW_INTERVAL_MS=10000
 WHATSAPP_RATE_LIMIT_MODE=disabled
+# PR 5 code remains dormant until a later explicitly approved canary:
+# WHATSAPP_SESSION_AUTH_MODE=local
+# WHATSAPP_SESSION_AUTH_KMS_KEY_PATH=projects/<project>/locations/<region>/keyRings/<ring>/cryptoKeys/<auth-key>
+# WHATSAPP_SESSION_AUTH_R2_BUCKET=<private-auth-bucket>
+# WHATSAPP_SESSION_AUTH_R2_ACCESS_KEY_ID=<auth-bucket-only-access-key>
+# WHATSAPP_SESSION_AUTH_R2_SECRET_ACCESS_KEY=<auth-bucket-only-secret-key>
+# WHATSAPP_SESSION_AUTH_R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
 ```
 
 `deploy-local-build.sh` starts the gateway when both secrets exist and adds the Caddy `/device-tunnel/*` WebSocket route. Apply the Prisma migration before binding a device. Rebuild and distribute the Android application so it can enroll its hardware-backed key.
@@ -54,6 +62,14 @@ A device-tunnel gateway restart destroys its loopback SOCKS listeners even when 
 Bridge readiness is active, not cached. A ready session must complete a bounded WhatsApp Web collection probe and a no-content heartbeat through the application webhook within the freshness window. A failed or stale probe removes the session from readiness, and stale browser errors trigger the bounded restart path. The opaque `whatsapp-web.js` error `r` can mean either a stale page or a failure while fully serializing one cached chat or message model. Chat-list and history reads therefore attempt a narrow lightweight/raw-model fallback first. The history fallback reads the cached collection directly and maps only the webhook fields; it must not call `WWebJS.getMessageModel()`, because that re-enters the failing whole-model serializer. Browser-evaluated fallback closures must also be tested after the production TypeScript transform: locally assigned callback functions can acquire a transpiler helper reference that does not exist inside the page, so in-page filters remain inline and self-contained. `r` triggers the bounded stale restart when that safe fallback also fails. An isolated media fetch may still fail without restarting the browser.
 
 All follow-up PRs must preserve and test this lifecycle ordering: fully stop the prior browser and release its persistent-profile lock, start the gateway generation, wait for Android reconnect and proxy creation, bind one new browser, then require active browser-plus-webhook readiness. Deployment or failover tooling must not preserve a browser across a gateway generation change, must not leave orphan Chromium children after the bridge exits, must not rely on PM2 reachability or cached `ready`, and must verify ingress as well as outbound egress before declaring the session healthy.
+
+### Durable session-auth decision
+
+PR 5 does not use one Hetzner Volume per session: the provider permits only 16 attached Volumes per server and supplies no Volume snapshot/backup facility, which does not fit the planned node density or recovery requirements. It also does not use the installed `whatsapp-web.js` 1.34.7 `RemoteAuth` loop directly because that implementation periodically archives profile directories while Chromium is live and does not remove local scratch on `destroy()`.
+
+The selected provider stores immutable encrypted profile generations in a private Cloudflare R2 auth bucket. Each generation has a random AES-256-GCM data key wrapped by a dedicated Google Cloud KMS key; the KMS key and R2 credentials are separate from application, database, settings, and tunnel secrets. PostgreSQL stores only non-secret placement, monotonically increasing `authEpoch`, object/integrity metadata, and audit state. Attach is bounded to 120 seconds and checkpoint/detach to 180 seconds. A checkpoint is allowed only after the exact browser tree has stopped and released its profile lock. Restore verifies the encryption tag, ciphertext and plaintext digests, size bounds, safe archive paths, and required profile directories before Chromium can start.
+
+The current verified generation, seven daily points, four weekly points, and a superseded last-known-good generation for at least 30 days are retained under unique object keys. Corrupt generations are quarantined; recovery increments `authEpoch` and may try only an older verified generation. If none restores, the session becomes `relink_required`. Rollback follows the same fence-stop-verify-restore sequence and never resets assignment, lease, or auth epochs. Production remains in `local` mode throughout PR 5; distributed placement and runtime lease enforcement remain off, no second node is added, and no server-egress fallback is introduced.
 
 After deploying the node-registry migration, verify the node's `status`, `lastHeartbeatAt`, `activeSessions`, configured URLs, region, capacity, and version in `DeviceTunnelGatewayNode`. A heartbeat update is scoped to both node ID and process `startedAt`; an older process cannot overwrite a replacement process's heartbeat.
 
@@ -94,7 +110,7 @@ Disabling the binding returns the session to server egress; this is an explicit 
 
 - The active production path remains single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. PR 4 code is fail-closed when explicitly enabled, but runtime enforcement remains inactive while distributed placement is false and its own flag is false.
 - Rate-limit schema, Redis counters, dispatch locks, queue rescheduling, and admin UI support are deployed, but production enforcement remains off until the required shadow observation cycle is completed.
-- Cross-node browser failover is not safe yet: runtime leases now stop stale browsers, but PR 5 session authentication is still stored on the local host. Do not enable multi-node automatic failover, move/copy a live profile, or provision a second node as part of PR 4.
+- Cross-node browser failover is not safe yet: the PR 5 provider contract is selected, but production session authentication is still stored on the local host and the durable mode is not enabled. Do not enable multi-node automatic failover, move/copy a live profile, or provision a second node during PR 5.
 - A 2026-07-20 production incident showed why process reachability is insufficient: deployment restarted the gateway but preserved a browser bound to the removed gateway proxy, leaving outbound browser operations and inbound webhooks stale while health still claimed ready. Recovery also found an orphan Chromium child retaining the profile lock after PM2 removed the bridge, and a clean browser reproduced `r` only in full chat-model serialization. Gateway-generation fencing, child-process cleanup, active ingress probes, and the safe raw-model fallback are required regression boundaries for PRs 5–7.
 - The current allowlist may need additions when WhatsApp changes media/CDN hostnames. Add only observed, reviewed suffixes through `DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES`.
 - Legal/Meta approval and an internal pilot remain required before exposing this transport to customer scale.

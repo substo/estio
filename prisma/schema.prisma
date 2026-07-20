@@ -72,6 +72,8 @@ model Location {
   whatsappWebBridgeSessions     WhatsAppWebBridgeSession[]
   whatsappRateLimitPolicy       WhatsAppRateLimitPolicy?
   whatsappOutboundDispatchLocks WhatsAppOutboundDispatchLock[]
+  whatsappSessionAuthPlacements WhatsAppSessionAuthPlacement[]
+  whatsappSessionAuthAuditEvents WhatsAppSessionAuthAuditEvent[]
   whatsappTemplates             WhatsAppTemplate[]
   whatsappIdentityMaps          WhatsAppIdentityMap[]
   whatsappCallAttempts          WhatsAppCallAttempt[]
@@ -3338,6 +3340,9 @@ model WhatsAppWebBridgeSession {
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
   tunnelBinding DeviceTunnelBinding?
   tunnelLease DeviceTunnelSessionLease?
+  authPlacement WhatsAppSessionAuthPlacement?
+  authGenerations WhatsAppSessionAuthGeneration[]
+  authAuditEvents WhatsAppSessionAuthAuditEvent[]
 
   @@unique([locationId])
   @@unique([sessionId])
@@ -3363,9 +3368,117 @@ model DeviceTunnelGatewayNode {
 
   tunnelBindings DeviceTunnelBinding[]
   sessionLeases  DeviceTunnelSessionLease[]
+  authPlacements WhatsAppSessionAuthPlacement[]
+  authAuditEvents WhatsAppSessionAuthAuditEvent[]
 
   @@index([region, status, lastHeartbeatAt])
   @@index([status, lastHeartbeatAt])
+}
+
+model WhatsAppSessionAuthPlacement {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locationId String
+  sessionId String @unique
+  bindingId String @unique
+
+  provider String @default("r2_encrypted_snapshot")
+  state String @default("detached") // detached | attaching | attached | detaching | recovering | quarantined | relink_required
+  gatewayNodeId String?
+  assignmentEpoch Int @default(0)
+  ownerInstanceId String?
+  leaseEpoch Int @default(0)
+  authEpoch Int @default(0)
+  operationId String? @unique
+  operationStartedAt DateTime?
+  operationDeadlineAt DateTime?
+  currentGeneration Int @default(0)
+  lastKnownGoodGeneration Int @default(0)
+  lastAttachedAt DateTime?
+  lastDetachedAt DateTime?
+  lastVerifiedAt DateTime?
+  recoveryStatus String @default("healthy") // healthy | restoring_previous | quarantined | relink_required
+  lastErrorCode String?
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  session WhatsAppWebBridgeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  binding DeviceTunnelBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  gatewayNode DeviceTunnelGatewayNode? @relation(fields: [gatewayNodeId], references: [id], onDelete: Restrict)
+  generations WhatsAppSessionAuthGeneration[]
+  auditEvents WhatsAppSessionAuthAuditEvent[]
+
+  @@index([locationId, state])
+  @@index([gatewayNodeId, state])
+  @@index([state, operationDeadlineAt])
+}
+
+model WhatsAppSessionAuthGeneration {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  placementId String
+  sessionId String
+  generation Int
+  authEpoch Int
+  status String @default("pending") // pending | verified | quarantined | retired | deleted
+  objectKey String @unique
+  objectVersionId String?
+  objectEtag String?
+  encryptedSize BigInt
+  plaintextSize BigInt
+  ciphertextSha256 String
+  plaintextSha256 String
+  encryptionAlgorithm String @default("AES-256-GCM")
+  kmsKeyName String
+  encryptedDek String @db.Text
+  iv String
+  authTag String
+  formatVersion Int @default(1)
+  verifiedAt DateTime?
+  quarantinedAt DateTime?
+  retentionUntil DateTime?
+  errorCode String?
+
+  placement WhatsAppSessionAuthPlacement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+  session WhatsAppWebBridgeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([placementId, generation])
+  @@index([sessionId, status, generation(sort: Desc)])
+  @@index([status, retentionUntil])
+}
+
+model WhatsAppSessionAuthAuditEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  placementId String
+  locationId String
+  sessionId String
+  bindingId String
+  eventType String
+  outcome String
+  gatewayNodeId String?
+  assignmentEpoch Int
+  leaseEpoch Int
+  authEpoch Int
+  operationId String?
+  generation Int?
+  errorCode String?
+  metadata Json?
+
+  placement WhatsAppSessionAuthPlacement @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  session WhatsAppWebBridgeSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  binding DeviceTunnelBinding @relation(fields: [bindingId], references: [id], onDelete: Restrict)
+  gatewayNode DeviceTunnelGatewayNode? @relation(fields: [gatewayNodeId], references: [id], onDelete: Restrict)
+
+  @@index([placementId, createdAt(sort: Desc)])
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@index([bindingId, createdAt(sort: Desc)])
 }
 
 model WhatsAppTemplate {
@@ -4011,6 +4124,8 @@ model DeviceTunnelBinding {
   session  WhatsAppWebBridgeSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   gatewayNode DeviceTunnelGatewayNode? @relation(fields: [gatewayNodeId], references: [id], onDelete: SetNull)
   sessionLease DeviceTunnelSessionLease?
+  authPlacement WhatsAppSessionAuthPlacement?
+  authAuditEvents WhatsAppSessionAuthAuditEvent[]
 
   @@index([locationId, status])
   @@index([status, lastSeenAt])
