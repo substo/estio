@@ -42,6 +42,7 @@ android {
             .getOrElse(1)
         versionName = providers.gradleProperty("SIMRELAY_VERSION_NAME")
             .getOrElse("1.0")
+        buildConfigField("String", "DEVICE_TUNNEL_GATEWAY_HOST_SUFFIX", "\"estio.co\"")
     }
 
     signingConfigs {

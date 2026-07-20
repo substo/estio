@@ -1,9 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateDeviceTunnelGatewayUrl } from "./gateway-url";
+import { validateDeviceTunnelGatewayUrl, validateTrustedDeviceTunnelGatewayUrl } from "./gateway-url";
 
 test("accepts canonical WSS node URLs", () => {
     assert.equal(validateDeviceTunnelGatewayUrl("wss://node-a.example.test/device-tunnel/", true), "wss://node-a.example.test/device-tunnel");
+});
+
+test("trusted node URLs require the exact endpoint, TLS port, and host suffix", () => {
+    assert.equal(validateTrustedDeviceTunnelGatewayUrl({
+        value: "wss://node-a.egress.example.test/device-tunnel",
+        trustedHostSuffixes: ["egress.example.test"],
+    }), "wss://node-a.egress.example.test/device-tunnel");
+    for (const value of [
+        "wss://node-a.evil.test/device-tunnel",
+        "wss://127.0.0.1/device-tunnel",
+        "wss://node-a.egress.example.test:8443/device-tunnel",
+        "wss://node-a.egress.example.test/alternate",
+    ]) {
+        assert.throws(() => validateTrustedDeviceTunnelGatewayUrl({
+            value,
+            trustedHostSuffixes: ["egress.example.test"],
+        }));
+    }
 });
 
 test("rejects redirect-like or credential-bearing gateway URLs", () => {

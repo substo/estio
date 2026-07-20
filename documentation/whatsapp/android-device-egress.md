@@ -14,6 +14,8 @@ Last updated: 2026-07-20.
 - Production remains on the compatibility path: distributed placement and runtime lease enforcement are off, and outbound rate limiting is disabled by default. The deployments preserved one healthy Android tunnel and did not add a node.
 - PR 5's durable session-auth implementation is complete on `clean-history`: immutable quiesced profile snapshots in private R2, AES-256-GCM envelope encryption under a dedicated Google Cloud KMS key, PostgreSQL single-writer placement fencing, bounded corruption fallback, retention, and bridge/deployment lifecycle wiring. It is not deployed or enabled.
 - Production still uses the existing host-local directory. The PR 5 migration is not applied, `WHATSAPP_SESSION_AUTH_MODE` remains `local`, and the durable provider is bypassed. PR 6 owns provider provisioning, two-node operations, explicit canary approval, and activation; PR 7 owns cleanup and final security review.
+- PR 6 implementation is complete locally and remains inactive. It adds exact expiring canary scopes, strict node WSS trust on the control plane/gateway/Android, per-token compatibility versus canary routing, process-fenced drain/resume, redacted acceptance/failure-matrix tooling, and the infrastructure/migration/rollback runbook. No production mutation was performed.
+- The latest production-only dependency audit has 32 findings, including critical Clerk authorization paths and `protobufjs` in the Google KMS dependency chain. These require upgrade-and-regression disposition before a canary; no audit fix was applied.
 
 See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
 
@@ -23,6 +25,7 @@ See the [horizontal implementation plan](./horizontal-device-egress-plan.md#impl
 DEVICE_TUNNEL_JWT_SECRET=<independent random secret, at least 32 bytes>
 DEVICE_TUNNEL_INTERNAL_SECRET=<independent random secret, at least 32 bytes>
 DEVICE_TUNNEL_PUBLIC_URL=wss://estio.co/device-tunnel
+DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES=estio.co
 DEVICE_TUNNEL_GATEWAY_PORT=3220
 DEVICE_TUNNEL_GATEWAY_URL=http://127.0.0.1:3220
 DEVICE_TUNNEL_GATEWAY_NODE_ID=cyprus-egress-1
@@ -35,14 +38,16 @@ DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT=false
 # DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID=<unique deployment instance ID>
 # DEVICE_TUNNEL_RUNTIME_LEASE_TTL_MS=30000
 # DEVICE_TUNNEL_RUNTIME_LEASE_RENEW_INTERVAL_MS=10000
+# Exact expiring tenant/session/binding/node JSON; omit until an approved canary:
+# DEVICE_TUNNEL_CANARY_SCOPES=[]
 WHATSAPP_RATE_LIMIT_MODE=disabled
 # PR 5 code remains dormant until a later explicitly approved canary:
 # WHATSAPP_SESSION_AUTH_MODE=local
 # WHATSAPP_SESSION_AUTH_KMS_KEY_PATH=projects/<project>/locations/<region>/keyRings/<ring>/cryptoKeys/<auth-key>
+# CLOUDFLARE_R2_ACCOUNT_ID=<cloudflare-account-id>
 # WHATSAPP_SESSION_AUTH_R2_BUCKET=<private-auth-bucket>
 # WHATSAPP_SESSION_AUTH_R2_ACCESS_KEY_ID=<auth-bucket-only-access-key>
 # WHATSAPP_SESSION_AUTH_R2_SECRET_ACCESS_KEY=<auth-bucket-only-secret-key>
-# WHATSAPP_SESSION_AUTH_R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
 ```
 
 `deploy-local-build.sh` starts the gateway when both secrets exist and adds the Caddy `/device-tunnel/*` WebSocket route. Apply the Prisma migration before binding a device. Rebuild and distribute the Android application so it can enroll its hardware-backed key.
@@ -51,7 +56,7 @@ The SIM Relay integration page shows the live tunnel state and the last verified
 
 The gateway registers `DEVICE_TUNNEL_GATEWAY_NODE_ID` in PostgreSQL and heartbeats every 15 seconds. Use one stable ID per deployed gateway; do not derive it from a PID or container restart. Keep `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` during the PR 1 rollout. With the flag disabled, node registry fields are populated but assignment and lease enforcement are not activated, so the existing single-host browser-to-loopback-SOCKS path remains unchanged. Enabling the flag requires an explicit node ID and is reserved for the later routing/ownership phases.
 
-PR 3 keeps that flag-off routing behavior: token exchange returns the global `DEVICE_TUNNEL_PUBLIC_URL`, and gateway connect/disconnect observations may continue updating `gatewayNodeId` as before. With distributed placement enabled in a later controlled phase, bind/token exchange keeps an eligible current assignment or selects a healthy online, non-draining node with capacity. The binding row is locked transactionally; a node ownership change increments `assignmentEpoch`, while a stable assignment does not. The endpoint returns the assigned registry node's validated WSS URL. Node URLs must be credential-free WebSocket URLs with no query or fragment; production accepts only `wss://`.
+PR 3 keeps that flag-off routing behavior: token exchange returns the global `DEVICE_TUNNEL_PUBLIC_URL`, and gateway connect/disconnect observations may continue updating `gatewayNodeId` as before. PR 6 prevents a global placement flip: only an exact, unexpired `DEVICE_TUNNEL_CANARY_SCOPES` tenant/session/binding entry whose provider and ownership prerequisites are complete receives `placementMode=distributed_canary`. The reviewed node is pinned and its registry URL must exactly equal the scope URL. Every other token remains `compatibility`. Node URLs require WSS on the TLS port, the exact `/device-tunnel` endpoint, a trusted DNS suffix, and no credentials, query, fragment, literal IP, redirect, or alternate endpoint. Android enforces the production host suffix and endpoint again before connecting.
 
 PR 4 runtime enforcement activates only when both `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT` and `DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT` are `true`. The gateway and bridge must share the same stable gateway node ID and the same unique deployment-instance owner ID. The gateway acquires the existing PostgreSQL lease before listening on a loopback SOCKS port, renews it on a bounded cadence, and passes both assignment and lease epochs to the bridge. New proxy work, Chromium startup, browser readiness, send-proof start and verification, webhook mutations, and proof persistence all require the exact current tenant/session/binding/node/assignment/owner/lease scope. Two missed renewals, lease expiry, reassignment, node drain, or binding drain stop new work, close tunnel streams, and stop only the browser carrying the fenced descriptor. Ownership gaps keep outbox work `blocked_egress` without incrementing the provider attempt count.
 
@@ -74,6 +79,10 @@ The current verified generation, seven daily points, four weekly points, explici
 Automatic attach has a 120-second database deadline; a stopped-browser checkpoint/detach has a 180-second deadline. Android reconnect retains its existing full-jitter backoff capped at 60 seconds, and deployment allows up to 180 seconds for the restored browser plus authenticated webhook heartbeat to become ready. These are fail-closed bounds, not an availability promise: provider or WhatsApp outages leave the session non-ready without switching to server egress.
 
 Break-glass rollback is an authenticated internal operation, not a database-edit procedure. Drain new work, call the bridge `POST /sessions/<bridge-session-id>/auth-rollback` with the exact current runtime ownership descriptor and location, and let it stop/checkpoint the browser before selecting the newest older verified/retained generation. The transaction revalidates the active runtime lease, requires the placement to be detached, increments `authEpoch`, records an immutable audit event, and then restores through the normal integrity and ingress-readiness gates. If no older generation verifies, use the existing authenticated `clear` operation to enter `relink_required` and obtain a new QR. Never change generation or epoch columns manually, copy the persistent directory, restart the gateway before the bridge has stopped, or weaken KMS/archive validation. PR 6 must turn this sequence into a rehearsed operator runbook with node-specific canary controls before activation.
+
+PR 6 now provides that [multi-node deployment and operations runbook](./multi-node-device-egress-runbook.md). It includes node config generation with every control off, read-only migration/tenant preflight, dedicated KMS/R2 least privilege, DNS/TLS validation, per-node credential revocation, dry-run drain/resume, exact canary syntax, redacted acceptance evidence, the complete failure matrix, and monotonic rollback. The tools prepare and validate; they do not authorize production changes.
+
+Local PR 6 verification passed 111 focused TypeScript tests, 2 PM2 singleton tests, Android unit/debug builds, Prisma validate/generate, strict targeted gateway/PR 6 checks, shell validation, operator dry runs, production route/runtime bundles, transformed page-closure inspection, diff checks, and the production build. The read-only migration-status command still returns an opaque Prisma schema-engine error against the configured datasource, so production migration state remains unverified and blocks rollout preflight.
 
 After deploying the node-registry migration, verify the node's `status`, `lastHeartbeatAt`, `activeSessions`, configured URLs, region, capacity, and version in `DeviceTunnelGatewayNode`. A heartbeat update is scoped to both node ID and process `startedAt`; an older process cannot overwrite a replacement process's heartbeat.
 
@@ -102,7 +111,7 @@ Disabling the binding returns the session to server egress; this is an explicit 
 
 - Android keeps its P-256 private key in Android Keystore.
 - A valid SMS Relay device token can request a short-lived challenge, but only a signature from the enrolled device key can exchange it for a five-minute tunnel token.
-- Tunnel JWTs contain `aud`, `nodeId`, `sessionId`, `bindingId`, `deviceId`, `locationId`, `assignmentEpoch`, `jti`, `iat`, and `exp`. Issuance rechecks the tenant, current device token hash and credential version, enrolled key, binding, and session egress mode after consuming the one-time challenge; distributed issuance also rechecks assignment, node health, and the registry WSS URL. Every successful device-key enrollment increments `tunnelCredentialVersion`, so an older token cannot survive re-pairing.
+- Tunnel JWTs contain `aud`, `nodeId`, `sessionId`, `bindingId`, `deviceId`, `locationId`, `assignmentEpoch`, `placementMode`, `jti`, `iat`, and `exp`. Issuance rechecks the tenant, current device token hash and credential version, enrolled key, binding, and session egress mode after consuming the one-time challenge; distributed-canary issuance also rechecks the exact expiring scope, provider prerequisites, assignment, node health, and canonical registry WSS URL. Every successful device-key enrollment increments `tunnelCredentialVersion`, so an older token cannot survive re-pairing.
 - The gateway verifies signature and audience, rejects tokens for another node, and rechecks current tenant/device/binding/session/assignment epoch and device credential state before creating a proxy. Each JTI is consumed once per gateway process. Expired entries are purged; the cache is bounded by `DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES` and fails closed when full. A process restart clears only this bounded replay cache; durable wrong-node, credential-version, and assignment-epoch fencing still applies.
 - Android accepts only credential-free `wss://` endpoints returned by the token exchange. Every reconnect obtains a new challenge and token, so reassignment supplies the new node URL. Failed reconnects retain exponential backoff capped at 60 seconds with full jitter.
 - The gateway listens locally behind Caddy, creates loopback-only SOCKS endpoints, allows domain-form WhatsApp/Meta destinations on port 443, rejects literal IP targets, and limits concurrent streams and frame size.

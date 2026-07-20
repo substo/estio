@@ -15,6 +15,7 @@ export type DeviceTunnelTokenPayload = {
     assignmentEpoch: number;
     credentialVersion: number;
     purpose: "device_tunnel";
+    placementMode?: "compatibility" | "distributed_canary";
     jti: string;
     iat: number;
     exp: number;
@@ -83,6 +84,7 @@ export function issueDeviceTunnelToken(args: {
     bindingId: string;
     assignmentEpoch: number;
     credentialVersion: number;
+    placementMode?: "compatibility" | "distributed_canary";
 }): string {
     if (
         !args.nodeId
@@ -105,6 +107,7 @@ export function issueDeviceTunnelToken(args: {
             assignmentEpoch: args.assignmentEpoch,
             credentialVersion: args.credentialVersion,
             purpose: "device_tunnel",
+            placementMode: args.placementMode || "compatibility",
         },
         getTunnelJwtSecret(),
         {
@@ -122,6 +125,10 @@ export function verifyDeviceTunnelToken(token: string, expectedNodeId?: string):
         audience: DEVICE_TUNNEL_TOKEN_AUDIENCE,
     }) as DeviceTunnelTokenPayload;
     if (payload.purpose !== "device_tunnel") throw new Error("Invalid tunnel token purpose");
+    const placementMode = payload.placementMode || "compatibility";
+    if (placementMode !== "compatibility" && placementMode !== "distributed_canary") {
+        throw new Error("Invalid tunnel token placement mode");
+    }
     if (
         !payload.nodeId
         || !payload.sessionId
@@ -135,7 +142,7 @@ export function verifyDeviceTunnelToken(token: string, expectedNodeId?: string):
         throw new Error("Tunnel token scope is incomplete");
     }
     if (expectedNodeId && payload.nodeId !== expectedNodeId) throw new Error("Tunnel token belongs to another gateway node");
-    return payload;
+    return { ...payload, placementMode };
 }
 
 export function maskIpAddress(value: string): string | null {

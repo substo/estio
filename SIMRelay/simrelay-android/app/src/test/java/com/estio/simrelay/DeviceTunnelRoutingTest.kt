@@ -20,22 +20,27 @@ class DeviceTunnelRoutingTest {
     @Test
     fun usesReturnedAssignedNodeUrl() {
         assertEquals(
-            "wss://node-a.example.test/device-tunnel/v1/device",
-            DeviceTunnelRouting.endpoint(config("wss://node-a.example.test/device-tunnel", "node-a", 4)),
+            "wss://node-a.estio.co/device-tunnel/v1/device",
+            DeviceTunnelRouting.endpoint(config("wss://node-a.estio.co/device-tunnel", "node-a", 4)),
         )
     }
 
     @Test
     fun freshTokenCanRouteReconnectToReassignedNode() {
-        val oldEndpoint = DeviceTunnelRouting.endpoint(config("wss://node-a.example.test/device-tunnel", "node-a", 4))
-        val newEndpoint = DeviceTunnelRouting.endpoint(config("wss://node-b.example.test/device-tunnel", "node-b", 5))
+        val oldEndpoint = DeviceTunnelRouting.endpoint(config("wss://node-a.estio.co/device-tunnel", "node-a", 4))
+        val newEndpoint = DeviceTunnelRouting.endpoint(config("wss://node-b.estio.co/device-tunnel", "node-b", 5))
         assertNotEquals(oldEndpoint, newEndpoint)
-        assertTrue(newEndpoint.startsWith("wss://node-b.example.test/"))
+        assertTrue(newEndpoint.startsWith("wss://node-b.estio.co/"))
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsNonTlsOrCredentialBearingGatewayUrls() {
         DeviceTunnelRouting.endpoint(config("ws://user:secret@127.0.0.1:3220", "node-a", 1))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnexpectedHostSuffixOrAlternateEndpoint() {
+        DeviceTunnelRouting.endpoint(config("wss://node-a.example.test/alternate", "node-a", 1))
     }
 
     @Test

@@ -25,7 +25,11 @@
         "test:scraping:deep": "node --test lib/scraping/deep-scrape-types.test.mjs",
         "test:scraping:relevance": "tsx --test lib/scraping/listing-relevance-classifier.test.ts lib/scraping/listing-scraper.relevance.test.ts",
         "prospecting:reclassify": "tsx scripts/reclassify-scraped-listings.ts",
-        "ops:wa-outbox:mark-stale": "tsx scripts/mark-stale-whatsapp-outbox.ts"
+        "ops:wa-outbox:mark-stale": "tsx scripts/mark-stale-whatsapp-outbox.ts",
+        "ops:wa-egress:node-config": "tsx scripts/ops/whatsapp-device-egress-node-config.ts",
+        "ops:wa-egress:preflight": "tsx scripts/ops/whatsapp-device-egress-preflight.ts",
+        "ops:wa-egress:control": "tsx scripts/ops/whatsapp-device-egress-control.ts",
+        "ops:wa-egress:acceptance": "tsx scripts/ops/whatsapp-device-egress-acceptance.ts"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.995.0",

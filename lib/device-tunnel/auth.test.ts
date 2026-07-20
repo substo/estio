@@ -36,6 +36,7 @@ test("issues scoped short-lived tunnel tokens", () => {
         bindingId: "binding-1",
         assignmentEpoch: 7,
         credentialVersion: 2,
+        placementMode: "distributed_canary",
     });
     const payload = verifyDeviceTunnelToken(token);
     assert.equal(payload.purpose, "device_tunnel");
@@ -47,6 +48,7 @@ test("issues scoped short-lived tunnel tokens", () => {
     assert.equal(payload.locationId, "location-1");
     assert.equal(payload.assignmentEpoch, 7);
     assert.equal(payload.credentialVersion, 2);
+    assert.equal(payload.placementMode, "distributed_canary");
     assert.ok(payload.jti);
     assert.equal(payload.exp - payload.iat, DEVICE_TUNNEL_TOKEN_TTL_SECONDS);
     assert.throws(() => verifyDeviceTunnelToken(token, "node-b"), /another gateway node/);
@@ -70,6 +72,17 @@ test("rejects a tunnel token with the wrong audience", () => {
         expiresIn: 300,
     });
     assert.throws(() => verifyDeviceTunnelToken(token, "node-a"), /audience/);
+});
+
+test("tokens minted before placement modes remain compatibility-only", () => {
+    process.env.DEVICE_TUNNEL_JWT_SECRET = "test-device-tunnel-secret-that-is-long-enough";
+    const token = jwt.sign({
+        nodeId: "node-a", sessionId: "session-1", deviceId: "device-1", locationId: "location-1",
+        bindingId: "binding-1", assignmentEpoch: 0, credentialVersion: 1, purpose: "device_tunnel",
+    }, process.env.DEVICE_TUNNEL_JWT_SECRET, {
+        algorithm: "HS256", audience: DEVICE_TUNNEL_TOKEN_AUDIENCE, jwtid: crypto.randomUUID(), expiresIn: 300,
+    });
+    assert.equal(verifyDeviceTunnelToken(token).placementMode, "compatibility");
 });
 
 test("masks IP addresses for status storage", () => {

@@ -788,10 +788,9 @@ const payload = {
         locationId: session.locationId || null,
         status: session.status || null,
         ready: Boolean(session.ready),
-        phoneMasked: session.phone ? '***' + String(session.phone).slice(-4) : null,
         lastEventAt: session.lastEventAt || null,
         lastReadyAt: session.lastReadyAt || null,
-        lastError: session.lastError || null,
+        lastErrorCode: session.lastErrorCode || null,
         lastWebhookSuccessAt: session.lastWebhookSuccessAt || null,
         lastWebhookErrorAt: session.lastWebhookErrorAt || null,
     })),
@@ -819,7 +818,7 @@ NODE
     CURRENT_BRIDGE_SESSION_DIR=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_SESSION_DIR || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CWD=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.pm_cwd || "");' 2>/dev/null || true)
     CURRENT_BRIDGE_CODE_HASH=\$(WHATSAPP_BRIDGE_APP_NAME="\$WHATSAPP_BRIDGE_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.WHATSAPP_BRIDGE_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || app?.pm2_env?.env?.WHATSAPP_WEB_BRIDGE_CODE_HASH || "");' 2>/dev/null || true)
-    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-*.ts lib/whatsapp/session-auth-*.ts lib/device-tunnel/runtime-ownership.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
+    EXPECTED_BRIDGE_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/whatsapp-web-bridge-service.ts lib/whatsapp/web-bridge-*.ts lib/whatsapp/session-auth-*.ts lib/device-tunnel/runtime-ownership.ts lib/device-tunnel/canary-control.ts lib/device-tunnel/multi-node-operations.ts 2>/dev/null | sha256sum | awk '{print \$1}' || true)
     BRIDGE_HEALTH_JSON=\$(probe_whatsapp_bridge_health)
 
     if [ -n "\$BRIDGE_HEALTH_JSON" ] && whatsapp_bridge_has_ready_session "\$BRIDGE_HEALTH_JSON" && [ "\$CURRENT_BRIDGE_WEBHOOK_URL" = "\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" ] && [ "\$CURRENT_BRIDGE_SESSION_DIR" = "\$WHATSAPP_BRIDGE_SESSION_DIR" ] && [ "\$CURRENT_BRIDGE_CWD" = "\$SYMLINK_PATH" ] && [ -n "\$EXPECTED_BRIDGE_CODE_HASH" ] && [ "\$CURRENT_BRIDGE_CODE_HASH" = "\$EXPECTED_BRIDGE_CODE_HASH" ]; then

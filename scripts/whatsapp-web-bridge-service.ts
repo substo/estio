@@ -82,10 +82,12 @@ type ManagedSession = {
     deviceTunnelBindingId?: string | null;
     ownership?: DeviceTunnelRuntimeOwnership | null;
     ownershipValid?: boolean;
+    runtimeLeaseEnforced?: boolean;
     restarting?: boolean;
     shuttingDown?: boolean;
     authPlacement?: any;
     authDurableReady?: boolean;
+    authDurableRequired?: boolean;
     initialCheckpointInFlight?: boolean;
 };
 
@@ -315,7 +317,7 @@ async function emitSessionEvent(
         await assertManagedSessionOwnership(session);
         await emitEvent({
             ...payload,
-            ...(RUNTIME_LEASE_ENFORCEMENT && session.deviceTunnelBindingId ? { ownership: session.ownership } : {}),
+            ...(session.runtimeLeaseEnforced && session.deviceTunnelBindingId ? { ownership: session.ownership } : {}),
         }, options?.timeoutMs);
         session.lastWebhookSuccessAt = new Date();
         if (session.lastWebhookErrorAt && session.lastWebhookSuccessAt > session.lastWebhookErrorAt) {
@@ -332,19 +334,18 @@ async function emitSessionEvent(
 }
 
 function serializeManagedSession(session: ManagedSession) {
-    const runtimeReady = !RUNTIME_LEASE_ENFORCEMENT || !session.deviceTunnelBindingId || session.ownershipValid === true;
+    const runtimeReady = !session.runtimeLeaseEnforced || !session.deviceTunnelBindingId || session.ownershipValid === true;
     const activeProbeFresh = isWhatsAppWebBridgeActiveProbeFresh({
         healthy: Boolean(session.activeProbeHealthy),
         lastSuccessAt: session.lastActiveProbeSuccessAt,
         maxAgeMs: ACTIVE_PROBE_STALE_MS,
     });
-    const durableReady = !SESSION_AUTH_COORDINATOR || session.authDurableReady === true;
+    const durableReady = !session.authDurableRequired || session.authDurableReady === true;
     const ready = Boolean(session.ready && runtimeReady && activeProbeFresh && durableReady);
     return {
         sessionId: session.sessionId,
         locationId: session.locationId,
         ready,
-        phone: session.phone || null,
         status: ready ? "ready" : (session.ready ? "stale" : (session.status || "starting")),
         restarting: Boolean(session.restarting),
         startedAt: session.startedAt.toISOString(),
@@ -357,12 +358,30 @@ function serializeManagedSession(session: ManagedSession) {
         lastActiveProbeSuccessAt: session.lastActiveProbeSuccessAt?.toISOString?.() || null,
         lastActiveProbeErrorAt: session.lastActiveProbeErrorAt?.toISOString?.() || null,
         gatewayGeneration: session.gatewayGeneration || null,
-        lastError: session.lastError || null,
-        sessionAuthMode: SESSION_AUTH_CONFIGURATION.mode,
+        lastErrorCode: classifyOperationalError(session.lastError),
+        sessionAuthMode: session.authDurableRequired ? SESSION_AUTH_CONFIGURATION.mode : "local",
         authDurableReady: durableReady,
         authGeneration: Number(session.authPlacement?.currentGeneration || 0),
         authEpoch: Number(session.authPlacement?.authEpoch || 0),
+        authState: String(session.authPlacement?.state || (session.authDurableRequired ? "unattached" : "local")),
+        authOperationDeadlineAt: session.authPlacement?.operationDeadlineAt?.toISOString?.() || null,
+        gatewayNodeId: session.ownership?.gatewayNodeId || null,
+        assignmentEpoch: Number(session.ownership?.assignmentEpoch || 0),
+        leaseEpoch: Number(session.ownership?.leaseEpoch || 0),
+        runtimeLeaseEnforced: Boolean(session.runtimeLeaseEnforced),
     };
+}
+
+function classifyOperationalError(value: unknown) {
+    const message = String(value || "").toLowerCase();
+    if (!message) return null;
+    if (message.includes("gateway generation")) return "gateway_generation_stale";
+    if (message.includes("webhook")) return "webhook_stale";
+    if (message.includes("lease") || message.includes("ownership") || message.includes("fenced")) return "runtime_fenced";
+    if (message.includes("profile") || message.includes("singleton") || message.includes("chromium")) return "profile_lock_held";
+    if (message.includes("tunnel") || message.includes("proxy") || message.includes("egress")) return "tunnel_disconnected";
+    if (message.includes("deadline") || message.includes("timeout")) return "attach_deadline_expired";
+    return "bridge_operation_failed";
 }
 
 async function getDeviceTunnelGatewayGeneration() {
@@ -443,7 +462,7 @@ function createRuntimeOwnershipUnavailableError(message = "WhatsApp Android egre
 }
 
 async function assertManagedSessionOwnership(session: ManagedSession) {
-    if (!RUNTIME_LEASE_ENFORCEMENT || !session.deviceTunnelBindingId) return;
+    if (!session.runtimeLeaseEnforced || !session.deviceTunnelBindingId) return;
     if (!session.ownership || !session.ownershipValid) throw createRuntimeOwnershipUnavailableError();
     if (
         session.ownership.gatewayNodeId !== GATEWAY_NODE_ID
@@ -474,6 +493,7 @@ async function quiesceManagedSession(session: ManagedSession, checkpoint: boolea
     const destroy = async () => { await session.client?.destroy?.().catch(() => null); };
     if (
         checkpoint
+        && session.authDurableRequired
         && SESSION_AUTH_COORDINATOR
         && session.authPlacement
         && session.ownership
@@ -488,17 +508,16 @@ async function quiesceManagedSession(session: ManagedSession, checkpoint: boolea
         return;
     }
     await destroy();
-    if (SESSION_AUTH_COORDINATOR && session.authPlacement && !session.authDurableReady) {
+    if (session.authDurableRequired && SESSION_AUTH_COORDINATOR && session.authPlacement && !session.authDurableReady) {
         session.authPlacement = await SESSION_AUTH_COORDINATOR.abandonUndurableProfile(session.authPlacement, session.sessionId);
-    } else if (SESSION_AUTH_COORDINATOR) {
+    } else if (session.authDurableRequired && SESSION_AUTH_COORDINATOR) {
         await SESSION_AUTH_COORDINATOR.discardLocalProfile(session.sessionId);
     }
 }
 
 async function refreshRuntimeSessionOwnerships() {
-    if (!RUNTIME_LEASE_ENFORCEMENT) return;
     await Promise.all(Array.from(sessions.values()).map(async (session) => {
-        if (!session.deviceTunnelBindingId || !session.ownership || !session.ownershipValid) return;
+        if (!session.runtimeLeaseEnforced || !session.deviceTunnelBindingId || !session.ownership || !session.ownershipValid) return;
         await assertManagedSessionOwnership(session).catch((error: any) => (
             fenceManagedSession(session, error?.message || "Runtime ownership was fenced")
         ));
@@ -961,7 +980,9 @@ async function getDeviceTunnelProxy(
     const ownership = payload?.ownership
         ? validateDeviceTunnelRuntimeOwnershipDescriptor(payload.ownership)
         : null;
-    if (RUNTIME_LEASE_ENFORCEMENT) {
+    const runtimeLeaseEnforced = Boolean(expectedOwnership || ownership);
+    if (runtimeLeaseEnforced) {
+        if (!RUNTIME_LEASE_ENFORCEMENT) throw createRuntimeOwnershipUnavailableError();
         if (!ownership || ownership.locationId !== locationId || ownership.sessionId !== session.id) {
             throw createRuntimeOwnershipUnavailableError();
         }
@@ -996,7 +1017,7 @@ async function beginDeviceTunnelSendProof(session: ManagedSession) {
         signal: AbortSignal.timeout(5_000),
     }).catch(() => null);
     if (!response?.ok) {
-        if (RUNTIME_LEASE_ENFORCEMENT) throw createRuntimeOwnershipUnavailableError();
+        if (session.runtimeLeaseEnforced) throw createRuntimeOwnershipUnavailableError();
         return null;
     }
     const payload = await response.json().catch(() => null);
@@ -1025,7 +1046,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
     const existing = sessions.get(sessionId);
     if (existing) {
         if (
-            RUNTIME_LEASE_ENFORCEMENT
+            (existing.runtimeLeaseEnforced || Boolean(expectedOwnership))
             && expectedOwnership
             && !sameDeviceTunnelRuntimeOwnership(existing.ownership, expectedOwnership)
         ) {
@@ -1052,7 +1073,9 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
     }
 
     const tunnelProxy = await getDeviceTunnelProxy(sessionId, locationId, expectedOwnership);
-    const authAttachment = SESSION_AUTH_COORDINATOR && tunnelProxy?.ownership
+    const runtimeLeaseEnforced = Boolean(expectedOwnership || tunnelProxy?.ownership);
+    const authDurableRequired = runtimeLeaseEnforced && Boolean(SESSION_AUTH_COORDINATOR);
+    const authAttachment = authDurableRequired && SESSION_AUTH_COORDINATOR && tunnelProxy?.ownership
         ? await SESSION_AUTH_COORDINATOR.attach({ ownership: tunnelProxy.ownership, bridgeSessionId: sessionId })
         : null;
     const { Client, LocalAuth } = require("whatsapp-web.js");
@@ -1102,9 +1125,11 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         activeProbeInFlight: null,
         deviceTunnelBindingId: tunnelProxy?.bindingId || null,
         ownership: tunnelProxy?.ownership || null,
-        ownershipValid: !RUNTIME_LEASE_ENFORCEMENT || !tunnelProxy || Boolean(tunnelProxy.ownership),
+        ownershipValid: !tunnelProxy || !runtimeLeaseEnforced || Boolean(tunnelProxy.ownership),
+        runtimeLeaseEnforced,
         authPlacement: authAttachment?.placement || null,
-        authDurableReady: !SESSION_AUTH_COORDINATOR || Boolean(authAttachment?.durableReady),
+        authDurableReady: !authDurableRequired || Boolean(authAttachment?.durableReady),
+        authDurableRequired,
         shuttingDown: false,
         initialCheckpointInFlight: false,
     };
@@ -1148,7 +1173,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         managed.lastReadyAt = new Date();
         console.log(`[WhatsApp Web Bridge] Ready ${sessionId}`);
         const probed = await activelyProbeManagedSession(managed, true);
-        if (SESSION_AUTH_COORDINATOR && !managed.authDurableReady) {
+        if (managed.authDurableRequired && SESSION_AUTH_COORDINATOR && !managed.authDurableReady) {
             if (!probed || managed.initialCheckpointInFlight) return;
             managed.initialCheckpointInFlight = true;
             markSessionEvent(managed, "checkpointing");

@@ -28,7 +28,10 @@ class AssignmentDb {
     updates = 0;
     private transactionTail: Promise<unknown> = Promise.resolve();
 
-    deviceTunnelGatewayNode = { findMany: async () => this.nodes };
+    deviceTunnelGatewayNode = { findMany: async (args: any) => this.nodes.filter((candidate) => (
+        (!args?.where?.id || candidate.id === args.where.id)
+        && (!args?.where?.region || candidate.region === args.where.region)
+    )) };
     deviceTunnelBinding = {
         update: async (args: any) => {
             this.updates += 1;
@@ -61,6 +64,16 @@ test("assignment selects a healthy node with capacity and increments the epoch o
     assert.equal(assigned.gatewayNodeId, "node-b");
     assert.equal(assigned.assignmentEpoch, 1);
     assert.equal(db.updates, 1);
+});
+
+test("explicit canary assignment selects only the reviewed node", async () => {
+    const db = new AssignmentDb();
+    db.nodes = [node({ id: "node-a", activeSessions: 0 }), node({ id: "node-b", activeSessions: 4 })];
+    const assigned = await assignDeviceTunnelBindingToGateway({
+        db: db as any, bindingId: db.binding.id, now, region: "eu", requiredNodeId: "node-b",
+    });
+    assert.equal(assigned.gatewayNodeId, "node-b");
+    assert.equal(assigned.assignmentEpoch, 1);
 });
 
 test("assignment rejects offline, stale, draining, quarantined, full, and unroutable nodes", async () => {

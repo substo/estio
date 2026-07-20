@@ -48,6 +48,7 @@ export async function assignDeviceTunnelBindingToGateway(args: {
     now?: Date;
     heartbeatTimeoutMs?: number;
     productionUrls?: boolean;
+    requiredNodeId?: string | null;
 }): Promise<DeviceTunnelAssignment> {
     const now = args.now || new Date();
     const heartbeatTimeoutMs = args.heartbeatTimeoutMs ?? DEFAULT_DEVICE_TUNNEL_NODE_HEARTBEAT_TIMEOUT_MS;
@@ -66,7 +67,10 @@ export async function assignDeviceTunnelBindingToGateway(args: {
         if (!binding) throw new Error("Device tunnel binding no longer exists");
 
         const nodes = await tx.deviceTunnelGatewayNode.findMany({
-            where: args.region ? { region: args.region } : undefined,
+            where: {
+                ...(args.region ? { region: args.region } : {}),
+                ...(args.requiredNodeId ? { id: args.requiredNodeId } : {}),
+            },
             select: {
                 id: true,
                 region: true,

@@ -20,8 +20,8 @@ Last updated: 2026-07-20.
 | PR 2 — Distributed rate limiter | Complete (`0d6c77a`) | Migrated and deployed; limiter defaults to `disabled` pending the shadow rollout. |
 | PR 3 — Node-scoped device tokens and routing | Complete and deployed (`a2bcb4a`) | Verified on the compatibility path; the global URL remains active and distributed placement remains disabled. |
 | PR 4 — Co-located runtime ownership | Complete and code deployed (`86cf242`) | No migration; runtime enforcement remains unset/off and is inactive while distributed placement is off. |
-| PR 5 — Durable session-auth placement | Implementation complete; verification pending final commit | Production still uses host-local `LocalAuth`; the encrypted snapshot path is not enabled and its migration is not deployed. |
-| PR 6 — Multi-node deployment and operations | Not started | One production egress node is registered. |
+| PR 5 — Durable session-auth placement | Complete (`b0b3bbd`, `1dc79cc`) | Production still uses host-local `LocalAuth`; the encrypted snapshot path is not enabled and its migration is not deployed. |
+| PR 6 — Multi-node deployment and operations | Implementation complete locally; not deployed or activated | One production egress node is registered; no provider, DNS/TLS, migration, node, or flag mutation was performed. |
 | PR 7 — Cleanup and security review | Not started | Single-node compatibility code remains required. |
 
 The production data path remains intentionally on the compatibility path. PR 4 code is deployed but inactive: both distributed placement and runtime lease enforcement are unset/off. `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` preserves single-node routing, and an absent or invalid `WHATSAPP_RATE_LIMIT_MODE` resolves to `disabled`. Do not enable distributed placement until PR 5 is complete and the later canary requirements pass. Rate limiting may be advanced independently from `disabled` to `shadow`, observed for at least one complete daily window, and then moved to `enforce` after Redis and queue telemetry are healthy.
@@ -377,7 +377,7 @@ Verification for the completed implementation: 96/96 focused device-tunnel, sess
 
 ### PR 6 — Multi-node deployment and operations
 
-**Status: pending PRs 3–5.** This provisions the second real node and exercises the complete failure path.
+**Status: implementation complete locally, not deployed or activated.** The code and runbook prepare a second node and full failure rehearsal, but PR 6 deliberately does not provision infrastructure, change DNS/TLS, apply the PR 5 migration, or enable a canary.
 
 - Provision at least two egress nodes in one region.
 - Add node-specific WSS DNS/TLS, capacity-aware placement, drain tooling, dashboards, and alerts.
@@ -395,6 +395,21 @@ Deployment regression requirement: restart only the gateway while initially pres
 
 Rollback: stop new placement, drain canary bindings, fence their current epochs, and return them to the original healthy node. Server-egress fallback remains prohibited.
 
+Implemented in this PR:
+
+- `lib/device-tunnel/gateway-url.ts` now has a strict node trust contract: exact WSS endpoint, trusted host suffix, TLS port, no literal IP/credentials/query/fragment, and no alternate path. Distributed token routing and gateway startup require it. Android independently pins the production suffix, path, scheme, and port.
+- `lib/device-tunnel/canary-control.ts` parses at most 25 exact tenant/session/binding/node scopes. Each scope includes a canonical node URL, review reference, and expiry. Duplicate, malformed, expired, wrong-node, or incompletely configured selected scopes fail closed. Non-selected bindings stay on compatibility routing; rate limiting is not touched.
+- Tunnel JWTs include a backward-compatible `placementMode`. Only `distributed_canary` tokens enter assignment and runtime lease enforcement; compatibility tokens retain the flag-off path. Assignment can be pinned to the reviewed canary node, and the registry URL must exactly match the scope URL.
+- The gateway and bridge apply runtime ownership and durable auth per distributed canary session, so enabling canary capability does not silently move compatibility sessions. The gateway has authenticated drain/resume endpoints fenced by node process generation, rejects new WebSockets while draining, expires exact leases, and fences exact browsers.
+- Bridge health now exposes non-secret node ID, assignment/lease/auth epochs, generation, auth state/deadline, readiness timestamps, and per-session enforcement state. No owner IDs, credentials, wrapped keys, token/JTI values, phone/IP data, message content, or profile contents are added.
+- `lib/device-tunnel/multi-node-operations.ts` implements the acceptance gates, monotonic reassignment plan, operational error-code allowlist, and fail-closed response policy for the complete PR 6 failure matrix. Rollback may lower the selected generation but never an epoch.
+- `scripts/ops/whatsapp-device-egress-node-config.ts` generates a reviewed non-secret node overlay with all four controls off. `whatsapp-device-egress-preflight.ts` performs static and optional read-only database checks. `whatsapp-device-egress-control.ts` is dry-run-first and controls loopback drain/resume only with an explicit change reference. `whatsapp-device-egress-acceptance.ts` evaluates a redacted captured canary observation.
+- [The multi-node operator runbook](./multi-node-device-egress-runbook.md) defines KMS/R2 least privilege, per-node credential rotation/revocation, DNS/TLS trust, migration safety, provider and directory preflights, deployment order, canary evidence, the full failure rehearsal, and rollback.
+
+No new Prisma migration is needed for PR 6. Canary authority is intentionally not stored in node metadata JSON; it is an explicit, expiring deployment control layered over the existing authoritative binding, lease, and auth-placement rows. Migration `20260720120000_whatsapp_session_auth_placement` remains byte-for-byte unchanged and pending production approval.
+
+PR 6 verification: 111/111 focused device-tunnel, rate-limit, session-auth, bridge ingress/history/media, canary, drain, crash-policy, reassignment, and rollback tests pass, plus 2/2 PM2 singleton tests. The suite includes the PR 5 real archive round trip, integrity rejection, exact orphan matching, retention protection, and transactional attach/checkpoint/retained rollback. Strict targeted TypeScript checks pass for the gateway, PR 6 libraries, and operator scripts. Prisma validate/generate, Android `testDebugUnitTest` and `assembleDebug`, shell syntax, static/dry-run operator tooling, production-style gateway/bridge bundles, route bundles, `git diff --check`, and the production build pass. The transformed raw-history closure contains no `getMessageModel()`, `__name`, or `__async`. A broader standalone strict check of the entire bridge script still reports its known pre-existing `unknown`/Puppeteer window typing diagnostics and is not claimed as passing; full repository `tsc --noEmit` remains unsuitable. Read-only `prisma migrate status` reached the configured datasource but returned an opaque schema-engine error twice, so the live migration state is not considered verified and must be re-run successfully before any migration approval. No migration or production mutation occurred.
+
 ### PR 7 — Cleanup and security review
 
 **Status: final phase after the migration window.** Do not remove compatibility paths until all production bindings use the multi-node contract and rollback has been rehearsed.
@@ -406,7 +421,7 @@ Rollback: stop new placement, drain canary bindings, fence their current epochs,
 - Review JWT replay boundaries, tenant scoping, lease/epoch fencing, SSRF/DNS rebinding controls, auth-volume key access, log redaction, and audit immutability.
 - Resolve or explicitly accept production dependency audit findings, including the critical findings currently reported by `npm audit`, before broad customer rollout.
 
-The latest PR 5 dependency install reports 40 audit findings (1 low, 13 moderate, 23 high, and 3 critical) after `archiver` and `unzipper` became direct runtime dependencies instead of optional transitive `whatsapp-web.js` dependencies. No automatic audit fix was applied. PR 7 must review the exact advisory paths or replace the archive implementation before broad rollout; the three critical findings remain an activation blocker requiring an explicit disposition.
+The latest full install previously reported 40 findings. A PR 6 production-only audit now reports 32 (1 low, 12 moderate, 16 high, and 3 critical). The critical installed paths are `@clerk/nextjs@6.36.10`/`@clerk/shared@3.43.2` and `protobufjs@7.5.4` through `@google-cloud/kms@5.4.0 -> google-gax@5.0.6` (also through `@google/genai`). `archiver@7.0.1` and `unzipper@0.12.3` remain direct runtime dependencies but are not the critical packages in this report. No automatic audit fix was applied. Clerk must move beyond every reported authorization-bypass range and every protobuf path must move beyond the currently reported affected range through 7.6.2, followed by focused auth/KMS/archive/build/audit verification; otherwise a security owner must explicitly accept the risk. The default is to block canary activation and broad rollout.
 
 Expected migration: only cleanup/backfill constraints proven safe by production data. Destructive column/table removal should be a separate, reversible migration after a full release window.
 
@@ -417,9 +432,11 @@ Acceptance: the threat model is signed off, dependency/privacy/policy findings h
 1. Ship all changes behind feature flags.
 2. Shadow node assignment and rate-limit decisions before enforcing them.
 3. Enable strict rate limits first on internal sessions.
-4. Enable fenced leases on the existing single node.
-5. Add a second node and canary selected bindings.
-6. Drain rather than kill nodes during routine deploys.
+4. Deploy lease-capable code on the existing node with enforcement still off.
+5. After provider, migration, and DNS/TLS approval, add a second node with all controls off.
+6. Request separate approval for one exact expiring tenant/session/binding/node canary scope.
+7. Enable fenced leases and durable auth only for that accepted scope; keep rate limiting disabled.
+8. Drain rather than kill nodes during routine deploys.
 
 Rollback must preserve binding epochs. Disable new placement and move canary bindings back to the original healthy node only after fencing the newer owner. Never roll back by allowing server egress.
 

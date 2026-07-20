@@ -9,7 +9,7 @@ import {
     verifyTunnelChallengeSignature,
 } from "@/lib/device-tunnel/auth";
 import { assignDeviceTunnelBindingToGateway } from "@/lib/device-tunnel/assignment";
-import { isDistributedDeviceTunnelPlacementEnabled } from "@/lib/device-tunnel/distributed-placement";
+import { resolveDeviceTunnelCanary } from "@/lib/device-tunnel/canary-control";
 import { resolveDeviceTunnelTokenRouting } from "@/lib/device-tunnel/token-routing";
 
 export const dynamic = "force-dynamic";
@@ -126,7 +126,20 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Device binding authorization changed" }, { status: 403 });
     }
 
-    const distributedPlacement = isDistributedDeviceTunnelPlacementEnabled();
+    let canary;
+    try {
+        canary = resolveDeviceTunnelCanary({
+            locationId: current.locationId,
+            sessionId: current.tunnelBinding.sessionId,
+            bindingId: current.tunnelBinding.id,
+        });
+    } catch {
+        return NextResponse.json({ error: "Device tunnel canary configuration is invalid" }, { status: 503 });
+    }
+    if (canary.selected && !canary.active) {
+        return NextResponse.json({ error: "Device tunnel canary prerequisites are incomplete" }, { status: 503 });
+    }
+    const distributedPlacement = canary.active;
     let binding = current.tunnelBinding;
     if (distributedPlacement) {
         try {
@@ -134,7 +147,11 @@ export async function POST(req: NextRequest) {
                 db: db as any,
                 bindingId: binding.id,
                 region: String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "").trim() || null,
+                requiredNodeId: canary.scope.gatewayNodeId,
             });
+            if (assignment.gatewayNode.publicUrl !== canary.scope.gatewayUrl) {
+                throw new Error("Canary gateway URL does not match the registered node URL");
+            }
             binding = {
                 ...binding,
                 gatewayNodeId: assignment.gatewayNodeId,
@@ -162,6 +179,7 @@ export async function POST(req: NextRequest) {
         bindingId: binding.id,
         assignmentEpoch: Number(binding.assignmentEpoch || 0),
         credentialVersion: Number(current.tunnelCredentialVersion || 1),
+        placementMode: distributedPlacement ? "distributed_canary" : "compatibility",
     });
 
     return NextResponse.json({
@@ -171,5 +189,6 @@ export async function POST(req: NextRequest) {
         bindingId: binding.id,
         nodeId,
         assignmentEpoch: Number(binding.assignmentEpoch || 0),
+        placementMode: distributedPlacement ? "distributed_canary" : "compatibility",
     });
 }

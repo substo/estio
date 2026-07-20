@@ -84,3 +84,24 @@ export async function heartbeatDeviceTunnelGatewayNode(args: {
     });
     return result.count === 1;
 }
+
+export async function setDeviceTunnelGatewayNodeDrainState(args: {
+    db: GatewayNodeRegistryClient;
+    nodeId: string;
+    startedAt: Date;
+    draining: boolean;
+    now?: Date;
+}) {
+    const result = await args.db.deviceTunnelGatewayNode.updateMany({
+        where: {
+            id: args.nodeId,
+            startedAt: args.startedAt,
+            status: args.draining ? "online" : "draining",
+        },
+        data: {
+            status: args.draining ? "draining" : "online",
+            lastHeartbeatAt: args.now || new Date(),
+        },
+    });
+    return result.count === 1;
+}

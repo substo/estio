@@ -12,6 +12,7 @@ test("flag-off token routing preserves the configured global single-node URL", (
         env: {
             DEVICE_TUNNEL_GATEWAY_NODE_ID: "single-node",
             DEVICE_TUNNEL_PUBLIC_URL: "wss://global.example.test/device-tunnel",
+            DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES: "example.test",
         } as NodeJS.ProcessEnv,
         productionUrls: true,
     }), {
@@ -30,6 +31,7 @@ test("distributed token routing uses only the assigned registry node URL", () =>
         env: {
             DEVICE_TUNNEL_GATEWAY_NODE_ID: "single-node",
             DEVICE_TUNNEL_PUBLIC_URL: "wss://global.example.test/device-tunnel",
+            DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES: "example.test",
         } as NodeJS.ProcessEnv,
         productionUrls: true,
     }), {

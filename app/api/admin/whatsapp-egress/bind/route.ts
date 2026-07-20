@@ -4,7 +4,7 @@ import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { buildWhatsAppWebBridgeSessionId, stopWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
 import { assignDeviceTunnelBindingToGateway } from "@/lib/device-tunnel/assignment";
-import { isDistributedDeviceTunnelPlacementEnabled } from "@/lib/device-tunnel/distributed-placement";
+import { resolveDeviceTunnelCanary } from "@/lib/device-tunnel/canary-control";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +48,6 @@ export async function POST(req: NextRequest) {
         update: { egressMode: "device_tunnel" },
     });
 
-    const distributedPlacement = isDistributedDeviceTunnelPlacementEnabled();
     let binding = await db.$transaction(async (tx: any) => {
         await tx.deviceTunnelBinding.deleteMany({
             where: {
@@ -70,7 +69,7 @@ export async function POST(req: NextRequest) {
                 deviceId,
                 status: "offline",
                 networkType: null,
-                ...(!distributedPlacement ? { gatewayNodeId: null } : {}),
+                gatewayNodeId: null,
                 egressIpMasked: null,
                 lastConnectedAt: null,
                 lastSeenAt: null,
@@ -84,13 +83,31 @@ export async function POST(req: NextRequest) {
         });
     });
 
-    if (distributedPlacement) {
+    let canary;
+    try {
+        canary = resolveDeviceTunnelCanary({
+            locationId: location.id,
+            sessionId: bridgeSession.id,
+            bindingId: binding.id,
+        });
+    } catch {
+        return NextResponse.json({ error: "Device tunnel canary configuration is invalid" }, { status: 503 });
+    }
+    if (canary.selected && !canary.active) {
+        return NextResponse.json({ error: "Device tunnel canary prerequisites are incomplete" }, { status: 503 });
+    }
+
+    if (canary.active) {
         try {
             binding = await assignDeviceTunnelBindingToGateway({
                 db: db as any,
                 bindingId: binding.id,
                 region: String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "").trim() || null,
+                requiredNodeId: canary.scope.gatewayNodeId,
             }) as any;
+            if (binding.gatewayNode?.publicUrl !== canary.scope.gatewayUrl) {
+                throw new Error("Canary gateway URL does not match the registered node URL");
+            }
         } catch (error: any) {
             console.warn("[Device Tunnel] WhatsApp egress binding has no eligible gateway", {
                 locationId: location.id,

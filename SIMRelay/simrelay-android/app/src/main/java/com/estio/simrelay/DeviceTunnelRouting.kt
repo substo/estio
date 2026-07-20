@@ -11,11 +11,15 @@ internal object DeviceTunnelRouting {
         require(
             uri.scheme.equals("wss", ignoreCase = true)
                 && !uri.host.isNullOrBlank()
+                && (uri.host.equals(BuildConfig.DEVICE_TUNNEL_GATEWAY_HOST_SUFFIX, ignoreCase = true)
+                    || uri.host.lowercase().endsWith(".${BuildConfig.DEVICE_TUNNEL_GATEWAY_HOST_SUFFIX.lowercase()}"))
                 && uri.userInfo == null
                 && uri.query == null
                 && uri.fragment == null
+                && uri.port in listOf(-1, 443)
+                && uri.path == "/device-tunnel"
         ) { "Invalid tunnel gateway URL" }
-        return if (raw.endsWith("/v1/device")) raw else "$raw/v1/device"
+        return "$raw/v1/device"
     }
 }
 

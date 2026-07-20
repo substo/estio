@@ -9,8 +9,22 @@ import { BoundedJtiReplayCache } from "../lib/device-tunnel/jti-replay-cache";
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
 import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
-import { registerDeviceTunnelGatewayNode, heartbeatDeviceTunnelGatewayNode } from "../lib/device-tunnel/gateway-node-registry";
+import {
+    registerDeviceTunnelGatewayNode,
+    heartbeatDeviceTunnelGatewayNode,
+    setDeviceTunnelGatewayNodeDrainState,
+} from "../lib/device-tunnel/gateway-node-registry";
 import { isDistributedDeviceTunnelPlacementEnabled } from "../lib/device-tunnel/distributed-placement";
+import {
+    requireAuthoritativeDeviceTunnelTokenMode,
+    resolveDeviceTunnelCanary,
+} from "../lib/device-tunnel/canary-control";
+import {
+    DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES_ENV,
+    isDeviceTunnelAndroidTrustedHostname,
+    parseDeviceTunnelGatewayHostSuffixes,
+    validateTrustedDeviceTunnelGatewayUrl,
+} from "../lib/device-tunnel/gateway-url";
 import {
     acquireDeviceTunnelSessionLease,
     createPrismaDeviceTunnelLeaseStore,
@@ -45,7 +59,17 @@ const RUNTIME_LEASE_RENEW_INTERVAL_MS = Math.min(
 const GATEWAY_STARTED_AT = new Date();
 const GATEWAY_GENERATION = randomUUID();
 const GATEWAY_REGION = String(process.env.DEVICE_TUNNEL_GATEWAY_REGION || "default").trim() || "default";
-const GATEWAY_PUBLIC_URL = String(process.env.DEVICE_TUNNEL_PUBLIC_URL || "").trim() || null;
+const RAW_GATEWAY_PUBLIC_URL = String(process.env.DEVICE_TUNNEL_PUBLIC_URL || "").trim();
+const GATEWAY_PUBLIC_URL = DISTRIBUTED_PLACEMENT
+    ? validateTrustedDeviceTunnelGatewayUrl({
+        value: RAW_GATEWAY_PUBLIC_URL,
+        trustedHostSuffixes: parseDeviceTunnelGatewayHostSuffixes(process.env[DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES_ENV]),
+        production: process.env.NODE_ENV === "production",
+    })
+    : RAW_GATEWAY_PUBLIC_URL || null;
+if (DISTRIBUTED_PLACEMENT && !isDeviceTunnelAndroidTrustedHostname(new URL(String(GATEWAY_PUBLIC_URL)).hostname)) {
+    throw new Error("Distributed gateway hostname is outside the Android estio.co trust boundary");
+}
 const GATEWAY_INTERNAL_URL = String(process.env.DEVICE_TUNNEL_GATEWAY_INTERNAL_URL || `http://127.0.0.1:${PORT}`).trim();
 const GATEWAY_CAPACITY_SESSIONS = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS || 100), 1);
 const GATEWAY_VERSION = String(process.env.RELEASE_VERSION || process.env.npm_package_version || "").trim() || null;
@@ -85,6 +109,9 @@ type ConnectedDevice = {
     leaseExpiresAt: Date | null;
     renewalFence: RuntimeLeaseRenewalFence;
     renewalInFlight: boolean;
+    distributedPlacement: boolean;
+    runtimeLeaseEnforcement: boolean;
+    canaryExpiresAt: Date | null;
 };
 
 const devicesByBridgeSession = new Map<string, ConnectedDevice>();
@@ -96,6 +123,11 @@ const consumedTunnelJtis = new BoundedJtiReplayCache(
 
 function isInternalAuthorized(req: IncomingMessage) {
     return Boolean(INTERNAL_SECRET) && req.headers["x-device-tunnel-secret"] === INTERNAL_SECRET;
+}
+
+function readChangeReference(req: IncomingMessage) {
+    const value = String(req.headers["x-change-ref"] || "").trim();
+    return /^[A-Za-z0-9_.:-]{1,128}$/.test(value) ? value : null;
 }
 
 function json(res: ServerResponse, status: number, payload: unknown) {
@@ -154,8 +186,14 @@ async function readSmallJson(req: IncomingMessage) {
 
 function sendFrame(device: ConnectedDevice, frame: TunnelFrame) {
     if (
-        RUNTIME_LEASE_ENFORCEMENT
-        && (!device.renewalFence.canAcceptWork || !device.leaseExpiresAt || device.leaseExpiresAt <= new Date())
+        device.runtimeLeaseEnforcement
+        && (
+            !device.renewalFence.canAcceptWork
+            || !device.leaseExpiresAt
+            || device.leaseExpiresAt <= new Date()
+            || !device.canaryExpiresAt
+            || device.canaryExpiresAt <= new Date()
+        )
     ) {
         throw new Error("Device tunnel runtime ownership was fenced");
     }
@@ -166,8 +204,15 @@ function sendFrame(device: ConnectedDevice, frame: TunnelFrame) {
 }
 
 async function hasCurrentRuntimeOwnership(device: ConnectedDevice) {
-    if (!RUNTIME_LEASE_ENFORCEMENT) return true;
-    if (!device.ownership || !device.renewalFence.canAcceptWork || !device.leaseExpiresAt || device.leaseExpiresAt <= new Date()) {
+    if (!device.runtimeLeaseEnforcement) return true;
+    if (
+        !device.ownership
+        || !device.renewalFence.canAcceptWork
+        || !device.leaseExpiresAt
+        || device.leaseExpiresAt <= new Date()
+        || !device.canaryExpiresAt
+        || device.canaryExpiresAt <= new Date()
+    ) {
         return false;
     }
     return validateDeviceTunnelRuntimeOwnership({ db: db as any, ownership: device.ownership }).catch(() => false);
@@ -290,15 +335,15 @@ async function disconnectDevice(device: ConnectedDevice, reason: string) {
     device.renewalFence.fence();
     for (const streamId of Array.from(device.streams.keys())) closeStream(device, streamId, false);
     device.proxyServer.close();
-    if (RUNTIME_LEASE_ENFORCEMENT && device.ws.readyState === WebSocket.OPEN) {
+    if (device.runtimeLeaseEnforcement && device.ws.readyState === WebSocket.OPEN) {
         device.ws.close(4002, "Runtime ownership ended");
     }
     if (!isCurrentConnection) return;
-    if (RUNTIME_LEASE_ENFORCEMENT) await stopFencedWhatsAppBrowser(device);
+    if (device.runtimeLeaseEnforcement) await stopFencedWhatsAppBrowser(device);
     await (db as any).deviceTunnelBinding.updateMany({
         where: {
             id: device.bindingId,
-            ...(DISTRIBUTED_PLACEMENT ? {
+            ...(device.distributedPlacement ? {
                 gatewayNodeId: GATEWAY_NODE_ID,
                 assignmentEpoch: device.assignmentEpoch,
             } : {}),
@@ -314,7 +359,7 @@ async function disconnectDevice(device: ConnectedDevice, reason: string) {
         data: {
             status: "offline",
             lastError: reason,
-            ...(!DISTRIBUTED_PLACEMENT ? { gatewayNodeId: null } : {}),
+            ...(!device.distributedPlacement ? { gatewayNodeId: null } : {}),
         },
     }).catch(() => undefined);
     if (device.ownership) {
@@ -334,11 +379,29 @@ async function disconnectDevice(device: ConnectedDevice, reason: string) {
 async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
     const token = extractBearer(req);
     const tokenPayload = verifyDeviceTunnelToken(token, GATEWAY_NODE_ID);
+    const placementMode = tokenPayload.placementMode || "compatibility";
+    const canary = resolveDeviceTunnelCanary({
+        locationId: tokenPayload.locationId,
+        sessionId: tokenPayload.sessionId,
+        bindingId: tokenPayload.bindingId,
+        gatewayNodeId: GATEWAY_NODE_ID,
+    });
+    const distributedPlacement = requireAuthoritativeDeviceTunnelTokenMode({
+        canary,
+        placementMode,
+        gatewayPublicUrl: GATEWAY_PUBLIC_URL,
+    });
+    if (distributedPlacement) {
+        if (!DISTRIBUTED_PLACEMENT || !RUNTIME_LEASE_ENFORCEMENT) {
+            throw new Error("Distributed canary placement is not active on this gateway");
+        }
+    }
+    const runtimeLeaseEnforcement = distributedPlacement && RUNTIME_LEASE_ENFORCEMENT;
     const binding = await authorizeDeviceTunnelGatewayConnection({
         db: db as any,
         token: tokenPayload,
         gatewayNodeId: GATEWAY_NODE_ID,
-        distributedPlacement: DISTRIBUTED_PLACEMENT,
+        distributedPlacement,
     });
     if (!consumedTunnelJtis.consume(tokenPayload.jti, tokenPayload.exp)) {
         throw new Error("Tunnel token was already used");
@@ -350,7 +413,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         await disconnectDevice(existing, "Tunnel connection replaced");
     }
 
-    const acquiredLease = RUNTIME_LEASE_ENFORCEMENT
+    const acquiredLease = runtimeLeaseEnforcement
         ? await acquireDeviceTunnelSessionLease({
             store: leaseStore,
             locationId: binding.locationId,
@@ -362,7 +425,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
             ttlMs: RUNTIME_LEASE_TTL_MS,
         })
         : null;
-    if (RUNTIME_LEASE_ENFORCEMENT && !acquiredLease) {
+    if (runtimeLeaseEnforcement && !acquiredLease) {
         throw new Error("Device tunnel runtime ownership is unavailable");
     }
     const ownership: DeviceTunnelRuntimeOwnership | null = acquiredLease ? {
@@ -398,6 +461,9 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         leaseExpiresAt: acquiredLease?.expiresAt || null,
         renewalFence,
         renewalInFlight: false,
+        distributedPlacement,
+        runtimeLeaseEnforcement,
+        canaryExpiresAt: distributedPlacement && canary.scope ? new Date(canary.scope.expiresAt) : null,
     };
     const proxyServer = createSocksProxy(base);
     proxyServer.listen(0, "127.0.0.1");
@@ -419,12 +485,12 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
             sessionId: tokenPayload.sessionId,
             locationId: tokenPayload.locationId,
             assignmentEpoch: tokenPayload.assignmentEpoch,
-            ...(DISTRIBUTED_PLACEMENT ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
+            ...(distributedPlacement ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
             ...runtimeLeaseFilter(device),
         },
         data: {
             status: "online",
-            ...(!DISTRIBUTED_PLACEMENT ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
+            ...(!distributedPlacement ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
             egressIpMasked,
             lastConnectedAt: new Date(),
             lastSeenAt: new Date(),
@@ -440,20 +506,25 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         deviceId: binding.deviceId,
         sessionId: device.bridgeSessionId,
         gatewayNodeId: GATEWAY_NODE_ID,
-        egressIpMasked,
     });
     void ensureWhatsAppBrowserStarted(device.bridgeSessionId, binding.locationId, device.ownership).catch((error) => {
         console.warn(
             `[Device Tunnel] Failed to start WhatsApp browser for ${device.bridgeSessionId}:`,
             (error as any)?.message || error,
         );
-        if (RUNTIME_LEASE_ENFORCEMENT) void disconnectDevice(device, "WhatsApp browser ownership start failed");
+        if (runtimeLeaseEnforcement) void disconnectDevice(device, "WhatsApp browser ownership start failed");
     });
 
     ws.on("message", async (raw) => {
         if (
-            RUNTIME_LEASE_ENFORCEMENT
-            && (!device.renewalFence.canAcceptWork || !device.leaseExpiresAt || device.leaseExpiresAt <= new Date())
+            device.runtimeLeaseEnforcement
+            && (
+                !device.renewalFence.canAcceptWork
+                || !device.leaseExpiresAt
+                || device.leaseExpiresAt <= new Date()
+                || !device.canaryExpiresAt
+                || device.canaryExpiresAt <= new Date()
+            )
         ) {
             void disconnectDevice(device, "Runtime lease expired or was fenced");
             return;
@@ -471,7 +542,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
                 where: {
                     id: binding.id,
                     assignmentEpoch: device.assignmentEpoch,
-                    ...(DISTRIBUTED_PLACEMENT ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
+                    ...(device.distributedPlacement ? { gatewayNodeId: GATEWAY_NODE_ID } : {}),
                     ...runtimeLeaseFilter(device),
                 },
                 data: {
@@ -480,7 +551,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
                     ...(frame.networkType ? { networkType: String(frame.networkType).slice(0, 32) } : {}),
                 },
             }).catch(() => null);
-            if (RUNTIME_LEASE_ENFORCEMENT && Number(observed?.count || 0) !== 1) {
+            if (device.runtimeLeaseEnforcement && Number(observed?.count || 0) !== 1) {
                 void disconnectDevice(device, "Runtime ownership was fenced");
             }
             return;
@@ -524,6 +595,34 @@ const server = createHttpServer(async (req, res) => {
             gatewayNodeId: GATEWAY_NODE_ID,
             gatewayGeneration: GATEWAY_GENERATION,
             connectedDevices: devicesByBridgeSession.size,
+            status: draining ? "draining" : "online",
+            acceptingConnections: !draining,
+        });
+    }
+    if (url.pathname === "/admin/drain" && req.method === "POST") {
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        const changeRef = readChangeReference(req);
+        if (!changeRef) return json(res, 400, { error: "A valid change reference is required" });
+        const changed = await drainGateway(false);
+        console.info("[Device Tunnel] Gateway drain requested", { gatewayNodeId: GATEWAY_NODE_ID, changeRef, changed });
+        return json(res, changed ? 200 : 409, {
+            ok: changed,
+            gatewayNodeId: GATEWAY_NODE_ID,
+            gatewayGeneration: GATEWAY_GENERATION,
+            status: "draining",
+        });
+    }
+    if (url.pathname === "/admin/resume" && req.method === "POST") {
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        const changeRef = readChangeReference(req);
+        if (!changeRef) return json(res, 400, { error: "A valid change reference is required" });
+        const changed = await resumeGateway();
+        console.info("[Device Tunnel] Gateway resume requested", { gatewayNodeId: GATEWAY_NODE_ID, changeRef, changed });
+        return json(res, changed ? 200 : 409, {
+            ok: changed,
+            gatewayNodeId: GATEWAY_NODE_ID,
+            gatewayGeneration: GATEWAY_GENERATION,
+            status: changed ? "online" : "draining",
         });
     }
     const proofStartMatch = url.pathname.match(/^\/sessions\/([^/]+)\/send-proof-start$/);
@@ -647,7 +746,7 @@ const server = createHttpServer(async (req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
 server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-    if (url.pathname !== "/v1/device") return socket.destroy();
+    if (url.pathname !== "/v1/device" || draining) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => {
         void acceptDevice(ws, req).catch((error) => {
             console.warn("[Device Tunnel] Rejected device connection:", error?.message || error);
@@ -678,8 +777,12 @@ void startGateway().catch((error) => {
 });
 
 setInterval(() => {
-    if (!RUNTIME_LEASE_ENFORCEMENT) return;
     for (const device of devicesByBridgeSession.values()) {
+        if (!device.runtimeLeaseEnforcement) continue;
+        if (!device.canaryExpiresAt || device.canaryExpiresAt <= new Date()) {
+            void disconnectDevice(device, "Distributed canary scope expired");
+            continue;
+        }
         if (!device.ownership || device.renewalInFlight || !device.renewalFence.canAcceptWork) continue;
         if (!device.leaseExpiresAt || device.leaseExpiresAt <= new Date()) {
             void disconnectDevice(device, "Runtime lease expired");
@@ -738,16 +841,35 @@ setInterval(() => {
 }, 20_000).unref?.();
 
 let draining = false;
-async function drainGateway() {
-    if (draining) return;
+async function drainGateway(shutdown = false) {
+    if (draining) {
+        if (shutdown) server.close();
+        return false;
+    }
+    const changed = await setDeviceTunnelGatewayNodeDrainState({
+        db: db as any,
+        nodeId: GATEWAY_NODE_ID,
+        startedAt: GATEWAY_STARTED_AT,
+        draining: true,
+    }).catch(() => false);
+    if (!changed) return false;
     draining = true;
-    await (db as any).deviceTunnelGatewayNode.updateMany({
-        where: { id: GATEWAY_NODE_ID, startedAt: GATEWAY_STARTED_AT, status: "online" },
-        data: { status: "draining", lastHeartbeatAt: new Date() },
-    }).catch(() => null);
     await Promise.all(Array.from(devicesByBridgeSession.values()).map((device) => disconnectDevice(device, "Gateway node is draining")));
-    server.close();
+    if (shutdown) server.close();
+    return true;
 }
 
-process.once("SIGTERM", () => void drainGateway());
-process.once("SIGINT", () => void drainGateway());
+async function resumeGateway() {
+    if (!draining) return false;
+    const changed = await setDeviceTunnelGatewayNodeDrainState({
+        db: db as any,
+        nodeId: GATEWAY_NODE_ID,
+        startedAt: GATEWAY_STARTED_AT,
+        draining: false,
+    }).catch(() => false);
+    if (changed) draining = false;
+    return changed;
+}
+
+process.once("SIGTERM", () => void drainGateway(true));
+process.once("SIGINT", () => void drainGateway(true));

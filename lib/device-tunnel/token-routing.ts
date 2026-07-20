@@ -1,4 +1,9 @@
-import { validateDeviceTunnelGatewayUrl } from "./gateway-url";
+import {
+    DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES_ENV,
+    parseDeviceTunnelGatewayHostSuffixes,
+    validateDeviceTunnelGatewayUrl,
+    validateTrustedDeviceTunnelGatewayUrl,
+} from "./gateway-url";
 
 export function resolveDeviceTunnelTokenRouting(args: {
     distributedPlacement: boolean;
@@ -17,8 +22,15 @@ export function resolveDeviceTunnelTokenRouting(args: {
     const rawGatewayUrl = args.distributedPlacement
         ? String(args.binding.gatewayNode?.publicUrl || "")
         : String(env.DEVICE_TUNNEL_PUBLIC_URL || "").trim();
+    const gatewayUrl = args.distributedPlacement
+        ? validateTrustedDeviceTunnelGatewayUrl({
+            value: rawGatewayUrl,
+            production: args.productionUrls ?? process.env.NODE_ENV === "production",
+            trustedHostSuffixes: parseDeviceTunnelGatewayHostSuffixes(env[DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES_ENV]),
+        })
+        : validateDeviceTunnelGatewayUrl(rawGatewayUrl, args.productionUrls);
     return {
         nodeId,
-        gatewayUrl: validateDeviceTunnelGatewayUrl(rawGatewayUrl, args.productionUrls),
+        gatewayUrl,
     };
 }
