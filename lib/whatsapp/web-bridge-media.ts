@@ -7,6 +7,7 @@ import {
     toR2Uri,
 } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia } from "@/lib/contacts/vcard";
+import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
 
 const DEFAULT_TRANSIENT_INGEST_ATTEMPTS = 5;
 const DEFAULT_TRANSIENT_INGEST_BACKOFF_MS = 1000;
@@ -128,11 +129,22 @@ async function runWithTransientRetry<T>(args: {
     throw new Error("Transient media ingest retry exhausted.");
 }
 
+export function buildWhatsAppWebBridgeMediaLogFields(wamId: string, detail?: Record<string, unknown>) {
+    const safeDetail: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(detail || {})) {
+        if (key === "key") safeDetail.objectRef = redactOperationalIdentifier(value, "object");
+        else if (key === "attachmentId") safeDetail.attachmentRef = redactOperationalIdentifier(value, "attachment");
+        else if (key === "error") safeDetail.errorCode = "MEDIA_INGEST_TRANSIENT";
+        else if (["attempt", "exists", "found", "size", "contentType"].includes(key)) safeDetail[key] = value;
+    }
+    return {
+        messageRef: redactOperationalIdentifier(wamId, "message"),
+        ...safeDetail,
+    };
+}
+
 function logMediaIngestStage(stage: string, wamId: string, detail?: Record<string, unknown>) {
-    console.log(`[WhatsApp Web Bridge] media ingest ${stage}`, {
-        wamId,
-        ...(detail || {}),
-    });
+    console.log(`[WhatsApp Web Bridge] media ingest ${stage}`, buildWhatsAppWebBridgeMediaLogFields(wamId, detail));
 }
 
 const mediaIngestLocks = new Map<string, Promise<any>>();
@@ -267,10 +279,10 @@ async function ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params: {
                 });
                 if (!existing?.exists) throw error;
 
-                console.warn(
-                    `[WhatsApp Web Bridge] Media upload reported transient failure, but object exists; continuing attachment ingest for ${wamId}.`,
-                    { key, error: (error as any)?.message || String(error) }
-                );
+                logMediaIngestStage("upload_transient_existing_object", wamId, {
+                    key,
+                    error: (error as any)?.message || String(error),
+                });
                 return { key, r2Uri: toMediaUri(key) };
             }
         },
@@ -364,7 +376,10 @@ async function ingestWhatsAppWebBridgeMediaAttachmentUnlocked(params: {
                     attachmentId: createdAttachment.id,
                 });
             } catch (error) {
-                console.error(`[WhatsApp Web Bridge] Failed to enqueue audio transcription for ${wamId}:`, error);
+                console.error("[WhatsApp Web Bridge] Failed to enqueue audio transcription", {
+                    messageRef: redactOperationalIdentifier(wamId, "message"),
+                    errorCode: "AUDIO_TRANSCRIPTION_ENQUEUE_FAILED",
+                });
             }
         })();
     }

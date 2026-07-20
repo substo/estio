@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseWhatsAppRateLimitModeStrict } from "../device-tunnel/startup-configuration";
 
 export type WhatsAppRateLimitMode = "disabled" | "shadow" | "enforce";
 export type WhatsAppRateLimitWindow = {
@@ -78,8 +79,7 @@ function hashScope(value: string) {
 }
 
 export function getWhatsAppRateLimitMode(env: NodeJS.ProcessEnv = process.env): WhatsAppRateLimitMode {
-    const value = String(env.WHATSAPP_RATE_LIMIT_MODE || "disabled").trim().toLowerCase();
-    return value === "enforce" || value === "shadow" ? value : "disabled";
+    return parseWhatsAppRateLimitModeStrict(env);
 }
 
 export function resolveWhatsAppRateLimitPolicyValues(args: {

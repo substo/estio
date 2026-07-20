@@ -35,7 +35,7 @@ export async function getLocationContext(): Promise<Location | null> {
     // ── FALLBACK: User not in DB or has no location — use Clerk API ─────
     // This only happens for brand-new users on their very first request.
     // Wrapped in try/catch to gracefully handle Clerk 429 rate limits.
-    console.log(`[Location Context] User ${userId} not found in DB or has no location. Falling back to Clerk API.`);
+    console.log("[Location Context] Local location unavailable; falling back to Clerk API.");
 
     let client;
     let clerkUser;
@@ -68,9 +68,9 @@ export async function getLocationContext(): Promise<Location | null> {
                         where: { id: userWithLocations.id },
                         data: { locations: { connect: { id: location.id } } }
                     });
-                    console.log(`[Location Context] Self-healed DB: linked user ${userId} to location ${location.id}`);
-                } catch (e) {
-                    console.warn("[Location Context] Failed to self-heal DB link", e);
+                    console.log("[Location Context] Self-healed local user/location link.");
+                } catch {
+                    console.warn("[Location Context] Failed to self-heal DB link");
                 }
             }
             return location;
@@ -78,7 +78,7 @@ export async function getLocationContext(): Promise<Location | null> {
     }
 
     // Create a "Standalone" location for brand-new users
-    console.log(`[Location Context] Creating standalone location for user ${userId}`);
+    console.log("[Location Context] Creating standalone location for authenticated user.");
 
     let localUser = userWithLocations;
     if (!localUser) {
@@ -120,7 +120,7 @@ export async function getLocationContext(): Promise<Location | null> {
         if (e?.status === 429) {
             console.warn('[Location Context] Clerk rate limited on metadata update. Location created but metadata not synced.');
         } else {
-            console.warn("[Location Context] Failed to update Clerk metadata", e);
+            console.warn("[Location Context] Failed to update Clerk metadata");
         }
     }
 

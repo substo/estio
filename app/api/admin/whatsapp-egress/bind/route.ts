@@ -5,6 +5,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import { buildWhatsAppWebBridgeSessionId, stopWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
 import { assignDeviceTunnelBindingToGateway } from "@/lib/device-tunnel/assignment";
 import { resolveDeviceTunnelCanary } from "@/lib/device-tunnel/canary-control";
+import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
 
 export const dynamic = "force-dynamic";
 
@@ -110,19 +111,19 @@ export async function POST(req: NextRequest) {
             }
         } catch (error: any) {
             console.warn("[Device Tunnel] WhatsApp egress binding has no eligible gateway", {
-                locationId: location.id,
-                bindingId: binding.id,
-                reason: error?.message || "assignment_failed",
+                locationRef: redactOperationalIdentifier(location.id, "location"),
+                bindingRef: redactOperationalIdentifier(binding.id, "binding"),
+                reason: "assignment_failed",
             });
             return NextResponse.json({ error: "No healthy device tunnel gateway is available" }, { status: 503 });
         }
     }
 
     console.info("[Device Tunnel] WhatsApp egress binding changed", {
-        actorUserId: userId,
-        locationId: location.id,
-        deviceId,
-        bindingId: binding.id,
+        actorRef: redactOperationalIdentifier(userId, "actor"),
+        locationRef: redactOperationalIdentifier(location.id, "location"),
+        deviceRef: redactOperationalIdentifier(deviceId, "device"),
+        bindingRef: redactOperationalIdentifier(binding.id, "binding"),
     });
     return NextResponse.json({ success: true, binding });
 }
@@ -142,7 +143,7 @@ export async function DELETE() {
             (db as any).deviceTunnelBinding.deleteMany({ where: { sessionId: session.id } }),
             (db as any).whatsAppWebBridgeSession.update({
                 where: { id: session.id },
-                data: { egressMode: "server", status: "disconnected" },
+                data: { egressMode: "device_tunnel", status: "disconnected" },
             }),
         ]);
     }

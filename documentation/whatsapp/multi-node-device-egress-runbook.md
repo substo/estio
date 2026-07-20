@@ -1,6 +1,6 @@
 # Multi-node WhatsApp device-egress runbook
 
-Last updated: 2026-07-20. This runbook prepares PR 6. It does not authorize a production mutation.
+Last updated: 2026-07-20. This runbook includes the PR 7 cleanup review. It does not authorize a production mutation. Read [the PR 7 security, privacy, and policy review](./device-egress-security-review.md) before any rollout request.
 
 ## Hard activation boundary
 
@@ -14,6 +14,8 @@ DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT=false
 WHATSAPP_SESSION_AUTH_MODE=local
 WHATSAPP_RATE_LIMIT_MODE=disabled
 ```
+
+At startup, unset values resolve to this compatibility matrix. Explicit booleans must be `true` or `false`; auth must be `local` or `encrypted_snapshot`; rate mode must be `disabled`, `shadow`, or `enforce`. Placement, lease enforcement, and encrypted snapshots must be enabled together. The enabled trio additionally requires at least one exact, unexpired (maximum seven-day) scope and exact KMS/private-R2 configuration. Partial, contradictory, empty, deprecated-alias, malformed, or expired configuration fails with a non-secret code. Rate mode remains independent and does not enable any distributed control.
 
 ## Node identity, DNS, and TLS design
 
@@ -75,7 +77,9 @@ Before rollout also verify, without printing secrets:
 - no profile-scoped Chromium process or singleton lock exists before restore;
 - the dependency audit's three critical findings have an explicit disposition before activation.
 
-The 2026-07-20 production-only audit reports 32 findings: 1 low, 12 moderate, 16 high, and 3 critical. The critical installed paths are `@clerk/nextjs@6.36.10` with `@clerk/shared@3.43.2`, and `protobufjs@7.5.4` through `@google-cloud/kms@5.4.0 -> google-gax@5.0.6` (also present through `@google/genai`). The Clerk findings include route/authorization bypasses and directly affect protection of operator routes. The protobuf path includes code-generation/injection findings and is in the durable KMS dependency chain. `archiver@7.0.1` and `unzipper@0.12.3` are direct runtime dependencies but are not the three critical packages in this audit. Before canary activation, upgrade Clerk beyond all reported affected ranges and move every protobuf path beyond the reported affected range (currently through `7.6.2`), then rerun auth-route, KMS, archive, focused, build, and audit checks. If an upgrade cannot be made, a written security-owner risk disposition is required; the default disposition is block activation. No `npm audit fix` was applied in PR 6.
+The fresh pre-change PR 7 production-only audit reproduced 32 findings: 1 low, 12 moderate, 16 high, and 3 critical. PR 7 targeted only the critical paths: `@clerk/nextjs` now resolves to 6.39.6 with backend 2.33.6, React 5.61.9, and shared 3.47.8; `protobufjs` is pinned to 7.6.3 across `@google-cloud/kms -> google-gax` and `@google/genai`. The post-change production-only audit reports 25 findings: 1 low, 11 moderate, 13 high, and zero critical. No `npm audit fix` or blanket upgrade was used. Security still owns triage of the remaining paths, and any returned critical finding blocks activation.
+
+PR 7 final verification passed 156 focused device-tunnel/rate-limit/session-auth/bridge/security tests, separate 2/2 Clerk bearer and 2/2 PM2 singleton tests, Android unit/debug builds, Prisma validation/generation, targeted strict checks, static/template/dry-run operator commands, production bundles, transformed closure inspection, and the production build. Full-repository TypeScript is not claimed as passing. No production mutation occurred.
 
 ## Explicit canary scope
 

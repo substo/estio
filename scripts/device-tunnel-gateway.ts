@@ -14,7 +14,6 @@ import {
     heartbeatDeviceTunnelGatewayNode,
     setDeviceTunnelGatewayNodeDrainState,
 } from "../lib/device-tunnel/gateway-node-registry";
-import { isDistributedDeviceTunnelPlacementEnabled } from "../lib/device-tunnel/distributed-placement";
 import {
     requireAuthoritativeDeviceTunnelTokenMode,
     resolveDeviceTunnelCanary,
@@ -32,21 +31,31 @@ import {
     renewDeviceTunnelSessionLease,
 } from "../lib/device-tunnel/session-lease";
 import {
-    isDeviceTunnelRuntimeLeaseEnforcementActive,
     RuntimeLeaseRenewalFence,
     validateDeviceTunnelRuntimeOwnership,
     type DeviceTunnelRuntimeOwnership,
 } from "../lib/device-tunnel/runtime-ownership";
+import { validateWhatsAppDeviceEgressStartupConfiguration } from "../lib/device-tunnel/startup-configuration";
+import {
+    isOperationalRequestAuthorized,
+    readBoundedOperationalJson,
+    readOperationalChangeReference,
+    writeOperationalJson,
+} from "../lib/device-tunnel/operational-http";
+import { createDeviceTunnelBridgeControlClient } from "../lib/device-tunnel/bridge-control-client";
+import { DeviceTunnelGatewayDrainController } from "../lib/device-tunnel/gateway-drain-control";
+import { redactOperationalIdentifier } from "../lib/device-tunnel/operational-redaction";
 
 const PORT = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_PORT || 3220), 1);
 const INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
-const DISTRIBUTED_PLACEMENT = isDistributedDeviceTunnelPlacementEnabled();
+const STARTUP_CONFIGURATION = validateWhatsAppDeviceEgressStartupConfiguration();
+const DISTRIBUTED_PLACEMENT = STARTUP_CONFIGURATION.distributedPlacement;
 const CONFIGURED_GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || "").trim();
 if (DISTRIBUTED_PLACEMENT && !CONFIGURED_GATEWAY_NODE_ID) {
     throw new Error("DEVICE_TUNNEL_GATEWAY_NODE_ID is required when distributed placement is enabled");
 }
 const GATEWAY_NODE_ID = CONFIGURED_GATEWAY_NODE_ID || "device-tunnel-gateway-single";
-const RUNTIME_LEASE_ENFORCEMENT = isDeviceTunnelRuntimeLeaseEnforcementActive();
+const RUNTIME_LEASE_ENFORCEMENT = STARTUP_CONFIGURATION.runtimeLeaseEnforcement;
 const RUNTIME_OWNER_INSTANCE_ID = String(process.env.DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID || "").trim();
 if (RUNTIME_LEASE_ENFORCEMENT && !RUNTIME_OWNER_INSTANCE_ID) {
     throw new Error("DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID is required when runtime lease enforcement is enabled");
@@ -75,6 +84,10 @@ const GATEWAY_CAPACITY_SESSIONS = Math.max(Number(process.env.DEVICE_TUNNEL_GATE
 const GATEWAY_VERSION = String(process.env.RELEASE_VERSION || process.env.npm_package_version || "").trim() || null;
 const WHATSAPP_BRIDGE_URL = String(process.env.WHATSAPP_WEB_BRIDGE_URL || "http://127.0.0.1:3218").replace(/\/+$/, "");
 const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON_SECRET || "").trim();
+const WHATSAPP_BRIDGE_CONTROL = createDeviceTunnelBridgeControlClient({
+    baseUrl: WHATSAPP_BRIDGE_URL,
+    secret: WHATSAPP_BRIDGE_SECRET,
+});
 const MAX_STREAMS_PER_DEVICE = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_STREAMS || 64), 1);
 const MAX_FRAME_BYTES = Math.max(Number(process.env.DEVICE_TUNNEL_MAX_FRAME_BYTES || 512 * 1024), 64 * 1024);
 const ALLOWED_SUFFIXES = parseAllowedTunnelSuffixes(process.env.DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES);
@@ -122,17 +135,11 @@ const consumedTunnelJtis = new BoundedJtiReplayCache(
 );
 
 function isInternalAuthorized(req: IncomingMessage) {
-    return Boolean(INTERNAL_SECRET) && req.headers["x-device-tunnel-secret"] === INTERNAL_SECRET;
-}
-
-function readChangeReference(req: IncomingMessage) {
-    const value = String(req.headers["x-change-ref"] || "").trim();
-    return /^[A-Za-z0-9_.:-]{1,128}$/.test(value) ? value : null;
+    return isOperationalRequestAuthorized({ request: req, headerName: "x-device-tunnel-secret", secret: INTERNAL_SECRET });
 }
 
 function json(res: ServerResponse, status: number, payload: unknown) {
-    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(JSON.stringify(payload));
+    writeOperationalJson(res, status, payload);
 }
 
 function extractBearer(req: IncomingMessage) {
@@ -140,48 +147,22 @@ function extractBearer(req: IncomingMessage) {
 }
 
 async function ensureWhatsAppBrowserStarted(sessionId: string, locationId: string, ownership: DeviceTunnelRuntimeOwnership | null) {
-    if (!WHATSAPP_BRIDGE_SECRET) {
-        throw new Error("WHATSAPP_WEB_BRIDGE_SECRET is not configured");
-    }
-    const response = await fetch(`${WHATSAPP_BRIDGE_URL}/sessions/${encodeURIComponent(sessionId)}/start`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "x-whatsapp-web-bridge-secret": WHATSAPP_BRIDGE_SECRET,
-        },
-        body: JSON.stringify({ locationId, ...(ownership ? { ownership } : {}) }),
-        signal: AbortSignal.timeout(5_000),
+    await WHATSAPP_BRIDGE_CONTROL.startSession({ sessionId, locationId, ownership });
+    console.info("[Device Tunnel] Requested WhatsApp browser start", {
+        sessionRef: redactOperationalIdentifier(sessionId, "session"),
     });
-    if (!response.ok) {
-        throw new Error(`WhatsApp bridge rejected tunnel session start (${response.status})`);
-    }
-    console.info(`[Device Tunnel] Requested WhatsApp browser start for ${sessionId}`);
 }
 
 async function stopFencedWhatsAppBrowser(device: ConnectedDevice) {
-    if (!WHATSAPP_BRIDGE_SECRET || !device.ownership) return;
-    await fetch(`${WHATSAPP_BRIDGE_URL}/sessions/${encodeURIComponent(device.bridgeSessionId)}/fence`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "x-whatsapp-web-bridge-secret": WHATSAPP_BRIDGE_SECRET,
-        },
-        body: JSON.stringify({ ownership: device.ownership }),
-        signal: AbortSignal.timeout(5_000),
-    }).catch(() => null);
+    if (!device.ownership) return;
+    await WHATSAPP_BRIDGE_CONTROL.fenceSession({
+        sessionId: device.bridgeSessionId,
+        ownership: device.ownership,
+    }).catch(() => false);
 }
 
 async function readSmallJson(req: IncomingMessage) {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    for await (const chunk of req) {
-        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        size += value.length;
-        if (size > 16 * 1024) throw new Error("Request body too large");
-        chunks.push(value);
-    }
-    if (!chunks.length) return {};
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return readBoundedOperationalJson(req, 16 * 1024);
 }
 
 function sendFrame(device: ConnectedDevice, frame: TunnelFrame) {
@@ -502,15 +483,18 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         throw new Error("Tunnel assignment changed during connection");
     }
     console.info("[Device Tunnel] Android relay connected", {
-        bindingId: binding.id,
-        deviceId: binding.deviceId,
-        sessionId: device.bridgeSessionId,
-        gatewayNodeId: GATEWAY_NODE_ID,
+        bindingRef: redactOperationalIdentifier(binding.id, "binding"),
+        deviceRef: redactOperationalIdentifier(binding.deviceId, "device"),
+        sessionRef: redactOperationalIdentifier(device.bridgeSessionId, "session"),
+        gatewayNodeRef: redactOperationalIdentifier(GATEWAY_NODE_ID, "gateway"),
     });
     void ensureWhatsAppBrowserStarted(device.bridgeSessionId, binding.locationId, device.ownership).catch((error) => {
         console.warn(
-            `[Device Tunnel] Failed to start WhatsApp browser for ${device.bridgeSessionId}:`,
-            (error as any)?.message || error,
+            "[Device Tunnel] Failed to start WhatsApp browser",
+            {
+                sessionRef: redactOperationalIdentifier(device.bridgeSessionId, "session"),
+                code: "BRIDGE_START_FAILED",
+            },
         );
         if (runtimeLeaseEnforcement) void disconnectDevice(device, "WhatsApp browser ownership start failed");
     });
@@ -595,16 +579,20 @@ const server = createHttpServer(async (req, res) => {
             gatewayNodeId: GATEWAY_NODE_ID,
             gatewayGeneration: GATEWAY_GENERATION,
             connectedDevices: devicesByBridgeSession.size,
-            status: draining ? "draining" : "online",
-            acceptingConnections: !draining,
+            status: drainController.isDraining ? "draining" : "online",
+            acceptingConnections: !drainController.isDraining,
         });
     }
     if (url.pathname === "/admin/drain" && req.method === "POST") {
         if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
-        const changeRef = readChangeReference(req);
+        const changeRef = readOperationalChangeReference(req);
         if (!changeRef) return json(res, 400, { error: "A valid change reference is required" });
         const changed = await drainGateway(false);
-        console.info("[Device Tunnel] Gateway drain requested", { gatewayNodeId: GATEWAY_NODE_ID, changeRef, changed });
+        console.info("[Device Tunnel] Gateway drain requested", {
+            gatewayNodeRef: redactOperationalIdentifier(GATEWAY_NODE_ID, "gateway"),
+            changeRef: redactOperationalIdentifier(changeRef, "change"),
+            changed,
+        });
         return json(res, changed ? 200 : 409, {
             ok: changed,
             gatewayNodeId: GATEWAY_NODE_ID,
@@ -614,10 +602,14 @@ const server = createHttpServer(async (req, res) => {
     }
     if (url.pathname === "/admin/resume" && req.method === "POST") {
         if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
-        const changeRef = readChangeReference(req);
+        const changeRef = readOperationalChangeReference(req);
         if (!changeRef) return json(res, 400, { error: "A valid change reference is required" });
         const changed = await resumeGateway();
-        console.info("[Device Tunnel] Gateway resume requested", { gatewayNodeId: GATEWAY_NODE_ID, changeRef, changed });
+        console.info("[Device Tunnel] Gateway resume requested", {
+            gatewayNodeRef: redactOperationalIdentifier(GATEWAY_NODE_ID, "gateway"),
+            changeRef: redactOperationalIdentifier(changeRef, "change"),
+            changed,
+        });
         return json(res, changed ? 200 : 409, {
             ok: changed,
             gatewayNodeId: GATEWAY_NODE_ID,
@@ -746,10 +738,10 @@ const server = createHttpServer(async (req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
 server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-    if (url.pathname !== "/v1/device" || draining) return socket.destroy();
+    if (url.pathname !== "/v1/device" || drainController.isDraining) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => {
         void acceptDevice(ws, req).catch((error) => {
-            console.warn("[Device Tunnel] Rejected device connection:", error?.message || error);
+            console.warn("[Device Tunnel] Rejected device connection", { code: "TUNNEL_CONNECTION_REJECTED" });
             ws.close(4003, "Unauthorized tunnel connection");
         });
     });
@@ -767,12 +759,16 @@ async function startGateway() {
         metadata: { runtime: "device-tunnel-gateway" },
     });
     server.listen(PORT, "127.0.0.1", () => {
-        console.log(`[Device Tunnel] Gateway ${GATEWAY_NODE_ID} listening on 127.0.0.1:${PORT}`);
+        console.log("[Device Tunnel] Gateway listening", {
+            gatewayNodeRef: redactOperationalIdentifier(GATEWAY_NODE_ID, "gateway"),
+            loopback: true,
+            port: PORT,
+        });
     });
 }
 
 void startGateway().catch((error) => {
-    console.error("[Device Tunnel] Gateway node registration failed:", error?.message || error);
+    console.error("[Device Tunnel] Gateway node registration failed", { code: "GATEWAY_REGISTRATION_FAILED" });
     process.exitCode = 1;
 });
 
@@ -822,13 +818,15 @@ setInterval(() => {
         activeSessions: devicesByBridgeSession.size,
     }).then((updated) => {
         if (!updated) {
-            console.warn(`[Device Tunnel] Gateway node ${GATEWAY_NODE_ID} heartbeat was fenced`);
+            console.warn("[Device Tunnel] Gateway node heartbeat was fenced", {
+                gatewayNodeRef: redactOperationalIdentifier(GATEWAY_NODE_ID, "gateway"),
+            });
             if (RUNTIME_LEASE_ENFORCEMENT) {
                 for (const device of devicesByBridgeSession.values()) void disconnectDevice(device, "Gateway node heartbeat was fenced");
             }
         }
     }).catch((error) => {
-        console.warn("[Device Tunnel] Gateway node heartbeat failed:", error?.message || error);
+        console.warn("[Device Tunnel] Gateway node heartbeat failed", { code: "GATEWAY_HEARTBEAT_FAILED" });
     });
 }, 15_000).unref?.();
 
@@ -840,36 +838,23 @@ setInterval(() => {
     }
 }, 20_000).unref?.();
 
-let draining = false;
-async function drainGateway(shutdown = false) {
-    if (draining) {
-        if (shutdown) server.close();
-        return false;
-    }
-    const changed = await setDeviceTunnelGatewayNodeDrainState({
+const drainController = new DeviceTunnelGatewayDrainController({
+    persistDrainState: (draining) => setDeviceTunnelGatewayNodeDrainState({
         db: db as any,
         nodeId: GATEWAY_NODE_ID,
         startedAt: GATEWAY_STARTED_AT,
-        draining: true,
-    }).catch(() => false);
-    if (!changed) return false;
-    draining = true;
-    await Promise.all(Array.from(devicesByBridgeSession.values()).map((device) => disconnectDevice(device, "Gateway node is draining")));
-    if (shutdown) server.close();
-    return true;
-}
+        draining,
+    }).catch(() => false),
+    fenceConnectedSessions: async () => {
+        await Promise.all(Array.from(devicesByBridgeSession.values()).map((device) => (
+            disconnectDevice(device, "Gateway node is draining")
+        )));
+    },
+    closeServer: () => server.close(),
+});
 
-async function resumeGateway() {
-    if (!draining) return false;
-    const changed = await setDeviceTunnelGatewayNodeDrainState({
-        db: db as any,
-        nodeId: GATEWAY_NODE_ID,
-        startedAt: GATEWAY_STARTED_AT,
-        draining: false,
-    }).catch(() => false);
-    if (changed) draining = false;
-    return changed;
-}
+const drainGateway = (shutdown = false) => drainController.drain(shutdown);
+const resumeGateway = () => drainController.resume();
 
 process.once("SIGTERM", () => void drainGateway(true));
 process.once("SIGINT", () => void drainGateway(true));

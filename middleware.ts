@@ -38,7 +38,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     const destUrl = new URL(normalizedPath, req.url);
 
     destUrl.searchParams.set('_internal_rewrite', 'true');
-    console.log(`[Middleware] Rewriting Tenant to: ${destUrl.toString()}`);
+    console.log("[Middleware] Applying tenant rewrite");
 
     return NextResponse.rewrite(destUrl, {
       request: { headers: req.headers },
@@ -50,7 +50,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     if (isProtectedRoute(req)) {
       await auth.protect();
     }
-    console.log(`[Middleware] System Domain (${hostname}) -> Handling Natively`);
+    console.log("[Middleware] Handling system domain natively");
     const response = NextResponse.next();
 
     response.headers.set(
@@ -142,8 +142,8 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
         destination.port = "";
         return NextResponse.redirect(destination, 308);
       }
-    } catch (error) {
-      console.error("[public-site-domain] resolver unavailable", error);
+    } catch {
+      console.error("[public-site-domain] resolver unavailable");
       return new NextResponse("Domain resolution temporarily unavailable", {
         status: 503,
         headers: { "Retry-After": "30" },

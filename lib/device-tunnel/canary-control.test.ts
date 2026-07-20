@@ -79,7 +79,7 @@ test("selected canaries fail closed when ownership or providers are incomplete",
     });
     assert.equal(resolved.selected, true);
     assert.equal(resolved.active, false);
-    assert.deepEqual(resolved.errors.sort(), ["r2_configuration_incomplete", "wrong_gateway_node"]);
+    assert.deepEqual(resolved.errors.sort(), ["r2_configuration_invalid", "wrong_gateway_node"]);
 });
 
 test("canary configuration rejects alternate endpoints, duplicates, and expired scopes", () => {

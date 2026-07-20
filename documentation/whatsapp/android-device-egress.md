@@ -15,7 +15,7 @@ Last updated: 2026-07-20.
 - PR 5's durable session-auth implementation is complete on `clean-history`: immutable quiesced profile snapshots in private R2, AES-256-GCM envelope encryption under a dedicated Google Cloud KMS key, PostgreSQL single-writer placement fencing, bounded corruption fallback, retention, and bridge/deployment lifecycle wiring. It is not deployed or enabled.
 - Production still uses the existing host-local directory. The PR 5 migration is not applied, `WHATSAPP_SESSION_AUTH_MODE` remains `local`, and the durable provider is bypassed. PR 6 owns provider provisioning, two-node operations, explicit canary approval, and activation; PR 7 owns cleanup and final security review.
 - PR 6 implementation is complete locally and remains inactive. It adds exact expiring canary scopes, strict node WSS trust on the control plane/gateway/Android, per-token compatibility versus canary routing, process-fenced drain/resume, redacted acceptance/failure-matrix tooling, and the infrastructure/migration/rollback runbook. No production mutation was performed.
-- The latest production-only dependency audit has 32 findings, including critical Clerk authorization paths and `protobufjs` in the Google KMS dependency chain. These require upgrade-and-regression disposition before a canary; no audit fix was applied.
+- The fresh PR 7 pre-change production-only audit had 32 findings, including three critical Clerk/protobuf entries. Targeted upgrades resolved every critical entry; the final audit has 25 findings (1 low, 11 moderate, 13 high, zero critical). Security still owns the non-critical triage; no audit fix or blanket upgrade was applied.
 
 See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
 
@@ -105,7 +105,7 @@ Rate-limited outbox rows use status `rate_limited`, retain their current provide
 3. Confirm the tunnel status becomes `online`.
 4. Restart or reconnect the location's WhatsApp Web session. The bridge refuses to start when the assigned tunnel is offline.
 
-Disabling the binding returns the session to server egress; this is an explicit administrator action, never an automatic fallback.
+Removing a device binding leaves the session in `device_tunnel` mode and disconnected/unbound. It does not activate server egress. Recovery requires an authorized device binding or `relink_required`; no automatic or operator-side server-egress fallback exists.
 
 ## Security properties
 
@@ -117,7 +117,7 @@ Disabling the binding returns the session to server egress; this is an explicit 
 - The gateway listens locally behind Caddy, creates loopback-only SOCKS endpoints, allows domain-form WhatsApp/Meta destinations on port 443, rejects literal IP targets, and limits concurrent streams and frame size.
 - Browser sessions configured for device egress have an explicit SOCKS proxy, remote DNS enforcement, and QUIC disabled so they cannot bypass the TCP tunnel.
 - Runtime ownership is PostgreSQL-backed rather than a Redis-only lock. Assignment and lease epochs are independent monotonic fences; neither is reset or reused during rollback.
-- Tunnel loss blocks Web Bridge outbox rows. Cloud fallback requires detected coexistence, the same sender number, and an open customer-service window (or an eligible template).
+- Tunnel loss blocks Web Bridge outbox rows. It never activates Cloud API or server-egress fallback; any official-channel send remains a separate explicitly selected transport decision outside device-egress recovery.
 
 ## Operational limitations
 
@@ -129,3 +129,11 @@ Disabling the binding returns the session to server egress; this is an explicit 
 - Legal/Meta approval and an internal pilot remain required before exposing this transport to customer scale.
 
 See [Horizontal WhatsApp device-egress implementation plan](./horizontal-device-egress-plan.md) for the multi-node ownership, rate-limit, failover, and rollout design.
+
+## PR 7 startup and operational safety
+
+The gateway and bridge now share one startup validator. Unset controls remain safe compatibility defaults (`false`, `false`, `local`, `disabled`). Placement, lease enforcement, and encrypted snapshots must be enabled together and require at least one exact unexpired canary plus exact KMS/private-R2 configuration. A canary-capable process still applies leases and durable auth only to an exact selected session. Rate limiting remains independent; invalid, empty, contradictory, and deprecated aliases fail with non-secret codes.
+
+Internal bridge operations require a configured secret and bounded bodies. New health output uses hashed session/location references and a session-directory fingerprint rather than raw tenant identifiers or the profile path. Mixed-version readers accept the older health shape during rollout, but new workers do not emit the sensitive fields. See [the PR 7 security review](./device-egress-security-review.md). No Android routing behavior or production control changed in PR 7.
+
+PR 7 verification passed 156 focused TypeScript tests, separate Clerk bearer and PM2 singleton suites, Android unit/debug builds, Prisma validation/generation, strict targeted checks, operator dry runs, production bundles, transformed page-closure inspection, and the production build. Repository-wide `tsc --noEmit` is not claimed as passing.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildWebBridgeDiagnostics } from "./web-bridge-diagnostics";
+import { fingerprintOperationalPath, redactOperationalIdentifier } from "../device-tunnel/operational-redaction";
 
 const expectedSessionDir = "/home/martin/whatsapp-web-sessions";
 
@@ -161,4 +162,29 @@ test("classifies wrong session dir as an error", () => {
     assert.equal(diagnostics.status, "worker_unreachable");
     assert.equal(diagnostics.severity, "error");
     assert.equal(diagnostics.sessionDirMatchesExpected, false);
+});
+
+test("matches redacted worker references and path fingerprints without exposing the path", () => {
+    const session = { sessionId: "estio_loc_1", locationId: "loc_1", status: "ready" };
+    const expectedSessionDir = "/private/secret/whatsapp-profile";
+    const diagnostics = buildWebBridgeDiagnostics({
+        session,
+        expectedSessionDir,
+        health: {
+            reachable: true,
+            ok: true,
+            sessionDirFingerprint: fingerprintOperationalPath(expectedSessionDir),
+            sessions: [{
+                sessionRef: redactOperationalIdentifier(session.sessionId, "session"),
+                locationRef: redactOperationalIdentifier(session.locationId, "location"),
+                status: "ready",
+                ready: true,
+            }],
+        },
+    });
+    assert.equal(diagnostics.workerSessionPresent, true);
+    assert.equal(diagnostics.workerReady, true);
+    assert.equal(diagnostics.sessionDirMatchesExpected, true);
+    assert.equal(diagnostics.sessionDir, null);
+    assert.equal(JSON.stringify(diagnostics).includes(expectedSessionDir), false);
 });

@@ -4,6 +4,7 @@ import type { SessionAuthKeyWrapper } from "./session-auth-crypto";
 
 const KMS_KEY_PATH_PATTERN =
     /^projects\/[^/]{1,100}\/locations\/[a-zA-Z0-9_-]{1,63}\/keyRings\/[^/]{1,100}\/cryptoKeys\/[^/]{1,100}$/;
+const SESSION_AUTH_KMS_REQUEST_TIMEOUT_MS = 30_000;
 
 export function validateSessionAuthKmsKeyName(rawValue: string | undefined) {
     const keyName = String(rawValue || "").trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
@@ -31,7 +32,10 @@ export class GoogleSessionAuthKeyWrapper implements SessionAuthKeyWrapper {
         this.assertKeyName(kmsKeyName);
         const plaintextKey = randomBytes(32);
         try {
-            const [response] = await this.client.encrypt({ name: this.keyName, plaintext: plaintextKey });
+            const [response] = await this.client.encrypt(
+                { name: this.keyName, plaintext: plaintextKey },
+                { timeout: SESSION_AUTH_KMS_REQUEST_TIMEOUT_MS },
+            );
             if (!response.ciphertext) throw new Error("WhatsApp session-auth KMS wrap returned no ciphertext");
             return {
                 plaintextKey: Buffer.from(plaintextKey),
@@ -45,10 +49,13 @@ export class GoogleSessionAuthKeyWrapper implements SessionAuthKeyWrapper {
     async decryptDataKey(kmsKeyName: string, encryptedKey: string) {
         this.assertKeyName(kmsKeyName);
         if (!encryptedKey || encryptedKey.length > 16 * 1024) throw new Error("WhatsApp session-auth wrapped key is invalid");
-        const [response] = await this.client.decrypt({
-            name: this.keyName,
-            ciphertext: Buffer.from(encryptedKey, "base64"),
-        });
+        const [response] = await this.client.decrypt(
+            {
+                name: this.keyName,
+                ciphertext: Buffer.from(encryptedKey, "base64"),
+            },
+            { timeout: SESSION_AUTH_KMS_REQUEST_TIMEOUT_MS },
+        );
         if (!response.plaintext) throw new Error("WhatsApp session-auth KMS unwrap returned no plaintext");
         return Buffer.from(response.plaintext);
     }

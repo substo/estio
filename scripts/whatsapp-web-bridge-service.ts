@@ -21,7 +21,6 @@ import {
 } from "../lib/whatsapp/web-bridge-runtime-health";
 import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
 import {
-    isDeviceTunnelRuntimeLeaseEnforcementActive,
     sameDeviceTunnelRuntimeOwnership,
     validateDeviceTunnelRuntimeOwnership,
     validateDeviceTunnelRuntimeOwnershipDescriptor,
@@ -32,6 +31,14 @@ import { SessionAuthPlacementStore } from "../lib/whatsapp/session-auth-store";
 import { WhatsAppSessionAuthCoordinator } from "../lib/whatsapp/session-auth-coordinator";
 import { R2SessionAuthObjectStore, getSessionAuthObjectStoreConfig } from "../lib/whatsapp/session-auth-object-store";
 import { GoogleSessionAuthKeyWrapper } from "../lib/whatsapp/session-auth-kms";
+import { validateWhatsAppDeviceEgressStartupConfiguration } from "../lib/device-tunnel/startup-configuration";
+import {
+    isOperationalRequestAuthorized,
+    readBoundedOperationalJson,
+    sanitizeOperationalError,
+    writeOperationalJson,
+} from "../lib/device-tunnel/operational-http";
+import { fingerprintOperationalPath, redactOperationalIdentifier } from "../lib/device-tunnel/operational-redaction";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -40,7 +47,8 @@ const APP_WEBHOOK_URL = String(process.env.WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL |
 const SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON_SECRET || "").trim();
 const DEVICE_TUNNEL_GATEWAY_URL = String(process.env.DEVICE_TUNNEL_GATEWAY_URL || "http://127.0.0.1:3220").replace(/\/+$/, "");
 const DEVICE_TUNNEL_INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
-const RUNTIME_LEASE_ENFORCEMENT = isDeviceTunnelRuntimeLeaseEnforcementActive();
+const STARTUP_CONFIGURATION = validateWhatsAppDeviceEgressStartupConfiguration();
+const RUNTIME_LEASE_ENFORCEMENT = STARTUP_CONFIGURATION.runtimeLeaseEnforcement;
 const GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || "").trim();
 const RUNTIME_OWNER_INSTANCE_ID = String(process.env.DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID || "").trim();
 if (RUNTIME_LEASE_ENFORCEMENT && (!GATEWAY_NODE_ID || !RUNTIME_OWNER_INSTANCE_ID)) {
@@ -140,7 +148,9 @@ function detectChromiumUserAgent() {
             return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
         }
     } catch (error: any) {
-        console.warn("[WhatsApp Web Bridge] Could not detect the bundled Chromium version:", error?.message || error);
+        console.warn("[WhatsApp Web Bridge] Could not detect the bundled Chromium version", {
+            code: "CHROMIUM_VERSION_DETECTION_FAILED",
+        });
     }
     // Avoid whatsapp-web.js's legacy Chrome 101 default if version detection is unavailable.
     return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -156,6 +166,10 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
     return Promise.race([promise, timeoutPromise]).finally(() => {
         if (timeout) clearTimeout(timeout);
     });
+}
+
+function bridgeRef(value: unknown, prefix: string) {
+    return redactOperationalIdentifier(String(value || ""), prefix);
 }
 
 async function sleep(ms: number) {
@@ -205,7 +219,10 @@ async function resolveLidAndPhoneFromClient(messageOrChat: any, fallbackJid: str
             lidJid: jidFromId(mapping?.lid),
         };
     } catch (error: any) {
-        console.warn(`[WhatsApp Web Bridge] LID/phone lookup failed for ${fallbackJid}:`, error?.message || error);
+        console.warn("[WhatsApp Web Bridge] LID/phone lookup failed", {
+            contactRef: bridgeRef(fallbackJid, "contact"),
+            code: "CONTACT_IDENTITY_LOOKUP_FAILED",
+        });
         return { phoneJid: "", lidJid: "" };
     }
 }
@@ -217,7 +234,10 @@ async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
             contact = await messageOrChat.getContact();
         }
     } catch (error: any) {
-        console.warn(`[WhatsApp Web Bridge] Contact metadata lookup failed for ${fallbackJid}:`, error?.message || error);
+        console.warn("[WhatsApp Web Bridge] Contact metadata lookup failed", {
+            contactRef: bridgeRef(fallbackJid, "contact"),
+            code: "CONTACT_METADATA_LOOKUP_FAILED",
+        });
     }
 
     const contactPhoneJid = phoneJidFromContact(contact);
@@ -257,20 +277,15 @@ async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
 }
 
 function json(res: ServerResponse, status: number, payload: any) {
-    res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(payload));
+    writeOperationalJson(res, status, payload);
 }
 
 function isAuthorized(req: IncomingMessage) {
-    if (!SECRET) return true;
-    return req.headers["x-whatsapp-web-bridge-secret"] === SECRET;
+    return isOperationalRequestAuthorized({ request: req, headerName: "x-whatsapp-web-bridge-secret", secret: SECRET });
 }
 
 async function readJson(req: IncomingMessage) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    if (!chunks.length) return {};
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return readBoundedOperationalJson(req);
 }
 
 async function emitEvent(payload: Record<string, any>, timeoutMs?: number) {
@@ -280,9 +295,13 @@ async function emitEvent(payload: Record<string, any>, timeoutMs?: number) {
     });
     if (prepared.omittedInlineMedia) {
         const messageId = getSerializedMessageId(payload?.message);
-        console.warn(
-            `[WhatsApp Web Bridge] Inline media omitted for ${payload.event || "event"} ${messageId || "unknown message"}: webhook body ${prepared.originalBodyBytes} bytes exceeds ${APP_WEBHOOK_BODY_LIMIT_BYTES}; sending ${prepared.bodyBytes} bytes.`
-        );
+        console.warn("[WhatsApp Web Bridge] Inline media omitted from webhook", {
+            event: String(payload.event || "event").slice(0, 64),
+            messageRef: bridgeRef(messageId, "message"),
+            originalBodyBytes: prepared.originalBodyBytes,
+            bodyBytes: prepared.bodyBytes,
+            limitBytes: APP_WEBHOOK_BODY_LIMIT_BYTES,
+        });
     }
     const response = await fetch(APP_WEBHOOK_URL, {
         method: "POST",
@@ -328,7 +347,11 @@ async function emitSessionEvent(
         session.lastWebhookErrorAt = new Date();
         session.lastError = error?.message || "Failed to emit bridge webhook event.";
         session.lastEventAt = new Date();
-        console.error(`[WhatsApp Web Bridge] Failed to emit ${payload.event || "event"} for ${session.sessionId}:`, error?.message || error);
+        console.error("[WhatsApp Web Bridge] Failed to emit session event", {
+            event: String(payload.event || "event").slice(0, 64),
+            sessionRef: bridgeRef(session.sessionId, "session"),
+            code: "BRIDGE_WEBHOOK_EMIT_FAILED",
+        });
         return false;
     }
 }
@@ -343,8 +366,8 @@ function serializeManagedSession(session: ManagedSession) {
     const durableReady = !session.authDurableRequired || session.authDurableReady === true;
     const ready = Boolean(session.ready && runtimeReady && activeProbeFresh && durableReady);
     return {
-        sessionId: session.sessionId,
-        locationId: session.locationId,
+        sessionRef: redactOperationalIdentifier(session.sessionId, "session"),
+        locationRef: redactOperationalIdentifier(session.locationId, "location"),
         ready,
         status: ready ? "ready" : (session.ready ? "stale" : (session.status || "starting")),
         restarting: Boolean(session.restarting),
@@ -547,7 +570,10 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
     session.restarting = true;
     session.ready = false;
     markSessionEvent(session, "restarting", error);
-    console.warn(`[WhatsApp Web Bridge] Restarting stale session ${session.sessionId}:`, (error as any)?.message || error);
+    console.warn("[WhatsApp Web Bridge] Restarting stale session", {
+        sessionRef: bridgeRef(session.sessionId, "session"),
+        code: classifyOperationalError(error) || "STALE_SESSION_RESTART",
+    });
     await emitSessionEvent(session, {
         event: "restarting",
         locationId: session.locationId,
@@ -560,7 +586,10 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
     } finally {
         setTimeout(() => {
             startSession(sessionId, locationId, session.ownership).catch((restartError: any) => {
-                console.error(`[WhatsApp Web Bridge] Failed to restart stale session ${sessionId}:`, restartError?.message || restartError);
+                console.error("[WhatsApp Web Bridge] Failed to restart stale session", {
+                    sessionRef: bridgeRef(sessionId, "session"),
+                    code: "STALE_SESSION_RESTART_FAILED",
+                });
             });
         }, SESSION_RESTART_BACKOFF_MS);
     }
@@ -719,10 +748,12 @@ async function downloadMessageMediaWithRetry(message: any, messageId: string) {
             lastError = error;
             const retryable = isWhatsAppWebBridgeRecoverableMediaError(error);
             if (!retryable || attempt >= MEDIA_DOWNLOAD_RETRY_ATTEMPTS) break;
-            console.warn(
-                `[WhatsApp Web Bridge] Media download retry ${attempt}/${MEDIA_DOWNLOAD_RETRY_ATTEMPTS - 1} for ${messageId}:`,
-                (error as any)?.message || error,
-            );
+            console.warn("[WhatsApp Web Bridge] Media download retry", {
+                messageRef: bridgeRef(messageId, "message"),
+                attempt,
+                maxRetries: MEDIA_DOWNLOAD_RETRY_ATTEMPTS - 1,
+                code: "MEDIA_DOWNLOAD_RETRY",
+            });
             await sleep(MEDIA_DOWNLOAD_RETRY_BACKOFF_MS * attempt);
         }
     }
@@ -730,14 +761,16 @@ async function downloadMessageMediaWithRetry(message: any, messageId: string) {
     try {
         const media = await downloadMessageMediaFromRawFields(message, messageId);
         if (media?.data) {
-            console.log(`[WhatsApp Web Bridge] Media fallback download succeeded for ${messageId}`);
+            console.log("[WhatsApp Web Bridge] Media fallback download succeeded", {
+                messageRef: bridgeRef(messageId, "message"),
+            });
             return media;
         }
     } catch (fallbackError: any) {
-        console.warn(
-            `[WhatsApp Web Bridge] Media fallback download failed for ${messageId}:`,
-            fallbackError?.message || fallbackError,
-        );
+        console.warn("[WhatsApp Web Bridge] Media fallback download failed", {
+            messageRef: bridgeRef(messageId, "message"),
+            code: "MEDIA_FALLBACK_DOWNLOAD_FAILED",
+        });
     }
 
     throw lastError || new Error("Failed to download media.");
@@ -858,7 +891,10 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 message: `Unsupported WhatsApp Web media type: ${messageType}`,
                 type: messageType,
             };
-            console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: unsupported type ${messageType}`);
+            console.warn("[WhatsApp Web Bridge] Media skipped: unsupported type", {
+                messageRef: bridgeRef(id, "message"),
+                mediaType: String(messageType).slice(0, 64),
+            });
             return serialized;
         }
 
@@ -886,7 +922,9 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                     type: messageType,
                     size: approxBytes || null,
                 };
-                console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing mimetype`);
+                console.warn("[WhatsApp Web Bridge] Media skipped: missing mimetype", {
+                    messageRef: bridgeRef(id, "message"),
+                });
             } else if (media?.data && approxBytes <= MAX_INLINE_MEDIA_BYTES) {
                 serialized.media = {
                     mimetype,
@@ -895,7 +933,11 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                     size: approxBytes,
                 };
                 serialized.mediaMeta.inlined = true;
-                console.log(`[WhatsApp Web Bridge] Media inlined for ${id}: ${mimetype} ${approxBytes} bytes`);
+                console.log("[WhatsApp Web Bridge] Media inlined", {
+                    messageRef: bridgeRef(id, "message"),
+                    contentType: String(mimetype).slice(0, 128),
+                    sizeBytes: approxBytes,
+                });
             } else if (media?.data) {
                 serialized.mediaError = {
                     code: "media_too_large",
@@ -905,7 +947,11 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                     mimetype,
                     filename,
                 };
-                console.warn(`[WhatsApp Web Bridge] Media too large for ${id}: ${approxBytes} bytes > ${MAX_INLINE_MEDIA_BYTES}`);
+                console.warn("[WhatsApp Web Bridge] Media too large", {
+                    messageRef: bridgeRef(id, "message"),
+                    sizeBytes: approxBytes,
+                    limitBytes: MAX_INLINE_MEDIA_BYTES,
+                });
             } else {
                 serialized.mediaError = {
                     code: "missing_media_data",
@@ -914,7 +960,9 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                     filename,
                     type: messageType,
                 };
-                console.warn(`[WhatsApp Web Bridge] Media skipped for ${id}: missing media data`);
+                console.warn("[WhatsApp Web Bridge] Media skipped: missing media data", {
+                    messageRef: bridgeRef(id, "message"),
+                });
             }
         } catch (error: any) {
             serialized.mediaError = {
@@ -922,7 +970,10 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 message: error?.message || "Failed to download media.",
                 type: messageType,
             };
-            console.error(`[WhatsApp Web Bridge] Media download failed for ${id}:`, error?.message || error);
+            console.error("[WhatsApp Web Bridge] Media download failed", {
+                messageRef: bridgeRef(id, "message"),
+                code: "MEDIA_DOWNLOAD_FAILED",
+            });
         }
     } else if (options?.includeMedia && message?.hasMedia) {
         serialized.mediaError = {
@@ -930,7 +981,9 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
             message: "WhatsApp Web message does not expose downloadMedia().",
             type: messageType,
         };
-        console.warn(`[WhatsApp Web Bridge] Media download unavailable for ${id}`);
+        console.warn("[WhatsApp Web Bridge] Media download unavailable", {
+            messageRef: bridgeRef(id, "message"),
+        });
     }
 
     return serialized;
@@ -1036,7 +1089,9 @@ async function recordDeviceTunnelSendProof(session: ManagedSession, messageId: s
         signal: AbortSignal.timeout(5_000),
     }).catch(() => null);
     if (!response?.ok) {
-        console.warn(`[WhatsApp Web Bridge] Send succeeded but tunnel proof was unavailable for ${session.sessionId}.`);
+        console.warn("[WhatsApp Web Bridge] Send succeeded but tunnel proof was unavailable", {
+            sessionRef: bridgeRef(session.sessionId, "session"),
+        });
         return null;
     }
     return response.json().catch(() => null);
@@ -1137,7 +1192,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
 
     client.on("qr", async (qr: string) => {
         markSessionEvent(managed, "qr");
-        console.log(`[WhatsApp Web Bridge] QR generated for ${sessionId}`);
+        console.log("[WhatsApp Web Bridge] QR generated", { sessionRef: bridgeRef(sessionId, "session") });
         const qrCode = await qrcode.toDataURL(qr, { margin: 1, width: 320 });
         await emitSessionEvent(managed, { event: "qr", locationId, sessionId, qrCode });
     });
@@ -1149,14 +1204,17 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
 
     client.on("authenticated", async () => {
         markSessionEvent(managed, "authenticated");
-        console.log(`[WhatsApp Web Bridge] Authenticated ${sessionId}`);
+        console.log("[WhatsApp Web Bridge] Authenticated", { sessionRef: bridgeRef(sessionId, "session") });
         await emitSessionEvent(managed, { event: "authenticated", locationId, sessionId });
     });
 
     client.on("auth_failure", async (error: string) => {
         managed.ready = false;
         markSessionEvent(managed, "failed", error);
-        console.error(`[WhatsApp Web Bridge] Auth failure for ${sessionId}:`, error);
+        console.error("[WhatsApp Web Bridge] Authentication failed", {
+            sessionRef: bridgeRef(sessionId, "session"),
+            code: "WHATSAPP_AUTH_FAILURE",
+        });
         await emitSessionEvent(managed, { event: "auth_failure", locationId, sessionId, error });
     });
 
@@ -1171,7 +1229,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         managed.phone = await getPhone(client);
         markSessionEvent(managed, "ready");
         managed.lastReadyAt = new Date();
-        console.log(`[WhatsApp Web Bridge] Ready ${sessionId}`);
+        console.log("[WhatsApp Web Bridge] Ready", { sessionRef: bridgeRef(sessionId, "session") });
         const probed = await activelyProbeManagedSession(managed, true);
         if (managed.authDurableRequired && SESSION_AUTH_COORDINATOR && !managed.authDurableReady) {
             if (!probed || managed.initialCheckpointInFlight) return;
@@ -1181,7 +1239,8 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
                 await quiesceManagedSession(managed, true, true);
                 await startSession(sessionId, locationId, managed.ownership);
             } catch (error: any) {
-                console.error(`[WhatsApp Web Bridge] Initial durable checkpoint failed for ${sessionId}`, {
+                console.error("[WhatsApp Web Bridge] Initial durable checkpoint failed", {
+                    sessionRef: bridgeRef(sessionId, "session"),
                     code: String(error?.code || "SESSION_AUTH_CHECKPOINT_FAILED").slice(0, 64),
                     name: String(error?.name || "Error").slice(0, 64),
                 });
@@ -1195,7 +1254,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         if (managed.shuttingDown) return;
         managed.ready = false;
         markSessionEvent(managed, "disconnected", reason);
-        console.warn(`[WhatsApp Web Bridge] Disconnected ${sessionId}:`, reason);
+        console.warn("[WhatsApp Web Bridge] Disconnected", {
+            sessionRef: bridgeRef(sessionId, "session"),
+            code: "WHATSAPP_SESSION_DISCONNECTED",
+        });
         sessions.delete(sessionId);
         await emitSessionEvent(managed, { event: "disconnected", locationId, sessionId, error: reason });
     });
@@ -1205,7 +1267,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         try {
             await emitSessionEvent(managed, { event: "message", locationId, sessionId, phone: managed.phone, message: await withStaleRecovery(managed, () => serializeMessage(message, { includeMedia: true })) });
         } catch (error: any) {
-            console.error(`[WhatsApp Web Bridge] Failed to serialize inbound message for ${sessionId}:`, error?.message || error);
+            console.error("[WhatsApp Web Bridge] Failed to serialize inbound message", {
+                sessionRef: bridgeRef(sessionId, "session"),
+                code: "INBOUND_SERIALIZATION_FAILED",
+            });
         }
     });
 
@@ -1214,7 +1279,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         try {
             await emitSessionEvent(managed, { event: "message_create", locationId, sessionId, phone: managed.phone, message: await withStaleRecovery(managed, () => serializeMessage(message, { includeMedia: true })) });
         } catch (error: any) {
-            console.error(`[WhatsApp Web Bridge] Failed to serialize outbound echo for ${sessionId}:`, error?.message || error);
+            console.error("[WhatsApp Web Bridge] Failed to serialize outbound echo", {
+                sessionRef: bridgeRef(sessionId, "session"),
+                code: "OUTBOUND_SERIALIZATION_FAILED",
+            });
         }
     });
 
@@ -1300,12 +1368,11 @@ async function sendMessage(sessionId: string, payload: any) {
         if (linkPreviewRequested) {
             const sentLinks = Array.isArray(sent?.links) ? sent.links.length : null;
             console.log("[WhatsApp Web Bridge] Text URL send completed", {
-                sessionId,
+                sessionRef: bridgeRef(sessionId, "session"),
                 toKind: /@lid$/i.test(to) ? "lid" : /@c\.us$/i.test(to) ? "phone" : "other",
-                urlHost: preview.host,
                 linkPreviewRequested: true,
                 sentLinks,
-                messageId,
+                messageRef: bridgeRef(messageId, "message"),
             });
         }
         return {
@@ -1366,7 +1433,10 @@ async function fetchMessages(sessionId: string, payload: any) {
                     `WhatsApp get message ${sessionId}`
                 ));
                 if (targetMessage) {
-                    console.log(`[WhatsApp Web Bridge] Direct message lookup matched ${targetMessageId} via ${lookupMessageId}`);
+                    console.log("[WhatsApp Web Bridge] Direct message lookup matched", {
+                        targetMessageRef: bridgeRef(targetMessageId, "message"),
+                        lookupMessageRef: bridgeRef(lookupMessageId, "message"),
+                    });
                     return [
                         await withStaleRecovery(
                             session,
@@ -1376,10 +1446,10 @@ async function fetchMessages(sessionId: string, payload: any) {
                     ];
                 }
             } catch (error: any) {
-                console.warn(
-                    `[WhatsApp Web Bridge] Direct message lookup failed for ${lookupMessageId}; falling back to next candidate:`,
-                    error?.message || error,
-                );
+                console.warn("[WhatsApp Web Bridge] Direct message lookup failed; trying next candidate", {
+                    lookupMessageRef: bridgeRef(lookupMessageId, "message"),
+                    code: "DIRECT_MESSAGE_LOOKUP_FAILED",
+                });
             }
         }
     }
@@ -1476,7 +1546,7 @@ const server = createServer(async (req, res) => {
                 uptimeSeconds: Math.floor((Date.now() - serviceStartedAt.getTime()) / 1000),
                 sessionCount: sessions.size,
                 sessions: Array.from(sessions.values()).map(serializeManagedSession),
-                sessionDir: SESSION_DIR,
+                sessionDirFingerprint: fingerprintOperationalPath(SESSION_DIR),
                 sessionAuthMode: SESSION_AUTH_CONFIGURATION.mode,
                 maxInlineMediaBytes: MAX_INLINE_MEDIA_BYTES,
                 protocolTimeoutMs: PROTOCOL_TIMEOUT_MS,
@@ -1492,7 +1562,7 @@ const server = createServer(async (req, res) => {
                 ok: readySessions.length > 0,
                 readySessionCount: readySessions.length,
                 sessions: serializedSessions,
-                sessionDir: SESSION_DIR,
+                sessionDirFingerprint: fingerprintOperationalPath(SESSION_DIR),
                 sessionAuthMode: SESSION_AUTH_CONFIGURATION.mode,
             });
         }
@@ -1507,7 +1577,10 @@ const server = createServer(async (req, res) => {
                     ? validateDeviceTunnelRuntimeOwnershipDescriptor(body.ownership)
                     : null;
                 startSession(sessionId, locationId, ownership).catch((error: any) => {
-                    console.error(`[WhatsApp Web Bridge] Failed to start session ${sessionId}:`, error?.message || error);
+                    console.error("[WhatsApp Web Bridge] Failed to start session", {
+                        sessionRef: bridgeRef(sessionId, "session"),
+                        code: "SESSION_START_FAILED",
+                    });
                 });
                 return json(res, 202, { success: true, sessionId, status: "starting" });
             }
@@ -1571,22 +1644,27 @@ const server = createServer(async (req, res) => {
 
         return json(res, 404, { error: "Not found." });
     } catch (error: any) {
-        const deviceEgressOffline = String(error?.code || "") === "DEVICE_EGRESS_OFFLINE";
-        console.error("[WhatsApp Web Bridge] Request failed", {
-            code: deviceEgressOffline ? "DEVICE_EGRESS_OFFLINE" : String(error?.code || "BRIDGE_REQUEST_FAILED").slice(0, 64),
-            name: String(error?.name || "Error").slice(0, 64),
+        const sanitized = sanitizeOperationalError({
+            error,
+            fallbackCode: "BRIDGE_REQUEST_FAILED",
+            allowlistedCodes: new Set(["DEVICE_EGRESS_OFFLINE"]),
         });
+        const deviceEgressOffline = sanitized.code === "DEVICE_EGRESS_OFFLINE";
+        console.error("[WhatsApp Web Bridge] Request failed", sanitized);
         return json(res, deviceEgressOffline ? 503 : 500, {
-            error: error?.message || "Internal Server Error",
-            ...(deviceEgressOffline ? { code: "DEVICE_EGRESS_OFFLINE" } : {}),
+            error: deviceEgressOffline ? "Device egress is unavailable." : "Internal Server Error",
+            code: sanitized.code,
         });
     }
 });
 
 server.listen(PORT, () => {
-    console.log(`[WhatsApp Web Bridge] Listening on ${PORT}; session dir ${SESSION_DIR}`);
+    console.log("[WhatsApp Web Bridge] Listening", {
+        port: PORT,
+        sessionDirFingerprint: fingerprintOperationalPath(SESSION_DIR),
+    });
     if (!process.env.WHATSAPP_WEB_BRIDGE_SESSION_DIR) {
-        console.warn("[WhatsApp Web Bridge] WHATSAPP_WEB_BRIDGE_SESSION_DIR is not set. Set it to a persistent path outside release folders, for example /home/martin/whatsapp-web-sessions.");
+        console.warn("[WhatsApp Web Bridge] WHATSAPP_WEB_BRIDGE_SESSION_DIR is not set; configure a persistent path outside release folders.");
     }
 });
 
@@ -1596,7 +1674,10 @@ setInterval(() => {
             const ageMs = Date.now() - session.lastEventAt.getTime();
             if (ageMs > QR_STALE_MS && !session.restarting) {
                 restartStaleSession(session, new Error(`WhatsApp QR expired after ${Math.round(ageMs / 1000)} seconds.`)).catch((error: any) => {
-                    console.warn(`[WhatsApp Web Bridge] Failed to refresh expired QR for ${session.sessionId}:`, error?.message || error);
+                    console.warn("[WhatsApp Web Bridge] Failed to refresh expired QR", {
+                        sessionRef: bridgeRef(session.sessionId, "session"),
+                        code: "QR_REFRESH_FAILED",
+                    });
                 });
                 continue;
             }
@@ -1610,7 +1691,10 @@ setInterval(() => {
         });
         if (staleNonReadyReason && !session.restarting) {
             restartStaleSession(session, new Error(staleNonReadyReason)).catch((error: any) => {
-                console.warn(`[WhatsApp Web Bridge] Failed to recover non-ready session ${session.sessionId}:`, error?.message || error);
+                console.warn("[WhatsApp Web Bridge] Failed to recover non-ready session", {
+                    sessionRef: bridgeRef(session.sessionId, "session"),
+                    code: "NON_READY_RECOVERY_FAILED",
+                });
             });
             continue;
         }
@@ -1630,13 +1714,18 @@ async function bootstrapPersistedSessions() {
         },
         select: { sessionId: true, locationId: true },
     }).catch((error: any) => {
-        console.error("[WhatsApp Web Bridge] Failed to load persisted sessions:", error?.message || error);
+        console.error("[WhatsApp Web Bridge] Failed to load persisted sessions", {
+            code: "PERSISTED_SESSION_LOAD_FAILED",
+        });
         return [];
     });
 
     for (const row of rows) {
         startSession(String(row.sessionId), String(row.locationId)).catch((error) => {
-            console.error(`[WhatsApp Web Bridge] Failed to bootstrap ${row.sessionId}:`, error?.message || error);
+            console.error("[WhatsApp Web Bridge] Failed to bootstrap persisted session", {
+                sessionRef: bridgeRef(row.sessionId, "session"),
+                code: "PERSISTED_SESSION_BOOTSTRAP_FAILED",
+            });
         });
     }
 }

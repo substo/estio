@@ -1,4 +1,5 @@
 import { getStaleWhatsAppWebBridgeNonReadyReason } from "./web-bridge-readiness";
+import { fingerprintOperationalPath, redactOperationalIdentifier } from "../device-tunnel/operational-redaction";
 
 export type WhatsAppWebBridgeOperationalStatus =
     | "healthy"
@@ -57,8 +58,14 @@ export function buildWebBridgeDiagnostics(args: {
     const session = args.session;
     const health = args.health;
     const sessionId = session?.sessionId ? String(session.sessionId) : "";
+    const sessionRef = redactOperationalIdentifier(sessionId, "session");
+    const locationRef = redactOperationalIdentifier(session?.locationId, "location");
     const workerSession = sessionId && Array.isArray(health?.sessions)
-        ? health.sessions.find((item: any) => String(item.sessionId || "") === sessionId)
+        ? health.sessions.find((item: any) => (
+            String(item.sessionId || "") === sessionId
+            || item.sessionRef === sessionRef
+            || (locationRef && item.locationRef === locationRef)
+        ))
         : null;
     const dbStatus = normalizeSessionStatus(session?.status || "not_created");
     const workerStatus = workerSession?.status ? normalizeSessionStatus(workerSession.status) : (workerSession?.ready ? "ready" : null);
@@ -86,8 +93,10 @@ export function buildWebBridgeDiagnostics(args: {
     });
     const expectedSessionDir = args.expectedSessionDir || null;
     const sessionDir = health?.sessionDir || null;
-    const sessionDirMatchesExpected = expectedSessionDir && sessionDir
-        ? String(expectedSessionDir) === String(sessionDir)
+    const sessionDirFingerprint = health?.sessionDirFingerprint || fingerprintOperationalPath(sessionDir);
+    const expectedSessionDirFingerprint = fingerprintOperationalPath(expectedSessionDir);
+    const sessionDirMatchesExpected = expectedSessionDirFingerprint && sessionDirFingerprint
+        ? expectedSessionDirFingerprint === sessionDirFingerprint
         : null;
 
     let severity: "healthy" | "warning" | "error" = "healthy";
@@ -101,7 +110,7 @@ export function buildWebBridgeDiagnostics(args: {
     } else if (sessionDirMatchesExpected === false) {
         severity = "error";
         status = "worker_unreachable";
-        message = `Bridge worker is using ${sessionDir}, expected ${expectedSessionDir}. Restart the worker with the persistent session directory.`;
+        message = "Bridge worker is using a different session directory fingerprint. Restart it with the reviewed persistent directory.";
     } else if (stale) {
         severity = "warning";
         status = "stale_worker";
@@ -145,8 +154,8 @@ export function buildWebBridgeDiagnostics(args: {
         baseUrl: health?.baseUrl || "http://127.0.0.1:3218",
         uptimeSeconds: health?.uptimeSeconds ?? null,
         sessionCount: health?.sessionCount ?? null,
-        sessionDir,
-        expectedSessionDir,
+        sessionDir: null,
+        expectedSessionDir: null,
         sessionDirMatchesExpected,
         maxInlineMediaBytes: health?.maxInlineMediaBytes ?? null,
         protocolTimeoutMs: health?.protocolTimeoutMs ?? null,

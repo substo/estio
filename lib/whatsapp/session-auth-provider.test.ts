@@ -8,14 +8,16 @@ test("session-auth KMS wrapper accepts only the dedicated configured key", async
     assert.equal(validateSessionAuthKmsKeyName(keyName), keyName);
     assert.throws(() => validateSessionAuthKmsKeyName("https://example.test/key"));
     const wrapped = Buffer.from("wrapped-key");
+    const callOptions: unknown[] = [];
     const client = {
-        async encrypt() { return [{ ciphertext: wrapped }]; },
-        async decrypt() { return [{ plaintext: Buffer.alloc(32, 7) }]; },
+        async encrypt(_request: unknown, options: unknown) { callOptions.push(options); return [{ ciphertext: wrapped }]; },
+        async decrypt(_request: unknown, options: unknown) { callOptions.push(options); return [{ plaintext: Buffer.alloc(32, 7) }]; },
     } as any;
     const wrapper = new GoogleSessionAuthKeyWrapper(keyName, client);
     const generated = await wrapper.generateDataKey(keyName);
     assert.equal(generated.plaintextKey.length, 32);
     assert.equal((await wrapper.decryptDataKey(keyName, generated.encryptedKey)).length, 32);
+    assert.deepEqual(callOptions, [{ timeout: 30_000 }, { timeout: 30_000 }]);
     await assert.rejects(() => wrapper.generateDataKey("projects/other/locations/global/keyRings/auth/cryptoKeys/whatsapp"));
 });
 

@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
 
 export const WHATSAPP_WEB_BRIDGE_PROVIDER = "whatsapp_web_bridge";
 export const WHATSAPP_WEB_BRIDGE_TRANSPORT = "web_bridge";
@@ -26,8 +27,10 @@ export type WhatsAppWebBridgeSessionRow = {
 };
 
 export type WhatsAppWebBridgeHealthSession = {
-    sessionId: string;
-    locationId: string;
+    sessionId?: string;
+    locationId?: string;
+    sessionRef?: string | null;
+    locationRef?: string | null;
     ready: boolean;
     phone?: string | null;
     status?: string | null;
@@ -52,6 +55,7 @@ export type WhatsAppWebBridgeHealth = {
     sessionCount?: number | null;
     sessions?: WhatsAppWebBridgeHealthSession[];
     sessionDir?: string | null;
+    sessionDirFingerprint?: string | null;
     maxInlineMediaBytes?: number | null;
     protocolTimeoutMs?: number | null;
     error?: string | null;
@@ -174,8 +178,13 @@ export async function getReadyWhatsAppWebBridgeSession(locationId: string) {
 
     const health = await getWhatsAppWebBridgeHealth().catch(() => null);
     const expectedSessionId = session?.sessionId || buildWhatsAppWebBridgeSessionId(locationId);
+    const expectedSessionRef = redactOperationalIdentifier(expectedSessionId, "session");
+    const expectedLocationRef = redactOperationalIdentifier(locationId, "location");
     const workerSession = (health?.sessions || []).find((item: any) =>
-        item?.locationId === locationId || item?.sessionId === expectedSessionId
+        item?.locationId === locationId
+        || item?.sessionId === expectedSessionId
+        || item?.locationRef === expectedLocationRef
+        || item?.sessionRef === expectedSessionRef
     );
     if (!health?.reachable || !workerSession?.ready) return null;
 

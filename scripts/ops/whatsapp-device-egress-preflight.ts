@@ -14,6 +14,7 @@ import {
 } from "../../lib/device-tunnel/gateway-url";
 import { validateSessionAuthKmsKeyName } from "../../lib/whatsapp/session-auth-kms";
 import { getSessionAuthObjectStoreConfig } from "../../lib/whatsapp/session-auth-object-store";
+import { validateWhatsAppDeviceEgressStartupConfiguration } from "../../lib/device-tunnel/startup-configuration";
 
 type Check = { code: string; ok: boolean; detail?: string };
 async function main() {
@@ -30,6 +31,8 @@ function check(code: string, fn: () => void, detail?: string) {
     try { fn(); checks.push({ code, ok: true, ...(detail ? { detail } : {}) }); }
     catch (error: any) { checks.push({ code, ok: false, detail: String(error?.message || error).slice(0, 160) }); }
 }
+
+check("startup_control_configuration", () => { validateWhatsAppDeviceEgressStartupConfiguration(); });
 
 const nodeId = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || "").trim();
 check("stable_node_id", () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    buildWhatsAppWebBridgeMediaLogFields,
     ingestWhatsAppWebBridgeMediaAttachment,
     isTransientWebBridgeMediaIngestError,
 } from "./web-bridge-media";
@@ -12,6 +13,22 @@ const media = {
     filename: "voice.ogg",
     size: 10,
 };
+
+test("media operational logs redact message, object, attachment, and error details", () => {
+    const fields = buildWhatsAppWebBridgeMediaLogFields("wam_sensitive", {
+        key: "tenant/location/contact/message/object.ogg",
+        attachmentId: "attachment-sensitive",
+        error: "token and recipient leaked here",
+        size: 42,
+        contentType: "audio/ogg",
+    });
+    const serialized = JSON.stringify(fields);
+    for (const sensitive of ["wam_sensitive", "tenant/location", "attachment-sensitive", "token and recipient"]) {
+        assert.equal(serialized.includes(sensitive), false);
+    }
+    assert.equal(fields.errorCode, "MEDIA_INGEST_TRANSIENT");
+    assert.equal(fields.size, 42);
+});
 
 function createDbMock() {
     const createdAttachments: any[] = [];

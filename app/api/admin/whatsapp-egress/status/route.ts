@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { getWhatsAppWebBridgeHealth } from "@/lib/whatsapp/web-bridge";
+import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +38,13 @@ export async function GET() {
         getWhatsAppWebBridgeHealth().catch(() => null),
     ]);
     const binding = session?.tunnelBinding || null;
+    const sessionRef = redactOperationalIdentifier(session?.sessionId, "session");
+    const locationRef = redactOperationalIdentifier(location.id, "location");
     const workerSession = (bridgeHealth?.sessions || []).find((candidate: any) =>
-        candidate?.sessionId === session?.sessionId || candidate?.locationId === location.id
+        candidate?.sessionId === session?.sessionId
+        || candidate?.locationId === location.id
+        || candidate?.sessionRef === sessionRef
+        || candidate?.locationRef === locationRef
     );
     const fresh = Boolean(binding?.lastSeenAt && Date.now() - new Date(binding.lastSeenAt).getTime() < 45_000);
     const proof = binding?.lastVerifiedAt ? {
