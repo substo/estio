@@ -235,7 +235,12 @@ async function bridgeFetch(path: string, init?: RequestInit & { timeoutMs?: numb
         });
         const json = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error(String((json as any)?.error || response.statusText || "WhatsApp Web bridge request failed."));
+            const error: any = new Error(String((json as any)?.error || response.statusText || "WhatsApp Web bridge request failed."));
+            if (String((json as any)?.code || "") === "DEVICE_EGRESS_OFFLINE") {
+                error.code = "DEVICE_EGRESS_OFFLINE";
+                error.providerClassification = { retryable: true, reason: "device_egress_offline" };
+            }
+            throw error;
         }
         return json as any;
     } catch (error: any) {

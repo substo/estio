@@ -14,6 +14,11 @@ import {
     normalizeWhatsAppWebBridgeAckStatus,
     normalizeWhatsAppWebBridgeMessage,
 } from "@/lib/whatsapp/webhook-normalizers";
+import {
+    isDeviceTunnelRuntimeLeaseEnforcementActive,
+    validateDeviceTunnelRuntimeOwnership,
+    validateDeviceTunnelRuntimeOwnershipDescriptor,
+} from "@/lib/device-tunnel/runtime-ownership";
 
 function isAuthorized(req: NextRequest) {
     const secret = getWhatsAppWebBridgeSecret();
@@ -104,6 +109,29 @@ export async function POST(req: NextRequest) {
         const sessionId = String(body?.sessionId || "").trim();
         if (!locationId || !sessionId) {
             return NextResponse.json({ error: "Missing locationId or sessionId" }, { status: 400 });
+        }
+        if (isDeviceTunnelRuntimeLeaseEnforcementActive()) {
+            const currentSession = await (db as any).whatsAppWebBridgeSession.findUnique({
+                where: { locationId },
+                select: { id: true, sessionId: true, egressMode: true },
+            });
+            if (!currentSession) {
+                return NextResponse.json({ error: "WhatsApp Web session is not registered" }, { status: 409 });
+            }
+            if (currentSession?.egressMode === "device_tunnel") {
+                let ownership;
+                try {
+                    ownership = validateDeviceTunnelRuntimeOwnershipDescriptor(body?.ownership);
+                } catch {
+                    return NextResponse.json({ error: "Runtime ownership is required" }, { status: 409 });
+                }
+                const owned = Boolean(
+                    currentSession.id === ownership.sessionId
+                    && currentSession.sessionId === sessionId
+                    && await validateDeviceTunnelRuntimeOwnership({ db: db as any, ownership })
+                );
+                if (!owned) return NextResponse.json({ error: "Runtime ownership was fenced" }, { status: 409 });
+            }
         }
 
         if (["qr", "ready", "authenticated", "auth_failure", "disconnected", "loading", "stale", "restarting"].includes(event)) {

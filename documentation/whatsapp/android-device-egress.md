@@ -8,9 +8,10 @@ Last updated: 2026-07-20.
 
 - PR 1, node registry and PostgreSQL fenced-lease primitives, is deployed as commit `6c53c5e` with migration `20260719160000_device_tunnel_node_registry_leases`.
 - PR 2, distributed outbound rate limiting and per-session dispatch serialization, is deployed as commit `0d6c77a` with migration `20260719180000_whatsapp_distributed_rate_limits`.
-- PR 3, node-scoped tokens and assignment-aware routing, is complete in commit `a2bcb4a`, pushed to `clean-history`, and pending review/deployment. It required no migration.
-- Production remains on the compatibility path: distributed placement is off and outbound rate limiting is disabled by default. The gateway registry is live, but leases do not yet control browser ownership.
-- PRs 4–7 remain: runtime lease enforcement and drain, movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
+- PR 3, node-scoped tokens and assignment-aware routing, is deployed and verified as commit `a2bcb4a`. It required no migration.
+- PR 4, co-located runtime ownership, is complete on `clean-history` and pending review/deployment. It required no migration and its enforcement flag defaults to off.
+- Production remains on the compatibility path: distributed placement and runtime lease enforcement are off, and outbound rate limiting is disabled by default. The PR 3 deployment preserved the healthy single-node tunnel and existing WhatsApp Web browser session.
+- PRs 5–7 remain: movable encrypted session auth, two-node operations/canary, then compatibility cleanup and final security review.
 
 See the [horizontal implementation plan](./horizontal-device-egress-plan.md#implementation-status) for the implementation record, remaining migrations, acceptance criteria, dependencies, and rollback boundaries for every PR.
 
@@ -27,6 +28,11 @@ DEVICE_TUNNEL_GATEWAY_REGION=cyprus
 DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS=100
 DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES=10000
 DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false
+DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT=false
+# Required on both co-located processes only for a later enabled canary:
+# DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID=<unique deployment instance ID>
+# DEVICE_TUNNEL_RUNTIME_LEASE_TTL_MS=30000
+# DEVICE_TUNNEL_RUNTIME_LEASE_RENEW_INTERVAL_MS=10000
 WHATSAPP_RATE_LIMIT_MODE=disabled
 ```
 
@@ -37,6 +43,8 @@ The SIM Relay integration page shows the live tunnel state and the last verified
 The gateway registers `DEVICE_TUNNEL_GATEWAY_NODE_ID` in PostgreSQL and heartbeats every 15 seconds. Use one stable ID per deployed gateway; do not derive it from a PID or container restart. Keep `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` during the PR 1 rollout. With the flag disabled, node registry fields are populated but assignment and lease enforcement are not activated, so the existing single-host browser-to-loopback-SOCKS path remains unchanged. Enabling the flag requires an explicit node ID and is reserved for the later routing/ownership phases.
 
 PR 3 keeps that flag-off routing behavior: token exchange returns the global `DEVICE_TUNNEL_PUBLIC_URL`, and gateway connect/disconnect observations may continue updating `gatewayNodeId` as before. With distributed placement enabled in a later controlled phase, bind/token exchange keeps an eligible current assignment or selects a healthy online, non-draining node with capacity. The binding row is locked transactionally; a node ownership change increments `assignmentEpoch`, while a stable assignment does not. The endpoint returns the assigned registry node's validated WSS URL. Node URLs must be credential-free WebSocket URLs with no query or fragment; production accepts only `wss://`.
+
+PR 4 runtime enforcement activates only when both `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT` and `DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT` are `true`. The gateway and bridge must share the same stable gateway node ID and the same unique deployment-instance owner ID. The gateway acquires the existing PostgreSQL lease before listening on a loopback SOCKS port, renews it on a bounded cadence, and passes both assignment and lease epochs to the bridge. New proxy work, Chromium startup, browser readiness, send-proof start and verification, webhook mutations, and proof persistence all require the exact current tenant/session/binding/node/assignment/owner/lease scope. Two missed renewals, lease expiry, reassignment, node drain, or binding drain stop new work, close tunnel streams, and stop only the browser carrying the fenced descriptor. Ownership gaps keep outbox work `blocked_egress` without incrementing the provider attempt count.
 
 After deploying the node-registry migration, verify the node's `status`, `lastHeartbeatAt`, `activeSessions`, configured URLs, region, capacity, and version in `DeviceTunnelGatewayNode`. A heartbeat update is scoped to both node ID and process `startedAt`; an older process cannot overwrite a replacement process's heartbeat.
 
@@ -70,13 +78,14 @@ Disabling the binding returns the session to server egress; this is an explicit 
 - Android accepts only credential-free `wss://` endpoints returned by the token exchange. Every reconnect obtains a new challenge and token, so reassignment supplies the new node URL. Failed reconnects retain exponential backoff capped at 60 seconds with full jitter.
 - The gateway listens locally behind Caddy, creates loopback-only SOCKS endpoints, allows domain-form WhatsApp/Meta destinations on port 443, rejects literal IP targets, and limits concurrent streams and frame size.
 - Browser sessions configured for device egress have an explicit SOCKS proxy, remote DNS enforcement, and QUIC disabled so they cannot bypass the TCP tunnel.
+- Runtime ownership is PostgreSQL-backed rather than a Redis-only lock. Assignment and lease epochs are independent monotonic fences; neither is reset or reused during rollback.
 - Tunnel loss blocks Web Bridge outbox rows. Cloud fallback requires detected coexistence, the same sender number, and an open customer-service window (or an eligible template).
 
 ## Operational limitations
 
-- The active production path remains single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. The node registry and fenced-lease primitives are present for phased rollout, but routing and runtime lease enforcement remain disabled while `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`.
+- The active production path remains single-node and intentionally keeps its proxy endpoints on the same host as the browser bridge. PR 4 code is fail-closed when explicitly enabled, but runtime enforcement remains inactive while distributed placement is false and its own flag is false.
 - Rate-limit schema, Redis counters, dispatch locks, queue rescheduling, and admin UI support are deployed, but production enforcement remains off until the required shadow observation cycle is completed.
-- Cross-node browser failover is not safe yet: tokens and reconnect routing are now node/assignment-epoch scoped, but PR 4 runtime leases do not yet stop stale browsers and PR 5 session authentication is still stored on the local host. Do not enable multi-node automatic failover.
+- Cross-node browser failover is not safe yet: runtime leases now stop stale browsers, but PR 5 session authentication is still stored on the local host. Do not enable multi-node automatic failover, move/copy a live profile, or provision a second node as part of PR 4.
 - The current allowlist may need additions when WhatsApp changes media/CDN hostnames. Add only observed, reviewed suffixes through `DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES`.
 - Legal/Meta approval and an internal pilot remain required before exposing this transport to customer scale.
 

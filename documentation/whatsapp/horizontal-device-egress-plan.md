@@ -18,17 +18,19 @@ Last updated: 2026-07-20.
 |---|---|---|
 | PR 1 — Node registry and fenced lease primitives | Complete (`6c53c5e`) | Migrated and deployed; registry heartbeat is live; distributed placement remains disabled. |
 | PR 2 — Distributed rate limiter | Complete (`0d6c77a`) | Migrated and deployed; limiter defaults to `disabled` pending the shadow rollout. |
-| PR 3 — Node-scoped device tokens and routing | Complete (`a2bcb4a`); pushed, pending review/deployment | Compatibility mode still returns the global URL; distributed placement remains disabled in production. |
-| PR 4 — Co-located runtime ownership | Next implementation PR | Lease primitives exist but do not yet fence gateway/bridge runtime ownership. |
+| PR 3 — Node-scoped device tokens and routing | Complete and deployed (`a2bcb4a`) | Verified on the compatibility path; the global URL remains active and distributed placement remains disabled. |
+| PR 4 — Co-located runtime ownership | Complete on `clean-history`; pending review/deployment | No migration; runtime enforcement is explicit, defaults off, and is inactive while distributed placement is off. |
 | PR 5 — Durable session-auth placement | Not started | Production still uses host-local `LocalAuth`. |
 | PR 6 — Multi-node deployment and operations | Not started | One production egress node is registered. |
 | PR 7 — Cleanup and security review | Not started | Single-node compatibility code remains required. |
 
-The production data path is intentionally unchanged after PRs 1–2. `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` preserves single-node routing, and an absent or invalid `WHATSAPP_RATE_LIMIT_MODE` resolves to `disabled`. Do not enable distributed placement until PRs 3–5 are complete. Rate limiting may be advanced independently from `disabled` to `shadow`, observed for at least one complete daily window, and then moved to `enforce` after Redis and queue telemetry are healthy.
+The production data path is intentionally unchanged after PRs 1–3. `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false` preserves single-node routing, and an absent or invalid `WHATSAPP_RATE_LIMIT_MODE` resolves to `disabled`. Do not enable distributed placement until PRs 4–5 are complete. Rate limiting may be advanced independently from `disabled` to `shadow`, observed for at least one complete daily window, and then moved to `enforce` after Redis and queue telemetry are healthy.
 
-PR 3 is implemented in commit `a2bcb4a` without a migration. Binding assignment is row-locked in PostgreSQL, retains an eligible current node, and increments `assignmentEpoch` only when `gatewayNodeId` changes. Five-minute tunnel JWTs contain audience, node, session, binding, device, tenant, assignment epoch, JTI, issued-at, and expiry claims. The gateway revalidates those claims against current binding, session, device credential, node health, and assignment state before accepting a WebSocket. Its per-process JTI cache purges expired entries, has a configurable hard bound, and fails closed rather than evicting an unexpired replay fence. Android validates and uses each exchange response's WSS URL, requests a fresh challenge/token for every reconnect, and applies exponential backoff with full jitter.
+PR 3 is deployed from commit `a2bcb4a` without a migration. Binding assignment is row-locked in PostgreSQL, retains an eligible current node, and increments `assignmentEpoch` only when `gatewayNodeId` changes. Five-minute tunnel JWTs contain audience, node, session, binding, device, tenant, assignment epoch, JTI, issued-at, and expiry claims. The gateway revalidates those claims against current binding, session, device credential, node health, and assignment state before accepting a WebSocket. Its per-process JTI cache purges expired entries, has a configurable hard bound, and fails closed rather than evicting an unexpired replay fence. Android validates and uses each exchange response's WSS URL, requests a fresh challenge/token for every reconnect, and applies exponential backoff with full jitter.
 
 With `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`, token exchange continues to return `DEVICE_TUNNEL_PUBLIC_URL`, does not assign or rebalance bindings, and the gateway preserves the existing single-node observation writes. The new five-minute scoped token contract applies in both modes. No production flag, rate-limit mode, lease ownership, Chromium behavior, session-auth storage, or node count is changed by PR 3.
+
+PR 4 makes the existing PostgreSQL lease authoritative only when both `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=true` and `DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT=true`. The gateway and bridge must then share the configured `DEVICE_TUNNEL_GATEWAY_NODE_ID` and a deployment-instance value in `DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID`. The gateway acquires the exact tenant/session/binding/node/assignment scope before opening the loopback SOCKS listener and passes the assignment and lease fencing epochs to the co-located bridge. Proxy admission, browser startup and readiness, proof creation and verification, session webhooks, and proof persistence revalidate that ownership. The gateway renews every 10 seconds by default against a 30-second lease, stops new work after two consecutive missed renewals, and closes streams plus the matching browser on expiry, drain, fencing, or ownership loss. Binding and node drain state prevents acquisition and renewal. Outbox rows remain `blocked_egress` without consuming an attempt during ownership gaps. No server-egress browser fallback, auth-profile movement, rate-limit change, second node, or production flag activation is included.
 
 ### Implemented in PR 1
 
@@ -48,6 +50,14 @@ With `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`, token exchange continues to re
 - BullMQ retries use distinct job IDs so a delayed retry cannot collide with the currently active job and disappear.
 - Conversation loading and realtime patches expose the reason and exact next-eligible time to administrators.
 - Focused tests cover atomic concurrent workers, lock contention, Redis failures, shadow behavior, retry identity, outbox attempt preservation, and UI state. The production build passed before deployment.
+
+### Implemented in PR 4
+
+- `lib/device-tunnel/runtime-ownership.ts` defines the explicit opt-in flag, exact runtime ownership descriptor, durable database validation, and the two-missed-renewal fence.
+- `scripts/device-tunnel-gateway.ts` acquires and renews the existing PostgreSQL lease before exposing SOCKS, binds observations and proof persistence to assignment and lease epochs, and shuts proxy streams plus the matching bridge browser down on fencing, expiry, or drain.
+- `scripts/whatsapp-web-bridge-service.ts` requires the same node and deployment-instance identities, validates ownership before Chromium startup and all new browser work, and suppresses readiness after ownership loss.
+- The bridge webhook revalidates ownership before persisted readiness, session, message, or acknowledgement mutations. Outbound readiness also requires a current lease, so ownership gaps remain `blocked_egress` without changing `attemptCount`.
+- The compatibility path remains authoritative unless both distributed placement and runtime lease enforcement are explicitly enabled. No Prisma schema or migration changed.
 
 ## Recommended architecture decision
 
@@ -92,7 +102,7 @@ Egress worker node B
 
 ## Control-plane data model
 
-The PR 1 and PR 2 portions of this model are present in production. The PR 3 routing implementation is present on `clean-history` but is not yet recorded as deployed. Items explicitly described as future work belong to PRs 4–7.
+The PR 1, PR 2, and PR 3 portions of this model are present in production. Items explicitly described as future work belong to PRs 4–7.
 
 ### `DeviceTunnelGatewayNode`
 
@@ -275,7 +285,7 @@ Result: acceptance passed in focused concurrency tests and the production build.
 
 ### PR 3 — Node-scoped device tokens and routing
 
-**Status: complete in commit `a2bcb4a`, pushed to `clean-history`, pending review and deployment.** This adds assignment-aware routing but does not activate automatic cross-node browser failover.
+**Status: complete, deployed, and verified.** Commit `a2bcb4a`; no migration. This adds assignment-aware routing but does not activate automatic cross-node browser failover.
 
 - Assign bindings to a healthy node.
 - Return the assigned node URL from `/api/device-relay/v1/tunnel-token`.
@@ -293,11 +303,11 @@ Acceptance: the wrong node rejects the token; reassignment causes Android to rec
 
 Rollback: turn distributed placement off. Existing single-node tokens and routing must continue to work without decrementing or reusing assignment epochs.
 
-Result: no migration was required. Assignment uses `SELECT ... FOR UPDATE` on the binding and the PR 1 stable placement helper. Issuance and gateway acceptance validate the same tenant/device/binding/session/epoch scope; distributed acceptance additionally requires the configured gateway to be the healthy assigned node. JWT audience is `device-tunnel-gateway`, lifetime is five minutes, and each JTI is accepted once per gateway process. Replay state is capped by `DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES` (default 10,000); after expired entries are removed, a full cache rejects new connections until capacity becomes available. A gateway process restart clears this best-effort cache, while node and assignment-epoch checks remain durable. Android accepts only credential-free `wss://` node URLs and obtains a new URL with every fresh token exchange. Focused TypeScript and Android unit/build checks cover stable/capacity placement, concurrency, complete claims, wrong audience/node/scope/epoch, credential revocation/version fencing, bounded replay, reassigned URLs, full jitter, and flag-off compatibility.
+Result: no migration was required. Assignment uses `SELECT ... FOR UPDATE` on the binding and the PR 1 stable placement helper. Issuance and gateway acceptance validate the same tenant/device/binding/session/epoch scope; distributed acceptance additionally requires the configured gateway to be the healthy assigned node. JWT audience is `device-tunnel-gateway`, lifetime is five minutes, and each JTI is accepted once per gateway process. Replay state is capped by `DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES` (default 10,000); after expired entries are removed, a full cache rejects new connections until capacity becomes available. A gateway process restart clears this best-effort cache, while node and assignment-epoch checks remain durable. Android accepts only credential-free `wss://` node URLs and obtains a new URL with every fresh token exchange. Focused TypeScript and Android unit/build checks cover stable/capacity placement, concurrency, complete claims, wrong audience/node/scope/epoch, credential revocation/version fencing, bounded replay, reassigned URLs, full jitter, and flag-off compatibility. The 2026-07-20 production cutover completed with no pending Prisma migrations; public health, the refreshed gateway, and the existing ready WhatsApp session all passed verification. Both compatibility controls remain unset, so distributed placement and rate-limit enforcement retain their disabled defaults, and no second node was deployed.
 
 ### PR 4 — Co-located runtime ownership
 
-**Status: next implementation PR; PR 3 is coded but still pending production review/deployment.** This is the first phase that makes the PR 1 lease authoritative at runtime.
+**Status: complete on `clean-history`, pending review and deployment.** No migration. This is the first phase that makes the PR 1 lease authoritative at runtime.
 
 - Make gateway and bridge use the same node identity and lease.
 - Require a valid lease before returning the local SOCKS endpoint or starting Chromium.
@@ -312,6 +322,8 @@ Expected migration: normally none. Add durable drain/audit fields only if the ex
 Acceptance: forced lease loss stops the old browser; only the new owner becomes ready; queued sends remain blocked during the gap.
 
 Rollback: disable lease enforcement only after draining any canary owner. Never run old and new ownership modes concurrently for the same session.
+
+Result: the gateway owns the PostgreSQL lease and the co-located bridge consumes its exact runtime descriptor. Acquisition and every guarded mutation are scoped by tenant, database session ID, binding, node, assignment epoch, deployment owner, and lease epoch. A stale process cannot expose a new SOCKS connection, start or retain Chromium, create or verify proof, publish ready state, or persist tunnel proof after fencing. Lease expiry is checked on stream traffic as well as on the bounded renewal cadence. Two missed renewals fence new work and trigger stream/browser shutdown; node and binding drain make database validation and renewal fail closed. The expanded focused TypeScript suite passed 91/91 and covers concurrent lease acquisition, takeover, stale renewal, wrong scope/owner/epochs, drain, missed-renewal shutdown, proof calculations, flag-off behavior, bridge behavior, and outbox attempt preservation. Android `testDebugUnitTest` and `assembleDebug`, runtime-script bundling, `npx prisma validate`, `git diff --check`, and the production build passed; the Next.js build explicitly skipped type validation. A full TypeScript check with an 8 GB heap emitted no diagnostics but remained active for roughly ten minutes and was stopped, so it is not recorded as passing.
 
 ### PR 5 — Durable session-auth placement
 
@@ -391,17 +403,4 @@ Rollback must preserve binding epochs. Disable new placement and move canary bin
 
 ## Next implementation task
 
-Implement **PR 4 only: co-located runtime ownership**. PRs 1 and 2 are deployed. PR 3 is complete in commit `a2bcb4a` and pushed but is not recorded as deployed. Do not recreate earlier migrations, alter PR 2 rate-limit enforcement, implement PR 5 session-auth movement, or provision another node. Start by reading:
-
-- `documentation/whatsapp/android-device-egress.md`
-- `scripts/device-tunnel-gateway.ts`
-- `scripts/whatsapp-web-bridge-service.ts`
-- `lib/device-tunnel/session-lease.ts`
-- `lib/device-tunnel/assignment.ts`
-- `lib/device-tunnel/gateway-authorization.ts`
-- `lib/whatsapp/web-bridge.ts`
-- the `WhatsAppWebBridgeSession`, `DeviceTunnelBinding`, `DeviceTunnelGatewayNode`, and `DeviceTunnelSessionLease` Prisma models
-
-Keep the production path unchanged when `DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT=false`. When runtime ownership is explicitly enabled for a later canary, require the gateway and bridge to use the same stable node identity and valid fenced lease before serving the loopback proxy, starting Chromium, accepting proof work, or reporting readiness. Renew on a bounded cadence, fail closed after the documented missed-renewal threshold, and stop streams/browser activity on fencing or lease loss. Queue sends as `blocked_egress`; never add server-egress fallback. Do not move or copy `LocalAuth` data in PR 4.
-
-Before handoff, run focused device-tunnel, lease, gateway, bridge, outbox, and authentication tests; run Prisma validation/generation if schema changes; run `git diff --check` and the production build. Review tenant scoping, node/assignment/lease epoch fencing, split-brain behavior, lease-loss shutdown, proof/readiness fencing, secret logging, compatibility rollback, and the prohibition on server-egress fallback.
+PR 5 is next, but implementation must not begin until its durable session-auth storage/provider architecture is selected and documented. Specify single-writer guarantees, encryption-key ownership, backup retention, attach/detach timeout, integrity validation, and recovery behavior first. Move authentication state only after the prior runtime is fenced and Chromium has stopped; never copy a live `LocalAuth` profile. PR 4 does not make cross-node browser failover safe by itself, so distributed placement and runtime lease enforcement remain disabled pending review and the PR 5 storage boundary.

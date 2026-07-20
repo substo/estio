@@ -2,10 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    buildDeviceEgressBlockedUpdate,
     buildWhatsAppRateLimitDeferralUpdate,
     resolveWhatsAppDispatchAckTimeoutState,
     resolveWhatsAppOutboundCompletionState,
 } from "./outbound-outbox";
+
+test("runtime ownership gaps stay blocked_egress without consuming an attempt", () => {
+    const update = buildDeviceEgressBlockedUpdate({
+        reason: "Runtime ownership is unavailable",
+        scheduledAt: new Date("2026-07-20T12:01:00.000Z"),
+    });
+    assert.equal(update.status, "blocked_egress");
+    assert.equal("attemptCount" in update, false);
+});
 
 test("rate-limit deferral does not consume a provider attempt", () => {
     const update = buildWhatsAppRateLimitDeferralUpdate({

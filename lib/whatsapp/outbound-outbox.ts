@@ -124,6 +124,16 @@ export function buildWhatsAppRateLimitDeferralUpdate(args: {
     };
 }
 
+export function buildDeviceEgressBlockedUpdate(args: { reason: string; scheduledAt: Date }) {
+    return {
+        status: "blocked_egress",
+        lastError: args.reason,
+        scheduledAt: args.scheduledAt,
+        lockedAt: null,
+        lockedBy: null,
+    };
+}
+
 async function deferWhatsAppOutboundWithoutAttempt(args: {
     row: any;
     reason: string;
@@ -583,13 +593,7 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             const nextScheduledAt = new Date(Date.now() + retryDelayMs);
             await (db as any).whatsAppOutboundOutbox.update({
                 where: { id: row.id },
-                data: {
-                    status: "blocked_egress",
-                    lastError: message,
-                    scheduledAt: nextScheduledAt,
-                    lockedAt: null,
-                    lockedBy: null,
-                },
+                data: buildDeviceEgressBlockedUpdate({ reason: message, scheduledAt: nextScheduledAt }),
             });
             await db.message.update({
                 where: { id: row.messageId },
