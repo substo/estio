@@ -24,7 +24,7 @@ DEVICE_TUNNEL_GATEWAY_DEFAULT_PORT=3220
 WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT="$BASE_DIR/whatsapp-web-sessions"
 WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_HEALTH_TIMEOUT_SECONDS:-40}"
 WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS="${WHATSAPP_BRIDGE_CONNECT_TIMEOUT_SECONDS:-2}"
-WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS:-180}"
+WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS:-300}"
 WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS="${WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS:-5}"
 REQUIRE_WHATSAPP_BRIDGE_READY="${REQUIRE_WHATSAPP_BRIDGE_READY:-false}"
 RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAMES="estio-whatsapp-browser-call-bridge estio-whatsapp-call-bridge"
@@ -875,7 +875,7 @@ NODE
     if [ -n "\$BRIDGE_HEALTH_JSON" ]; then
         LAST_BRIDGE_HEALTH_JSON="\$BRIDGE_HEALTH_JSON"
         if ! [[ "\$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS" =~ ^[0-9]+$ ]] || [ "\$WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS" -lt 0 ]; then
-            WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS=180
+            WHATSAPP_BRIDGE_SESSION_READY_WAIT_SECONDS=300
         fi
         if ! [[ "\$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS" =~ ^[0-9]+$ ]] || [ "\$WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS" -lt 1 ]; then
             WHATSAPP_BRIDGE_SESSION_READY_POLL_SECONDS=5
@@ -945,9 +945,11 @@ for (const session of sessions) {
     console.log('   - ' + locationId + ': status=' + status + ' ready=' + ready + ' phone=' + phone + webhookState + webhookTiming);
 }
 
-const needsQr = sessions.some((session) => ['qr', 'disconnected', 'failed'].includes(String(session?.status || '')));
-if (needsQr || readySessions.length === 0) {
-    console.log('⚠️  WhatsApp Web Bridge is running, but no session is ready yet. Open Estio and scan the QR if status remains qr/disconnected.');
+const needsQr = sessions.some((session) => String(session?.status || '') === 'qr');
+if (needsQr) {
+    console.log('⚠️  A WhatsApp session explicitly entered QR state. Relink only after confirming the durable restore cannot recover.');
+} else if (readySessions.length === 0) {
+    console.log('⏳ WhatsApp recovery is continuing automatically. Do not restart Android or scan a QR while status is starting/authenticated.');
 }
 NODE
     fi

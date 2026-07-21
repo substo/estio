@@ -145,6 +145,7 @@ Every scenario must end fail-closed with no server-egress fallback:
 | Lease loss during attach/detach | Operation cannot complete or publish; deadline/fence advances auth epoch. |
 | Gateway generation replacement | Cached-ready browser loses readiness and is recreated after Android reconnect. |
 | Android disconnect/reconnect | Sends block; fresh token uses current node/epoch; no server path. |
+| Normal post-deploy recovery | Allow the bounded 300-second reconnect/restore/probe window. `starting` or `authenticated` recovers automatically; do not require an Android restart or QR relink. |
 | R2 PUT/read-back or KMS failure | No generation publication; transient valid generations are not falsely quarantined. |
 | Archive tag/digest/path corruption | Generation quarantined; older verified generation tried. |
 | Profile lock held | Attach/detach fails until exact orphan exits; no unsafe deletion/copy. |
