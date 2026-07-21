@@ -49,6 +49,26 @@ function parseTimestampMs(value: unknown) {
     return Number.isFinite(time) ? time : null;
 }
 
+export function findMatchingWhatsAppWebBridgeHealthSession(args: {
+    sessions: any[] | null | undefined;
+    sessionId: string;
+    locationId?: string | null;
+}) {
+    const sessionId = String(args.sessionId || "").trim();
+    const locationId = String(args.locationId || "").trim();
+    if (!sessionId || !Array.isArray(args.sessions)) return null;
+    const sessionRef = redactOperationalIdentifier(sessionId, "session");
+    const locationRef = redactOperationalIdentifier(locationId, "location");
+    return args.sessions.find((item: any) => {
+        const rawWorkerSessionId = String(item?.sessionId || "").trim();
+        if (rawWorkerSessionId) return rawWorkerSessionId === sessionId;
+        if (item?.sessionRef) return item.sessionRef === sessionRef;
+        const rawWorkerLocationId = String(item?.locationId || "").trim();
+        if (rawWorkerLocationId) return Boolean(locationId && rawWorkerLocationId === locationId);
+        return Boolean(locationRef && item?.locationRef === locationRef);
+    }) || null;
+}
+
 export function buildWebBridgeDiagnostics(args: {
     session: any;
     health: any;
@@ -58,15 +78,11 @@ export function buildWebBridgeDiagnostics(args: {
     const session = args.session;
     const health = args.health;
     const sessionId = session?.sessionId ? String(session.sessionId) : "";
-    const sessionRef = redactOperationalIdentifier(sessionId, "session");
-    const locationRef = redactOperationalIdentifier(session?.locationId, "location");
-    const workerSession = sessionId && Array.isArray(health?.sessions)
-        ? health.sessions.find((item: any) => (
-            String(item.sessionId || "") === sessionId
-            || item.sessionRef === sessionRef
-            || (locationRef && item.locationRef === locationRef)
-        ))
-        : null;
+    const workerSession = findMatchingWhatsAppWebBridgeHealthSession({
+        sessions: health?.sessions,
+        sessionId,
+        locationId: session?.locationId,
+    });
     const dbStatus = normalizeSessionStatus(session?.status || "not_created");
     const workerStatus = workerSession?.status ? normalizeSessionStatus(workerSession.status) : (workerSession?.ready ? "ready" : null);
     const dbReady = dbStatus === "ready";

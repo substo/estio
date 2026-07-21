@@ -10,6 +10,7 @@ import {
     upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
 import { getStaleWhatsAppWebBridgeNonReadyReason } from "@/lib/whatsapp/web-bridge-readiness";
+import { findMatchingWhatsAppWebBridgeHealthSession } from "@/lib/whatsapp/web-bridge-diagnostics";
 
 type LocationContext = {
     id: string;
@@ -64,9 +65,11 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
         })),
     ]);
     const expectedSessionId = session?.sessionId || buildWhatsAppWebBridgeSessionId(location.id);
-    const workerSession = (health.sessions || []).find((item: any) =>
-        item?.locationId === location.id || item?.sessionId === expectedSessionId
-    );
+    const workerSession = findMatchingWhatsAppWebBridgeHealthSession({
+        sessions: health.sessions,
+        sessionId: expectedSessionId,
+        locationId: location.id,
+    });
 
     if (health.reachable && workerSession?.ready) {
         const now = new Date();

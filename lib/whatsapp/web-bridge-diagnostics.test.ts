@@ -1,9 +1,50 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildWebBridgeDiagnostics } from "./web-bridge-diagnostics";
+import {
+    buildWebBridgeDiagnostics,
+    findMatchingWhatsAppWebBridgeHealthSession,
+} from "./web-bridge-diagnostics";
 import { fingerprintOperationalPath, redactOperationalIdentifier } from "../device-tunnel/operational-redaction";
 
 const expectedSessionDir = "/home/martin/whatsapp-web-sessions";
+
+test("matches redacted health references without exposing raw tenant identifiers", () => {
+    const sessionId = "estio_loc_1";
+    const locationId = "loc_1";
+    const expected = {
+        sessionRef: redactOperationalIdentifier(sessionId, "session"),
+        locationRef: redactOperationalIdentifier(locationId, "location"),
+        status: "ready",
+        ready: true,
+    };
+    assert.equal(findMatchingWhatsAppWebBridgeHealthSession({
+        sessions: [expected],
+        sessionId,
+        locationId,
+    }), expected);
+});
+
+test("does not match another tenant or bridge session", () => {
+    const worker = {
+        sessionRef: redactOperationalIdentifier("estio_loc_other", "session"),
+        locationRef: redactOperationalIdentifier("loc_other", "location"),
+        status: "ready",
+        ready: true,
+    };
+    assert.equal(findMatchingWhatsAppWebBridgeHealthSession({
+        sessions: [worker],
+        sessionId: "estio_loc_1",
+        locationId: "loc_1",
+    }), null);
+    assert.equal(findMatchingWhatsAppWebBridgeHealthSession({
+        sessions: [{
+            ...worker,
+            locationRef: redactOperationalIdentifier("loc_1", "location"),
+        }],
+        sessionId: "estio_loc_1",
+        locationId: "loc_1",
+    }), null);
+});
 
 test("classifies a matching ready worker session as healthy", () => {
     const diagnostics = buildWebBridgeDiagnostics({
