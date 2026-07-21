@@ -38,3 +38,17 @@ internal class DeviceTunnelReconnectPolicy(
 
     fun fullJitterDelay(currentCapMs: Long): Long = random.nextLong(0, currentCapMs.coerceAtMost(maximumCapMs) + 1)
 }
+
+internal class DeviceTunnelLivenessPolicy(
+    private val maximumSilenceMs: Long = 75_000L,
+    private val checkIntervalMs: Long = 15_000L,
+) {
+    init {
+        require(maximumSilenceMs > checkIntervalMs && checkIntervalMs > 0)
+    }
+
+    fun checkInterval() = checkIntervalMs
+
+    fun isStale(lastGatewayFrameAtMs: Long, nowMs: Long): Boolean =
+        nowMs - lastGatewayFrameAtMs > maximumSilenceMs
+}

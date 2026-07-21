@@ -3,11 +3,13 @@ package com.estio.simrelay
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.SystemClock
 import android.util.Base64
 import com.estio.simrelay.api.ApiClient
 import com.estio.simrelay.api.TunnelTokenRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -26,7 +28,8 @@ import kotlin.coroutines.resume
 
 class DeviceTunnelClient(
     context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val onConnectionStateChanged: (Boolean) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
@@ -37,6 +40,7 @@ class DeviceTunnelClient(
         .build()
     @Volatile private var webSocket: WebSocket? = null
     private val reconnectPolicy = DeviceTunnelReconnectPolicy()
+    private val livenessPolicy = DeviceTunnelLivenessPolicy()
 
     suspend fun runForever() {
         var backoffCapMs = reconnectPolicy.initialCap()
@@ -67,38 +71,80 @@ class DeviceTunnelClient(
     }
 
     fun networkChanged() {
-        webSocket?.close(4002, "Android network changed")
+        onConnectionStateChanged(false)
+        webSocket?.cancel()
         closeStreams()
     }
 
     fun close() {
+        onConnectionStateChanged(false)
         webSocket?.close(1000, "Relay stopped")
         webSocket = null
         closeStreams()
         client.dispatcher.executorService.shutdown()
     }
 
-    private suspend fun connectOnce(endpoint: String, token: String) = suspendCancellableCoroutine { continuation ->
+    private suspend fun connectOnce(endpoint: String, token: String): Boolean = suspendCancellableCoroutine<Boolean> { continuation ->
         val request = Request.Builder()
             .url(endpoint)
             .header("Authorization", "Bearer $token")
             .build()
         var completed = false
         var opened = false
+        var lastGatewayFrameAtMs = SystemClock.elapsedRealtime()
+        var watchdogJob: Job? = null
+        val stateLock = Any()
+
+        fun markGatewayFrame() {
+            synchronized(stateLock) {
+                lastGatewayFrameAtMs = SystemClock.elapsedRealtime()
+            }
+        }
+
         fun finish() {
-            if (completed) return
-            completed = true
+            val result = synchronized(stateLock) {
+                if (completed) null else {
+                    completed = true
+                    opened
+                }
+            } ?: return
+            watchdogJob?.cancel()
+            onConnectionStateChanged(false)
             closeStreams()
-            if (continuation.isActive) continuation.resume(opened)
+            if (continuation.isActive) continuation.resume(result)
+        }
+
+        fun startLivenessWatchdog(ws: WebSocket) {
+            watchdogJob?.cancel()
+            watchdogJob = scope.launch {
+                while (isActive) {
+                    delay(livenessPolicy.checkInterval())
+                    val stale = synchronized(stateLock) {
+                        !completed && livenessPolicy.isStale(lastGatewayFrameAtMs, SystemClock.elapsedRealtime())
+                    }
+                    if (stale) {
+                        if (webSocket === ws) webSocket = null
+                        ws.cancel()
+                        finish()
+                        break
+                    }
+                }
+            }
         }
         val listener = object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
-                opened = true
+                synchronized(stateLock) {
+                    opened = true
+                    lastGatewayFrameAtMs = SystemClock.elapsedRealtime()
+                }
                 webSocket = ws
                 ws.send(JSONObject().put("type", "hello").put("networkType", networkType()).toString())
+                onConnectionStateChanged(true)
+                startLivenessWatchdog(ws)
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
+                markGatewayFrame()
                 handleFrame(ws, text)
             }
 

@@ -54,4 +54,12 @@ class DeviceTunnelRoutingTest {
         }
         assertEquals(60_000, cap)
     }
+
+    @Test
+    fun livenessPolicyFencesSilentGatewaySockets() {
+        val policy = DeviceTunnelLivenessPolicy(maximumSilenceMs = 75_000, checkIntervalMs = 15_000)
+        assertEquals(15_000, policy.checkInterval())
+        assertTrue(!policy.isStale(lastGatewayFrameAtMs = 10_000, nowMs = 85_000))
+        assertTrue(policy.isStale(lastGatewayFrameAtMs = 10_000, nowMs = 85_001))
+    }
 }

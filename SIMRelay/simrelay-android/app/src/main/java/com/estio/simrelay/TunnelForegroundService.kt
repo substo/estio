@@ -14,16 +14,24 @@ import com.estio.simrelay.api.ApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class TunnelForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "EstioWhatsAppNetworkRelay"
+        @Volatile
+        var isRunning = false
+            private set
+        @Volatile
+        var isConnected = false
+            private set
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var tunnelClient: DeviceTunnelClient? = null
+    private var tunnelJob: Job? = null
     private var connectivity: ConnectivityManager? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -54,18 +62,28 @@ class TunnelForegroundService : Service() {
             startForeground(2, notification)
         }
 
-        if (tunnelClient != null) return START_STICKY
+        if (tunnelClient != null && tunnelJob?.isActive == true) return START_STICKY
         val prefs = SecurePrefs.get(this)
-        val token = prefs.getString("device_token", null) ?: return START_NOT_STICKY
+        val token = prefs.getString("device_token", null) ?: run {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val baseUrl = prefs.getString("base_url", "https://estio.co") ?: "https://estio.co"
         ApiClient.initBaseUrl(baseUrl)
         ApiClient.initToken(token)
-        connectivity = getSystemService(ConnectivityManager::class.java).also {
-            it.registerDefaultNetworkCallback(networkCallback)
+        if (connectivity == null) {
+            connectivity = getSystemService(ConnectivityManager::class.java).also {
+                it.registerDefaultNetworkCallback(networkCallback)
+            }
         }
-        tunnelClient = DeviceTunnelClient(this, scope).also { client ->
-            scope.launch { client.runForever() }
+        tunnelClient?.close()
+        lateinit var client: DeviceTunnelClient
+        client = DeviceTunnelClient(this, scope) { connected ->
+            if (tunnelClient === client) isConnected = connected
         }
+        tunnelClient = client
+        tunnelJob = scope.launch { client.runForever() }
+        isRunning = true
         return START_STICKY
     }
 
@@ -73,6 +91,9 @@ class TunnelForegroundService : Service() {
         connectivity?.runCatching { unregisterNetworkCallback(networkCallback) }
         tunnelClient?.close()
         tunnelClient = null
+        tunnelJob = null
+        isRunning = false
+        isConnected = false
         scope.cancel()
         super.onDestroy()
     }

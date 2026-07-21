@@ -680,48 +680,92 @@ NODE
         echo "❌ WHATSAPP_WEB_BRIDGE_SESSION_DIR must be outside release directories. Current: \$WHATSAPP_BRIDGE_SESSION_DIR"
         exit 1
     fi
-    if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
-        echo "🛑 Stopping the WhatsApp browser before replacing its gateway generation"
-        pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
-    fi
     WHATSAPP_PROFILE_PATTERN="\$WHATSAPP_BRIDGE_SESSION_DIR/session-"
-    if pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then
-        echo "🧹 Terminating Chromium children scoped to the persistent WhatsApp session directory"
-        pkill -TERM -f "\$WHATSAPP_PROFILE_PATTERN" 2>/dev/null || true
-        for _ in \$(seq 1 30); do
-            if ! pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then break; fi
-            sleep 1
-        done
-        if pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then
-            pkill -KILL -f "\$WHATSAPP_PROFILE_PATTERN" 2>/dev/null || true
+    fence_whatsapp_browser_for_gateway_restart() {
+        if pm2 describe "\$WHATSAPP_BRIDGE_APP_NAME" > /dev/null 2>&1; then
+            echo "🛑 Stopping the WhatsApp browser before replacing its gateway generation"
+            pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
         fi
-    fi
+        if pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then
+            echo "🧹 Terminating Chromium children scoped to the persistent WhatsApp session directory"
+            pkill -TERM -f "\$WHATSAPP_PROFILE_PATTERN" 2>/dev/null || true
+            for _ in \$(seq 1 30); do
+                if ! pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then break; fi
+                sleep 1
+            done
+            if pgrep -f "\$WHATSAPP_PROFILE_PATTERN" > /dev/null 2>&1; then
+                pkill -KILL -f "\$WHATSAPP_PROFILE_PATTERN" 2>/dev/null || true
+            fi
+        fi
+    }
 
     if [ -n "\${DEVICE_TUNNEL_JWT_SECRET:-}" ] && [ -n "\${DEVICE_TUNNEL_INTERNAL_SECRET:-}" ]; then
         echo "🔐 Ensuring Android device tunnel gateway is running (\$DEVICE_TUNNEL_GATEWAY_APP_NAME) on :\$DEVICE_TUNNEL_GATEWAY_PORT..."
+        GATEWAY_HASH_FILE="\$DEPLOY_STATE_DIR/device-tunnel-gateway.sha256"
+        EXPECTED_GATEWAY_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/device-tunnel-gateway.ts lib/device-tunnel/*.ts lib/whatsapp/rate-limit*.ts package-lock.json 2>/dev/null | sha256sum | awk '{print \$1}' || true)
+        EXPECTED_GATEWAY_CONFIG_HASH=\$(printf '%s\0' \
+            "\$DEVICE_TUNNEL_GATEWAY_PORT" \
+            "\${DEVICE_TUNNEL_GATEWAY_NODE_ID:-}" \
+            "\${DEVICE_TUNNEL_GATEWAY_REGION:-}" \
+            "\${DEVICE_TUNNEL_PUBLIC_URL:-}" \
+            "\${DEVICE_TUNNEL_GATEWAY_INTERNAL_URL:-}" \
+            "\${DEVICE_TUNNEL_TRUSTED_HOST_SUFFIXES:-}" \
+            "\${DEVICE_TUNNEL_ALLOWED_HOST_SUFFIXES:-}" \
+            "\${DEVICE_TUNNEL_DISTRIBUTED_PLACEMENT:-}" \
+            "\${DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT:-}" \
+            "\${DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID:-}" \
+            "\${DEVICE_TUNNEL_RUNTIME_LEASE_TTL_MS:-}" \
+            "\${DEVICE_TUNNEL_RUNTIME_LEASE_RENEW_INTERVAL_MS:-}" \
+            "\${DEVICE_TUNNEL_CANARY_SCOPES:-}" \
+            "\${DEVICE_TUNNEL_FRESHNESS_MS:-}" \
+            "\${DEVICE_TUNNEL_GATEWAY_CAPACITY_SESSIONS:-}" \
+            "\${DEVICE_TUNNEL_JTI_CACHE_MAX_ENTRIES:-}" \
+            "\${DEVICE_TUNNEL_MAX_FRAME_BYTES:-}" \
+            "\${DEVICE_TUNNEL_MAX_STREAMS:-}" \
+            "\${WHATSAPP_SESSION_AUTH_MODE:-}" \
+            "\${WHATSAPP_RATE_LIMIT_MODE:-}" \
+            "\${WHATSAPP_WEB_BRIDGE_URL:-}" \
+            "\${WHATSAPP_WEB_BRIDGE_SECRET:-}" \
+            "\$DEVICE_TUNNEL_JWT_SECRET" \
+            "\$DEVICE_TUNNEL_INTERNAL_SECRET" | sha256sum | awk '{print \$1}')
+        EXPECTED_GATEWAY_DEPLOY_HASH=\$(printf '%s:%s' "\$EXPECTED_GATEWAY_CODE_HASH" "\$EXPECTED_GATEWAY_CONFIG_HASH" | sha256sum | awk '{print \$1}')
+        CURRENT_GATEWAY_DEPLOY_HASH=\$(sed -n '1p' "\$GATEWAY_HASH_FILE" 2>/dev/null || true)
+        GATEWAY_HEALTH_JSON=""
         if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
-            pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
+            GATEWAY_HEALTH_JSON=\$(curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" 2>/dev/null || true)
         fi
-        NODE_ENV=production PROCESS_ROLE=device-tunnel-gateway DEVICE_TUNNEL_GATEWAY_PORT="\$DEVICE_TUNNEL_GATEWAY_PORT" \
-            pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway
-        TUNNEL_GATEWAY_READY=0
-        for i in \$(seq 1 45); do
-            if curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" > /dev/null 2>&1; then
-                TUNNEL_GATEWAY_READY=1
-                echo "✅ Android device tunnel gateway is healthy"
-                break
+
+        if [ -n "\$GATEWAY_HEALTH_JSON" ] && [ -n "\$EXPECTED_GATEWAY_DEPLOY_HASH" ] && [ "\$CURRENT_GATEWAY_DEPLOY_HASH" = "\$EXPECTED_GATEWAY_DEPLOY_HASH" ]; then
+            echo "✅ Android device tunnel gateway is healthy and unchanged; preserving connected relays"
+        else
+            fence_whatsapp_browser_for_gateway_restart
+            if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
+                pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
             fi
-            sleep 1
-        done
-        if [ "\$TUNNEL_GATEWAY_READY" -ne 1 ]; then
-            pm2 logs "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --lines 120 --nostream || true
-            echo "❌ Android device tunnel gateway failed readiness checks."
-            exit 1
+            NODE_ENV=production PROCESS_ROLE=device-tunnel-gateway DEVICE_TUNNEL_GATEWAY_PORT="\$DEVICE_TUNNEL_GATEWAY_PORT" \
+                pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway
+            TUNNEL_GATEWAY_READY=0
+            for i in \$(seq 1 45); do
+                if curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" > /dev/null 2>&1; then
+                    TUNNEL_GATEWAY_READY=1
+                    printf '%s\n' "\$EXPECTED_GATEWAY_DEPLOY_HASH" > "\$GATEWAY_HASH_FILE"
+                    echo "✅ Android device tunnel gateway is healthy"
+                    break
+                fi
+                sleep 1
+            done
+            if [ "\$TUNNEL_GATEWAY_READY" -ne 1 ]; then
+                pm2 logs "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --lines 120 --nostream || true
+                echo "❌ Android device tunnel gateway failed readiness checks."
+                exit 1
+            fi
         fi
     else
+        fence_whatsapp_browser_for_gateway_restart
         if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
             pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
         fi
+        rm -f "\$DEPLOY_STATE_DIR/device-tunnel-gateway.sha256"
         echo "⚠️  Android device tunnel gateway is disabled; configure DEVICE_TUNNEL_JWT_SECRET and DEVICE_TUNNEL_INTERNAL_SECRET to enable it."
     fi
 

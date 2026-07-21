@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnToggleService.setOnClickListener {
-            if (RelayForegroundService.isRunning) {
+            if (RelayForegroundService.isRunning && TunnelForegroundService.isRunning) {
                 stopService(Intent(this, RelayForegroundService::class.java))
                 stopService(Intent(this, TunnelForegroundService::class.java))
                 Toast.makeText(this, "Service Stopped", Toast.LENGTH_SHORT).show()
@@ -115,7 +115,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (RelayForegroundService.isRunning && !TunnelForegroundService.isRunning) {
+            val tunnelIntent = Intent(this, TunnelForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(tunnelIntent)
+            else startService(tunnelIntent)
+        }
         updateUI()
+        btnToggleService.postDelayed({ updateUI() }, 500)
     }
 
     private fun checkPermissions() {
@@ -161,13 +167,26 @@ class MainActivity : AppCompatActivity() {
             layoutService.visibility = View.VISIBLE
             tvServerUrl.text = "Connected to $baseUrl"
             
-            if (RelayForegroundService.isRunning) {
+            if (RelayForegroundService.isRunning && TunnelForegroundService.isRunning && TunnelForegroundService.isConnected) {
                 tvStatus.text = "Service Running"
                 tvStatus.setTextColor(android.graphics.Color.parseColor("#10B981")) // Green
                 ivStatusIcon.setImageResource(android.R.drawable.ic_dialog_email)
                 ivStatusIcon.setColorFilter(android.graphics.Color.parseColor("#10B981"))
                 btnToggleService.text = "Stop Relay Service"
                 btnToggleService.setBackgroundColor(android.graphics.Color.parseColor("#EF4444"))
+            } else if (RelayForegroundService.isRunning || TunnelForegroundService.isRunning) {
+                tvStatus.text = "Service Recovering"
+                tvStatus.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
+                ivStatusIcon.setImageResource(android.R.drawable.stat_notify_sync)
+                ivStatusIcon.setColorFilter(android.graphics.Color.parseColor("#F59E0B"))
+                btnToggleService.text = if (RelayForegroundService.isRunning && TunnelForegroundService.isRunning) {
+                    "Stop Relay Service"
+                } else {
+                    "Resume Relay Service"
+                }
+                btnToggleService.setBackgroundColor(android.graphics.Color.parseColor(
+                    if (RelayForegroundService.isRunning && TunnelForegroundService.isRunning) "#EF4444" else "#10B981"
+                ))
             } else {
                 tvStatus.text = "Service Stopped"
                 tvStatus.setTextColor(android.graphics.Color.parseColor("#0F172A"))
