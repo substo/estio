@@ -26,6 +26,7 @@ import {
 import {
     didDeviceTunnelGatewayGenerationChange,
     isWhatsAppWebBridgeActiveProbeFresh,
+    isWhatsAppWebBridgeChatCollectionReady,
     isWhatsAppWebBridgeCheckpointEligible,
 } from "../lib/whatsapp/web-bridge-runtime-health";
 import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
@@ -472,7 +473,15 @@ async function activelyProbeManagedSession(session: ManagedSession, force = fals
                     throw new Error("Device tunnel gateway generation changed; the browser proxy must be rebound.");
                 }
             }
-            await getLightweightChats(session.client);
+            const chats = await getLightweightChats(session.client);
+            if (!isWhatsAppWebBridgeChatCollectionReady({
+                durableAuthReady: session.authDurableReady,
+                chatCount: chats.length,
+            })) {
+                const error: any = new Error("Durable WhatsApp session has an empty chat collection.");
+                error.code = "WHATSAPP_CHAT_COLLECTION_EMPTY";
+                throw error;
+            }
             const webhookHealthy = await emitSessionEvent(session, {
                 event: "heartbeat",
                 locationId: session.locationId,
@@ -487,7 +496,7 @@ async function activelyProbeManagedSession(session: ManagedSession, force = fals
             session.activeProbeHealthy = false;
             session.lastActiveProbeErrorAt = new Date();
             session.lastError = error?.message || String(error || "WhatsApp Web active readiness probe failed.");
-            if (shouldRestartWhatsAppWebBridgeSession(error)) {
+            if (error?.code === "WHATSAPP_CHAT_COLLECTION_EMPTY" || shouldRestartWhatsAppWebBridgeSession(error)) {
                 await restartStaleSession(session, error);
             }
             return false;
@@ -1373,10 +1382,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
     return managed;
 }
 
-async function stopSession(sessionId: string) {
+async function stopSession(sessionId: string, checkpoint = true) {
     const session = sessions.get(sessionId);
     sessions.delete(sessionId);
-    if (session?.client) await quiesceManagedSession(session, true);
+    if (session?.client) await quiesceManagedSession(session, checkpoint);
 }
 
 async function sendMessage(sessionId: string, payload: any) {
@@ -1657,7 +1666,7 @@ const server = createServer(async (req, res) => {
                 const locationId = String(body.locationId || "").trim();
                 const ownership = validateDeviceTunnelRuntimeOwnershipDescriptor(body.ownership);
                 if (ownership.locationId !== locationId) return json(res, 400, { error: "Rollback location scope does not match ownership." });
-                await withTimeout(stopSession(sessionId), SESSION_AUTH_STOP_TIMEOUT_MS, `WhatsApp rollback stop session ${sessionId}`);
+                await withTimeout(stopSession(sessionId, false), SESSION_AUTH_STOP_TIMEOUT_MS, `WhatsApp rollback stop session ${sessionId}`);
                 const placement = await (db as any).whatsAppSessionAuthPlacement.findUnique({ where: { sessionId: ownership.sessionId } });
                 if (!placement) return json(res, 404, { error: "Session-auth placement was not found." });
                 await SESSION_AUTH_COORDINATOR.rollbackToPrevious(placement.id, ownership);

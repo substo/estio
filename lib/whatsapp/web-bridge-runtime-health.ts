@@ -33,6 +33,13 @@ export function isWhatsAppWebBridgeCheckpointEligible(args: {
     });
 }
 
+export function isWhatsAppWebBridgeChatCollectionReady(args: {
+    durableAuthReady: boolean;
+    chatCount: number;
+}) {
+    return !args.durableAuthReady || args.chatCount > 0;
+}
+
 export function didDeviceTunnelGatewayGenerationChange(args: {
     deviceTunnelBindingId?: string | null;
     sessionGeneration?: string | null;

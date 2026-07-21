@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     didDeviceTunnelGatewayGenerationChange,
     isWhatsAppWebBridgeActiveProbeFresh,
+    isWhatsAppWebBridgeChatCollectionReady,
     isWhatsAppWebBridgeCheckpointEligible,
 } from "./web-bridge-runtime-health";
 
@@ -69,4 +70,10 @@ test("durable checkpoints require ready, authoritative, recently probed browsers
         ...healthy,
         lastActiveProbeSuccessAt: new Date(nowMs - 60_001),
     }), false);
+});
+
+test("durable restored sessions require a populated WhatsApp chat collection", () => {
+    assert.equal(isWhatsAppWebBridgeChatCollectionReady({ durableAuthReady: true, chatCount: 0 }), false);
+    assert.equal(isWhatsAppWebBridgeChatCollectionReady({ durableAuthReady: true, chatCount: 1 }), true);
+    assert.equal(isWhatsAppWebBridgeChatCollectionReady({ durableAuthReady: false, chatCount: 0 }), true);
 });
