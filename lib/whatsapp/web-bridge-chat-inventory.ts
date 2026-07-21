@@ -49,9 +49,9 @@ export function buildWhatsAppWebBridgeHistoryChatCandidates(input: {
     resolvedChatId?: unknown;
 }) {
     const candidates = [
+        input.resolvedChatId,
         input.providerConversationId,
         input.contactLid,
-        input.resolvedChatId,
         normalizePhoneChat(input.contactPhone),
     ];
     return Array.from(new Set(candidates.map((value) => String(value || "").trim()).filter(Boolean)));

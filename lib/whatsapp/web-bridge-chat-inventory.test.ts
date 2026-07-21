@@ -33,9 +33,9 @@ test("history candidates preserve distinct LID and phone aliases and remove dupl
     assert.deepEqual(buildWhatsAppWebBridgeHistoryChatCandidates({
         providerConversationId: "123@lid",
         contactLid: "123@lid",
-        resolvedChatId: "35799111222@c.us",
+        resolvedChatId: "current@lid",
         contactPhone: "+357 99 111 222",
-    }), ["123@lid", "35799111222@c.us"]);
+    }), ["current@lid", "123@lid", "35799111222@c.us"]);
 });
 
 test("client timeouts exceed the bridge operation limit without becoming unbounded", () => {

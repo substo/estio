@@ -4150,10 +4150,27 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
         const existingBridgeSync = (conversation.syncRecords || []).find((sync: any) =>
             String(sync.provider || "") === "whatsapp_web_bridge" && sync.providerConversationId
         );
+        let resolvedChatId: string | null = null;
+        let identityResolutionSource: string | null = null;
+        if (conversation.contact?.phone) {
+            try {
+                const resolved = await resolveWhatsAppWebBridgeChatForPhone({
+                    locationId: location.id,
+                    phone: conversation.contact.phone,
+                });
+                if (isResolvedWhatsAppWebBridgeChatAvailable(resolved)) {
+                    resolvedChatId = String(resolved.chatId || "").trim() || null;
+                    identityResolutionSource = String(resolved.source || "resolved");
+                }
+            } catch {
+                // Existing provider/LID/phone candidates remain safe fallbacks.
+            }
+        }
         const chatIds = buildWhatsAppWebBridgeHistoryChatCandidates({
             providerConversationId: existingBridgeSync?.providerConversationId,
             contactLid: conversation.contact?.lid,
             contactPhone: conversation.contact?.phone,
+            resolvedChatId,
         });
         if (chatIds.length === 0) {
             return { success: false, error: "Web Bridge history sync needs a contact phone number or WhatsApp identity." };
@@ -4161,6 +4178,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
 
         const result = { imported: 0, skipped: 0, errors: 0, processed: 0 };
         let completedCandidates = 0;
+        const boundedLimit = Math.min(Math.max(Number(limit || 30), 1), 100);
         for (const chatId of chatIds) {
             try {
                 const candidateResult = await importWebBridgeRecentMessagesForContact({
@@ -4171,7 +4189,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                     canonicalConversationId: conversation.id,
                     canonicalPhone: conversation.contact.phone,
                     contactName: conversation.contact.name,
-                    limit: limit || 30,
+                    limit: boundedLimit,
                     stopAfterDuplicates: ignoreDuplicates ? Number.MAX_SAFE_INTEGER : 5,
                 });
                 result.imported += candidateResult.imported;
@@ -4179,6 +4197,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
                 result.errors += candidateResult.errors;
                 result.processed += candidateResult.processed;
                 completedCandidates++;
+                if (candidateResult.processed > 0) break;
             } catch {
                 result.errors++;
             }
@@ -4193,9 +4212,13 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
         return {
             success: true,
             count: result.imported,
+            processed: result.processed,
             skipped: result.skipped,
             errors: result.errors,
             candidates: chatIds.length,
+            candidatesTried: completedCandidates,
+            identityResolved: Boolean(resolvedChatId),
+            identityResolutionSource,
             provider: "web_bridge",
         };
     } catch (error: any) {

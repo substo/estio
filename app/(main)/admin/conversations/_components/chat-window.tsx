@@ -34,6 +34,7 @@ import { getConversationChannelInfo } from "./conversation-channel-info";
 import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
 import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
 import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
+import type { WhatsAppHistorySyncUiState } from "./whatsapp-history-sync-ui";
 import {
     isMobileAiSuggestionDefaultCollapsed,
     usePersistentAiSuggestionsCollapsed,
@@ -73,6 +74,7 @@ interface ChatWindowProps {
     onBulkTranscribeUnprocessedAudio?: (options?: { window?: "30d" | "all" }) => void | Promise<void>;
     transcriptOnDemandEnabled?: boolean;
     onSync?: () => void;
+    whatsAppHistorySync?: WhatsAppHistorySyncUiState;
     onFetchHistory?: () => void;
     onGenerateDraft?: (
         instruction?: string,
@@ -201,6 +203,7 @@ export function ChatWindow({
     onBulkTranscribeUnprocessedAudio,
     transcriptOnDemandEnabled,
     onSync,
+    whatsAppHistorySync = { status: "idle", message: "" },
     onGenerateDraft,
     onSetReplyLanguageOverride,
     onTranslateMessage,
@@ -566,8 +569,19 @@ export function ChatWindow({
                         </>
                     )}
                     {isWhatsAppConversation && onSync && (
-                        <Button variant="ghost" size="icon" className="hidden sm:inline-flex" onClick={onSync} title="Sync WhatsApp History">
-                            <RefreshCw className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="hidden sm:inline-flex"
+                            onClick={onSync}
+                            disabled={whatsAppHistorySync.status === "syncing"}
+                            title={whatsAppHistorySync.status === "syncing" ? "Syncing WhatsApp history" : "Sync WhatsApp History"}
+                            aria-label={whatsAppHistorySync.status === "syncing" ? "Syncing WhatsApp history" : "Sync WhatsApp history"}
+                        >
+                            <RefreshCw className={cn(
+                                "h-4 w-4 text-gray-500 dark:text-slate-400",
+                                whatsAppHistorySync.status === "syncing" && "animate-spin",
+                            )} />
                         </Button>
                     )}
                     {isWhatsAppConversation
@@ -633,9 +647,13 @@ export function ChatWindow({
                                     </DropdownMenuItem>
                                 )}
                                 {isWhatsAppConversation && onSync && (
-                                    <DropdownMenuItem onClick={onSync} className="gap-2">
-                                        <RefreshCw className="h-4 w-4" />
-                                        Sync WhatsApp History
+                                    <DropdownMenuItem
+                                        onClick={onSync}
+                                        className="gap-2"
+                                        disabled={whatsAppHistorySync.status === "syncing"}
+                                    >
+                                        <RefreshCw className={cn("h-4 w-4", whatsAppHistorySync.status === "syncing" && "animate-spin")} />
+                                        {whatsAppHistorySync.status === "syncing" ? "Syncing WhatsApp…" : "Sync WhatsApp History"}
                                     </DropdownMenuItem>
                                 )}
                                 {isWhatsAppConversation && canUseTranscriptOnDemand && onBulkTranscribeUnprocessedAudio && (
@@ -662,6 +680,22 @@ export function ChatWindow({
                     )}
                 </div>
             </div>
+
+            {isWhatsAppConversation && whatsAppHistorySync.status !== "idle" && (
+                <div
+                    role={whatsAppHistorySync.status === "error" ? "alert" : "status"}
+                    aria-live="polite"
+                    className={cn(
+                        "flex shrink-0 items-start gap-2 border-b px-4 py-2 text-xs",
+                        whatsAppHistorySync.status === "syncing" && "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/60 dark:text-sky-200",
+                        whatsAppHistorySync.status === "success" && "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
+                        whatsAppHistorySync.status === "error" && "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200",
+                    )}
+                >
+                    {whatsAppHistorySync.status === "syncing" && <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />}
+                    <span>{whatsAppHistorySync.message}</span>
+                </div>
+            )}
 
             {showTranscriptSearch && (
                 <div className="border-b bg-slate-50/80 px-4 py-3 space-y-3 dark:border-slate-800 dark:bg-slate-950/90">

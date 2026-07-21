@@ -21,7 +21,6 @@ import {
     unarchiveConversations,
     permanentlyDeleteConversations,
     emptyTrash,
-    syncWhatsAppHistory,
     refreshConversation,
     markConversationAsRead,
     refetchWhatsAppMediaAttachment,
@@ -114,6 +113,10 @@ import {
     normalizeSendError,
 } from './conversation-message-actions';
 import { applyRealtimeMessagePatchToMessages } from './conversation-realtime-message-actions';
+import {
+    getWhatsAppHistorySyncResultMessage,
+    type WhatsAppHistorySyncUiState,
+} from './whatsapp-history-sync-ui';
 import {
     applyMessageTranslation,
     applyMessageTranslations,
@@ -408,6 +411,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const initialTaskId = getSearchParam('task');
     const [activeId, setActiveId] = useState<string | null>(initialActiveId);
     const activeIdRef = useRef<string | null>(initialActiveId);
+    const [whatsAppHistorySync, setWhatsAppHistorySync] = useState<WhatsAppHistorySyncUiState>({
+        status: "idle",
+        message: "",
+    });
+    useEffect(() => {
+        setWhatsAppHistorySync({ status: "idle", message: "" });
+    }, [activeId]);
     const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId);
 
     // View Mode State (inbox, archived, trash)
@@ -2709,57 +2719,54 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
 
     const handleSync = async () => {
-        if (!activeId) return;
-        setLoadingMessages(true);
-        const CHUNK_SIZE = 50;
-        const MAX_LIMIT = 500; // Safety cap
-        let totalSynced = 0;
-        let offset = 0;
-        let keepFetching = true;
+        const conversationId = activeIdRef.current;
+        if (!conversationId || whatsAppHistorySync.status === "syncing") return;
 
+        setWhatsAppHistorySync({
+            status: "syncing",
+            message: "Resolving the current WhatsApp chat and checking up to 100 recent messages…",
+        });
+        toast({
+            title: "WhatsApp history sync started",
+            description: "You can keep reading the conversation while Estio checks WhatsApp.",
+        });
+
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 160_000);
         try {
-            toast({ title: "Starting Deep Sync...", description: "Initializing..." });
-
-            while (keepFetching && offset < MAX_LIMIT) {
-                // Manual Sync: Force deeper check (limit 50, offset, ignore duplicates)
-                const res = await syncWhatsAppHistory(activeId, CHUNK_SIZE, true, offset);
-
-                if (res.success) {
-                    const count = res.count || 0;
-                    totalSynced += count;
-                    offset += CHUNK_SIZE;
-
-                    // Update UI with progress
-                    if (count > 0) {
-                        toast({
-                            title: "Syncing WhatsApp History...",
-                            description: `Fetched ${count} messages (Total: ${totalSynced})...`
-                        });
-                        // Re-fetch to display them as they come in
-                        const msgs = await fetchMessages(activeId, THREAD_REFRESH_MESSAGES_OPTIONS);
-                        applyRefreshedChatMessages(activeId, msgs);
-                    }
-
-                    // Stop if we fetched fewer than requested (end of history)
-                    // WhatsApp history fetch usually returns what it finds. If it finds 0, we stop.
-                    if (count < CHUNK_SIZE) {
-                        keepFetching = false;
-                    }
-                } else {
-                    toast({ title: "Sync Failed", description: String(res.error), variant: "destructive" });
-                    keepFetching = false;
-                }
+            const response = await fetch(
+                `/api/admin/conversations/${encodeURIComponent(conversationId)}/whatsapp-history-sync`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ limit: 100 }),
+                    signal: controller.signal,
+                },
+            );
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result?.success) {
+                const reference = String(result?.requestId || "").slice(0, 8);
+                const message = `${String(result?.error || "WhatsApp history sync failed.")}${reference ? ` Reference: ${reference}.` : ""}`;
+                throw new Error(message);
             }
 
-            toast({ title: "Sync Complete", description: `Total messages recovered: ${totalSynced}` });
-            const msgs = await fetchMessages(activeId, THREAD_REFRESH_MESSAGES_OPTIONS);
-            applyRefreshedChatMessages(activeId, msgs);
-
-        } catch (e) {
-            console.error("Sync error:", e);
-            toast({ title: "Sync Error", description: "An unexpected error occurred.", variant: "destructive" });
+            const message = getWhatsAppHistorySyncResultMessage(result);
+            if (activeIdRef.current === conversationId) {
+                const refreshedMessages = await fetchMessages(conversationId, THREAD_REFRESH_MESSAGES_OPTIONS);
+                applyRefreshedChatMessages(conversationId, refreshedMessages);
+                setWhatsAppHistorySync({ status: "success", message });
+            }
+            toast({ title: "WhatsApp history sync complete", description: message });
+        } catch (error: any) {
+            const message = error?.name === "AbortError"
+                ? "WhatsApp history sync timed out. Check the WhatsApp connection and try again."
+                : (error?.message || "WhatsApp history sync failed unexpectedly.");
+            if (activeIdRef.current === conversationId) {
+                setWhatsAppHistorySync({ status: "error", message });
+            }
+            toast({ title: "WhatsApp history sync failed", description: message, variant: "destructive" });
         } finally {
-            setLoadingMessages(false);
+            window.clearTimeout(timeout);
         }
     };
 
@@ -3091,6 +3098,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
             transcriptOnDemandEnabled={transcriptOnDemandEnabled}
             onSync={handleSync}
+            whatsAppHistorySync={whatsAppHistorySync}
             onAddActivityEntry={handleChatAddActivityEntry}
             onActivityEntryUpdated={handleChatActivityEntryUpdated}
             onActivityEntryDeleted={handleChatActivityEntryDeleted}

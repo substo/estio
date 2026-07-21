@@ -48,6 +48,7 @@ import {
 } from "../lib/device-tunnel/operational-http";
 import { fingerprintOperationalPath, redactOperationalIdentifier } from "../lib/device-tunnel/operational-redaction";
 import { buildLightweightWhatsAppWebBridgeChat } from "../lib/whatsapp/web-bridge-chat-inventory";
+import { sortWhatsAppWebBridgeChatsByMostRecent } from "../lib/whatsapp/web-bridge-chat-resolution";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -1520,7 +1521,7 @@ async function resolveChatForPhone(sessionId: string, payload: any) {
         return { chatId: numberChatId, source: "getNumberId" };
     }
 
-    const chats = await getChatsWithOpaqueFallback(session);
+    const chats = sortWhatsAppWebBridgeChatsByMostRecent(await getChatsWithOpaqueFallback(session));
     for (const chat of chats || []) {
         if (chat?.isGroup) continue;
         const chatId = jidFromId(chat?.id);
@@ -1536,7 +1537,7 @@ async function resolveChatForPhone(sessionId: string, payload: any) {
             chatId,
         ].filter(Boolean);
         if (candidates.some((candidate) => String(candidate).replace(/\D/g, "") === digits)) {
-            return { chatId, source: "chat_scan", contactIdentity: identity };
+            return { chatId, source: "chat_scan_latest", contactIdentity: identity };
         }
     }
 
