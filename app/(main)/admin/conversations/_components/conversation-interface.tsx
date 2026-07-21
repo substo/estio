@@ -1131,6 +1131,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
     const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
+    const [pendingUnconfirmedResendId, setPendingUnconfirmedResendId] = useState<string | null>(null);
     const [idsToDelete, setIdsToDelete] = useState<string[]>([]);
 
     // Undo Toast State
@@ -2366,7 +2367,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     };
 
-    const handleResendMessage = async (messageId: string) => {
+    const handleResendMessage = async (messageId: string, unconfirmedRetryApproved = false) => {
         const conversationTarget = activeConversation;
         if (!conversationTarget) return;
 
@@ -2382,11 +2383,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
             ? originalMsg.status
             : originalMsg.outboxState?.status;
         if (!canManuallyResendOutboundMessageStatus(manualResendStatus)) return;
-        if (manualResendStatus === 'delivery_unconfirmed') {
-            const confirmedAbsent = window.confirm(
-                'Only retry after checking WhatsApp and confirming the original message was not sent. Retrying an unconfirmed send can otherwise create a duplicate. Continue?'
-            );
-            if (!confirmedAbsent) return;
+        if (manualResendStatus === 'delivery_unconfirmed' && !unconfirmedRetryApproved) {
+            setPendingUnconfirmedResendId(messageId);
+            return;
         }
 
         // Transition back to sending optimism
@@ -3270,6 +3269,36 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationMainPane={conversationMainPane}
                 missionControlPane={missionControlPane}
             />
+
+            <AlertDialog
+                open={Boolean(pendingUnconfirmedResendId)}
+                onOpenChange={(open) => {
+                    if (!open) setPendingUnconfirmedResendId(null);
+                }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Retry this WhatsApp message?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This is not a WhatsApp connection warning. Estio did not receive a message ID for the previous attempt.
+                            Retry only after confirming this message is absent from the contact&apos;s WhatsApp chat,
+                            otherwise a delayed confirmation could result in a duplicate.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={() => {
+                                const messageId = pendingUnconfirmedResendId;
+                                setPendingUnconfirmedResendId(null);
+                                if (messageId) void handleResendMessage(messageId, true);
+                            }}
+                        >
+                            Retry message
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <AlertDialogContent>

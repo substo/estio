@@ -17,6 +17,14 @@ export function getWhatsAppWebBridgeSendRequestTimeoutMs(input: { hasMedia: bool
         : WHATSAPP_WEB_BRIDGE_TEXT_SEND_REQUEST_TIMEOUT_MS;
 }
 
+export function getWhatsAppWebBridgeLinkPreviewPolicy(input: { requested: boolean }) {
+    return {
+        requested: input.requested,
+        enabled: false,
+        suppressed: input.requested,
+    } as const;
+}
+
 export class WhatsAppWebBridgeDeliveryUnconfirmedError extends Error {
     readonly code = "WHATSAPP_WEB_BRIDGE_DELIVERY_UNCONFIRMED";
 

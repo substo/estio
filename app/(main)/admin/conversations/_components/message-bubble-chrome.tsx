@@ -275,7 +275,7 @@ export const MessageBubbleTimestampStatusRow = memo(function MessageBubbleTimest
                             }}
                             className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline px-1 py-0.5 rounded transition-colors"
                         >
-                            Resend
+                            {whatsAppUiState.label === "Send not confirmed" ? "Retry message" : "Resend"}
                         </button>
                     )}
                     {whatsAppUiState && failureFallbackLabel && (

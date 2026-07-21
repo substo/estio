@@ -228,8 +228,8 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
             lastError: 'WhatsApp Web dispatch accepted but no delivery ack arrived.',
         },
     } as any);
-    assert.equal(unconfirmed?.label, 'Delivery unconfirmed');
-    assert.equal(unconfirmed?.detail, 'No WhatsApp confirmation was received. Check WhatsApp before retrying.');
+    assert.equal(unconfirmed?.label, 'Send not confirmed');
+    assert.equal(unconfirmed?.detail, "This warning is about this message, not the WhatsApp connection. Estio could not confirm it was sent. Check this contact's WhatsApp chat before retrying.");
     assert.equal(unconfirmed?.canResend, true);
 
     const retrying = deriveOutboundWhatsAppUiState({

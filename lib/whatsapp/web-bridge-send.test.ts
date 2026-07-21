@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    getWhatsAppWebBridgeLinkPreviewPolicy,
     getWhatsAppWebBridgeSendRequestTimeoutMs,
     isWhatsAppWebBridgeDeliveryUnconfirmedError,
     requireWhatsAppWebBridgeSentMessageId,
@@ -10,6 +11,19 @@ import {
 test("client send deadlines exceed the bridge text and media operation bounds", () => {
     assert.equal(getWhatsAppWebBridgeSendRequestTimeoutMs({ hasMedia: false }), 35_000);
     assert.equal(getWhatsAppWebBridgeSendRequestTimeoutMs({ hasMedia: true }), 75_000);
+});
+
+test("device-egress text sends do not let a blocking link preview prevent dispatch", () => {
+    assert.deepEqual(getWhatsAppWebBridgeLinkPreviewPolicy({ requested: true }), {
+        requested: true,
+        enabled: false,
+        suppressed: true,
+    });
+    assert.deepEqual(getWhatsAppWebBridgeLinkPreviewPolicy({ requested: false }), {
+        requested: false,
+        enabled: false,
+        suppressed: false,
+    });
 });
 
 test("extracts a serialized WhatsApp provider message id", () => {

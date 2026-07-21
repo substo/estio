@@ -12,7 +12,10 @@ import {
 } from "../lib/whatsapp/web-bridge-readiness";
 import { didWhatsAppWebSessionReachReadyBeforeInitializeError } from "../lib/whatsapp/web-bridge-initialize";
 import { classifyWhatsAppWebBridgeUnhandledRejection } from "../lib/whatsapp/web-bridge-process-errors";
-import { requireWhatsAppWebBridgeSentMessageId } from "../lib/whatsapp/web-bridge-send";
+import {
+    getWhatsAppWebBridgeLinkPreviewPolicy,
+    requireWhatsAppWebBridgeSentMessageId,
+} from "../lib/whatsapp/web-bridge-send";
 import {
     classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
@@ -1377,10 +1380,13 @@ async function sendMessage(sessionId: string, payload: any) {
         const linkPreviewRequested = typeof payload.linkPreview === "boolean"
             ? payload.linkPreview
             : preview.shouldRequestPreview;
+        // whatsapp-web.js resolves previews before dispatch without a bounded preview-only
+        // deadline. A stalled metadata lookup must not block the message itself.
+        const linkPreviewPolicy = getWhatsAppWebBridgeLinkPreviewPolicy({ requested: linkPreviewRequested });
         const proofNonce = await beginDeviceTunnelSendProof(session);
         const sent = await withStaleRecovery(session, () => withTimeout(
             session.client.sendMessage(to, text, {
-                linkPreview: linkPreviewRequested,
+                linkPreview: linkPreviewPolicy.enabled,
             }),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`
@@ -1388,13 +1394,11 @@ async function sendMessage(sessionId: string, payload: any) {
         const messageId = requireWhatsAppWebBridgeSentMessageId(sent);
         const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
         const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
-        if (linkPreviewRequested) {
-            const sentLinks = Array.isArray(sent?.links) ? sent.links.length : null;
-            console.log("[WhatsApp Web Bridge] Text URL send completed", {
+        if (linkPreviewPolicy.suppressed) {
+            console.log("[WhatsApp Web Bridge] Blocking link preview suppressed for reliable dispatch", {
                 sessionRef: bridgeRef(sessionId, "session"),
                 toKind: /@lid$/i.test(to) ? "lid" : /@c\.us$/i.test(to) ? "phone" : "other",
                 linkPreviewRequested: true,
-                sentLinks,
                 messageRef: bridgeRef(messageId, "message"),
             });
         }
@@ -1402,6 +1406,7 @@ async function sendMessage(sessionId: string, payload: any) {
             messageId,
             egressProof,
             linkPreviewRequested,
+            linkPreviewSuppressed: linkPreviewPolicy.suppressed,
             linkPreviewHost: preview.host,
             sentLinksCount: Array.isArray(sent?.links) ? sent.links.length : undefined,
         };

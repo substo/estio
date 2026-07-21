@@ -41,7 +41,7 @@ type FailureFallbackUiState = {
 };
 
 export type OutboundWhatsAppUiState = {
-    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Sent, confirming" | "Delivered" | "Read" | "Retrying" | "Delivery unconfirmed" | "Failed" | "SMS fallback available";
+    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "Send not confirmed" | "Failed" | "SMS fallback available";
     tone: OutboundWhatsAppUiTone;
     icon: OutboundWhatsAppUiIcon;
     detail: string | null;
@@ -164,10 +164,10 @@ export function deriveOutboundWhatsAppUiState(message: {
 
     if (status === "delivery_unconfirmed" || outboxStatus === "delivery_unconfirmed") {
         return {
-            label: "Delivery unconfirmed",
+            label: "Send not confirmed",
             tone: "warning",
             icon: "alert",
-            detail: "No WhatsApp confirmation was received. Check WhatsApp before retrying.",
+            detail: "This warning is about this message, not the WhatsApp connection. Estio could not confirm it was sent. Check this contact's WhatsApp chat before retrying.",
             showSpinner: false,
             canResend: true,
             canSmsFallback: false,
