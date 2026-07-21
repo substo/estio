@@ -11,6 +11,7 @@ import {
     getStaleWhatsAppWebBridgeNonReadyReason,
 } from "../lib/whatsapp/web-bridge-readiness";
 import { didWhatsAppWebSessionReachReadyBeforeInitializeError } from "../lib/whatsapp/web-bridge-initialize";
+import { classifyWhatsAppWebBridgeUnhandledRejection } from "../lib/whatsapp/web-bridge-process-errors";
 import {
     classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
@@ -103,6 +104,21 @@ type ManagedSession = {
 
 const sessions = new Map<string, ManagedSession>();
 const serviceStartedAt = new Date();
+
+process.on("unhandledRejection", (reason) => {
+    const disposition = classifyWhatsAppWebBridgeUnhandledRejection(
+        reason,
+        Array.from(sessions.values()).some((session) => session.ready),
+    );
+    if (disposition.action === "recover") {
+        console.warn("[WhatsApp Web Bridge] Ignored recoverable post-navigation injection timeout", {
+            code: disposition.code,
+        });
+        return;
+    }
+    console.error("[WhatsApp Web Bridge] Fatal unhandled rejection", { code: disposition.code });
+    process.exit(1);
+});
 const MAX_INLINE_MEDIA_BYTES = Math.min(
     Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MAX_INLINE_MEDIA_BYTES || DEFAULT_MAX_INLINE_MEDIA_BYTES), 1024 * 1024),
     DEFAULT_MAX_INLINE_MEDIA_BYTES
