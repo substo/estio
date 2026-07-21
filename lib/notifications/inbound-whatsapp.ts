@@ -3,6 +3,18 @@ import { deliverUserNotificationWebPush } from "@/lib/notifications/delivery-ser
 import { getNotificationFeatureFlags } from "@/lib/notifications/feature-flags";
 import { publishNotificationRealtimeEvent } from "@/lib/realtime/notification-events";
 
+export const INBOUND_WHATSAPP_NOTIFICATION_MAX_AGE_MS = 10 * 60 * 1000;
+export const INBOUND_WHATSAPP_NOTIFICATION_MAX_FUTURE_SKEW_MS = 2 * 60 * 1000;
+
+export function isInboundWhatsAppNotificationFresh(createdAt: Date, now = new Date()) {
+    const createdAtMs = createdAt instanceof Date ? createdAt.getTime() : Number.NaN;
+    const nowMs = now instanceof Date ? now.getTime() : Number.NaN;
+    if (!Number.isFinite(createdAtMs) || !Number.isFinite(nowMs)) return false;
+    const ageMs = nowMs - createdAtMs;
+    return ageMs <= INBOUND_WHATSAPP_NOTIFICATION_MAX_AGE_MS
+        && ageMs >= -INBOUND_WHATSAPP_NOTIFICATION_MAX_FUTURE_SKEW_MS;
+}
+
 export function buildInboundWhatsAppNotificationContent(conversationId: string) {
     const normalizedConversationId = String(conversationId || "").trim();
     return {

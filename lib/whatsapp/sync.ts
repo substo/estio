@@ -2221,18 +2221,23 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
 
     if (direction === "inbound" && msg.notificationIntent === "live_ingress") {
-        const { notifyLocationUsersOfInboundWhatsAppMessage } = await import("@/lib/notifications/inbound-whatsapp");
-        await notifyLocationUsersOfInboundWhatsAppMessage({
-            locationId,
-            conversationId: conversation.id,
-            contactId: contact.id,
-            messageId: newMessage.id,
-            createdAt: timestamp,
-        }).catch(() => {
-            console.warn("[WhatsApp Sync] Inbound notification delivery failed", {
-                code: "INBOUND_NOTIFICATION_DELIVERY_FAILED",
+        const {
+            isInboundWhatsAppNotificationFresh,
+            notifyLocationUsersOfInboundWhatsAppMessage,
+        } = await import("@/lib/notifications/inbound-whatsapp");
+        if (isInboundWhatsAppNotificationFresh(timestamp)) {
+            await notifyLocationUsersOfInboundWhatsAppMessage({
+                locationId,
+                conversationId: conversation.id,
+                contactId: contact.id,
+                messageId: newMessage.id,
+                createdAt: timestamp,
+            }).catch(() => {
+                console.warn("[WhatsApp Sync] Inbound notification delivery failed", {
+                    code: "INBOUND_NOTIFICATION_DELIVERY_FAILED",
+                });
             });
-        });
+        }
     }
 
     // --- GHL 2-Way Sync ---
