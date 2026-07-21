@@ -243,6 +243,7 @@ async function sendReplyViaApi(
         translationTargetLanguage?: string | null;
         translationDetectedSourceLanguage?: string | null;
         agentFeedback?: ComposerAiDraftFeedback & { humanOutput: string };
+        retryMessageId?: string | null;
     }
 ) {
     const response = await fetch("/api/admin/conversations/send-reply", {
@@ -259,6 +260,7 @@ async function sendReplyViaApi(
             translationTargetLanguage: options?.translationTargetLanguage || null,
             translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
             agentFeedback: options?.agentFeedback || null,
+            retryMessageId: options?.retryMessageId || null,
         }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -2410,7 +2412,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                       conversationTarget.contactId,
                       originalMsg.body,
                       "WhatsApp",
-                      { clientMessageId: resendClientMessageId }
+                      { clientMessageId: resendClientMessageId, retryMessageId: originalMsg.id }
                   )
                   : await sendReply(
                       conversationTarget.id,

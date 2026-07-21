@@ -14,6 +14,7 @@ import { didWhatsAppWebSessionReachReadyBeforeInitializeError } from "../lib/wha
 import { classifyWhatsAppWebBridgeUnhandledRejection } from "../lib/whatsapp/web-bridge-process-errors";
 import {
     getWhatsAppWebBridgeLinkPreviewPolicy,
+    getWhatsAppWebBridgeDispatchConfirmationPolicy,
     requireWhatsAppWebBridgeSentMessageId,
 } from "../lib/whatsapp/web-bridge-send";
 import {
@@ -1357,10 +1358,12 @@ async function sendMessage(sessionId: string, payload: any) {
             throw new Error(`WhatsApp Web could not read the signed media URL. Re-upload or resend the attachment. ${error?.message || ""}`.trim());
         }
         try {
+            const dispatchConfirmation = getWhatsAppWebBridgeDispatchConfirmationPolicy();
             const proofNonce = await beginDeviceTunnelSendProof(session);
             const sent = await withStaleRecovery(session, () => withTimeout(
                 session.client.sendMessage(to, media, {
                     caption: payload.caption || payload.text || undefined,
+                    waitUntilMsgSent: dispatchConfirmation.waitUntilMsgSent,
                 }),
                 MEDIA_OPERATION_TIMEOUT_MS,
                 `WhatsApp media send ${sessionId}`
@@ -1383,10 +1386,12 @@ async function sendMessage(sessionId: string, payload: any) {
         // whatsapp-web.js resolves previews before dispatch without a bounded preview-only
         // deadline. A stalled metadata lookup must not block the message itself.
         const linkPreviewPolicy = getWhatsAppWebBridgeLinkPreviewPolicy({ requested: linkPreviewRequested });
+        const dispatchConfirmation = getWhatsAppWebBridgeDispatchConfirmationPolicy();
         const proofNonce = await beginDeviceTunnelSendProof(session);
         const sent = await withStaleRecovery(session, () => withTimeout(
             session.client.sendMessage(to, text, {
                 linkPreview: linkPreviewPolicy.enabled,
+                waitUntilMsgSent: dispatchConfirmation.waitUntilMsgSent,
             }),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`

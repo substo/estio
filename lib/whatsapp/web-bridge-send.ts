@@ -25,6 +25,10 @@ export function getWhatsAppWebBridgeLinkPreviewPolicy(input: { requested: boolea
     } as const;
 }
 
+export function getWhatsAppWebBridgeDispatchConfirmationPolicy() {
+    return { waitUntilMsgSent: true } as const;
+}
+
 export class WhatsAppWebBridgeDeliveryUnconfirmedError extends Error {
     readonly code = "WHATSAPP_WEB_BRIDGE_DELIVERY_UNCONFIRMED";
 

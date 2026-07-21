@@ -44,6 +44,7 @@ export async function POST(request: Request) {
             agentFeedback: body?.agentFeedback && typeof body.agentFeedback === "object"
                 ? body.agentFeedback
                 : null,
+            retryMessageId: body?.retryMessageId ? String(body.retryMessageId) : null,
         });
 
         if (!result?.success) {

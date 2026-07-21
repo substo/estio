@@ -7,6 +7,7 @@ import type { WhatsAppOutboundKind, WhatsAppTransport, WhatsAppTemplateComponent
 import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { toR2Uri } from "@/lib/whatsapp/media-r2";
 import { getWhatsAppLinkPreviewDecision } from "@/lib/whatsapp/link-preview";
+import { getWhatsAppManualRetryEligibility } from "@/lib/whatsapp/outbound-manual-retry";
 
 export type { WhatsAppOutboundKind, WhatsAppTransport };
 
@@ -35,6 +36,7 @@ type EnqueueWhatsAppOutboundInput = {
     templateComponents?: WhatsAppTemplateComponent[] | null;
     pricingIntent?: string | null;
     linkPreviewRequested?: boolean | null;
+    retryMessageId?: string | null;
 };
 
 export type EnqueueWhatsAppOutboundResult = {
@@ -109,11 +111,19 @@ async function markOutboxQueueDegraded(outboxId: string, message: string) {
     }
 }
 
-async function tryResolveExistingByClientMessageId(clientMessageId: string): Promise<EnqueueWhatsAppOutboundResult | null> {
-    if (!clientMessageId) return null;
+async function tryResolveExistingByClientMessageId(input: {
+    clientMessageId: string;
+    locationId: string;
+    conversationId: string;
+    contactId: string;
+}): Promise<EnqueueWhatsAppOutboundResult | null> {
+    if (!input.clientMessageId) return null;
 
-    const existing = await (db as any).message.findUnique({
-        where: { clientMessageId },
+    const existing = await (db as any).message.findFirst({
+        where: {
+            clientMessageId: input.clientMessageId,
+            conversationId: input.conversationId,
+        },
         include: {
             outboundWhatsAppOutbox: {
                 select: {
@@ -122,17 +132,24 @@ async function tryResolveExistingByClientMessageId(clientMessageId: string): Pro
                     scheduledAt: true,
                     payload: true,
                     transport: true,
+                    locationId: true,
+                    contactId: true,
                 },
             },
         },
     });
 
-    if (!existing?.id || !existing?.outboundWhatsAppOutbox?.id) return null;
+    if (
+        !existing?.id
+        || !existing?.outboundWhatsAppOutbox?.id
+        || existing.outboundWhatsAppOutbox.locationId !== input.locationId
+        || existing.outboundWhatsAppOutbox.contactId !== input.contactId
+    ) return null;
 
     return {
         queued: true,
         messageId: String(existing.id),
-        clientMessageId,
+        clientMessageId: input.clientMessageId,
         outboxJobId: String(existing.outboundWhatsAppOutbox.id),
         scheduledAt: new Date(existing.outboundWhatsAppOutbox.scheduledAt || new Date()).toISOString(),
         typing: {
@@ -163,6 +180,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     const linkPreviewRequested = kind === "text"
         ? input.linkPreviewRequested ?? getWhatsAppLinkPreviewDecision(normalizedBody).shouldRequestPreview
         : false;
+    const retryMessageId = String(input.retryMessageId || "").trim();
     logWhatsAppSendLifecycle("enqueue_started", {
         clientMessageId,
         locationId,
@@ -177,6 +195,14 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     if (!normalizedBody) {
         throw new Error("Cannot queue an empty WhatsApp message.");
     }
+
+    const existingByClientMessageId = await tryResolveExistingByClientMessageId({
+        clientMessageId,
+        locationId,
+        conversationId: conversationInternalId,
+        contactId,
+    });
+    if (existingByClientMessageId) return existingByClientMessageId;
 
     const attachment = input.attachment;
     if (kind === "template") {
@@ -214,11 +240,106 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                 body: normalizedBody,
                 messageCreatedAt,
                 lastInboundMessageAt: lastInbound?.createdAt || null,
-                isRetryAttempt: false,
+                isRetryAttempt: Boolean(retryMessageId),
             });
 
             const scheduledAt = new Date(messageCreatedAt.getTime() + Math.max(typing.delayMs, 0));
             const idempotencyKey = `wa_outbox:${locationId}:${conversationInternalId}:${clientMessageId}`;
+
+            if (retryMessageId) {
+                const retryCandidate = await (tx as any).message.findFirst({
+                    where: {
+                        id: retryMessageId,
+                        conversationId: conversationInternalId,
+                        direction: "outbound",
+                    },
+                    select: {
+                        id: true,
+                        body: true,
+                        status: true,
+                        outboundWhatsAppOutbox: {
+                            select: {
+                                id: true,
+                                locationId: true,
+                                conversationId: true,
+                                contactId: true,
+                                transport: true,
+                                kind: true,
+                                status: true,
+                                lockedAt: true,
+                                payload: true,
+                            },
+                        },
+                    },
+                });
+                const retryOutbox = retryCandidate?.outboundWhatsAppOutbox;
+                const eligibility = getWhatsAppManualRetryEligibility({
+                    scopeMatches: Boolean(
+                        retryCandidate
+                        && retryOutbox
+                        && retryOutbox.locationId === locationId
+                        && retryOutbox.conversationId === conversationInternalId
+                        && retryOutbox.contactId === contactId
+                        && retryOutbox.transport === transport
+                    ),
+                    kind: retryOutbox?.kind,
+                    bodyMatches: normalizeBody(retryCandidate?.body || "") === normalizedBody,
+                    messageStatus: retryCandidate?.status,
+                    outboxStatus: retryOutbox?.status,
+                    outboxLocked: Boolean(retryOutbox?.lockedAt),
+                });
+                if (!eligibility.eligible || !retryCandidate || !retryOutbox) {
+                    throw new Error(`WHATSAPP_MANUAL_RETRY_REJECTED:${eligibility.code}`);
+                }
+
+                await (tx as any).message.update({
+                    where: { id: retryCandidate.id },
+                    data: {
+                        status: "sending",
+                        source,
+                        clientMessageId,
+                        wamId: null,
+                        updatedAt: messageCreatedAt,
+                    },
+                });
+                const existingPayload = retryOutbox.payload
+                    && typeof retryOutbox.payload === "object"
+                    && !Array.isArray(retryOutbox.payload)
+                    ? retryOutbox.payload
+                    : {};
+                await (tx as any).whatsAppOutboundOutbox.update({
+                    where: { id: retryOutbox.id },
+                    data: {
+                        status: "pending",
+                        scheduledAt,
+                        lockedAt: null,
+                        lockedBy: null,
+                        processedAt: null,
+                        lastError: null,
+                        rateLimitReason: null,
+                        rateLimitNextEligibleAt: null,
+                        idempotencyKey,
+                        payload: {
+                            ...existingPayload,
+                            text: normalizedBody,
+                            messageCreatedAt: messageCreatedAt.toISOString(),
+                            typingPolicySnapshot: typing.snapshot,
+                            typingDelayReason: typing.reason,
+                            initialTypingDelayMs: typing.delayMs,
+                            clientMessageId,
+                            conversationGhlId,
+                            linkPreviewRequested,
+                        },
+                    },
+                });
+
+                return {
+                    messageId: String(retryCandidate.id),
+                    outboxId: String(retryOutbox.id),
+                    scheduledAt,
+                    typing,
+                };
+            }
 
             const message = await (tx as any).message.create({
                 data: {
@@ -312,7 +433,12 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     } catch (error: any) {
         const uniqueTarget = extractUniqueErrorColumns(error);
         if ((error as any)?.code === "P2002" && uniqueTarget.includes("clientMessageId")) {
-            const existing = await tryResolveExistingByClientMessageId(clientMessageId);
+            const existing = await tryResolveExistingByClientMessageId({
+                clientMessageId,
+                locationId,
+                conversationId: conversationInternalId,
+                contactId,
+            });
             if (existing) return existing;
         }
         throw error;

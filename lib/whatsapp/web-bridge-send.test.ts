@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     getWhatsAppWebBridgeLinkPreviewPolicy,
+    getWhatsAppWebBridgeDispatchConfirmationPolicy,
     getWhatsAppWebBridgeSendRequestTimeoutMs,
     isWhatsAppWebBridgeDeliveryUnconfirmedError,
     requireWhatsAppWebBridgeSentMessageId,
@@ -24,6 +25,10 @@ test("device-egress text sends do not let a blocking link preview prevent dispat
         enabled: false,
         suppressed: false,
     });
+});
+
+test("device-egress waits for WhatsApp's network send result before accepting an id", () => {
+    assert.deepEqual(getWhatsAppWebBridgeDispatchConfirmationPolicy(), { waitUntilMsgSent: true });
 });
 
 test("extracts a serialized WhatsApp provider message id", () => {

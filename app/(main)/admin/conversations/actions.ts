@@ -4958,6 +4958,7 @@ export async function sendReply(
         translationTargetLanguage?: string | null;
         translationDetectedSourceLanguage?: string | null;
         agentFeedback?: SendReplyAgentFeedbackPayload;
+        retryMessageId?: string | null;
     }
 ) {
     try {
@@ -5091,6 +5092,7 @@ export async function sendReply(
                 source: "app_user",
                 transport: transportState.transport,
                 clientMessageId: options?.clientMessageId || null,
+                retryMessageId: options?.retryMessageId || null,
             });
             const clientSentAtMs = Date.parse(String(options?.clientSentAt || ""));
             if (Number.isFinite(clientSentAtMs)) {
