@@ -43,6 +43,7 @@ import {
     writeOperationalJson,
 } from "../lib/device-tunnel/operational-http";
 import { fingerprintOperationalPath, redactOperationalIdentifier } from "../lib/device-tunnel/operational-redaction";
+import { buildLightweightWhatsAppWebBridgeChat } from "../lib/whatsapp/web-bridge-chat-inventory";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -1414,24 +1415,8 @@ async function listChats(sessionId: string) {
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
     await assertManagedSessionOwnership(session);
 
-    const chats = await getChatsWithOpaqueFallback(session);
-    return Promise.all((chats || []).map(async (chat: any) => {
-        const chatId = chat?.id?._serialized || chat?.id?.user || "";
-        const contactIdentity = await buildContactIdentity(
-            chat?.client ? chat : { ...chat, client: session.client },
-            chatId,
-        );
-        return {
-        id: chatId,
-        name: chat?.name || chat?.formattedTitle || contactIdentity.displayName || chat?.id?.user || "",
-        isGroup: Boolean(chat?.isGroup),
-        unreadCount: Number(chat?.unreadCount || 0),
-        timestamp: Number(chat?.timestamp || 0),
-        archived: Boolean(chat?.archived),
-        pinned: Boolean(chat?.pinned),
-        contactIdentity,
-    };
-    }));
+    const chats = await getLightweightChats(session.client);
+    return (chats || []).map(buildLightweightWhatsAppWebBridgeChat);
 }
 
 async function fetchMessages(sessionId: string, payload: any) {

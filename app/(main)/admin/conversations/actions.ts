@@ -177,6 +177,7 @@ import {
     startWhatsAppWebBridgeSession,
     upsertWhatsAppWebBridgeSession,
 } from "@/lib/whatsapp/web-bridge";
+import { buildWhatsAppWebBridgeHistoryChatCandidates } from "@/lib/whatsapp/web-bridge-chat-inventory";
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
 import {
@@ -4149,36 +4150,42 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
         const existingBridgeSync = (conversation.syncRecords || []).find((sync: any) =>
             String(sync.provider || "") === "whatsapp_web_bridge" && sync.providerConversationId
         );
-        let chatId = String(existingBridgeSync?.providerConversationId || conversation.contact?.lid || "").trim();
-        if (!chatId && conversation.contact?.phone) {
-            const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
-                locationId: location.id,
-                phone: conversation.contact.phone,
-            }).catch((error: any) => {
-                console.warn(`[Sync][web_bridge:${conversationId}] Phone chat resolution failed:`, error?.message || error);
-                return null;
-            });
-            chatId = String(resolvedChat?.chatId || "").trim();
-        }
-        if (!chatId && conversation.contact?.phone) {
-            chatId = normalizeWhatsAppWebChatId(conversation.contact.phone);
-        }
-        if (!chatId) {
+        const chatIds = buildWhatsAppWebBridgeHistoryChatCandidates({
+            providerConversationId: existingBridgeSync?.providerConversationId,
+            contactLid: conversation.contact?.lid,
+            contactPhone: conversation.contact?.phone,
+        });
+        if (chatIds.length === 0) {
             return { success: false, error: "Web Bridge history sync needs a contact phone number or WhatsApp identity." };
         }
 
-        const result = await importWebBridgeRecentMessagesForContact({
-            locationId: location.id,
-            phone: conversation.contact.phone,
-            chatId,
-            canonicalContactId: conversation.contact.id,
-            canonicalConversationId: conversation.id,
-            canonicalPhone: conversation.contact.phone,
-            contactName: conversation.contact.name,
-            limit: limit || 30,
-            logPrefix: `[Sync][web_bridge:${conversationId}]`,
-            stopAfterDuplicates: ignoreDuplicates ? Number.MAX_SAFE_INTEGER : 5,
-        });
+        const result = { imported: 0, skipped: 0, errors: 0, processed: 0 };
+        let completedCandidates = 0;
+        for (const chatId of chatIds) {
+            try {
+                const candidateResult = await importWebBridgeRecentMessagesForContact({
+                    locationId: location.id,
+                    phone: conversation.contact.phone,
+                    chatId,
+                    canonicalContactId: conversation.contact.id,
+                    canonicalConversationId: conversation.id,
+                    canonicalPhone: conversation.contact.phone,
+                    contactName: conversation.contact.name,
+                    limit: limit || 30,
+                    stopAfterDuplicates: ignoreDuplicates ? Number.MAX_SAFE_INTEGER : 5,
+                });
+                result.imported += candidateResult.imported;
+                result.skipped += candidateResult.skipped;
+                result.errors += candidateResult.errors;
+                result.processed += candidateResult.processed;
+                completedCandidates++;
+            } catch {
+                result.errors++;
+            }
+        }
+        if (completedCandidates === 0) {
+            return { success: false, error: "WhatsApp history could not be read from any known contact identity." };
+        }
 
         if (result.imported > 0) {
             invalidateConversationReadCaches(conversationId);
@@ -4188,6 +4195,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
             count: result.imported,
             skipped: result.skipped,
             errors: result.errors,
+            candidates: chatIds.length,
             provider: "web_bridge",
         };
     } catch (error: any) {

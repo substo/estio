@@ -1,6 +1,10 @@
 import db from "@/lib/db";
 import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
 import { WhatsAppWebBridgeDeliveryUnconfirmedError } from "@/lib/whatsapp/web-bridge-send";
+import {
+    WHATSAPP_WEB_BRIDGE_CHAT_LIST_TIMEOUT_MS,
+    WHATSAPP_WEB_BRIDGE_HISTORY_TIMEOUT_MS,
+} from "@/lib/whatsapp/web-bridge-chat-inventory";
 
 export const WHATSAPP_WEB_BRIDGE_PROVIDER = "whatsapp_web_bridge";
 export const WHATSAPP_WEB_BRIDGE_TRANSPORT = "web_bridge";
@@ -364,6 +368,7 @@ export async function resolveWhatsAppWebBridgeChatForPhone(input: {
     return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/resolve-chat`, {
         method: "POST",
         body: JSON.stringify({ phone: digits }),
+        timeoutMs: WHATSAPP_WEB_BRIDGE_HISTORY_TIMEOUT_MS,
     });
 }
 
@@ -483,6 +488,7 @@ export async function fetchWhatsAppWebBridgeChats(locationId: string) {
 
     return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/chats`, {
         method: "GET",
+        timeoutMs: WHATSAPP_WEB_BRIDGE_CHAT_LIST_TIMEOUT_MS,
     });
 }
 
@@ -506,6 +512,6 @@ export async function fetchWhatsAppWebBridgeMessages(input: {
             includeMedia: Boolean(input.includeMedia),
             targetMessageId: input.targetMessageId || null,
         }),
-        timeoutMs: input.includeMedia ? 120_000 : undefined,
+        timeoutMs: input.includeMedia ? 120_000 : WHATSAPP_WEB_BRIDGE_HISTORY_TIMEOUT_MS,
     });
 }
