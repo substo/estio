@@ -12,7 +12,11 @@ import {
     type SessionAuthKeyWrapper,
 } from "./session-auth-crypto";
 import { buildSessionAuthObjectKey } from "./session-auth-object-store";
-import { ensureSessionAuthProfileQuiescent, getLocalAuthProfilePath } from "./session-auth-profile";
+import {
+    ensureSessionAuthProfileQuiescent,
+    getLocalAuthProfilePath,
+    inspectLocalAuthProfileState,
+} from "./session-auth-profile";
 import { SessionAuthPlacementStore } from "./session-auth-store";
 import { selectSessionAuthGenerationsForDeletion } from "./session-auth-retention";
 
@@ -62,10 +66,18 @@ export class WhatsAppSessionAuthCoordinator {
             const claimed = await this.dependencies.store.claimAttach(args.ownership);
             const placement = claimed.placement;
             const profilePath = this.profilePath(args.bridgeSessionId);
+            let preserveInitialProfile = false;
             try {
                 await ensureSessionAuthProfileQuiescent({ profilePath, terminate: true });
                 if (placement.currentGeneration === 0) {
-                    await rm(profilePath, { recursive: true, force: true });
+                    const localProfileState = await inspectLocalAuthProfileState(profilePath);
+                    preserveInitialProfile = localProfileState !== "missing";
+                    if (localProfileState === "incomplete") {
+                        throw safeSessionAuthError(
+                            "SESSION_AUTH_LOCAL_PROFILE_INVALID",
+                            "Existing local WhatsApp session auth profile is incomplete",
+                        );
+                    }
                     await mkdir(this.dependencies.dataPath, { recursive: true, mode: 0o700 });
                 } else {
                     const generation = await this.dependencies.store.generation(placement.id, placement.currentGeneration)
@@ -117,7 +129,9 @@ export class WhatsAppSessionAuthCoordinator {
                 return { placement: attached, profilePath, durableReady: attached.currentGeneration > 0 };
             } catch (error: any) {
                 await ensureSessionAuthProfileQuiescent({ profilePath, terminate: true }).catch(() => null);
-                await rm(profilePath, { recursive: true, force: true }).catch(() => null);
+                if (!preserveInitialProfile) {
+                    await rm(profilePath, { recursive: true, force: true }).catch(() => null);
+                }
                 await this.dependencies.store.failOperation(
                     placement,
                     placement.currentGeneration > 0 ? "generation_restore_failed" : "initial_attach_failed",

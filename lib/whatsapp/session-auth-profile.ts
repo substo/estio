@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { access, rm } from "node:fs/promises";
+import { access, lstat, rm } from "node:fs/promises";
 
 const execFileAsync = promisify(execFile);
 const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
@@ -13,6 +13,26 @@ function sleep(ms: number) {
 export function getLocalAuthProfilePath(dataPath: string, bridgeSessionId: string) {
     if (!/^[-_\w]+$/i.test(bridgeSessionId)) throw new Error("WhatsApp session ID is invalid for LocalAuth");
     return path.join(path.resolve(dataPath), `session-${bridgeSessionId}`);
+}
+
+export async function inspectLocalAuthProfileState(profilePath: string): Promise<"missing" | "complete" | "incomplete"> {
+    const profile = await lstat(profilePath).catch((error: any) => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+    });
+    if (!profile) return "missing";
+    if (!profile.isDirectory() || profile.isSymbolicLink()) return "incomplete";
+    for (const requiredPath of [
+        path.join(profilePath, "Default", "IndexedDB"),
+        path.join(profilePath, "Default", "Local Storage"),
+    ]) {
+        const required = await lstat(requiredPath).catch((error: any) => {
+            if (error?.code === "ENOENT") return null;
+            throw error;
+        });
+        if (!required?.isDirectory() || required.isSymbolicLink()) return "incomplete";
+    }
+    return "complete";
 }
 
 export function findProfileScopedChromiumPids(processList: string, profilePath: string) {
