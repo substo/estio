@@ -10,6 +10,7 @@ import {
     DEFAULT_WEB_BRIDGE_NON_READY_STALE_MS,
     getStaleWhatsAppWebBridgeNonReadyReason,
 } from "../lib/whatsapp/web-bridge-readiness";
+import { didWhatsAppWebSessionReachReadyBeforeInitializeError } from "../lib/whatsapp/web-bridge-initialize";
 import {
     classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
@@ -1296,6 +1297,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
     try {
         await withTimeout(client.initialize(), INITIALIZE_TIMEOUT_MS, `WhatsApp session initialize ${sessionId}`);
     } catch (error: any) {
+        if (didWhatsAppWebSessionReachReadyBeforeInitializeError(managed)) return managed;
         managed.ready = false;
         markSessionEvent(managed, "failed", error);
         await emitSessionEvent(managed, {
