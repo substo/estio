@@ -6,6 +6,10 @@ import { isUsableMessageTranslationText } from "@/lib/conversations/translation-
 import { getWhatsAppMediaObjectBytes, parseR2Uri } from "@/lib/whatsapp/media-r2";
 import { isVCardMedia, parseVCardContacts } from "@/lib/contacts/vcard";
 import { buildVisibleMessageSourceWhere } from "./internal-message-visibility";
+import {
+    areWhatsAppWebBridgeMessageIdAliases,
+    isWhatsAppWebBridgeSerializedMessageId,
+} from "@/lib/whatsapp/web-bridge-message-id-alias";
 
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
 const MESSAGE_TRANSLATION_STATUS = {
@@ -186,6 +190,61 @@ export function hideSupersededFailedWhatsAppAttemptsForDisplay<T extends Record<
             && accepted.timestampMs - timestampMs <= WHATSAPP_FAILED_ATTEMPT_SUPERSEDE_WINDOW_MS
         ));
     });
+}
+
+const WHATSAPP_DELIVERY_STATUS_PRIORITY: Record<string, number> = {
+    failed: 0,
+    sending: 1,
+    sent: 2,
+    delivered: 3,
+    read: 4,
+    played: 5,
+};
+
+function chooseRicherWhatsAppDeliveryStatus(left: unknown, right: unknown) {
+    const leftStatus = String(left || "").toLowerCase();
+    const rightStatus = String(right || "").toLowerCase();
+    return (WHATSAPP_DELIVERY_STATUS_PRIORITY[rightStatus] || 0) > (WHATSAPP_DELIVERY_STATUS_PRIORITY[leftStatus] || 0)
+        ? right
+        : left;
+}
+
+function isWebBridgeProviderIdAliasDuplicate(left: any, right: any) {
+    if (String(left?.direction || "") !== "outbound" || String(right?.direction || "") !== "outbound") return false;
+    if (String(left?.source || "") !== "whatsapp_web_bridge" || String(right?.source || "") !== "whatsapp_web_bridge") return false;
+    if (String(left?.conversationId || "") !== String(right?.conversationId || "")) return false;
+    if (getMessageTimestampMs(left) <= 0 || getMessageTimestampMs(left) !== getMessageTimestampMs(right)) return false;
+
+    const leftBody = normalizeMessageBodyForDedupe(left?.body);
+    const rightBody = normalizeMessageBodyForDedupe(right?.body);
+    return !!leftBody
+        && leftBody === rightBody
+        && areWhatsAppWebBridgeMessageIdAliases(left?.wamId, right?.wamId);
+}
+
+export function collapseWebBridgeProviderIdAliasesForDisplay<T extends Record<string, any>>(messages: T[]): T[] {
+    const output: T[] = [];
+
+    for (const message of messages || []) {
+        const duplicateIndex = output.findIndex((candidate) => isWebBridgeProviderIdAliasDuplicate(candidate, message));
+        if (duplicateIndex < 0) {
+            output.push(message);
+            continue;
+        }
+
+        const existing = output[duplicateIndex];
+        const canonical = isWhatsAppWebBridgeSerializedMessageId(message.wamId) ? message : existing;
+        const other = canonical === message ? existing : message;
+        output[duplicateIndex] = {
+            ...canonical,
+            status: chooseRicherWhatsAppDeliveryStatus(canonical.status, other.status),
+            attachments: Array.isArray(canonical.attachments) && canonical.attachments.length > 0
+                ? canonical.attachments
+                : other.attachments,
+        } as T;
+    }
+
+    return output;
 }
 
 function getAlbumRepresentative(group: any[]) {
@@ -499,7 +558,9 @@ export async function fetchMessagesForResolvedConversation(args: {
     markTiming("query_ms", queryStartedAtMs);
 
     const messages = hideSupersededFailedWhatsAppAttemptsForDisplay(
-        hideDuplicateScheduledWebBridgeEchoesForDisplay(readDescending ? [...messageRows].reverse() : messageRows)
+        hideDuplicateScheduledWebBridgeEchoesForDisplay(
+            collapseWebBridgeProviderIdAliasesForDisplay(readDescending ? [...messageRows].reverse() : messageRows)
+        )
     );
     console.log(`[DB Read] Fetched ${messages.length} messages from local database for conversation ${conversation.ghlConversationId}`);
 

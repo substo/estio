@@ -2,9 +2,72 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    collapseWebBridgeProviderIdAliasesForDisplay,
     hideDuplicateScheduledWebBridgeEchoesForDisplay,
     hideSupersededFailedWhatsAppAttemptsForDisplay,
 } from "./message-loading";
+
+test("collapseWebBridgeProviderIdAliasesForDisplay keeps one canonical bubble for local and serialized ids", () => {
+    const createdAt = new Date("2026-07-21T10:21:34.000Z");
+    const localId = "3EB0LOCALMESSAGEID";
+    const local = {
+        id: "local-row",
+        conversationId: "conversation-1",
+        body: "Ok",
+        direction: "outbound",
+        source: "whatsapp_web_bridge",
+        status: "read",
+        wamId: localId,
+        createdAt,
+        attachments: [],
+    };
+    const canonical = {
+        id: "canonical-row",
+        conversationId: "conversation-1",
+        body: "Ok",
+        direction: "outbound",
+        source: "whatsapp_web_bridge",
+        status: "sent",
+        wamId: `true_198247318593740@lid_${localId}`,
+        createdAt,
+        attachments: [],
+    };
+
+    assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([local, canonical]), [{
+        ...canonical,
+        status: "read",
+    }]);
+});
+
+test("collapseWebBridgeProviderIdAliasesForDisplay preserves genuine repeated sends", () => {
+    const base = {
+        conversationId: "conversation-1",
+        body: "Ok",
+        direction: "outbound",
+        source: "whatsapp_web_bridge",
+        status: "sent",
+        createdAt: new Date("2026-07-21T10:21:34.000Z"),
+    };
+    const first = { ...base, id: "first", wamId: "true_chat_3EB_FIRST" };
+    const second = { ...base, id: "second", wamId: "true_chat_3EB_SECOND" };
+
+    assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([first, second]), [first, second]);
+});
+
+test("collapseWebBridgeProviderIdAliasesForDisplay requires matching outbound bridge context", () => {
+    const localId = "3EB0LOCALMESSAGEID";
+    const base = {
+        conversationId: "conversation-1",
+        body: "Ok",
+        source: "whatsapp_web_bridge",
+        status: "sent",
+        createdAt: new Date("2026-07-21T10:21:34.000Z"),
+    };
+    const inbound = { ...base, id: "inbound", direction: "inbound", wamId: localId };
+    const outbound = { ...base, id: "outbound", direction: "outbound", wamId: `false_chat_${localId}` };
+
+    assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([inbound, outbound]), [inbound, outbound]);
+});
 
 test("hideDuplicateScheduledWebBridgeEchoesForDisplay hides unconfirmed scheduled placeholder when confirmed echo exists", () => {
     const scheduled = {

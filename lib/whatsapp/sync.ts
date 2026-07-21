@@ -14,6 +14,10 @@ import { WHATSAPP_CLOUD_PROVIDER } from "@/lib/whatsapp/client";
 import { WHATSAPP_WEB_BRIDGE_PROVIDER } from "@/lib/whatsapp/web-bridge";
 import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
+import {
+    isWhatsAppWebBridgeSerializedMessageId,
+    selectCanonicalizableWhatsAppWebBridgeAlias,
+} from "@/lib/whatsapp/web-bridge-message-id-alias";
 import { queueRequirementProposalForNewActivity } from "@/lib/ai/requirements-intelligence/service";
 import { markScheduledMessagesReviewRecommended } from "@/lib/conversations/scheduled-messages";
 import { findContactsByPhoneDigitsWithFallback, phoneDigitsLikelyMatch } from "@/lib/contacts/phone-lookup";
@@ -581,6 +585,97 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
         id: String(best.id),
         clientMessageId: best.clientMessageId ? String(best.clientMessageId) : null,
     };
+}
+
+async function tryCanonicalizeOutboundWebBridgeMessageIdAlias(args: {
+    locationId: string;
+    conversationId: string;
+    wamId: string;
+    body?: string | null;
+    timestamp: Date;
+    source: NormalizedMessage["source"];
+    providerAccountId: string;
+    providerThreadId: string;
+}) {
+    if (args.source !== "whatsapp_web_bridge" || !isWhatsAppWebBridgeSerializedMessageId(args.wamId)) {
+        return null;
+    }
+
+    const incomingBody = normalizeOutboundWebBridgeRetryBodyForMatch(args.body);
+    if (!incomingBody) return null;
+
+    const candidates = await (db as any).message.findMany({
+        where: {
+            conversationId: args.conversationId,
+            direction: "outbound",
+            source: "whatsapp_web_bridge",
+            createdAt: args.timestamp,
+        },
+        include: {
+            outboundWhatsAppOutbox: true,
+            conversation: { include: { contact: true } },
+        },
+        orderBy: [{ id: "desc" }],
+        take: 8,
+    });
+
+    const alias = selectCanonicalizableWhatsAppWebBridgeAlias({
+        canonicalMessageId: args.wamId,
+        body: incomingBody,
+        timestamp: args.timestamp,
+        candidates: Array.isArray(candidates) ? candidates : [],
+    });
+    if (!alias) return null;
+    try {
+        await (db as any).$transaction(async (tx: any) => {
+            await tx.message.update({
+                where: { id: alias.id },
+                data: {
+                    wamId: args.wamId,
+                    ghlMessageId: `wa_${args.wamId}`,
+                    updatedAt: new Date(),
+                },
+            });
+            await tx.messageSync.upsert({
+                where: {
+                    messageId_provider_providerAccountId: {
+                        messageId: alias.id,
+                        provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                        providerAccountId: args.providerAccountId,
+                    },
+                },
+                create: {
+                    messageId: alias.id,
+                    conversationId: args.conversationId,
+                    locationId: args.locationId,
+                    provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                    providerAccountId: args.providerAccountId,
+                    providerMessageId: args.wamId,
+                    providerThreadId: args.providerThreadId,
+                    status: "synced",
+                    remoteUpdatedAt: args.timestamp,
+                    lastSyncedAt: new Date(),
+                    metadata: { source: args.source, canonicalizedProviderMessageId: true },
+                },
+                update: {
+                    providerMessageId: args.wamId,
+                    providerThreadId: args.providerThreadId,
+                    status: "synced",
+                    remoteUpdatedAt: args.timestamp,
+                    lastSyncedAt: new Date(),
+                    lastError: null,
+                },
+            });
+        });
+    } catch (error: any) {
+        if (error?.code !== "P2002") throw error;
+        const concurrent = await db.message.findUnique({ where: { wamId: args.wamId }, select: { id: true } });
+        if (!concurrent?.id) throw error;
+        return { id: String(concurrent.id), message: null };
+    }
+
+    console.log("[WhatsApp Sync] Canonicalized one outbound WhatsApp Web provider message-id alias.");
+    return { id: String(alias.id), message: alias };
 }
 
 async function persistWebBridgeConversationSync(args: {
@@ -1945,6 +2040,33 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
     });
 
     if (direction === "outbound") {
+        const canonicalizedAlias = await tryCanonicalizeOutboundWebBridgeMessageIdAlias({
+            locationId,
+            conversationId: conversation.id,
+            wamId,
+            body,
+            timestamp,
+            source,
+            providerAccountId: syncProviderAccountId,
+            providerThreadId,
+        });
+        if (canonicalizedAlias?.id) {
+            if (msg.lid && canonicalizedAlias.message) {
+                await attachWebBridgeLidToExistingOutboundMessage({
+                    locationId,
+                    message: canonicalizedAlias.message,
+                    lid: msg.lid,
+                    timestamp,
+                    source,
+                    webBridgeIdentity: msg.webBridgeIdentity,
+                    providerThreadId,
+                    providerAccountId: syncProviderAccountId,
+                    ownPhone,
+                });
+            }
+            return { status: "processed", id: canonicalizedAlias.id };
+        }
+
         const reconciled = await tryReconcileOutboundWebhookToPendingMessage({
             locationId,
             conversationId: conversation.id,
