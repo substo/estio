@@ -112,3 +112,36 @@ test("transactional store fences attach, publishes a monotonic checkpoint, and r
         "attach_claimed", "attach_completed", "detach_claimed", "checkpoint_published", "operator_rollback",
     ]);
 });
+
+test("authoritative unhealthy owner detaches without publishing a checkpoint", async () => {
+    const { db, state } = fakeDb();
+    const store = new SessionAuthPlacementStore(db);
+    const claimed = await store.claimAttach(ownership);
+    const attached = await store.completeAttach(claimed.placement, ownership);
+
+    const detached = await store.detachWithoutCheckpoint(attached.id, ownership);
+
+    assert.equal(detached.state, "detached");
+    assert.equal(detached.currentGeneration, 2);
+    assert.equal(detached.lastKnownGoodGeneration, 2);
+    assert.equal(detached.authEpoch, 8);
+    assert.equal(detached.gatewayNodeId, null);
+    assert.equal(detached.ownerInstanceId, null);
+    assert.equal(detached.leaseEpoch, 0);
+    assert.equal(detached.lastErrorCode, "unhealthy_profile_discarded");
+    assert.deepEqual(state.audits.map((item: any) => item.eventType), [
+        "attach_claimed", "attach_completed", "checkpoint_skipped",
+    ]);
+});
+
+test("non-authoritative owner cannot detach a durable profile without a checkpoint", async () => {
+    const { db } = fakeDb();
+    const store = new SessionAuthPlacementStore(db);
+    const claimed = await store.claimAttach(ownership);
+    const attached = await store.completeAttach(claimed.placement, ownership);
+
+    await assert.rejects(
+        store.detachWithoutCheckpoint(attached.id, { ...ownership, ownerInstanceId: "stale-owner" }),
+        /not authoritative/,
+    );
+});

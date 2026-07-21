@@ -272,6 +272,49 @@ export class SessionAuthPlacementStore {
         });
     }
 
+    async detachWithoutCheckpoint(
+        placementId: string,
+        ownership: DeviceTunnelRuntimeOwnership,
+        errorCode = "unhealthy_profile_discarded",
+    ) {
+        return this.transaction(async (tx) => {
+            if (!await validateDeviceTunnelRuntimeOwnership({ db: tx, ownership })) {
+                throw new Error("Session-auth discard runtime ownership is not authoritative");
+            }
+            const current = record(await tx.whatsAppSessionAuthPlacement.findUnique({ where: { id: placementId } }));
+            if (
+                current.state !== "attached"
+                || current.locationId !== ownership.locationId
+                || current.sessionId !== ownership.sessionId
+                || current.bindingId !== ownership.bindingId
+                || current.gatewayNodeId !== ownership.gatewayNodeId
+                || current.assignmentEpoch !== ownership.assignmentEpoch
+                || current.ownerInstanceId !== ownership.ownerInstanceId
+                || current.leaseEpoch !== ownership.leaseEpoch
+            ) throw new Error("Session-auth discard requires an exactly scoped attached placement");
+            const safeErrorCode = errorCode.slice(0, 64);
+            const updated = record(await tx.whatsAppSessionAuthPlacement.update({
+                where: { id: current.id },
+                data: {
+                    state: current.currentGeneration > 0 ? "detached" : "relink_required",
+                    gatewayNodeId: null,
+                    ownerInstanceId: null,
+                    leaseEpoch: 0,
+                    authEpoch: current.authEpoch + 1,
+                    operationId: null,
+                    operationStartedAt: null,
+                    operationDeadlineAt: null,
+                    recoveryStatus: current.currentGeneration > 0 ? "restoring_previous" : "relink_required",
+                    lastErrorCode: safeErrorCode,
+                },
+            }));
+            await tx.whatsAppSessionAuthAuditEvent.create({
+                data: auditData(updated, "checkpoint_skipped", "fenced", undefined, safeErrorCode),
+            });
+            return updated;
+        });
+    }
+
     async requireRelink(placementId: string, errorCode = "operator_clear") {
         return this.transaction(async (tx) => {
             const current = record(await tx.whatsAppSessionAuthPlacement.findUnique({ where: { id: placementId } }));

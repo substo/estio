@@ -569,6 +569,17 @@ async function quiesceManagedSession(session: ManagedSession, checkpoint: boolea
     await destroy();
     if (session.authDurableRequired && SESSION_AUTH_COORDINATOR && session.authPlacement && !session.authDurableReady) {
         session.authPlacement = await SESSION_AUTH_COORDINATOR.abandonUndurableProfile(session.authPlacement, session.sessionId);
+    } else if (
+        session.authDurableRequired
+        && SESSION_AUTH_COORDINATOR
+        && session.authPlacement
+        && session.ownership
+    ) {
+        session.authPlacement = await SESSION_AUTH_COORDINATOR.detachWithoutCheckpoint({
+            placement: session.authPlacement,
+            ownership: session.ownership,
+            bridgeSessionId: session.sessionId,
+        });
     } else if (session.authDurableRequired && SESSION_AUTH_COORDINATOR) {
         await SESSION_AUTH_COORDINATOR.discardLocalProfile(session.sessionId);
     }

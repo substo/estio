@@ -230,6 +230,19 @@ export class WhatsAppSessionAuthCoordinator {
         return this.dependencies.store.failOperation(placement, "initial_profile_abandoned");
     }
 
+    async detachWithoutCheckpoint(args: {
+        placement: any;
+        ownership: DeviceTunnelRuntimeOwnership;
+        bridgeSessionId: string;
+    }) {
+        await this.discardLocalProfile(args.bridgeSessionId);
+        return this.dependencies.store.detachWithoutCheckpoint(
+            args.placement.id,
+            args.ownership,
+            "unhealthy_profile_discarded",
+        );
+    }
+
     async rollbackToPrevious(placementId: string, ownership: DeviceTunnelRuntimeOwnership) {
         return this.dependencies.store.rollbackToPrevious(placementId, ownership);
     }
