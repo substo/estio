@@ -15,6 +15,24 @@ export function isWhatsAppWebBridgeActiveProbeFresh(args: {
     return ageMs >= 0 && ageMs <= args.maxAgeMs;
 }
 
+export function isWhatsAppWebBridgeCheckpointEligible(args: {
+    ready: boolean;
+    runtimeLeaseEnforced: boolean;
+    ownershipValid: boolean;
+    activeProbeHealthy: boolean;
+    lastActiveProbeSuccessAt?: Date | string | null;
+    nowMs?: number;
+    maxAgeMs: number;
+}) {
+    if (!args.ready || (args.runtimeLeaseEnforced && !args.ownershipValid)) return false;
+    return isWhatsAppWebBridgeActiveProbeFresh({
+        healthy: args.activeProbeHealthy,
+        lastSuccessAt: args.lastActiveProbeSuccessAt,
+        nowMs: args.nowMs,
+        maxAgeMs: args.maxAgeMs,
+    });
+}
+
 export function didDeviceTunnelGatewayGenerationChange(args: {
     deviceTunnelBindingId?: string | null;
     sessionGeneration?: string | null;

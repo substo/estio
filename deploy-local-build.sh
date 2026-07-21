@@ -729,12 +729,18 @@ NODE
             "\$DEVICE_TUNNEL_INTERNAL_SECRET" | sha256sum | awk '{print \$1}')
         EXPECTED_GATEWAY_DEPLOY_HASH=\$(printf '%s:%s' "\$EXPECTED_GATEWAY_CODE_HASH" "\$EXPECTED_GATEWAY_CONFIG_HASH" | sha256sum | awk '{print \$1}')
         CURRENT_GATEWAY_DEPLOY_HASH=\$(sed -n '1p' "\$GATEWAY_HASH_FILE" 2>/dev/null || true)
+        CURRENT_GATEWAY_RUNTIME_OWNER_INSTANCE_ID=\$(DEVICE_TUNNEL_GATEWAY_APP_NAME="\$DEVICE_TUNNEL_GATEWAY_APP_NAME" node -e 'const { execSync } = require("child_process"); const appName = process.env.DEVICE_TUNNEL_GATEWAY_APP_NAME; const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf8" })); const app = list.find((entry) => entry && entry.name === appName); console.log(app?.pm2_env?.DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID || app?.pm2_env?.env?.DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID || "");' 2>/dev/null || true)
+        ACTIVE_GATEWAY_RUNTIME_OWNER_INSTANCE_ID="\${DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID:-}"
         GATEWAY_HEALTH_JSON=""
         if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
             GATEWAY_HEALTH_JSON=\$(curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" 2>/dev/null || true)
         fi
 
-        if [ -n "\$GATEWAY_HEALTH_JSON" ] && [ -n "\$EXPECTED_GATEWAY_DEPLOY_HASH" ] && [ "\$CURRENT_GATEWAY_DEPLOY_HASH" = "\$EXPECTED_GATEWAY_DEPLOY_HASH" ]; then
+        if [ -n "\$GATEWAY_HEALTH_JSON" ] \
+            && [ -n "\$EXPECTED_GATEWAY_DEPLOY_HASH" ] \
+            && [ "\$CURRENT_GATEWAY_DEPLOY_HASH" = "\$EXPECTED_GATEWAY_DEPLOY_HASH" ] \
+            && { [ "\${DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT:-}" != "true" ] || [ -n "\$CURRENT_GATEWAY_RUNTIME_OWNER_INSTANCE_ID" ]; }; then
+            ACTIVE_GATEWAY_RUNTIME_OWNER_INSTANCE_ID="\$CURRENT_GATEWAY_RUNTIME_OWNER_INSTANCE_ID"
             echo "✅ Android device tunnel gateway is healthy and unchanged; preserving connected relays"
         else
             fence_whatsapp_browser_for_gateway_restart
@@ -885,7 +891,7 @@ NODE
             pm2 delete "\$WHATSAPP_BRIDGE_APP_NAME" || true
         fi
         stop_orphaned_whatsapp_bridge_browsers
-        NODE_ENV=production PROCESS_ROLE=whatsapp-bridge WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
+        NODE_ENV=production PROCESS_ROLE=whatsapp-bridge DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID="\$ACTIVE_GATEWAY_RUNTIME_OWNER_INSTANCE_ID" WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
             pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --kill-timeout 200000 --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
     fi
     echo "📱 WhatsApp Web Bridge app webhook: \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"

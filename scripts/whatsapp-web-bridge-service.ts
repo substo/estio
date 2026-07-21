@@ -26,6 +26,7 @@ import {
 import {
     didDeviceTunnelGatewayGenerationChange,
     isWhatsAppWebBridgeActiveProbeFresh,
+    isWhatsAppWebBridgeCheckpointEligible,
 } from "../lib/whatsapp/web-bridge-runtime-health";
 import { getWhatsAppLinkPreviewDecision } from "../lib/whatsapp/link-preview";
 import {
@@ -144,7 +145,7 @@ const ACTIVE_PROBE_STALE_MS = Math.max(
 const QR_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_QR_STALE_MS || 90_000), 30_000);
 const NON_READY_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_NON_READY_STALE_MS || DEFAULT_WEB_BRIDGE_NON_READY_STALE_MS), 30_000);
 const PROTOCOL_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_PROTOCOL_TIMEOUT_MS || 120_000), 30_000);
-const INITIALIZE_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_INITIALIZE_TIMEOUT_MS || 45_000), 10_000);
+const INITIALIZE_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_INITIALIZE_TIMEOUT_MS || 120_000), 10_000);
 const OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_OPERATION_TIMEOUT_MS || 30_000), 5_000);
 const SESSION_AUTH_STOP_TIMEOUT_MS = SESSION_AUTH_COORDINATOR ? 190_000 : OPERATION_TIMEOUT_MS;
 const MEDIA_OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_OPERATION_TIMEOUT_MS || 60_000), 10_000);
@@ -528,7 +529,7 @@ async function fenceManagedSession(session: ManagedSession, reason: string) {
     sessions.delete(session.sessionId);
     session.ready = false;
     markSessionEvent(session, "blocked_egress", reason);
-    await quiesceManagedSession(session, true).catch(async () => {
+    await quiesceManagedSession(session, false).catch(async () => {
         await session.client?.destroy?.().catch(() => null);
         if (SESSION_AUTH_COORDINATOR) await SESSION_AUTH_COORDINATOR.discardLocalProfile(session.sessionId).catch(() => null);
     });
@@ -536,12 +537,21 @@ async function fenceManagedSession(session: ManagedSession, reason: string) {
 }
 
 async function quiesceManagedSession(session: ManagedSession, checkpoint: boolean, allowInitialCheckpoint = false) {
+    const checkpointEligible = isWhatsAppWebBridgeCheckpointEligible({
+        ready: session.ready,
+        runtimeLeaseEnforced: session.runtimeLeaseEnforced,
+        ownershipValid: session.ownershipValid,
+        activeProbeHealthy: Boolean(session.activeProbeHealthy),
+        lastActiveProbeSuccessAt: session.lastActiveProbeSuccessAt,
+        maxAgeMs: ACTIVE_PROBE_STALE_MS,
+    });
     session.shuttingDown = true;
     session.ready = false;
     sessions.delete(session.sessionId);
     const destroy = async () => { await session.client?.destroy?.().catch(() => null); };
     if (
         checkpoint
+        && checkpointEligible
         && session.authDurableRequired
         && SESSION_AUTH_COORDINATOR
         && session.authPlacement
@@ -608,7 +618,7 @@ async function restartStaleSession(session: ManagedSession, error: unknown) {
     });
     const { sessionId, locationId } = session;
     try {
-        await quiesceManagedSession(session, true);
+        await quiesceManagedSession(session, false);
     } finally {
         setTimeout(() => {
             startSession(sessionId, locationId, session.ownership).catch((restartError: any) => {
@@ -1290,7 +1300,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
             sessionRef: bridgeRef(sessionId, "session"),
             code: "WHATSAPP_SESSION_DISCONNECTED",
         });
-        sessions.delete(sessionId);
+        await quiesceManagedSession(managed, false);
         await emitSessionEvent(managed, { event: "disconnected", locationId, sessionId, error: reason });
         setTimeout(() => {
             startSession(sessionId, locationId, managed.ownership).catch(() => {

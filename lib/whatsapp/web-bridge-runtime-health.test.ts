@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     didDeviceTunnelGatewayGenerationChange,
     isWhatsAppWebBridgeActiveProbeFresh,
+    isWhatsAppWebBridgeCheckpointEligible,
 } from "./web-bridge-runtime-health";
 
 test("active readiness requires a recent successful browser and webhook probe", () => {
@@ -47,5 +48,25 @@ test("device-tunnel sessions rebind after a gateway process generation change", 
         deviceTunnelBindingId: null,
         sessionGeneration: null,
         gatewayGeneration: null,
+    }), false);
+});
+
+test("durable checkpoints require ready, authoritative, recently probed browsers", () => {
+    const nowMs = Date.parse("2026-07-21T17:30:00.000Z");
+    const healthy = {
+        ready: true,
+        runtimeLeaseEnforced: true,
+        ownershipValid: true,
+        activeProbeHealthy: true,
+        lastActiveProbeSuccessAt: new Date(nowMs - 1_000),
+        nowMs,
+        maxAgeMs: 60_000,
+    };
+    assert.equal(isWhatsAppWebBridgeCheckpointEligible(healthy), true);
+    assert.equal(isWhatsAppWebBridgeCheckpointEligible({ ...healthy, ready: false }), false);
+    assert.equal(isWhatsAppWebBridgeCheckpointEligible({ ...healthy, ownershipValid: false }), false);
+    assert.equal(isWhatsAppWebBridgeCheckpointEligible({
+        ...healthy,
+        lastActiveProbeSuccessAt: new Date(nowMs - 60_001),
     }), false);
 });
