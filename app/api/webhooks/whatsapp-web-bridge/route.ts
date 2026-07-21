@@ -216,7 +216,10 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ status: "ignored", reason: normalizedMessage.ignoreReason });
             }
 
-            const result = await processNormalizedMessage(normalizedMessage.normalized);
+            const result = await processNormalizedMessage({
+                ...normalizedMessage.normalized,
+                notificationIntent: "live_ingress",
+            });
 
             if (message.fromMe) {
                 const snapshotStatus = normalizeWhatsAppWebBridgeAckStatus(message.ack);

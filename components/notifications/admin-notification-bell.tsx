@@ -84,7 +84,7 @@ export function AdminNotificationBell() {
 
         if (notificationId && notificationId !== lastToastNotificationIdRef.current) {
           lastToastNotificationIdRef.current = notificationId;
-          const title = String(payload.title || "Task reminder");
+          const title = String(payload.title || "Notification");
           const body = String(payload.body || "");
           const deepLinkUrl = String(payload.deepLinkUrl || "");
 
@@ -180,9 +180,9 @@ export function AdminNotificationBell() {
       <PopoverContent align="end" className="w-[420px] p-0">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
-            <div className="text-sm font-semibold">Task reminders</div>
+            <div className="text-sm font-semibold">Notifications</div>
             <div className="text-xs text-muted-foreground">
-              {unreadCount > 0 ? `${unreadCount} unread reminder${unreadCount === 1 ? "" : "s"}` : "No unread reminders"}
+              {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}` : "No unread notifications"}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -212,7 +212,7 @@ export function AdminNotificationBell() {
           <div>
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-medium">Recent reminders</div>
+                <div className="text-sm font-medium">Recent notifications</div>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
               </div>
 
@@ -278,7 +278,7 @@ export function AdminNotificationBell() {
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  No reminders yet. Deadline reminders will appear here once a task has a due date and assignee.
+                  No notifications yet. Task reminders and new-message alerts will appear here.
                 </div>
               )}
             </section>

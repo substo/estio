@@ -63,7 +63,10 @@ async function processMessagesValue(value: any) {
         });
         if (!normalized) continue;
 
-        await processNormalizedMessage(normalized);
+        await processNormalizedMessage({
+            ...normalized,
+            notificationIntent: "live_ingress",
+        });
     }
 }
 

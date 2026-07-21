@@ -110,6 +110,7 @@ type ManagedSession = {
 };
 
 const sessions = new Map<string, ManagedSession>();
+const restartMetadataBySession = new Map<string, { attempts: number; firstRestartAt: number }>();
 const serviceStartedAt = new Date();
 
 process.on("unhandledRejection", (reason) => {
@@ -574,13 +575,13 @@ async function refreshRuntimeSessionOwnerships() {
 
 async function restartStaleSession(session: ManagedSession, error: unknown) {
     if (session.restarting) return;
-    const metadata = (session as any).restartMetadata || { attempts: 0, firstRestartAt: Date.now() };
+    const metadata = restartMetadataBySession.get(session.sessionId) || { attempts: 0, firstRestartAt: Date.now() };
     const windowAgeMs = Date.now() - Number(metadata.firstRestartAt || Date.now());
     const attempts = windowAgeMs > 10 * 60 * 1000 ? 1 : Number(metadata.attempts || 0) + 1;
-    (session as any).restartMetadata = {
+    restartMetadataBySession.set(session.sessionId, {
         attempts,
         firstRestartAt: windowAgeMs > 10 * 60 * 1000 ? Date.now() : metadata.firstRestartAt,
-    };
+    });
     if (attempts > MAX_SESSION_RESTART_ATTEMPTS) {
         session.ready = false;
         markSessionEvent(session, "failed", `Restart limit reached after ${MAX_SESSION_RESTART_ATTEMPTS} attempts. Last error: ${(error as any)?.message || error}`);
@@ -1145,6 +1146,9 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
                 return existing;
             }
             await assertManagedSessionOwnership(existing);
+            if (!existing.ready && existing.status === "failed" && !existing.restarting) {
+                await restartStaleSession(existing, new Error("WhatsApp browser initialization failed and was requested again by the connected Android relay."));
+            }
             return existing;
         } else {
             await assertManagedSessionOwnership(existing);
@@ -1272,7 +1276,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
             }
             return;
         }
-        if (probed) await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
+        if (probed) {
+            restartMetadataBySession.delete(sessionId);
+            await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
+        }
     });
 
     client.on("disconnected", async (reason: string) => {
@@ -1285,6 +1292,14 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         });
         sessions.delete(sessionId);
         await emitSessionEvent(managed, { event: "disconnected", locationId, sessionId, error: reason });
+        setTimeout(() => {
+            startSession(sessionId, locationId, managed.ownership).catch(() => {
+                console.warn("[WhatsApp Web Bridge] Failed to recover disconnected session", {
+                    sessionRef: bridgeRef(sessionId, "session"),
+                    code: "DISCONNECTED_SESSION_RECOVERY_FAILED",
+                });
+            });
+        }, SESSION_RESTART_BACKOFF_MS);
     });
 
     client.on("message", async (message: any) => {
@@ -1320,7 +1335,10 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
     try {
         await withTimeout(client.initialize(), INITIALIZE_TIMEOUT_MS, `WhatsApp session initialize ${sessionId}`);
     } catch (error: any) {
-        if (didWhatsAppWebSessionReachReadyBeforeInitializeError(managed)) return managed;
+        if (didWhatsAppWebSessionReachReadyBeforeInitializeError({
+            ready: managed.ready,
+            lastReadyAt: managed.lastReadyAt ?? null,
+        })) return managed;
         managed.ready = false;
         markSessionEvent(managed, "failed", error);
         await emitSessionEvent(managed, {
@@ -1737,7 +1755,14 @@ setInterval(() => {
 async function bootstrapPersistedSessions() {
     const rows = await (db as any).whatsAppWebBridgeSession.findMany({
         where: {
-            status: { in: ["ready", "authenticated", "starting", "restarting", "qr"] },
+            OR: [
+                { status: { in: ["ready", "authenticated", "starting", "restarting", "qr"] } },
+                {
+                    status: { in: ["failed", "disconnected"] },
+                    egressMode: "device_tunnel",
+                    tunnelBinding: { is: { status: "online", desiredState: "active" } },
+                },
+            ],
         },
         select: { sessionId: true, locationId: true },
     }).catch((error: any) => {

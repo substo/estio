@@ -101,7 +101,8 @@ export async function POST(req: NextRequest) {
                 timestamp: new Date(),
                 source: "whatsapp_twilio",
                 contactName: data.ProfileName,
-                direction: isOutboundFromApp ? "outbound" : "inbound"
+                direction: isOutboundFromApp ? "outbound" : "inbound",
+                notificationIntent: "live_ingress",
             });
         }
 

@@ -37,3 +37,15 @@ test("getStaleWhatsAppWebBridgeNonReadyReason allows recent non-ready sessions",
 
     assert.equal(result, null);
 });
+
+test("getStaleWhatsAppWebBridgeNonReadyReason retries failed initialization promptly", () => {
+    const result = getStaleWhatsAppWebBridgeNonReadyReason({
+        status: "failed",
+        ready: false,
+        lastEventAt: "2026-05-29T06:00:00.000Z",
+        nowMs: Date.parse("2026-05-29T06:00:31.000Z"),
+        maxAgeMs: 180_000,
+    });
+
+    assert.match(result || "", /stayed failed for 31 seconds/);
+});
