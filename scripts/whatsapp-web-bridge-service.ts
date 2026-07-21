@@ -1357,7 +1357,6 @@ async function sendMessage(sessionId: string, payload: any) {
             const sent = await withStaleRecovery(session, () => withTimeout(
                 session.client.sendMessage(to, media, {
                     caption: payload.caption || payload.text || undefined,
-                    waitUntilMsgSent: true,
                 }),
                 MEDIA_OPERATION_TIMEOUT_MS,
                 `WhatsApp media send ${sessionId}`
@@ -1381,7 +1380,6 @@ async function sendMessage(sessionId: string, payload: any) {
         const sent = await withStaleRecovery(session, () => withTimeout(
             session.client.sendMessage(to, text, {
                 linkPreview: linkPreviewRequested,
-                waitUntilMsgSent: true,
             }),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`

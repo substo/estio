@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { dispatchWhatsAppOutbound } from "@/lib/whatsapp/outbound-dispatch";
 import { classifyOutboundSendFailure } from "@/lib/conversations/outbound-send-failure";
 import { isDeviceEgressOfflineError } from "@/lib/device-tunnel/status";
+import { isWhatsAppWebBridgeDeliveryUnconfirmedError } from "@/lib/whatsapp/web-bridge-send";
 import {
     buildWhatsAppRateLimitWindows,
     createWhatsAppRateLimitMember,
@@ -129,6 +130,17 @@ export function buildDeviceEgressBlockedUpdate(args: { reason: string; scheduled
         status: "blocked_egress",
         lastError: args.reason,
         scheduledAt: args.scheduledAt,
+        lockedAt: null,
+        lockedBy: null,
+    };
+}
+
+export function buildWhatsAppDeliveryUnconfirmedUpdate(args: { reason: string; attemptCount: number }) {
+    return {
+        status: "delivery_unconfirmed",
+        processedAt: new Date(),
+        attemptCount: args.attemptCount,
+        lastError: args.reason,
         lockedAt: null,
         lockedBy: null,
     };
@@ -588,6 +600,36 @@ export async function processWhatsAppOutboundOutboxJob(args: {
             });
         }
         const message = normalizeError(error);
+        if (isWhatsAppWebBridgeDeliveryUnconfirmedError(error)) {
+            await (db as any).whatsAppOutboundOutbox.updateMany({
+                where: { id: row.id, status: "processing" },
+                data: buildWhatsAppDeliveryUnconfirmedUpdate({ reason: message, attemptCount }),
+            });
+            await db.message.updateMany({
+                where: { id: row.messageId, status: { in: ["sending", "queued", "pending", "processing"] } },
+                data: { status: "delivery_unconfirmed", updatedAt: new Date() },
+            });
+            logWhatsAppSendLifecycle("delivery_unconfirmed_no_retry", {
+                messageId: row.messageId,
+                outboxJobId: row.id,
+                attemptCount,
+            });
+            void publishConversationRealtimeEvent({
+                locationId: row.locationId,
+                conversationId: row.conversationId,
+                type: "message.status",
+                payload: {
+                    channel: "whatsapp",
+                    messageId: row.messageId,
+                    status: "delivery_unconfirmed",
+                    outboxJobId: row.id,
+                    outboxStatus: "delivery_unconfirmed",
+                    attemptCount,
+                    lastError: message,
+                },
+            });
+            return { outcome: "success" };
+        }
         if (isDeviceEgressOfflineError(error)) {
             const retryDelayMs = 60_000;
             const nextScheduledAt = new Date(Date.now() + retryDelayMs);

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requireWhatsAppWebBridgeSentMessageId } from "./web-bridge-send";
+import {
+    isWhatsAppWebBridgeDeliveryUnconfirmedError,
+    requireWhatsAppWebBridgeSentMessageId,
+    WhatsAppWebBridgeDeliveryUnconfirmedError,
+} from "./web-bridge-send";
 
 test("extracts a serialized WhatsApp provider message id", () => {
     assert.equal(requireWhatsAppWebBridgeSentMessageId({
@@ -17,4 +21,11 @@ test("rejects null, undefined, and ambiguous send results", () => {
     assert.throws(() => requireWhatsAppWebBridgeSentMessageId(undefined), /WHATSAPP_SEND_RESULT_MISSING_ID/);
     assert.throws(() => requireWhatsAppWebBridgeSentMessageId({}), /WHATSAPP_SEND_RESULT_MISSING_ID/);
     assert.throws(() => requireWhatsAppWebBridgeSentMessageId({ id: {} }), /WHATSAPP_SEND_RESULT_MISSING_ID/);
+});
+
+test("classifies only explicit bridge delivery uncertainty", () => {
+    const error = new WhatsAppWebBridgeDeliveryUnconfirmedError();
+    assert.equal(isWhatsAppWebBridgeDeliveryUnconfirmedError(error), true);
+    assert.equal(isWhatsAppWebBridgeDeliveryUnconfirmedError({ code: error.code }), true);
+    assert.equal(isWhatsAppWebBridgeDeliveryUnconfirmedError(new Error("timeout")), false);
 });

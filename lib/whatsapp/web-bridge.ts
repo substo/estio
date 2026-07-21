@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
+import { WhatsAppWebBridgeDeliveryUnconfirmedError } from "@/lib/whatsapp/web-bridge-send";
 
 export const WHATSAPP_WEB_BRIDGE_PROVIDER = "whatsapp_web_bridge";
 export const WHATSAPP_WEB_BRIDGE_TRANSPORT = "web_bridge";
@@ -249,8 +250,16 @@ async function bridgeFetch(path: string, init?: RequestInit & { timeoutMs?: numb
         });
         const json = await response.json().catch(() => ({}));
         if (!response.ok) {
+            const responseCode = String((json as any)?.code || "");
+            if (
+                /\/send$/.test(path)
+                && response.status >= 500
+                && !["DEVICE_EGRESS_OFFLINE", "WHATSAPP_SESSION_NOT_READY", "WHATSAPP_CHAT_NOT_FOUND"].includes(responseCode)
+            ) {
+                throw new WhatsAppWebBridgeDeliveryUnconfirmedError();
+            }
             const error: any = new Error(String((json as any)?.error || response.statusText || "WhatsApp Web bridge request failed."));
-            if (String((json as any)?.code || "") === "DEVICE_EGRESS_OFFLINE") {
+            if (responseCode === "DEVICE_EGRESS_OFFLINE") {
                 error.code = "DEVICE_EGRESS_OFFLINE";
                 error.providerClassification = { retryable: true, reason: "device_egress_offline" };
             }
@@ -259,6 +268,7 @@ async function bridgeFetch(path: string, init?: RequestInit & { timeoutMs?: numb
         return json as any;
     } catch (error: any) {
         if (error?.name === "AbortError") {
+            if (/\/send$/.test(path)) throw new WhatsAppWebBridgeDeliveryUnconfirmedError();
             throw new Error(`WhatsApp Web bridge request timed out after ${timeoutMs}ms.`);
         }
         throw error;

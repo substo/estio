@@ -7,3 +7,17 @@ export function requireWhatsAppWebBridgeSentMessageId(sent: unknown) {
     if (!messageId) throw new Error("WHATSAPP_SEND_RESULT_MISSING_ID");
     return messageId;
 }
+
+export class WhatsAppWebBridgeDeliveryUnconfirmedError extends Error {
+    readonly code = "WHATSAPP_WEB_BRIDGE_DELIVERY_UNCONFIRMED";
+
+    constructor() {
+        super("WhatsApp Web send outcome is unknown; not retrying automatically to avoid duplicate delivery.");
+        this.name = "WhatsAppWebBridgeDeliveryUnconfirmedError";
+    }
+}
+
+export function isWhatsAppWebBridgeDeliveryUnconfirmedError(error: unknown) {
+    return error instanceof WhatsAppWebBridgeDeliveryUnconfirmedError
+        || String((error as any)?.code || "") === "WHATSAPP_WEB_BRIDGE_DELIVERY_UNCONFIRMED";
+}

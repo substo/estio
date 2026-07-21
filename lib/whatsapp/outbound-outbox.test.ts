@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     buildDeviceEgressBlockedUpdate,
+    buildWhatsAppDeliveryUnconfirmedUpdate,
     buildWhatsAppRateLimitDeferralUpdate,
     resolveWhatsAppDispatchAckTimeoutState,
     resolveWhatsAppOutboundCompletionState,
@@ -26,6 +27,18 @@ test("rate-limit deferral does not consume a provider attempt", () => {
     assert.equal(update.status, "rate_limited");
     assert.equal("attemptCount" in update, false);
     assert.equal(update.rateLimitReason, "Session burst limit reached");
+});
+
+test("ambiguous bridge delivery is terminal and unlocks the outbox", () => {
+    const update = buildWhatsAppDeliveryUnconfirmedUpdate({
+        reason: "Outcome unknown; no retry.",
+        attemptCount: 1,
+    });
+    assert.equal(update.status, "delivery_unconfirmed");
+    assert.equal(update.attemptCount, 1);
+    assert.equal(update.lockedAt, null);
+    assert.equal(update.lockedBy, null);
+    assert.ok(update.processedAt instanceof Date);
 });
 
 test("web bridge completion without provider id is delivery-unconfirmed and terminal", () => {
