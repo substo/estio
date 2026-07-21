@@ -75,6 +75,11 @@ function getFutureDelaySeconds(scheduledAt?: string | null, nowMs = Date.now()):
     return Math.max(0, Math.ceil((parsed - nowMs) / 1000));
 }
 
+export function canManuallyResendOutboundMessageStatus(status: unknown) {
+    const normalized = normalizeLower(status);
+    return normalized === "failed" || normalized === "delivery_unconfirmed";
+}
+
 export function deriveOutboundWhatsAppUiState(message: {
     type?: string | null;
     direction?: string | null;
@@ -159,12 +164,12 @@ export function deriveOutboundWhatsAppUiState(message: {
 
     if (status === "delivery_unconfirmed" || outboxStatus === "delivery_unconfirmed") {
         return {
-            label: "Sent, confirming",
-            tone: "info",
-            icon: "send",
-            detail: "WhatsApp accepted the send. Waiting for confirmation.",
+            label: "Delivery unconfirmed",
+            tone: "warning",
+            icon: "alert",
+            detail: "No WhatsApp confirmation was received. Check WhatsApp before retrying.",
             showSpinner: false,
-            canResend: false,
+            canResend: true,
             canSmsFallback: false,
             scheduledAt,
             retryAttempt,

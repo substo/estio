@@ -1,6 +1,9 @@
 import db from "@/lib/db";
 import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
-import { WhatsAppWebBridgeDeliveryUnconfirmedError } from "@/lib/whatsapp/web-bridge-send";
+import {
+    getWhatsAppWebBridgeSendRequestTimeoutMs,
+    WhatsAppWebBridgeDeliveryUnconfirmedError,
+} from "@/lib/whatsapp/web-bridge-send";
 import {
     WHATSAPP_WEB_BRIDGE_CHAT_LIST_TIMEOUT_MS,
     WHATSAPP_WEB_BRIDGE_HISTORY_TIMEOUT_MS,
@@ -466,6 +469,7 @@ export async function sendWhatsAppWebBridgeMessage(input: {
 
     return bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/send`, {
         method: "POST",
+        timeoutMs: getWhatsAppWebBridgeSendRequestTimeoutMs({ hasMedia: Boolean(input.mediaUrl) }),
         body: JSON.stringify({
             locationId: input.locationId,
             to: chatId,

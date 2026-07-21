@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    getWhatsAppWebBridgeSendRequestTimeoutMs,
     isWhatsAppWebBridgeDeliveryUnconfirmedError,
     requireWhatsAppWebBridgeSentMessageId,
     WhatsAppWebBridgeDeliveryUnconfirmedError,
 } from "./web-bridge-send";
+
+test("client send deadlines exceed the bridge text and media operation bounds", () => {
+    assert.equal(getWhatsAppWebBridgeSendRequestTimeoutMs({ hasMedia: false }), 35_000);
+    assert.equal(getWhatsAppWebBridgeSendRequestTimeoutMs({ hasMedia: true }), 75_000);
+});
 
 test("extracts a serialized WhatsApp provider message id", () => {
     assert.equal(requireWhatsAppWebBridgeSentMessageId({

@@ -8,6 +8,15 @@ export function requireWhatsAppWebBridgeSentMessageId(sent: unknown) {
     return messageId;
 }
 
+export const WHATSAPP_WEB_BRIDGE_TEXT_SEND_REQUEST_TIMEOUT_MS = 35_000;
+export const WHATSAPP_WEB_BRIDGE_MEDIA_SEND_REQUEST_TIMEOUT_MS = 75_000;
+
+export function getWhatsAppWebBridgeSendRequestTimeoutMs(input: { hasMedia: boolean }) {
+    return input.hasMedia
+        ? WHATSAPP_WEB_BRIDGE_MEDIA_SEND_REQUEST_TIMEOUT_MS
+        : WHATSAPP_WEB_BRIDGE_TEXT_SEND_REQUEST_TIMEOUT_MS;
+}
+
 export class WhatsAppWebBridgeDeliveryUnconfirmedError extends Error {
     readonly code = "WHATSAPP_WEB_BRIDGE_DELIVERY_UNCONFIRMED";
 

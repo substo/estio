@@ -106,6 +106,7 @@ import {
     applySendAckByCorrelation,
     buildOptimisticMediaMessage,
     buildOptimisticTextMessage,
+    canManuallyResendOutboundMessageStatus,
     createOutboundClientMessageId,
     getSendAckState,
     markMessageFailedById,
@@ -2377,7 +2378,16 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return;
         }
 
-        if (originalMsg.status !== 'failed') return;
+        const manualResendStatus = canManuallyResendOutboundMessageStatus(originalMsg.status)
+            ? originalMsg.status
+            : originalMsg.outboxState?.status;
+        if (!canManuallyResendOutboundMessageStatus(manualResendStatus)) return;
+        if (manualResendStatus === 'delivery_unconfirmed') {
+            const confirmedAbsent = window.confirm(
+                'Only retry after checking WhatsApp and confirming the original message was not sent. Retrying an unconfirmed send can otherwise create a duplicate. Continue?'
+            );
+            if (!confirmedAbsent) return;
+        }
 
         // Transition back to sending optimism
         if (viewMode === 'chats' && activeIdRef.current === conversationTarget.id) {

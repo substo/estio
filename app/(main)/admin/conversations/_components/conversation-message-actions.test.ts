@@ -6,6 +6,7 @@ import {
     applyResendAckById,
     applySendAckByCorrelation,
     buildOptimisticTextMessage,
+    canManuallyResendOutboundMessageStatus,
     deriveOutboundWhatsAppUiState,
     getSendAckState,
     getWhatsAppFailureFallbackUiState,
@@ -227,8 +228,9 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
             lastError: 'WhatsApp Web dispatch accepted but no delivery ack arrived.',
         },
     } as any);
-    assert.equal(unconfirmed?.label, 'Sent, confirming');
-    assert.equal(unconfirmed?.canResend, false);
+    assert.equal(unconfirmed?.label, 'Delivery unconfirmed');
+    assert.equal(unconfirmed?.detail, 'No WhatsApp confirmation was received. Check WhatsApp before retrying.');
+    assert.equal(unconfirmed?.canResend, true);
 
     const retrying = deriveOutboundWhatsAppUiState({
         ...baseMessage,
@@ -259,6 +261,13 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
     } as any)?.label, 'Sent');
     assert.equal(deriveOutboundWhatsAppUiState({ ...baseMessage, status: 'delivered' } as any)?.label, 'Delivered');
     assert.equal(deriveOutboundWhatsAppUiState({ ...baseMessage, status: 'read' } as any)?.label, 'Read');
+});
+
+test('manual resend requires an explicit failed or unconfirmed terminal state', () => {
+    assert.equal(canManuallyResendOutboundMessageStatus('failed'), true);
+    assert.equal(canManuallyResendOutboundMessageStatus('delivery_unconfirmed'), true);
+    assert.equal(canManuallyResendOutboundMessageStatus('sending'), false);
+    assert.equal(canManuallyResendOutboundMessageStatus('sent'), false);
 });
 
 test('deriveOutboundWhatsAppUiState keeps SMS fallback gated to number-not-on-WhatsApp', () => {
