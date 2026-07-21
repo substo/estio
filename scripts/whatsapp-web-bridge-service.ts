@@ -12,6 +12,7 @@ import {
 } from "../lib/whatsapp/web-bridge-readiness";
 import { didWhatsAppWebSessionReachReadyBeforeInitializeError } from "../lib/whatsapp/web-bridge-initialize";
 import { classifyWhatsAppWebBridgeUnhandledRejection } from "../lib/whatsapp/web-bridge-process-errors";
+import { requireWhatsAppWebBridgeSentMessageId } from "../lib/whatsapp/web-bridge-send";
 import {
     classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
@@ -1356,11 +1357,12 @@ async function sendMessage(sessionId: string, payload: any) {
             const sent = await withStaleRecovery(session, () => withTimeout(
                 session.client.sendMessage(to, media, {
                     caption: payload.caption || payload.text || undefined,
+                    waitUntilMsgSent: true,
                 }),
                 MEDIA_OPERATION_TIMEOUT_MS,
                 `WhatsApp media send ${sessionId}`
             ));
-            const messageId = sent?.id?._serialized || sent?.id?.id || "";
+            const messageId = requireWhatsAppWebBridgeSentMessageId(sent);
             const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
             const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
             return { messageId, egressProof };
@@ -1377,11 +1379,14 @@ async function sendMessage(sessionId: string, payload: any) {
             : preview.shouldRequestPreview;
         const proofNonce = await beginDeviceTunnelSendProof(session);
         const sent = await withStaleRecovery(session, () => withTimeout(
-            session.client.sendMessage(to, text, { linkPreview: linkPreviewRequested }),
+            session.client.sendMessage(to, text, {
+                linkPreview: linkPreviewRequested,
+                waitUntilMsgSent: true,
+            }),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`
         ));
-        const messageId = sent?.id?._serialized || sent?.id?.id || "";
+        const messageId = requireWhatsAppWebBridgeSentMessageId(sent);
         const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
         const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
         if (linkPreviewRequested) {
