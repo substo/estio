@@ -26,7 +26,12 @@ export function getWhatsAppWebBridgeLinkPreviewPolicy(input: { requested: boolea
 }
 
 export function getWhatsAppWebBridgeDispatchConfirmationPolicy() {
-    return { waitUntilMsgSent: true } as const;
+    // whatsapp-web.js has already created and queued the browser message when
+    // sendMessage returns without waiting for sendMsgResultPromise. Treat the
+    // returned provider id as dispatch acceptance and let message_ack provide
+    // the authoritative sent/delivered/read transition. This avoids holding an
+    // app request open when the Android tunnel is slow or briefly reconnecting.
+    return { waitUntilMsgSent: false } as const;
 }
 
 export class WhatsAppWebBridgeDeliveryUnconfirmedError extends Error {

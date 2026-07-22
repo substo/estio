@@ -28,7 +28,7 @@ import {
 
 const MAX_OUTBOX_ATTEMPTS = Math.max(Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 6), 1);
 const STALE_PROCESSING_LOCK_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_STALE_LOCK_MS || 5 * 60 * 1000), 60_000);
-const DISPATCH_ACK_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_DISPATCH_ACK_TIMEOUT_MS || 2 * 60 * 1000), 30_000);
+const DISPATCH_ACK_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_OUTBOX_DISPATCH_ACK_TIMEOUT_MS || 60 * 1000), 30_000);
 const DISPATCH_LOCK_TTL_MS = Math.max(Number(process.env.WHATSAPP_OUTBOUND_DISPATCH_LOCK_TTL_MS || 5 * 60 * 1000), 60_000);
 
 export type WhatsAppOutboundOutboxProcessOutcome = "success" | "failed" | "deferred" | "dead" | "skipped";
@@ -601,18 +601,35 @@ export async function processWhatsAppOutboundOutboxJob(args: {
         }
         const message = normalizeError(error);
         if (isWhatsAppWebBridgeDeliveryUnconfirmedError(error)) {
+            // message_create can adopt the pending app message while the send
+            // request is still in flight. Include that intermediate state so a
+            // later request timeout cannot leave the row spinning forever.
             await (db as any).whatsAppOutboundOutbox.updateMany({
-                where: { id: row.id, status: "processing" },
+                where: { id: row.id, status: { in: ["processing", "dispatch_accepted"] } },
                 data: buildWhatsAppDeliveryUnconfirmedUpdate({ reason: message, attemptCount }),
             });
             await db.message.updateMany({
-                where: { id: row.messageId, status: { in: ["sending", "queued", "pending", "processing"] } },
+                where: {
+                    id: row.messageId,
+                    status: { in: ["sending", "queued", "pending", "processing", "dispatch_accepted"] },
+                },
                 data: { status: "delivery_unconfirmed", updatedAt: new Date() },
             });
+            const settledState = await (db as any).whatsAppOutboundOutbox.findUnique({
+                where: { id: row.id },
+                select: {
+                    status: true,
+                    message: { select: { status: true } },
+                },
+            });
+            const settledMessageStatus = String(settledState?.message?.status || "delivery_unconfirmed");
+            const settledOutboxStatus = String(settledState?.status || "delivery_unconfirmed");
             logWhatsAppSendLifecycle("delivery_unconfirmed_no_retry", {
                 messageId: row.messageId,
                 outboxJobId: row.id,
                 attemptCount,
+                settledMessageStatus,
+                settledOutboxStatus,
             });
             void publishConversationRealtimeEvent({
                 locationId: row.locationId,
@@ -621,11 +638,11 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 payload: {
                     channel: "whatsapp",
                     messageId: row.messageId,
-                    status: "delivery_unconfirmed",
+                    status: settledMessageStatus,
                     outboxJobId: row.id,
-                    outboxStatus: "delivery_unconfirmed",
+                    outboxStatus: settledOutboxStatus,
                     attemptCount,
-                    lastError: message,
+                    lastError: settledMessageStatus === "delivery_unconfirmed" ? message : null,
                 },
             });
             return { outcome: "success" };

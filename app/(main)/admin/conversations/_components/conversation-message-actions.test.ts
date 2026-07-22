@@ -172,7 +172,7 @@ test('text send ack replaces optimistic body and translation state with server c
 test('deriveOutboundWhatsAppUiState maps queued and scheduled states clearly', () => {
     const queued = deriveOutboundWhatsAppUiState(baseMessage as any, { nowMs: Date.parse('2026-05-21T10:00:00.000Z') });
     assert.equal(queued?.label, 'Queued');
-    assert.equal(queued?.detail, 'Waiting briefly before sending');
+    assert.equal(queued?.detail, 'Starting WhatsApp send');
     assert.equal(queued?.showSpinner, true);
 
     const scheduled = deriveOutboundWhatsAppUiState({
@@ -216,8 +216,8 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
         status: 'dispatch_accepted',
         outboxState: { id: 'job-1', status: 'dispatch_accepted' },
     } as any);
-    assert.equal(dispatchAccepted?.label, 'Sending');
-    assert.equal(dispatchAccepted?.detail, 'Waiting for WhatsApp confirmation');
+    assert.equal(dispatchAccepted?.label, 'Submitted');
+    assert.equal(dispatchAccepted?.detail, 'Submitted to WhatsApp; awaiting its delivery receipt');
 
     const unconfirmed = deriveOutboundWhatsAppUiState({
         ...baseMessage,

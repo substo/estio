@@ -179,10 +179,10 @@ export function deriveOutboundWhatsAppUiState(message: {
 
     if (status === "dispatch_accepted" || outboxStatus === "dispatch_accepted") {
         return {
-            label: "Sending",
+            label: "Submitted",
             tone: "info",
             icon: "send",
-            detail: "Waiting for WhatsApp confirmation",
+            detail: "Submitted to WhatsApp; awaiting its delivery receipt",
             showSpinner: true,
             canResend: false,
             canSmsFallback: false,
@@ -288,7 +288,7 @@ export function deriveOutboundWhatsAppUiState(message: {
         label: "Queued",
         tone: "muted",
         icon: "clock",
-        detail: "Waiting briefly before sending",
+        detail: "Starting WhatsApp send",
         showSpinner: true,
         canResend: false,
         canSmsFallback: false,

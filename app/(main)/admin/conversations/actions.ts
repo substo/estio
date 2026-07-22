@@ -170,7 +170,6 @@ import {
     getReadyWhatsAppWebBridgeSession,
     getWhatsAppWebBridgeConversationChatId,
     isResolvedWhatsAppWebBridgeChatAvailable,
-    isResolvedWhatsAppWebBridgeChatUsableForSend,
     isResolvedWhatsAppWebBridgeChatVerificationUnknown,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
@@ -5077,37 +5076,6 @@ export async function sendReply(
 
             const windowError = requireTemplateWindowForCloud(contact as any, transportState.transport);
             if (windowError) return windowError;
-
-            if (transportState.transport === "web_bridge") {
-                try {
-                    const preferredChatId = await getWhatsAppWebBridgeConversationChatId({
-                        locationId: location.id,
-                        conversationId: conversation.id,
-                    });
-                    const resolvedChat = await resolveWhatsAppWebBridgeChatForPhone({
-                        locationId: location.id,
-                        phone: contact.phone,
-                        preferredChatId,
-                    });
-                    if (!isResolvedWhatsAppWebBridgeChatAvailable(resolvedChat)
-                        && !isResolvedWhatsAppWebBridgeChatUsableForSend(resolvedChat)) {
-                        return {
-                            success: false,
-                            error: "This number is not available on WhatsApp.",
-                            errorCode: "whatsapp_number_not_found",
-                        };
-                    }
-                } catch (error: any) {
-                    const classification = classifyOutboundSendFailure(error);
-                    return {
-                        success: false,
-                        error: classification.label || error?.message || "Could not verify WhatsApp availability.",
-                        errorCode: classification.code === "WHATSAPP_NUMBER_NOT_FOUND"
-                            ? "whatsapp_number_not_found"
-                            : "whatsapp_unavailable",
-                    };
-                }
-            }
 
             const enqueueResult = await enqueueWhatsAppOutbound({
                 locationId: location.id,

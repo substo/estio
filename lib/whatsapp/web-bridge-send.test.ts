@@ -27,8 +27,8 @@ test("device-egress text sends do not let a blocking link preview prevent dispat
     });
 });
 
-test("device-egress waits for WhatsApp's network send result before accepting an id", () => {
-    assert.deepEqual(getWhatsAppWebBridgeDispatchConfirmationPolicy(), { waitUntilMsgSent: true });
+test("device-egress accepts the local provider id without blocking on the network send promise", () => {
+    assert.deepEqual(getWhatsAppWebBridgeDispatchConfirmationPolicy(), { waitUntilMsgSent: false });
 });
 
 test("extracts a serialized WhatsApp provider message id", () => {
