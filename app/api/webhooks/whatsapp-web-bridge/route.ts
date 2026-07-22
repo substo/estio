@@ -195,7 +195,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ status: "processed" });
         }
 
-        if (event === "message" || event === "message_create") {
+        if (event === "message" || event === "message_create" || event === "message_reconcile") {
             await markValidBridgeWebhookReceived(locationId, sessionId);
             const message = body?.message || {};
             const messageIdentity = resolveInboundWhatsAppContactIdentity({ message, phone: body?.phone });

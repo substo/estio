@@ -51,6 +51,11 @@ import {
 import { fingerprintOperationalPath, redactOperationalIdentifier } from "../lib/device-tunnel/operational-redaction";
 import { buildLightweightWhatsAppWebBridgeChat } from "../lib/whatsapp/web-bridge-chat-inventory";
 import { sortWhatsAppWebBridgeChatsByMostRecent } from "../lib/whatsapp/web-bridge-chat-resolution";
+import {
+    selectWhatsAppWebBridgeReconciliationChats,
+    selectWhatsAppWebBridgeReconciliationMessages,
+    WHATSAPP_WEB_BRIDGE_RECONCILIATION_MESSAGES_PER_CHAT,
+} from "../lib/whatsapp/web-bridge-reconciliation";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -109,6 +114,8 @@ type ManagedSession = {
     authDurableReady?: boolean;
     authDurableRequired?: boolean;
     initialCheckpointInFlight?: boolean;
+    reconciliationInFlight?: Promise<void> | null;
+    lastReconciliationAt?: Date | null;
 };
 
 const sessions = new Map<string, ManagedSession>();
@@ -788,6 +795,88 @@ async function fetchChatMessagesWithOpaqueFallback(session: ManagedSession, chat
     }
 }
 
+async function getLightweightReconciliationMessages(client: any, chatIds: string[]) {
+    return withTimeout(client.pupPage.evaluate((targetChatIds: string[], perChatLimit: number) => {
+        const collections = (window as any).require("WAWebCollections");
+        const widFactory = (window as any).require("WAWebWidFactory");
+        const reconciled: any[] = [];
+        for (const targetChatId of targetChatIds) {
+            const targetWid = widFactory.createWid(targetChatId);
+            const chat = collections?.Chat?.get(targetWid) || collections?.Chat?.get(targetChatId);
+            if (!chat?.msgs?.getModelsArray) continue;
+            const messages = chat.msgs.getModelsArray()
+                .filter((message: any) => !message?.isNotification)
+                .sort((left: any, right: any) => Number(left?.t || 0) - Number(right?.t || 0))
+                .slice(-perChatLimit);
+            for (const message of messages) {
+                const id = String(message?.id?._serialized || message?.id || "");
+                const remote = String(message?.id?.remote?._serialized || message?.id?.remote || targetChatId);
+                const fromMe = Boolean(message?.id?.fromMe ?? message?.fromMe);
+                const mediaData = message?.mediaData || {};
+                reconciled.push({
+                    id: { _serialized: id },
+                    from: fromMe ? "" : remote,
+                    to: fromMe ? remote : "",
+                    fromMe,
+                    body: String(message?.body || ""),
+                    type: String(message?.type || "text"),
+                    timestamp: Number(message?.t || message?.timestamp || 0),
+                    hasMedia: Boolean(message?.isMedia || message?.mediaData || message?.directPath),
+                    ack: Number(message?.ack || 0),
+                    _data: {
+                        caption: String(message?.caption || ""),
+                        notifyName: String(message?.notifyName || message?.pushName || ""),
+                        pushName: String(message?.pushName || ""),
+                        mimetype: String(message?.mimetype || mediaData?.mimetype || ""),
+                        filename: String(message?.filename || message?.title || ""),
+                        size: Number(message?.size || mediaData?.size || 0),
+                    },
+                });
+            }
+        }
+        return reconciled;
+    }, chatIds, WHATSAPP_WEB_BRIDGE_RECONCILIATION_MESSAGES_PER_CHAT), OPERATION_TIMEOUT_MS, "WhatsApp reconciliation snapshot");
+}
+
+async function reconcileManagedSession(session: ManagedSession) {
+    if (!session.ready || session.restarting || !session.client || session.shuttingDown) return;
+    if (session.reconciliationInFlight) return session.reconciliationInFlight;
+    const reconciliation = (async () => {
+        await assertManagedSessionOwnership(session);
+        const chats = selectWhatsAppWebBridgeReconciliationChats(await getLightweightChats(session.client));
+        const chatIds = chats.map((chat) => String(chat?.id?._serialized || chat?.id || "").trim()).filter(Boolean);
+        const messages = await getLightweightReconciliationMessages(session.client, chatIds);
+        const reconciliationMessages = selectWhatsAppWebBridgeReconciliationMessages(messages);
+        let emitted = 0;
+        for (const message of reconciliationMessages) {
+            if (!session.ready || session.restarting || session.shuttingDown) break;
+            const messageId = getSerializedMessageId(message);
+            if (!messageId) continue;
+            const delivered = await emitSessionEvent(session, {
+                event: "message_reconcile",
+                locationId: session.locationId,
+                sessionId: session.sessionId,
+                phone: session.phone,
+                message: await serializeMessage(message, { includeMedia: false }),
+            });
+            if (delivered) emitted += 1;
+        }
+        session.lastReconciliationAt = new Date();
+        console.info("[WhatsApp Web Bridge] Reconciliation completed", {
+            sessionRef: bridgeRef(session.sessionId, "session"),
+            chatCount: chats.length,
+            messageCount: messages.length,
+            emitted,
+        });
+    })();
+    session.reconciliationInFlight = reconciliation;
+    try {
+        await reconciliation;
+    } finally {
+        if (session.reconciliationInFlight === reconciliation) session.reconciliationInFlight = null;
+    }
+}
+
 async function downloadMessageMediaWithRetry(message: any, messageId: string) {
     let lastError: unknown = null;
     for (let attempt = 1; attempt <= MEDIA_DOWNLOAD_RETRY_ATTEMPTS; attempt++) {
@@ -1246,6 +1335,8 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         authDurableRequired,
         shuttingDown: false,
         initialCheckpointInFlight: false,
+        reconciliationInFlight: null,
+        lastReconciliationAt: null,
     };
     sessions.set(sessionId, managed);
 
@@ -1308,6 +1399,12 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         }
         if (probed) {
             restartMetadataBySession.delete(sessionId);
+            await reconcileManagedSession(managed).catch(() => {
+                console.warn("[WhatsApp Web Bridge] Initial reconciliation failed", {
+                    sessionRef: bridgeRef(sessionId, "session"),
+                    code: "INITIAL_RECONCILIATION_FAILED",
+                });
+            });
             await emitSessionEvent(managed, { event: "ready", locationId, sessionId, phone: managed.phone });
         }
     });
@@ -1775,6 +1872,15 @@ setInterval(() => {
         }
         if (!session.ready || session.restarting || !session.client) continue;
         void activelyProbeManagedSession(session, true);
+        const reconciliationAgeMs = Date.now() - (session.lastReconciliationAt?.getTime() || 0);
+        if (reconciliationAgeMs >= 60_000) {
+            void reconcileManagedSession(session).catch(() => {
+                console.warn("[WhatsApp Web Bridge] Reconciliation failed", {
+                    sessionRef: bridgeRef(session.sessionId, "session"),
+                    code: "RECONCILIATION_FAILED",
+                });
+            });
+        }
     }
 }, WATCHDOG_INTERVAL_MS).unref?.();
 
