@@ -125,11 +125,28 @@ function getOutboundWebBridgeOutboxStatusPriority(status: unknown) {
     return 5;
 }
 
-function getOutboundWebBridgeManualRetryMatch(candidate: any, args: {
+function dateMs(value: unknown) {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = new Date(value as any).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function getOutboundWebBridgeManualRetryMatch(candidate: any, args: {
     timestamp: Date;
     body?: string | null;
 }) {
-    const diffMs = Math.abs(new Date(candidate?.createdAt).getTime() - args.timestamp.getTime());
+    const timestampMs = args.timestamp.getTime();
+    const latestAllowedReferenceMs = timestampMs + 60 * 1000;
+    const referenceTimes = [
+        candidate?.createdAt,
+        candidate?.outboundWhatsAppOutbox?.scheduledAt,
+        candidate?.outboundWhatsAppOutbox?.updatedAt,
+    ]
+        .map(dateMs)
+        .filter((value): value is number => value !== null && value <= latestAllowedReferenceMs);
+    const diffMs = referenceTimes.length > 0
+        ? Math.min(...referenceTimes.map((value) => Math.abs(value - timestampMs)))
+        : Number.POSITIVE_INFINITY;
     const webhookBody = normalizeOutboundWebBridgeRetryBodyForMatch(args.body);
     const candidateBody = normalizeOutboundWebBridgeRetryBodyForMatch(candidate?.body);
     const bodyMatches = !!webhookBody && !!candidateBody && webhookBody === candidateBody;
@@ -143,6 +160,18 @@ function getOutboundWebBridgeManualRetryMatch(candidate: any, args: {
         outboxStatusPriority,
         matches: recentTimestampMatch || manualRetryBodyMatch,
     };
+}
+
+export function getInitialWhatsAppSyncedMessageStatus(input: {
+    direction: unknown;
+    source: unknown;
+}) {
+    const direction = String(input.direction || "").trim().toLowerCase();
+    if (direction === "inbound") return "received";
+    if (String(input.source || "").trim().toLowerCase() === "whatsapp_web_bridge") {
+        return "dispatch_accepted";
+    }
+    return "sent";
 }
 
 function hasStableWebBridgeContactIdentityMatch(identity: any, contact: WhatsAppIdentityNamedContact) {
@@ -456,6 +485,7 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
     const candidateWindowStart = new Date(args.timestamp.getTime() - (
         webhookBody ? OUTBOUND_WEB_BRIDGE_MANUAL_RETRY_WINDOW_MS : OUTBOUND_WEB_BRIDGE_RECENT_RECONCILE_WINDOW_MS
     ));
+    const candidateWindowEnd = new Date(args.timestamp.getTime() + 60 * 1000);
     const candidates = await (db as any).message.findMany({
         where: {
             conversationId: args.conversationId,
@@ -466,7 +496,13 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
                 { status: { in: ["dispatch_accepted", "delivery_unconfirmed"] } },
             ],
             clientMessageId: { not: null },
-            createdAt: { gte: candidateWindowStart },
+            AND: [{
+                OR: [
+                    { createdAt: { gte: candidateWindowStart, lte: candidateWindowEnd } },
+                    { outboundWhatsAppOutbox: { is: { scheduledAt: { gte: candidateWindowStart, lte: candidateWindowEnd } } } },
+                    { outboundWhatsAppOutbox: { is: { updatedAt: { gte: candidateWindowStart, lte: candidateWindowEnd } } } },
+                ],
+            }],
             outboundWhatsAppOutbox: {
                 is: {
                     transport: "web_bridge",
@@ -484,6 +520,8 @@ async function tryReconcileOutboundWebhookToPendingMessage(args: {
                     id: true,
                     transport: true,
                     status: true,
+                    scheduledAt: true,
+                    updatedAt: true,
                 },
             },
         },
@@ -915,7 +953,13 @@ async function tryAdoptOutboundWebBridgeLidWebhookToAppMessage(args: {
                 { wamId: null },
                 { status: { in: ["dispatch_accepted", "delivery_unconfirmed"] } },
             ],
-            createdAt: { gte: windowStart, lte: windowEnd },
+            AND: [{
+                OR: [
+                    { createdAt: { gte: windowStart, lte: windowEnd } },
+                    { outboundWhatsAppOutbox: { is: { scheduledAt: { gte: windowStart, lte: windowEnd } } } },
+                    { outboundWhatsAppOutbox: { is: { updatedAt: { gte: windowStart, lte: windowEnd } } } },
+                ],
+            }],
             conversation: { locationId: args.locationId },
             outboundWhatsAppOutbox: {
                 is: {
@@ -2110,7 +2154,7 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
                 wamId: wamId,
                 type: "WhatsApp",
                 direction: direction,
-                status: direction === "inbound" ? "received" : "sent",
+                status: getInitialWhatsAppSyncedMessageStatus({ direction, source }),
                 body: body,
                 source: source,
                 createdAt: timestamp,

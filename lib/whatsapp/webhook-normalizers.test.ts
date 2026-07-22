@@ -10,6 +10,8 @@ import {
 } from "@/lib/whatsapp/webhook-normalizers";
 import {
     hasWebBridgeIdentityNameConflict,
+    getInitialWhatsAppSyncedMessageStatus,
+    getOutboundWebBridgeManualRetryMatch,
     normalizeOutboundWebBridgeRetryBodyForMatch,
     selectPreferredWhatsAppLidContact,
     shouldRejectWebBridgeOutboundLidForOwnContact,
@@ -81,6 +83,76 @@ test("normalizeOutboundWebBridgeRetryBodyForMatch preserves content while normal
         normalizeOutboundWebBridgeRetryBodyForMatch("Hello there 1"),
         normalizeOutboundWebBridgeRetryBodyForMatch("Hello there 2")
     );
+});
+
+test("outbound Web Bridge retry matching uses the latest durable outbox activity", () => {
+    const timestamp = new Date("2026-07-22T09:34:34.000Z");
+    const match = getOutboundWebBridgeManualRetryMatch({
+        createdAt: new Date("2026-07-22T06:42:17.841Z"),
+        body: "Retry this message",
+        outboundWhatsAppOutbox: {
+            scheduledAt: new Date("2026-07-22T09:34:31.385Z"),
+            updatedAt: new Date("2026-07-22T09:34:33.200Z"),
+            status: "processing",
+        },
+    }, {
+        timestamp,
+        body: "Retry this message",
+    });
+
+    assert.equal(match.matches, true);
+    assert.equal(match.bodyMatches, true);
+    assert.equal(match.diffMs, 800);
+});
+
+test("an old provider event still matches the original logical message after later retry activity", () => {
+    const match = getOutboundWebBridgeManualRetryMatch({
+        createdAt: new Date("2026-07-22T06:42:17.841Z"),
+        body: "Same body",
+        outboundWhatsAppOutbox: {
+            scheduledAt: new Date("2026-07-22T09:34:31.385Z"),
+            updatedAt: new Date("2026-07-22T12:00:00.000Z"),
+            status: "delivery_unconfirmed",
+        },
+    }, {
+        timestamp: new Date("2026-07-22T06:42:18.000Z"),
+        body: "Same body",
+    });
+
+    assert.equal(match.matches, true);
+    assert.equal(match.diffMs, 159);
+});
+
+test("future outbox activity cannot make an unrelated old provider event match", () => {
+    const match = getOutboundWebBridgeManualRetryMatch({
+        createdAt: new Date("2026-07-22T00:00:00.000Z"),
+        body: "Same body",
+        outboundWhatsAppOutbox: {
+            scheduledAt: new Date("2026-07-22T09:34:31.385Z"),
+            updatedAt: new Date("2026-07-22T12:00:00.000Z"),
+            status: "delivery_unconfirmed",
+        },
+    }, {
+        timestamp: new Date("2026-07-22T06:42:18.000Z"),
+        body: "Same body",
+    });
+
+    assert.equal(match.matches, false);
+});
+
+test("outbound Web Bridge ingestion waits for a real acknowledgement before showing sent", () => {
+    assert.equal(getInitialWhatsAppSyncedMessageStatus({
+        direction: "outbound",
+        source: "whatsapp_web_bridge",
+    }), "dispatch_accepted");
+    assert.equal(getInitialWhatsAppSyncedMessageStatus({
+        direction: "outbound",
+        source: "whatsapp_native",
+    }), "sent");
+    assert.equal(getInitialWhatsAppSyncedMessageStatus({
+        direction: "inbound",
+        source: "whatsapp_web_bridge",
+    }), "received");
 });
 
 test("selectPreferredWhatsAppLidContact prefers mapped phone contact over LID placeholder", () => {
