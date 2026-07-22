@@ -332,6 +332,7 @@ export function ConversationComposer({
     const [scheduleLocal, setScheduleLocal] = useState(() => getDefaultScheduleLocalValue());
     const [scheduleError, setScheduleError] = useState<string | null>(null);
     const [scheduling, setScheduling] = useState(false);
+    const [blockedSendReason, setBlockedSendReason] = useState<string | null>(null);
     const {
         selectedChannel,
         selectChannel,
@@ -427,7 +428,7 @@ export function ConversationComposer({
         handleSend,
     } = useConversationComposerSend({
         draft,
-        isUnavailable,
+        isUnavailable: isSendUnavailable,
         isRecording: isRecordingRef,
         selectedChannel,
         selectedReplyLanguage,
@@ -447,6 +448,24 @@ export function ConversationComposer({
         },
         clearTranslationPreview,
     });
+    const getBlockedSendReason = () => {
+        if (!draft.trim()) return "Write a message before sending.";
+        if (isRecordingRef.current) return "Stop recording before sending a text message.";
+        if (sendUnavailableReason) return sendUnavailableReason;
+        if (isUnavailable) return "Composer unavailable until a contact is selected.";
+        return null;
+    };
+    const handleSendButtonPress = (mode: "original" | "translated") => {
+        const reason = getBlockedSendReason();
+        if (reason) {
+            setBlockedSendReason(reason);
+            return;
+        }
+        setBlockedSendReason(null);
+        void handleSend(mode);
+    };
+    const sendButtonBlocked = isSendUnavailable || isRecordingRef.current || !draft.trim();
+    const sendButtonBlockedClassName = sendButtonBlocked ? "opacity-60" : "";
     const {
         fileInputRef,
         isRecording,
@@ -761,9 +780,9 @@ export function ConversationComposer({
                     </div>
                 ) : null}
 
-                {(isUnavailable || sendUnavailableReason) && (
+                {(isUnavailable || sendUnavailableReason || blockedSendReason) && (
                     <div className="px-1 pb-1 text-[11px] text-amber-700">
-                        {sendUnavailableReason || "Composer unavailable until a contact is selected."}
+                        {blockedSendReason || sendUnavailableReason || "Composer unavailable until a contact is selected."}
                     </div>
                 )}
 
@@ -870,7 +889,7 @@ export function ConversationComposer({
                                 if (isNoteMode) {
                                     handleAddNote();
                                 } else {
-                                    handleSend("original");
+                                    handleSendButtonPress("original");
                                 }
                             }
                         }}
@@ -1301,10 +1320,12 @@ export function ConversationComposer({
                             )}
                             {canUseWriteTranslation && hasTranslationPreview ? (
                                 <Button
+                                    type="button"
                                     size="sm"
-                                    className={cn(MOBILE_PRIMARY_SEND_BUTTON_CLASS, "transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName)}
-                                    onClick={() => handleSend("translated")}
-                                    disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
+                                    className={cn(MOBILE_PRIMARY_SEND_BUTTON_CLASS, "transition-all duration-150", resolvedSurfaceTheme.composerPrimaryButtonClassName, sendButtonBlockedClassName)}
+                                    onClick={() => handleSendButtonPress("translated")}
+                                    disabled={sending}
+                                    aria-disabled={isSendUnavailable || isRecording || !draft.trim()}
                                     title="Sends the previewed customer-language version and preserves your working draft."
                                     aria-label={`Send in ${autoTranslateTargetLabel}`}
                                 >
@@ -1313,14 +1334,17 @@ export function ConversationComposer({
                                 </Button>
                             ) : willAutoTranslate ? (
                                 <Button
+                                    type="button"
                                     size="sm"
                                     className={cn(
                                         MOBILE_PRIMARY_SEND_BUTTON_CLASS,
                                         "gap-1 transition-all duration-150",
-                                        draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName
+                                        draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName,
+                                        sendButtonBlockedClassName
                                     )}
-                                    onClick={() => handleSend("original")}
-                                    disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
+                                    onClick={() => handleSendButtonPress("original")}
+                                    disabled={sending}
+                                    aria-disabled={isSendUnavailable || isRecording || !draft.trim()}
                                     title={`Message will be prepared in ${autoTranslateTargetLabel} before sending`}
                                     aria-label={`Send in ${autoTranslateTargetLabel}`}
                                 >
@@ -1329,14 +1353,17 @@ export function ConversationComposer({
                                 </Button>
                             ) : (
                                 <Button
+                                    type="button"
                                     size="sm"
                                     className={cn(
                                         MOBILE_PRIMARY_SEND_BUTTON_CLASS,
                                         "transition-all duration-150",
-                                        draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName
+                                        draft.trim() ? resolvedSurfaceTheme.composerPrimaryButtonClassName : resolvedSurfaceTheme.composerPrimaryButtonDisabledClassName,
+                                        sendButtonBlockedClassName
                                     )}
-                                    onClick={() => handleSend("original")}
-                                    disabled={isSendUnavailable || sending || isRecording || !draft.trim()}
+                                    onClick={() => handleSendButtonPress("original")}
+                                    disabled={sending}
+                                    aria-disabled={isSendUnavailable || isRecording || !draft.trim()}
                                     title={sendUnavailableReason || undefined}
                                     aria-label="Send message"
                                 >
