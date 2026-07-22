@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
     extractPhoneFromWhatsAppWebId,
     isResolvedWhatsAppWebBridgeChatAvailable,
+    isResolvedWhatsAppWebBridgeChatUsableForSend,
+    isResolvedWhatsAppWebBridgeChatVerificationUnknown,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
     selectWhatsAppWebBridgeConversationChatId,
@@ -67,6 +69,20 @@ test("resolved web bridge availability rejects synthetic phone fallback", () => 
         chatId: "35796407286@c.us",
         source: "getNumberId",
     }), true);
+});
+
+test("unverified canonical phone candidate is usable for provider-confirmed send", () => {
+    const result = {
+        chatId: "48600000000@c.us",
+        source: "registration_check_unavailable",
+        available: null,
+        verification: "unknown" as const,
+        reason: "registration_check_unavailable",
+    };
+
+    assert.equal(isResolvedWhatsAppWebBridgeChatAvailable(result), false);
+    assert.equal(isResolvedWhatsAppWebBridgeChatVerificationUnknown(result), true);
+    assert.equal(isResolvedWhatsAppWebBridgeChatUsableForSend(result), true);
 });
 
 test("conversation sync chat selection prefers a valid provider identity", () => {

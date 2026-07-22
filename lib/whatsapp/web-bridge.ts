@@ -8,6 +8,14 @@ import {
     WHATSAPP_WEB_BRIDGE_CHAT_LIST_TIMEOUT_MS,
     WHATSAPP_WEB_BRIDGE_HISTORY_TIMEOUT_MS,
 } from "@/lib/whatsapp/web-bridge-chat-inventory";
+import {
+    isWhatsAppWebBridgeRecipientCandidateUsable,
+    isWhatsAppWebBridgeRecipientVerificationUnknown,
+    isWhatsAppWebBridgeRecipientVerified,
+    type WhatsAppWebBridgeResolvedChat,
+} from "@/lib/whatsapp/web-bridge-recipient-resolution";
+
+export type { WhatsAppWebBridgeResolvedChat } from "@/lib/whatsapp/web-bridge-recipient-resolution";
 
 export const WHATSAPP_WEB_BRIDGE_PROVIDER = "whatsapp_web_bridge";
 export const WHATSAPP_WEB_BRIDGE_TRANSPORT = "web_bridge";
@@ -77,14 +85,6 @@ export type WhatsAppWebBridgeChatIdentity = {
     identityKind: "phone" | "lid" | "unsupported";
     isSupported: boolean;
     reason?: "missing_id" | "group_unsupported" | "broadcast_unsupported" | "newsletter_unsupported" | "lid_identity" | "invalid_phone";
-};
-
-export type WhatsAppWebBridgeResolvedChat = {
-    chatId?: string | null;
-    source?: string | null;
-    available?: boolean | null;
-    reason?: string | null;
-    contactIdentity?: any;
 };
 
 const DEFAULT_BRIDGE_BASE_URL = "http://127.0.0.1:3218";
@@ -383,7 +383,15 @@ export function isResolvedWhatsAppWebBridgeChatAvailable(result: WhatsAppWebBrid
     if (source === "not_found" || source === "phone_fallback") return false;
     if (result?.available === false) return false;
 
-    return true;
+    return isWhatsAppWebBridgeRecipientVerified(result);
+}
+
+export function isResolvedWhatsAppWebBridgeChatVerificationUnknown(result: WhatsAppWebBridgeResolvedChat | null | undefined) {
+    return isWhatsAppWebBridgeRecipientVerificationUnknown(result);
+}
+
+export function isResolvedWhatsAppWebBridgeChatUsableForSend(result: WhatsAppWebBridgeResolvedChat | null | undefined) {
+    return isWhatsAppWebBridgeRecipientCandidateUsable(result);
 }
 
 export function selectWhatsAppWebBridgeConversationChatId(

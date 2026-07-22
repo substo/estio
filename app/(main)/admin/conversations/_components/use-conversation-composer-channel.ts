@@ -17,6 +17,7 @@ import {
 
 const CHANNEL_CAPABILITY_CACHE_PREFIX = "estio:conversation-channel-capabilities:v2";
 const CHANNEL_CAPABILITY_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
+const CHANNEL_CAPABILITY_NEGATIVE_CACHE_MAX_AGE_MS = 30 * 1000;
 
 export type WhatsAppEligibilityState =
     | { status: "checking" }
@@ -55,6 +56,16 @@ type CachedConversationChannelCapabilities = {
     savedAt: number;
     capabilities: ConversationChannelCapabilities;
 };
+
+export function getConversationChannelCapabilityCacheMaxAge(capabilities: ConversationChannelCapabilities) {
+    const whatsApp = capabilities.WhatsApp;
+    if (whatsApp.reason === "unknown" || whatsApp.status === "unknown" || whatsApp.status === "checking") return 0;
+    if (whatsApp.available) return CHANNEL_CAPABILITY_CACHE_MAX_AGE_MS;
+    if (whatsApp.reason === "missing_phone" || whatsApp.reason === "masked_phone" || whatsApp.reason === "invalid_phone") {
+        return CHANNEL_CAPABILITY_CACHE_MAX_AGE_MS;
+    }
+    return CHANNEL_CAPABILITY_NEGATIVE_CACHE_MAX_AGE_MS;
+}
 
 function getDefaultCapabilitiesForConversation(conversation: Conversation | null): ConversationChannelCapabilities {
     const defaults = createDefaultChannelCapabilities();
@@ -123,8 +134,9 @@ function readCachedCapabilities(cacheKey: string | null): ConversationChannelCap
         const raw = getSessionStorage()?.getItem(cacheKey);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as CachedConversationChannelCapabilities;
-        if (!isConversationChannelCapabilityCacheFresh(parsed.savedAt)) return null;
         if (!parsed.capabilities?.WhatsApp || !parsed.capabilities?.SMS_RELAY) return null;
+        const maxAgeMs = getConversationChannelCapabilityCacheMaxAge(parsed.capabilities);
+        if (!maxAgeMs || !isConversationChannelCapabilityCacheFresh(parsed.savedAt, Date.now(), maxAgeMs)) return null;
         return parsed.capabilities;
     } catch {
         return null;

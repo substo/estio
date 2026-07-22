@@ -6,11 +6,13 @@ import type { Conversation } from "@/lib/ghl/conversations";
 import {
     buildConversationChannelCapabilityCacheKey,
     deriveProvisionalConversationChannelCapabilities,
+    getConversationChannelCapabilityCacheMaxAge,
     isConversationChannelCapabilityCacheFresh,
     selectComposerChannelAfterCapabilityUpdate,
 } from "./use-conversation-composer-channel";
 import {
     availableChannel,
+    unverifiedAvailableChannel,
     unavailableChannel,
     type ConversationChannelCapabilities,
 } from "@/lib/conversations/channel-capabilities";
@@ -49,6 +51,40 @@ test("channel capability cache freshness has a hard max age", () => {
     assert.equal(isConversationChannelCapabilityCacheFresh(now - 60_000, now, 120_000), true);
     assert.equal(isConversationChannelCapabilityCacheFresh(now - 180_000, now, 120_000), false);
     assert.equal(isConversationChannelCapabilityCacheFresh(0, now, 120_000), false);
+});
+
+test("provider-negative WhatsApp capability cache expires quickly", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: unavailableChannel("whatsapp_number_not_found"),
+        SMS: unavailableChannel("ghl_sms_not_configured"),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+
+    assert.equal(getConversationChannelCapabilityCacheMaxAge(capabilities), 30_000);
+});
+
+test("unknown WhatsApp capability is never cached", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: { status: "unknown", available: false, reason: "unknown", label: "Retry verification." },
+        SMS: unavailableChannel("ghl_sms_not_configured"),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+
+    assert.equal(getConversationChannelCapabilityCacheMaxAge(capabilities), 0);
+});
+
+test("enabled but unverified WhatsApp capability is never cached", () => {
+    const capabilities: ConversationChannelCapabilities = {
+        WhatsApp: unverifiedAvailableChannel("Registration will be confirmed when sending."),
+        SMS: unavailableChannel("ghl_sms_not_configured"),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+
+    assert.equal(capabilities.WhatsApp.available, true);
+    assert.equal(getConversationChannelCapabilityCacheMaxAge(capabilities), 0);
 });
 
 test("provisional channel state allows Android SMS from local evidence", () => {

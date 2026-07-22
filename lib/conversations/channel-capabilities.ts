@@ -39,8 +39,12 @@ const DEFAULT_UNAVAILABLE_LABELS: Record<Exclude<ChannelUnavailableReason, "unkn
     whatsapp_number_not_found: "This number is not available on WhatsApp.",
 };
 
-export function availableChannel(): ConversationChannelCapability {
-    return { status: "available", available: true, reason: null, label: null };
+export function availableChannel(label?: string | null): ConversationChannelCapability {
+    return { status: "available", available: true, reason: null, label: label || null };
+}
+
+export function unverifiedAvailableChannel(label = "Channel availability will be confirmed when sending."): ConversationChannelCapability {
+    return { status: "unknown", available: true, reason: "unknown", label };
 }
 
 export function unavailableChannel(reason: ChannelUnavailableReason, label?: string | null): ConversationChannelCapability {

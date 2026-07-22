@@ -11,6 +11,7 @@ import { createWhatsAppMediaReadUrl } from "@/lib/whatsapp/media-r2";
 import {
     getWhatsAppWebBridgeConversationChatId,
     isResolvedWhatsAppWebBridgeChatAvailable,
+    isResolvedWhatsAppWebBridgeChatUsableForSend,
     resolveWhatsAppWebBridgeChatForPhone,
     sendWhatsAppWebBridgeMessage,
     WHATSAPP_WEB_BRIDGE_PROVIDER,
@@ -57,7 +58,8 @@ async function resolveWebBridgeRecipient(row: any, normalizedPhone: string) {
             locationId: row.locationId,
             phone: normalizedPhone,
         });
-        if (!isResolvedWhatsAppWebBridgeChatAvailable(resolved)) {
+        if (!isResolvedWhatsAppWebBridgeChatAvailable(resolved)
+            && !isResolvedWhatsAppWebBridgeChatUsableForSend(resolved)) {
             throw new Error("This number is not available on WhatsApp.");
         }
         return String(resolved.chatId || "").trim();

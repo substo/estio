@@ -170,6 +170,8 @@ import {
     getReadyWhatsAppWebBridgeSession,
     getWhatsAppWebBridgeConversationChatId,
     isResolvedWhatsAppWebBridgeChatAvailable,
+    isResolvedWhatsAppWebBridgeChatUsableForSend,
+    isResolvedWhatsAppWebBridgeChatVerificationUnknown,
     normalizeWhatsAppWebChatId,
     parseWhatsAppWebChatIdentity,
     resolveWhatsAppWebBridgeChatForPhone,
@@ -222,6 +224,7 @@ import {
 } from "@/lib/conversations/outbound-send-failure";
 import {
     availableChannel,
+    unverifiedAvailableChannel,
     unavailableChannel,
     type ConversationChannelCapabilities,
 } from "@/lib/conversations/channel-capabilities";
@@ -5086,7 +5089,8 @@ export async function sendReply(
                         phone: contact.phone,
                         preferredChatId,
                     });
-                    if (!isResolvedWhatsAppWebBridgeChatAvailable(resolvedChat)) {
+                    if (!isResolvedWhatsAppWebBridgeChatAvailable(resolvedChat)
+                        && !isResolvedWhatsAppWebBridgeChatUsableForSend(resolvedChat)) {
                         return {
                             success: false,
                             error: "This number is not available on WhatsApp.",
@@ -8176,7 +8180,9 @@ async function resolveConversationChannelCapabilitiesForLocation(
                 });
                 whatsAppCapability = isResolvedWhatsAppWebBridgeChatAvailable(resolved)
                     ? availableChannel()
-                    : unavailableChannel("whatsapp_number_not_found", "This number is not available on WhatsApp.");
+                    : isResolvedWhatsAppWebBridgeChatVerificationUnknown(resolved)
+                        ? unverifiedAvailableChannel("WhatsApp registration will be confirmed when sending.")
+                        : unavailableChannel("whatsapp_number_not_found", "This number is not available on WhatsApp.");
             } catch (error: any) {
                 const classification = classifyOutboundSendFailure(error);
                 if (classification.code === "WHATSAPP_NUMBER_NOT_FOUND") {

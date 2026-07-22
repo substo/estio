@@ -339,6 +339,7 @@ export function ConversationComposer({
         isSmsDisabled,
         isSmsRelayDisabled,
         isEmailDisabled,
+        capabilities,
         channelSelectorTitle,
         noAvailableChannelReason,
     } = useConversationComposerChannel({
@@ -396,6 +397,11 @@ export function ConversationComposer({
         onAddActivityEntry,
     });
     const sendUnavailableReason = disabledReason || noAvailableChannelReason || channelSelectorTitle;
+    const whatsAppVerificationNotice = selectedChannel === "WhatsApp"
+        && capabilities.WhatsApp.available
+        && capabilities.WhatsApp.status === "unknown"
+        ? capabilities.WhatsApp.label
+        : null;
     const isSendUnavailable = isUnavailable || !!noAvailableChannelReason || !!channelSelectorTitle;
     const canScheduleChannel = selectedChannel === "WhatsApp" || selectedChannel === "SMS_RELAY";
     const {
@@ -827,6 +833,12 @@ export function ConversationComposer({
                         >
                             <X className="h-3.5 w-3.5" />
                         </Button>
+                    </div>
+                )}
+
+                {whatsAppVerificationNotice && !isNoteMode && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                        {whatsAppVerificationNotice}
                     </div>
                 )}
 

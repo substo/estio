@@ -56,6 +56,7 @@ import {
     selectWhatsAppWebBridgeReconciliationMessages,
     WHATSAPP_WEB_BRIDGE_RECONCILIATION_MESSAGES_PER_CHAT,
 } from "../lib/whatsapp/web-bridge-reconciliation";
+import { buildWhatsAppWebBridgeRecipientResolution } from "../lib/whatsapp/web-bridge-recipient-resolution";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -155,6 +156,14 @@ const NON_READY_STALE_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_NON_R
 const PROTOCOL_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_PROTOCOL_TIMEOUT_MS || 120_000), 30_000);
 const INITIALIZE_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_INITIALIZE_TIMEOUT_MS || 120_000), 10_000);
 const OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_OPERATION_TIMEOUT_MS || 30_000), 5_000);
+const RECIPIENT_REGISTRATION_TIMEOUT_MS = Math.min(
+    Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_RECIPIENT_REGISTRATION_TIMEOUT_MS || 8_000), 2_000),
+    OPERATION_TIMEOUT_MS,
+);
+const RECIPIENT_CHAT_SCAN_TIMEOUT_MS = Math.min(
+    Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_RECIPIENT_CHAT_SCAN_TIMEOUT_MS || 5_000), 1_000),
+    OPERATION_TIMEOUT_MS,
+);
 const SESSION_AUTH_STOP_TIMEOUT_MS = SESSION_AUTH_COORDINATOR ? 190_000 : OPERATION_TIMEOUT_MS;
 const MEDIA_OPERATION_TIMEOUT_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_MEDIA_OPERATION_TIMEOUT_MS || 60_000), 10_000);
 const SESSION_RESTART_BACKOFF_MS = Math.max(Number(process.env.WHATSAPP_WEB_BRIDGE_SESSION_RESTART_BACKOFF_MS || 15_000), 1_000);
@@ -673,7 +682,7 @@ async function withStaleRecovery<T>(
     }
 }
 
-async function getLightweightChats(client: any) {
+async function getLightweightChats(client: any, timeoutMs = OPERATION_TIMEOUT_MS) {
     return withTimeout(client.pupPage.evaluate(() => {
         const chats = (window as any).require("WAWebCollections")?.Chat?.getModelsArray?.() || [];
         return chats.map((chat: any) => ({
@@ -686,7 +695,7 @@ async function getLightweightChats(client: any) {
             archived: Boolean(chat?.archive || chat?.archived),
             pinned: Boolean(chat?.pin || chat?.pinned),
         }));
-    }), OPERATION_TIMEOUT_MS, "WhatsApp lightweight chat list");
+    }), timeoutMs, "WhatsApp lightweight chat list");
 }
 
 async function getChatsWithOpaqueFallback(session: ManagedSession) {
@@ -1653,45 +1662,51 @@ async function resolveChatForPhone(sessionId: string, payload: any) {
     const digits = String(payload.phone || "").replace(/\D/g, "");
     if (!digits) throw new Error("Missing phone number.");
 
-    const numberId = await withStaleRecovery(session, async () => {
-        if (typeof session.client.getNumberId !== "function") return null;
-        return withTimeout(
-            session.client.getNumberId(digits),
-            OPERATION_TIMEOUT_MS,
-            `WhatsApp get number id ${sessionId}`
-        ).catch(() => null);
-    });
+    let registration: "verified" | "unavailable" | "unknown" = "unknown";
+    let numberId: any = null;
+    if (typeof session.client.getNumberId === "function") {
+        try {
+            numberId = await withStaleRecovery(session, () => withTimeout(
+                session.client.getNumberId(digits),
+                RECIPIENT_REGISTRATION_TIMEOUT_MS,
+                `WhatsApp get number id ${sessionId}`
+            ));
+            registration = numberId ? "verified" : "unavailable";
+        } catch (error) {
+            console.warn("[WhatsApp Web Bridge] Recipient registration check unavailable", {
+                sessionRef: bridgeRef(sessionId, "session"),
+                code: classifyWhatsAppWebBridgeRequestError(error) || "RECIPIENT_REGISTRATION_CHECK_UNAVAILABLE",
+            });
+        }
+    }
     const numberChatId = jidFromId(numberId);
     if (numberChatId) {
-        return { chatId: numberChatId, source: "getNumberId" };
+        return buildWhatsAppWebBridgeRecipientResolution({
+            phone: digits,
+            registration,
+            registeredChatId: numberChatId,
+        });
     }
 
-    const chats = sortWhatsAppWebBridgeChatsByMostRecent(await getChatsWithOpaqueFallback(session));
+    let existingChatId = "";
+    const chats = sortWhatsAppWebBridgeChatsByMostRecent(
+        await getLightweightChats(session.client, RECIPIENT_CHAT_SCAN_TIMEOUT_MS).catch(() => []),
+    );
     for (const chat of chats || []) {
         if (chat?.isGroup) continue;
         const chatId = jidFromId(chat?.id);
         if (!chatId) continue;
-
-        const identity = await buildContactIdentity(
-            chat?.client ? chat : { ...chat, client: session.client },
-            chatId,
-        );
-        const candidates = [
-            identity.phoneJid,
-            identity.number,
-            chatId,
-        ].filter(Boolean);
-        if (candidates.some((candidate) => String(candidate).replace(/\D/g, "") === digits)) {
-            return { chatId, source: "chat_scan_latest", contactIdentity: identity };
+        if (String(chatId).replace(/\D/g, "") === digits) {
+            existingChatId = chatId;
+            break;
         }
     }
 
-    return {
-        chatId: null,
-        source: "not_found",
-        available: false,
-        reason: "number_not_found",
-    };
+    return buildWhatsAppWebBridgeRecipientResolution({
+        phone: digits,
+        registration,
+        existingChatId,
+    });
 }
 
 const server = createServer(async (req, res) => {
