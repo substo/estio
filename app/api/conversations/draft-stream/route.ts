@@ -55,10 +55,12 @@ export async function POST(req: NextRequest) {
 
     let location = locationBase;
     const tokenRefreshStartedAt = Date.now();
-    try {
-        location = await refreshGhlAccessToken(locationBase);
-    } catch (error) {
-        console.warn("[AI Draft Stream] Failed to refresh token; using existing location token", error);
+    if (locationBase.ghlRefreshToken) {
+        try {
+            location = await refreshGhlAccessToken(locationBase);
+        } catch (error) {
+            console.warn("[AI Draft Stream] Failed to refresh token; using existing location token", error);
+        }
     }
     logDraftStreamTiming("route_stream_token_refresh_end", {
         elapsedMs: Date.now() - tokenRefreshStartedAt,

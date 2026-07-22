@@ -276,6 +276,50 @@ function isModelUnavailableError(error: unknown): boolean {
     );
 }
 
+function isModelCapabilityError(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+    return (
+        (message.includes("400") || message.includes("bad request")) &&
+        (
+            message.includes("invalid argument") ||
+            message.includes("thinkingconfig") ||
+            message.includes("thinking budget") ||
+            message.includes("not supported") ||
+            message.includes("unsupported")
+        )
+    );
+}
+
+export function shouldRetryGeminiDraftWithPinnedFallback(modelName: string, error: unknown): boolean {
+    if (modelName === GEMINI_FLASH_LATEST_ALIAS) {
+        return isModelUnavailableError(error) || isModelCapabilityError(error);
+    }
+
+    return modelName === GEMINI_DRAFT_FAST_DEFAULT && isModelUnavailableError(error);
+}
+
+export function buildGeminiDraftGenerationConfig(args: {
+    modelName: string;
+    maxOutputTokens: number;
+    thinkingBudget: number;
+}): Record<string, unknown> {
+    const generationConfig: Record<string, unknown> = {
+        responseMimeType: "text/plain",
+        candidateCount: 1,
+        maxOutputTokens: args.maxOutputTokens,
+    };
+
+    // Numeric thinkingBudget is a Gemini 2.5 setting. Moving `-latest` aliases
+    // may advance to Gemini 3+, where sending it can reject the whole request.
+    if (/^gemini-2\.5(?:-|$)/i.test(args.modelName.trim())) {
+        generationConfig.thinkingConfig = {
+            thinkingBudget: args.thinkingBudget,
+        };
+    }
+
+    return generationConfig;
+}
+
 function isRateLimitError(error: unknown): boolean {
     const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
     return message.includes("429") || message.includes("rate limit");
@@ -637,7 +681,7 @@ export async function generateDraft(context: CoordinationContext) {
             fallbackUsed: boolean;
             streamed: boolean;
             maxOutputTokens: number;
-            thinkingBudget: number;
+            thinkingBudget: number | null;
         };
         cache: {
             state: "hit" | "miss" | "disabled" | "error";
@@ -1013,17 +1057,10 @@ export async function generateDraft(context: CoordinationContext) {
             : isComplexDraft
             ? DRAFT_THINKING_BUDGET_COMPLEX
             : DRAFT_THINKING_BUDGET_SIMPLE;
-        const generationConfig: Record<string, unknown> = {
-            responseMimeType: "text/plain",
-            candidateCount: 1,
-            maxOutputTokens,
-            thinkingConfig: {
-                thinkingBudget,
-            },
-        };
-
         telemetry.model.maxOutputTokens = maxOutputTokens;
-        telemetry.model.thinkingBudget = thinkingBudget;
+        telemetry.model.thinkingBudget = /^gemini-2\.5(?:-|$)/i.test(actualModelName)
+            ? thinkingBudget
+            : null;
 
         // 3. Construct Prompt
         let runtimeInstruction = `Runtime Context:
@@ -1166,7 +1203,7 @@ export async function generateDraft(context: CoordinationContext) {
             isComplexDraft,
             latencyMode: isFastDraft ? "fast" : "full",
             maxOutputTokens,
-            thinkingBudget,
+            thinkingBudget: telemetry.model.thinkingBudget,
             instruction: normalizedInstruction
                 ? {
                     ...summarizeDraftInstructionForLog(normalizedInstruction),
@@ -1202,6 +1239,11 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         // 4. Call selected provider. Gemini keeps cached-context streaming and
         // model fallback; OpenAI routes through the shared Responses API wrapper.
         const generateWithModel = async (candidateModel: string) => {
+            const generationConfig = buildGeminiDraftGenerationConfig({
+                modelName: candidateModel,
+                maxOutputTokens,
+                thinkingBudget,
+            });
             const cacheModel = await getDraftModelWithCachedContext({
                 apiKey,
                 modelName: candidateModel,
@@ -1316,9 +1358,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                     provider: "google_gemini",
                 };
             } catch (error) {
-                const canRetryWithPinnedFlash =
-                    (actualModelName === GEMINI_FLASH_LATEST_ALIAS || actualModelName === GEMINI_DRAFT_FAST_DEFAULT) &&
-                    isModelUnavailableError(error);
+                const canRetryWithPinnedFlash = shouldRetryGeminiDraftWithPinnedFallback(actualModelName, error);
 
                 if (!canRetryWithPinnedFlash) {
                     throw error;
@@ -1328,7 +1368,8 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 activeProvider = "google_gemini";
                 telemetry.model.actual = actualModelName;
                 telemetry.model.fallbackUsed = true;
-                console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable; retrying with ${actualModelName}.`);
+                telemetry.model.thinkingBudget = thinkingBudget;
+                console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable or incompatible; retrying with ${actualModelName}.`);
                 generationResult = {
                     ...await generateWithModel(actualModelName),
                     provider: "google_gemini",
@@ -1531,7 +1572,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         console.error("AI Coordinator Error:", error);
 
         // Return clearer error message to UI
-        let message = "Error generating draft.";
+        let message = "The AI service could not generate a draft. Please try again.";
         if (error.message?.includes("API key")) message = "Invalid or missing API Key.";
         if (error.message?.includes("429")) message = "AI Rate limit exceeded. Try again later.";
         telemetry.stageMs.totalMs = Date.now() - overallStartedAt;
@@ -1618,10 +1659,6 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             console.error("[AI Draft] Failed to persist error execution:", dbError);
         }
 
-        return {
-            draft: message,
-            reasoning: `Technical Error: ${error.message || "Unknown error"}`,
-            telemetry,
-        };
+        throw new Error(message, { cause: error });
     }
 }

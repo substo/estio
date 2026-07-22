@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    buildGeminiDraftGenerationConfig,
     buildContactRequirementGuide,
     enforceMapSharingInstruction,
     estimateDraftGenerationCost,
     isOpenAiDraftModel,
     looksLikeSendReadyDraftInstruction,
     resolveDraftChannelName,
+    shouldRetryGeminiDraftWithPinnedFallback,
     stripUngroundedMapUrls,
 } from "./coordinator";
 
@@ -162,4 +164,28 @@ test("estimateDraftGenerationCost still prices Gemini drafts", () => {
 
     assert.equal(estimate.amount, 0.5);
     assert.equal(estimate.method, "prompt_completion_only");
+});
+
+test("buildGeminiDraftGenerationConfig only sends numeric thinking budgets to Gemini 2.5", () => {
+    const pinnedConfig = buildGeminiDraftGenerationConfig({
+        modelName: "gemini-2.5-flash",
+        maxOutputTokens: 1200,
+        thinkingBudget: 0,
+    });
+    const movingAliasConfig = buildGeminiDraftGenerationConfig({
+        modelName: "gemini-flash-latest",
+        maxOutputTokens: 1200,
+        thinkingBudget: 0,
+    });
+
+    assert.deepEqual(pinnedConfig.thinkingConfig, { thinkingBudget: 0 });
+    assert.equal("thinkingConfig" in movingAliasConfig, false);
+});
+
+test("latest Gemini alias retries pinned fallback for capability-related HTTP 400 errors", () => {
+    const capabilityError = new Error("[400 Bad Request] Request contains an invalid argument.");
+
+    assert.equal(shouldRetryGeminiDraftWithPinnedFallback("gemini-flash-latest", capabilityError), true);
+    assert.equal(shouldRetryGeminiDraftWithPinnedFallback("gemini-2.5-flash-lite", capabilityError), false);
+    assert.equal(shouldRetryGeminiDraftWithPinnedFallback("gemini-3.1-pro", capabilityError), false);
 });
