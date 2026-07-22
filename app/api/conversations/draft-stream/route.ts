@@ -5,6 +5,8 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import { refreshGhlAccessToken } from "@/lib/location";
 import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { generateDraft } from "@/lib/ai/coordinator";
+import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
+import { getPendingPasteLeadPropertyImports } from "@/lib/queue/paste-lead-property-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ type DraftStreamBody = {
         dealId?: string;
         draftLanguage?: string | null;
         channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
+        ignorePendingPropertyImport?: boolean;
     };
 };
 
@@ -81,9 +84,31 @@ export async function POST(req: NextRequest) {
         || body?.options?.channel === "SMS_RELAY"
         ? body.options.channel
         : null;
+    const ignorePendingPropertyImport = body?.options?.ignorePendingPropertyImport === true;
 
     if (!conversationId || !contactId) {
         return NextResponse.json({ success: false, error: "conversationId and contactId are required" }, { status: 400 });
+    }
+
+    if (!ignorePendingPropertyImport) {
+        const conversation = await db.conversation.findFirst({
+            where: buildConversationReferenceWhere(location.id, conversationId),
+            select: { id: true },
+        });
+        if (conversation?.id) {
+            const pendingImports = await getPendingPasteLeadPropertyImports({
+                locationId: location.id,
+                conversationId: conversation.id,
+            });
+            if (pendingImports.length > 0) {
+                return NextResponse.json({
+                    success: false,
+                    code: "PROPERTY_IMPORT_PENDING",
+                    message: "The contact's property is still importing in the background.",
+                    pendingPropertyReferences: pendingImports.map((item) => item.publicReference),
+                }, { status: 409 });
+            }
+        }
     }
 
     const contactSyncStartedAt = Date.now();

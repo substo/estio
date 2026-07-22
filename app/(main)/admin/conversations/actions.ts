@@ -244,7 +244,7 @@ import {
 } from "@/lib/viewings/suggestion-parsing";
 import { normalizeInternationalPhone } from "@/lib/utils/phone";
 import { applyPropertyInterestToContact } from "@/lib/leads/contact-property-interest";
-import { enqueuePasteLeadPropertyImport } from "@/lib/queue/paste-lead-property-import";
+import { enqueuePasteLeadPropertyImport, getPendingPasteLeadPropertyImports } from "@/lib/queue/paste-lead-property-import";
 import { mapToRequirementPriceOption } from "@/lib/contacts/requirement-price-options";
 import {
     extractLegacyCrmRefCandidates,
@@ -5466,6 +5466,7 @@ type GenerateAIDraftOptions = {
     draftLanguage?: string | null;
     baseDraft?: string | null;
     channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
+    ignorePendingPropertyImport?: boolean;
 };
 
 function logAIDraftTiming(event: string, fields: Record<string, unknown> = {}) {
@@ -5717,6 +5718,21 @@ export async function generateComposerAIDraft(
         contactId,
         model,
     });
+
+    if (!options?.ignorePendingPropertyImport && conversationRecord?.id) {
+        const pendingImports = await getPendingPasteLeadPropertyImports({
+            locationId: location.id,
+            conversationId: conversationRecord.id,
+        });
+        if (pendingImports.length > 0) {
+            return {
+                draft: null,
+                blockedReason: "property_import_pending" as const,
+                pendingPropertyReferences: pendingImports.map((item) => item.publicReference),
+                reasoning: "The contact's property is still importing in the background.",
+            };
+        }
+    }
 
     if (conversationRecord?.id && contactRecord?.id) {
         try {

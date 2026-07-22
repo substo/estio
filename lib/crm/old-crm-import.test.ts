@@ -4,7 +4,16 @@ import {
     extractLegacyCrmRefCandidates,
     hasOldCrmImportCapability,
 } from "./old-crm-import";
-import { handlePasteLeadPropertyImportJobFailure } from "@/lib/queue/paste-lead-property-import";
+import { handlePasteLeadPropertyImportJobFailure, isPendingPasteLeadPropertyImportState } from "@/lib/queue/paste-lead-property-import";
+
+test("draft preflight treats only unfinished property import queue states as pending", () => {
+    for (const state of ["waiting", "active", "delayed", "prioritized", "paused"]) {
+        assert.equal(isPendingPasteLeadPropertyImportState(state), true, state);
+    }
+    for (const state of ["completed", "failed", "unknown"]) {
+        assert.equal(isPendingPasteLeadPropertyImportState(state), false, state);
+    }
+});
 
 test("hasOldCrmImportCapability requires crmUrl, crmUsername, and crmPassword", () => {
     assert.deepEqual(

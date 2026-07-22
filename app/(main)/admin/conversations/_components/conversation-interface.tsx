@@ -92,7 +92,7 @@ import {
     normalizeConversationContactIdentityPatch,
     type DealContactOption,
 } from './conversation-contact-identity-actions';
-import { generateDraftWithStreamingFallback, type ComposerAiDraftFeedback } from './conversation-draft-generation';
+import { generateDraftWithStreamingFallback, type ComposerAiDraftFeedback, type GenerateDraftResult } from './conversation-draft-generation';
 import {
     getMessageSignature,
     getTranscriptActionModeLabel,
@@ -213,6 +213,12 @@ function buildOptimisticNewConversation(result?: NewConversationCreatedResult): 
     };
 }
 
+type PendingPropertyImportDraftRequest = {
+    references: string[];
+    retry: () => Promise<GenerateDraftResult>;
+    resolve: (result: GenerateDraftResult | null) => void;
+    reject: (error: unknown) => void;
+};
 
 interface ConversationInterfaceProps {
     locationId: string;
@@ -1144,7 +1150,42 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
     const [emptyTrashDialogOpen, setEmptyTrashDialogOpen] = useState(false);
     const [pendingUnconfirmedResendId, setPendingUnconfirmedResendId] = useState<string | null>(null);
+    const [pendingPropertyImportDraft, setPendingPropertyImportDraft] = useState<PendingPropertyImportDraftRequest | null>(null);
+    const propertyImportOverrideInProgressRef = useRef(false);
     const [idsToDelete, setIdsToDelete] = useState<string[]>([]);
+
+    const requestPropertyImportDraftOverride = useCallback((
+        blockedResult: GenerateDraftResult,
+        retry: () => Promise<GenerateDraftResult>
+    ) => new Promise<GenerateDraftResult | null>((resolve, reject) => {
+        setPendingPropertyImportDraft({
+            references: blockedResult.pendingPropertyReferences || [],
+            retry,
+            resolve,
+            reject,
+        });
+    }), []);
+
+    const cancelPendingPropertyImportDraft = useCallback(() => {
+        const pending = pendingPropertyImportDraft;
+        if (!pending) return;
+        setPendingPropertyImportDraft(null);
+        pending.resolve(null);
+    }, [pendingPropertyImportDraft]);
+
+    const generatePendingPropertyImportDraftAnyway = useCallback(async () => {
+        const pending = pendingPropertyImportDraft;
+        if (!pending) return;
+        propertyImportOverrideInProgressRef.current = true;
+        setPendingPropertyImportDraft(null);
+        try {
+            pending.resolve(await pending.retry());
+        } catch (error) {
+            pending.reject(error);
+        } finally {
+            propertyImportOverrideInProgressRef.current = false;
+        }
+    }, [pendingPropertyImportDraft]);
 
     // Undo Toast State
     const [undoToast, setUndoToast] = useState<{ message: string; action: () => void } | null>(null);
@@ -2892,7 +2933,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         if (!activeConversation) return null;
 
         try {
-            const res = await generateDraftWithStreamingFallback({
+            const runDraft = (ignorePendingPropertyImport = false) => generateDraftWithStreamingFallback({
                 conversationId: activeConversation.id,
                 contactId: activeConversation.contactId,
                 instruction,
@@ -2901,12 +2942,19 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 mode: "chat",
                 draftLanguage,
                 channel: channel || null,
+                ignorePendingPropertyImport,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
                 onStreamError: (streamError) => {
                     console.warn("[AI Draft] Stream path failed, falling back to fast composer action.", streamError);
                 },
             });
+            let res = await runDraft();
+            if (res.blockedReason === "property_import_pending") {
+                const overrideResult = await requestPropertyImportDraftOverride(res, () => runDraft(true));
+                if (!overrideResult) return null;
+                res = overrideResult;
+            }
             if (res.reasoning) {
                 toast({ title: "Draft Generated", description: res.reasoning });
             }
@@ -2915,7 +2963,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             toast({ title: "Draft Failed", description: e.message, variant: "destructive" });
             return null;
         }
-    }, [activeConversation]);
+    }, [activeConversation, requestPropertyImportDraftOverride]);
 
     const handleChatSetReplyLanguageOverride = useCallback(async (replyLanguage: string | null) => {
         if (!activeConversation) {
@@ -2982,7 +3030,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     ) => {
         if (!selectedDealConversation) return null;
         try {
-            const res = await generateDraftWithStreamingFallback({
+            const runDraft = (ignorePendingPropertyImport = false) => generateDraftWithStreamingFallback({
                 conversationId: selectedDealConversation.id,
                 contactId: selectedDealConversation.contactId,
                 instruction,
@@ -2992,12 +3040,19 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 dealId: activeDealId || undefined,
                 draftLanguage,
                 channel: channel || null,
+                ignorePendingPropertyImport,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
                 onStreamError: (streamError) => {
                     console.warn("[AI Draft] Deal stream path failed, falling back to fast composer action.", streamError);
                 },
             });
+            let res = await runDraft();
+            if (res.blockedReason === "property_import_pending") {
+                const overrideResult = await requestPropertyImportDraftOverride(res, () => runDraft(true));
+                if (!overrideResult) return null;
+                res = overrideResult;
+            }
             if (res.reasoning) {
                 toast({ title: "Draft Generated", description: res.reasoning });
             }
@@ -3006,7 +3061,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             toast({ title: "Draft Failed", description: error?.message || "Failed to generate draft", variant: "destructive" });
             return null;
         }
-    }, [activeDealId, selectedDealConversation]);
+    }, [activeDealId, requestPropertyImportDraftOverride, selectedDealConversation]);
 
     const handleDealSetReplyLanguageOverride = useCallback(async (replyLanguage: string | null) => {
         if (!selectedDealConversation) {
@@ -3279,6 +3334,33 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 conversationMainPane={conversationMainPane}
                 missionControlPane={missionControlPane}
             />
+
+            <AlertDialog
+                open={Boolean(pendingPropertyImportDraft)}
+                onOpenChange={(open) => {
+                    if (!open && pendingPropertyImportDraft && !propertyImportOverrideInProgressRef.current) {
+                        cancelPendingPropertyImportDraft();
+                    }
+                }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Property is still importing</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {pendingPropertyImportDraft?.references.length
+                                ? `Property ${pendingPropertyImportDraft.references.join(", ")} is still importing in the background. `
+                                : "The contact's property is still importing in the background. "}
+                            Wait for the import to finish so the draft can use the complete property details, or generate now using the context currently available.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Wait</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => void generatePendingPropertyImportDraftAnyway()}>
+                            Generate anyway
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog
                 open={Boolean(pendingUnconfirmedResendId)}

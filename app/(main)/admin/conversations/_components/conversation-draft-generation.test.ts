@@ -249,6 +249,30 @@ test('generateDraftWithStreamingFallback falls back when stream completes withou
     assert.deepEqual(result, { draft: 'fallback for missing final' });
 });
 
+test('generateDraftWithStreamingFallback returns pending import result without invoking fallback', async () => {
+    let fallbackCalls = 0;
+    const blockedResult = {
+        draft: null,
+        blockedReason: 'property_import_pending' as const,
+        pendingPropertyReferences: ['DT1234'],
+    };
+
+    const result = await generateDraftWithStreamingFallback({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        onChunk: () => {},
+        streamDraft: async () => blockedResult,
+        generateDraft: async () => {
+            fallbackCalls += 1;
+            return { draft: 'fallback' };
+        },
+    });
+
+    assert.equal(fallbackCalls, 0);
+    assert.deepEqual(result, blockedResult);
+});
+
 test('generateDraftWithStreamingFallback skips stream path without onChunk', async () => {
     let streamCalled = false;
 
@@ -294,6 +318,46 @@ test('streamDraftViaApi parses chunk lines and complete result', async () => {
 
     assert.deepEqual(chunks, ['Hel', 'lo']);
     assert.deepEqual(result, { draft: 'Hello', reasoning: 'ok' });
+});
+
+test('streamDraftViaApi maps a pending property import response to a typed result', async () => {
+    const result = await streamDraftViaApi(
+        {
+            conversationId: 'conv-1',
+            contactId: 'contact-1',
+            mode: 'chat',
+        },
+        async () => new Response(JSON.stringify({
+            code: 'PROPERTY_IMPORT_PENDING',
+            message: 'Property import is running.',
+            pendingPropertyReferences: ['DT1234'],
+        }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+        })
+    );
+
+    assert.deepEqual(result, {
+        draft: null,
+        blockedReason: 'property_import_pending',
+        pendingPropertyReferences: ['DT1234'],
+        reasoning: 'Property import is running.',
+    });
+});
+
+test('streamDraftViaApi sends the generate-anyway property import override', async () => {
+    let requestBody: any = null;
+    await streamDraftViaApi({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        ignorePendingPropertyImport: true,
+    }, async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body || '{}'));
+        return new Response(`${JSON.stringify({ type: 'complete', result: { draft: 'draft' } })}\n`, { status: 200 });
+    });
+
+    assert.equal(requestBody.options.ignorePendingPropertyImport, true);
 });
 
 test('resolveComposerDraftModelOverride honors OpenAI defaults without freezing Gemini defaults', () => {

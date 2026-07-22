@@ -12,6 +12,8 @@ export type GenerateDraftResult = {
     routeReason?: string | null;
     requiresHumanApproval?: boolean | null;
     model?: string | null;
+    blockedReason?: "property_import_pending" | null;
+    pendingPropertyReferences?: string[];
 };
 
 export type ComposerAiDraftFeedback = {
@@ -62,6 +64,7 @@ type DraftStreamArgs = {
     channel?: DraftComposerChannel | null;
     onChunk?: (chunk: string) => void;
     timeoutMs?: number;
+    ignorePendingPropertyImport?: boolean;
 };
 
 type DraftFallbackArgs = {
@@ -75,6 +78,7 @@ type DraftFallbackArgs = {
         dealId?: string;
         draftLanguage?: string | null;
         channel?: DraftComposerChannel | null;
+        ignorePendingPropertyImport?: boolean;
     };
 };
 
@@ -154,6 +158,7 @@ export async function streamDraftViaApi(
                     dealId: args.dealId,
                     draftLanguage: args.draftLanguage ?? null,
                     channel: args.channel ?? undefined,
+                    ignorePendingPropertyImport: args.ignorePendingPropertyImport === true,
                 },
             }),
         });
@@ -177,6 +182,16 @@ export async function streamDraftViaApi(
             elapsedMs: Date.now() - startedAt,
             reason: payload?.error || payload?.message || fallbackMessage,
         });
+        if (response.status === 409 && payload?.code === "PROPERTY_IMPORT_PENDING") {
+            return {
+                draft: null,
+                blockedReason: "property_import_pending",
+                pendingPropertyReferences: Array.isArray(payload?.pendingPropertyReferences)
+                    ? payload.pendingPropertyReferences.map(String)
+                    : [],
+                reasoning: payload?.message || "The contact's property is still importing in the background.",
+            };
+        }
         throw new Error(payload?.error || payload?.message || fallbackMessage);
     }
 
@@ -276,6 +291,7 @@ export async function generateDraftWithStreamingFallback(args: {
     dealId?: string;
     draftLanguage?: string | null;
     channel?: DraftComposerChannel | null;
+    ignorePendingPropertyImport?: boolean;
     onChunk?: (chunk: string) => void;
     streamTimeoutMs?: number;
     streamDraft?: (args: DraftStreamArgs) => Promise<GenerateDraftResult | null>;
@@ -307,6 +323,7 @@ export async function generateDraftWithStreamingFallback(args: {
                 channel: args.channel ?? null,
                 onChunk: args.onChunk,
                 timeoutMs,
+                ignorePendingPropertyImport: args.ignorePendingPropertyImport,
             }), timeoutMs);
             fallbackReason = result?.draft ? "" : "stream_completed_without_final_result";
             logDraftTiming("stream_path_end", {
@@ -321,7 +338,7 @@ export async function generateDraftWithStreamingFallback(args: {
         }
     }
 
-    if (result?.draft) {
+    if (result?.draft || result?.blockedReason) {
         return result;
     }
 
@@ -342,6 +359,7 @@ export async function generateDraftWithStreamingFallback(args: {
             draftLanguage: args.draftLanguage,
             ...(args.channel ? { channel: args.channel } : {}),
             ...(args.baseDraft ? { baseDraft: args.baseDraft } : {}),
+            ...(args.ignorePendingPropertyImport ? { ignorePendingPropertyImport: true } : {}),
         }
     );
     logDraftTiming("fallback_server_action_end", {

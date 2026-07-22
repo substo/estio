@@ -35,6 +35,14 @@ export type EnqueuePasteLeadPropertyImportResult = {
     error?: string;
 };
 
+export type PendingPasteLeadPropertyImport = {
+    jobId: string;
+    publicReference: string;
+    state: string;
+};
+
+const PENDING_PROPERTY_IMPORT_STATES = ["waiting", "active", "delayed", "prioritized", "paused"] as const;
+
 let _queuePromise: Promise<any> | null = null;
 let _workerPromise: Promise<any> | null = null;
 
@@ -65,6 +73,42 @@ async function getQueueInstance() {
     } catch (error) {
         _queuePromise = null;
         throw error;
+    }
+}
+
+export function isPendingPasteLeadPropertyImportState(state: string): boolean {
+    return (PENDING_PROPERTY_IMPORT_STATES as readonly string[]).includes(state);
+}
+
+/**
+ * Best-effort draft preflight. Queue/status outages must never prevent an agent
+ * from drafting, so lookup failures deliberately return an empty list.
+ */
+export async function getPendingPasteLeadPropertyImports(args: {
+    locationId: string;
+    conversationId: string;
+}): Promise<PendingPasteLeadPropertyImport[]> {
+    try {
+        const queue = await getQueueInstance();
+        const jobs = await queue.getJobs([...PENDING_PROPERTY_IMPORT_STATES], 0, 100, false);
+        const pending = await Promise.all(jobs.map(async (job: any) => {
+            const data = job?.data as PasteLeadPropertyImportJobData | undefined;
+            if (data?.locationId !== args.locationId || data?.conversationId !== args.conversationId) return null;
+            const state = String(await job.getState());
+            if (!isPendingPasteLeadPropertyImportState(state)) return null;
+            return {
+                jobId: String(job.id || ""),
+                publicReference: String(data.publicReference || "property"),
+                state,
+            } satisfies PendingPasteLeadPropertyImport;
+        }));
+        return pending.filter((item): item is PendingPasteLeadPropertyImport => !!item);
+    } catch (error) {
+        console.warn("[PasteLeadPropertyImport] Draft preflight status unavailable; allowing draft generation", {
+            conversationId: args.conversationId,
+            error: truncateJobError(error),
+        });
+        return [];
     }
 }
 
