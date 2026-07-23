@@ -210,7 +210,9 @@ function chooseRicherWhatsAppDeliveryStatus(left: unknown, right: unknown) {
 }
 
 function isWebBridgeProviderIdAliasDuplicate(left: any, right: any) {
-    if (String(left?.direction || "") !== "outbound" || String(right?.direction || "") !== "outbound") return false;
+    const leftDirection = String(left?.direction || "");
+    const rightDirection = String(right?.direction || "");
+    if (!["inbound", "outbound"].includes(leftDirection) || leftDirection !== rightDirection) return false;
     if (String(left?.source || "") !== "whatsapp_web_bridge" || String(right?.source || "") !== "whatsapp_web_bridge") return false;
     if (String(left?.conversationId || "") !== String(right?.conversationId || "")) return false;
     if (getMessageTimestampMs(left) <= 0 || getMessageTimestampMs(left) !== getMessageTimestampMs(right)) return false;

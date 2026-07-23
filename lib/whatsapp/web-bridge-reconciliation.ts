@@ -1,3 +1,5 @@
+import { getWhatsAppWebBridgeLocalMessageId } from "./web-bridge-message-id-alias";
+
 export const WHATSAPP_WEB_BRIDGE_RECONCILIATION_CHAT_LIMIT = 50;
 export const WHATSAPP_WEB_BRIDGE_RECONCILIATION_MESSAGES_PER_CHAT = 20;
 export const WHATSAPP_WEB_BRIDGE_RECONCILIATION_MESSAGE_LIMIT = 200;
@@ -47,8 +49,9 @@ export function selectWhatsAppWebBridgeReconciliationMessages(
         .sort((left, right) => Number(right?.timestamp || right?.t || 0) - Number(left?.timestamp || left?.t || 0))
         .filter((message) => {
             const id = String(message?.id?._serialized || message?.id || "").trim();
-            if (!id || seen.has(id)) return false;
-            seen.add(id);
+            const dedupeId = getWhatsAppWebBridgeLocalMessageId(id) || id;
+            if (!id || seen.has(dedupeId)) return false;
+            seen.add(dedupeId);
             return true;
         })
         .slice(0, Math.max(0, limit))

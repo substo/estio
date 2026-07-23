@@ -53,6 +53,29 @@ test("selects one exact safe alias and fails closed for ambiguous or app-origina
     }), null);
 });
 
+test("selects a safe inbound alias when the direction is explicit", () => {
+    const timestamp = new Date("2026-07-22T19:32:29.000Z");
+    const localId = "AC6169BDDF0CDA06B6ED6282B1E3F246";
+    const safe = {
+        id: "safe-inbound",
+        wamId: localId,
+        body: "Inbound update",
+        direction: "inbound",
+        source: "whatsapp_web_bridge",
+        createdAt: timestamp,
+        clientMessageId: null,
+        outboundWhatsAppOutbox: null,
+    };
+
+    assert.equal(selectCanonicalizableWhatsAppWebBridgeAlias({
+        canonicalMessageId: `false_123456789@lid_${localId}`,
+        body: "Inbound update",
+        timestamp,
+        candidates: [safe],
+        direction: "inbound",
+    })?.id, "safe-inbound");
+});
+
 test("does not equate distinct local or serialized message ids", () => {
     assert.equal(areWhatsAppWebBridgeMessageIdAliases("3EB_FIRST", "3EB_SECOND"), false);
     assert.equal(

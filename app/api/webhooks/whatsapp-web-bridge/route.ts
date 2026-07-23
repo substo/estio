@@ -218,7 +218,7 @@ export async function POST(req: NextRequest) {
 
             const result = await processNormalizedMessage({
                 ...normalizedMessage.normalized,
-                notificationIntent: "live_ingress",
+                notificationIntent: event === "message_reconcile" ? "history_import" : "live_ingress",
             });
 
             if (message.fromMe) {

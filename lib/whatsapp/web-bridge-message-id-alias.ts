@@ -31,6 +31,7 @@ export function selectCanonicalizableWhatsAppWebBridgeAlias<T extends Record<str
     body: unknown;
     timestamp: Date;
     candidates: T[];
+    direction?: "inbound" | "outbound";
 }): T | null {
     if (!isWhatsAppWebBridgeSerializedMessageId(args.canonicalMessageId)) return null;
     const body = normalizeMessageBody(args.body);
@@ -41,7 +42,7 @@ export function selectCanonicalizableWhatsAppWebBridgeAlias<T extends Record<str
         const candidateTimestamp = candidate.createdAt instanceof Date
             ? candidate.createdAt.getTime()
             : new Date(candidate.createdAt || 0).getTime();
-        return String(candidate.direction || "") === "outbound"
+        return String(candidate.direction || "") === (args.direction || "outbound")
             && String(candidate.source || "") === "whatsapp_web_bridge"
             && !candidate.clientMessageId
             && !candidate.outboundWhatsAppOutbox

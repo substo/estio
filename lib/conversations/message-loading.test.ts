@@ -69,6 +69,30 @@ test("collapseWebBridgeProviderIdAliasesForDisplay requires matching outbound br
     assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([inbound, outbound]), [inbound, outbound]);
 });
 
+test("collapseWebBridgeProviderIdAliasesForDisplay collapses inbound provider aliases", () => {
+    const createdAt = new Date("2026-07-22T19:32:29.000Z");
+    const localId = "AC6169BDDF0CDA06B6ED6282B1E3F246";
+    const local = {
+        id: "local-inbound-row",
+        conversationId: "conversation-1",
+        body: "Inbound update",
+        direction: "inbound",
+        source: "whatsapp_web_bridge",
+        status: "received",
+        wamId: localId,
+        createdAt,
+        attachments: [],
+    };
+    const canonical = {
+        ...local,
+        id: "canonical-inbound-row",
+        status: "read",
+        wamId: `false_123456789@lid_${localId}`,
+    };
+
+    assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([local, canonical]), [canonical]);
+});
+
 test("hideDuplicateScheduledWebBridgeEchoesForDisplay hides unconfirmed scheduled placeholder when confirmed echo exists", () => {
     const scheduled = {
         id: "scheduled-placeholder",

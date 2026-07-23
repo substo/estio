@@ -47,9 +47,10 @@ export function resolveMonotonicWhatsAppDeliveryStatus(currentStatus: string, ne
 }
 
 function getWhatsAppDeliveryStatusAdvanceFilter(nextStatus: string) {
-    if (nextStatus === "sent") return { notIn: ["delivered", "read"] };
-    if (nextStatus === "delivered") return { not: "read" };
-    if (nextStatus === "failed") return { notIn: ["sent", "delivered", "read"] };
+    if (nextStatus === "sent") return { notIn: ["sent", "delivered", "read"] };
+    if (nextStatus === "delivered") return { notIn: ["delivered", "read"] };
+    if (nextStatus === "read") return { not: "read" };
+    if (nextStatus === "failed") return { notIn: ["failed", "sent", "delivered", "read"] };
     return undefined;
 }
 
@@ -109,7 +110,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
     if (!existingMessage?.id) return { matched: false, status };
 
     const statusAdvanceFilter = getWhatsAppDeliveryStatusAdvanceFilter(status);
-    await db.message.updateMany({
+    const messageUpdateResult = await db.message.updateMany({
         where: {
             id: existingMessage.id,
             ...(statusAdvanceFilter ? { status: statusAdvanceFilter } : {}),
@@ -133,6 +134,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
             },
             conversation: {
                 select: {
+                    id: true,
                     ghlConversationId: true,
                     locationId: true,
                 },
@@ -143,7 +145,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
     if (!messageWithConversation?.id) return { matched: false, status };
 
     const appliedStatus = String((messageWithConversation as any).status || status);
-    const conversationId = (messageWithConversation as any)?.conversation?.ghlConversationId;
+    const conversationId = (messageWithConversation as any)?.conversation?.id;
     const locationId = (messageWithConversation as any)?.conversation?.locationId;
     const createdAtMs = Date.parse(String((messageWithConversation as any)?.createdAt || ""));
     const outboxUpdateResult = await applyOutboundOutboxStatusFromProviderAck({
@@ -155,6 +157,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
         return null;
     });
     const outboxUpdated = Number((outboxUpdateResult as any)?.count || 0);
+    const messageUpdated = Number((messageUpdateResult as any)?.count || 0);
     const nextOutboxStatus = outboxUpdated > 0
         ? (appliedStatus === "failed" ? "failed" : "completed")
         : String((messageWithConversation as any)?.outboundWhatsAppOutbox?.status || "");
@@ -168,7 +171,7 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
         status_webhook_lag_ms: Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
         total_to_delivered_ms: appliedStatus === "delivered" && Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : null,
     });
-    if (conversationId && locationId) {
+    if ((messageUpdated > 0 || outboxUpdated > 0) && conversationId && locationId) {
         void publishConversationRealtimeEvent({
             locationId,
             conversationId,
