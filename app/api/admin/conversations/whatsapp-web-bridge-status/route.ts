@@ -25,10 +25,20 @@ export async function GET() {
             status: "ERROR",
             qrcode: null,
             phone: null,
-            sessionId: null,
             lastSeenAt: null,
             lastReadyAt: null,
-            error: error?.message || "Failed to check WhatsApp Web Bridge status.",
+            error: "Unable to check WhatsApp status.",
+            sto: {
+                configured: false,
+                state: "unavailable",
+                label: "STO Unavailable",
+                detail: "STO Secure Delivery status is temporarily unavailable.",
+                deviceAlias: null,
+                networkType: null,
+                lastConnectedAt: null,
+                lastVerifiedAt: null,
+                protectedSession: false,
+            },
         }, { status: 500 });
     }
 }

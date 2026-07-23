@@ -86,10 +86,10 @@ const INTEGRATION_GROUPS: IntegrationGroup[] = [
                 iconClassName: "bg-sky-100 text-sky-600 dark:bg-sky-900/20 dark:text-sky-400",
             },
             {
-                title: "SIM Relay",
-                description: "Connect physical Android phones as native SMS gateways using the Estio Companion app.",
+                title: "Connected Devices",
+                description: "Manage physical devices used for SMS Relay and STO Secure Delivery.",
                 href: "/admin/settings/integrations/sms-relay",
-                cta: "Configure Integration",
+                cta: "Manage Devices",
                 icon: Smartphone,
                 iconClassName: "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300",
             },

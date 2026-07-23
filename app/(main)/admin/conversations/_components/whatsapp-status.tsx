@@ -44,7 +44,6 @@ type WhatsAppWebBridgeStatus = {
     status: string;
     qrcode: string | null;
     phone: string | null;
-    sessionId: string | null;
     lastSeenAt: string | null;
     lastReadyAt: string | null;
     error: string | null;

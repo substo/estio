@@ -25,6 +25,8 @@ type MessageBubbleChromeMessage = {
     status?: string;
     sendState?: string;
     outboxState?: {
+        transport?: string | null;
+        stoSecureDelivery?: boolean | null;
         status?: string | null;
         scheduledAt?: string | null;
         attemptCount?: number | null;

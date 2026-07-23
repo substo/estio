@@ -14,3 +14,11 @@ test("every multi-node failure remains fail-closed without server fallback", () 
         assert.equal(planDeviceEgressFailureResponse(scenario).serverEgressFallback, false, scenario);
     }
 });
+
+test("STO outbound dispatch cannot switch a Web Bridge send to Cloud API", async () => {
+    const source = await readFile(new URL("../whatsapp/outbound-dispatch.ts", import.meta.url), "utf8");
+    const webBridgeBranch = source.split('} else if (transport === "web_bridge") {')[1]?.split('} else if (transport === "twilio") {')[0] || "";
+    assert.doesNotMatch(webBridgeBranch, /canUseCloudFallback/);
+    assert.doesNotMatch(webBridgeBranch, /sendWhatsAppCloud(?:Text|Media|Template)/);
+    assert.match(webBridgeBranch, /throw createDeviceEgressOfflineError/);
+});

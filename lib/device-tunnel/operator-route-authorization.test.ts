@@ -14,11 +14,21 @@ test("WhatsApp device-egress admin routes retain Clerk and database tenant autho
         const value = await source(path);
         assert.match(value, /await auth\(\)/, path);
         assert.match(value, /getLocationContext\(\)/, path);
+        assert.match(value, /verifyUserIsLocationAdmin/, path);
         assert.match(value, /location\.id/, path);
     }
     const bind = await source("app/api/admin/whatsapp-egress/bind/route.ts");
     assert.match(bind, /locationId:\s*location\.id/);
     assert.match(bind, /tunnelRevokedAt:\s*null/);
+});
+
+test("browser-facing STO status and bind responses do not serialize operational runtime objects", async () => {
+    const status = await source("app/api/admin/whatsapp-egress/status/route.ts");
+    const bind = await source("app/api/admin/whatsapp-egress/bind/route.ts");
+    assert.doesNotMatch(status, /binding:\s*serializableBinding[\s\S]*gatewayNodeId/);
+    assert.doesNotMatch(status, /messageHash:\s*binding/);
+    assert.doesNotMatch(status, /bytesToDevice:\s*binding/);
+    assert.doesNotMatch(bind, /NextResponse\.json\(\{\s*success:\s*true,\s*binding/);
 });
 
 test("Clerk middleware still protects dashboard/forum and tenant admin/API paths", async () => {

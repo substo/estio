@@ -79,6 +79,8 @@ export interface Message {
     outboxState?: {
         id: string;
         status: string;
+        transport?: string | null;
+        stoSecureDelivery?: boolean;
         scheduledAt?: string | null;
         attemptCount?: number;
         lastError?: string | null;

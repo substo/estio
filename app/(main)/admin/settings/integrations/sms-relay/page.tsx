@@ -61,25 +61,6 @@ function formatDate(iso: string | null): string {
     return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function formatDateTime(iso: string | null): string {
-    if (!iso) return "Not yet";
-    return new Date(iso).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-    });
-}
-
-function formatBytes(value: string | null | undefined): string {
-    const bytes = Number(value || 0);
-    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function formatNetworkType(value: string | null | undefined): string {
     const normalized = String(value || "unknown").toLowerCase();
     if (normalized === "cellular") return "Mobile data";
@@ -89,11 +70,11 @@ function formatNetworkType(value: string | null | undefined): string {
 
 function formatBrowserStatus(value: string | null | undefined): string {
     const status = String(value || "disconnected").toLowerCase();
-    if (status === "ready") return "WhatsApp browser ready";
+    if (status === "ready") return "WhatsApp session ready";
     if (["starting", "loading", "authenticated", "reconnecting"].includes(status)) {
-        return "WhatsApp browser starting";
+        return "WhatsApp session restoring";
     }
-    return "WhatsApp browser offline";
+    return "WhatsApp session unavailable";
 }
 
 type WhatsAppEgressStatus = {
@@ -101,19 +82,25 @@ type WhatsAppEgressStatus = {
     browserStatus: string;
     tunnelStatus: "online" | "offline" | "unbound";
     binding: null | {
-        device: { id: string; label: string; appVersion?: string | null };
-        egressIpMasked?: string | null;
+        device: {
+            id: string;
+            label: string;
+            platform?: string | null;
+            appVersion?: string | null;
+            lastSeenAt?: string | null;
+        };
         networkType?: string | null;
+        lastConnectedAt?: string | null;
+        lastVerifiedAt?: string | null;
     };
     proof: null | {
         verifiedAt: string;
-        trafficAt: string | null;
-        messageHash: string | null;
-        bytesToDevice: string;
-        bytesFromDevice: string;
-        egressIpMasked: string | null;
         networkType: string | null;
-        gatewayNodeId: string | null;
+    };
+    protectedSession: {
+        enabled: boolean;
+        ready: boolean;
+        state: string;
     };
 };
 
@@ -701,10 +688,10 @@ export default function SmsRelaySettingsPage() {
                 body: JSON.stringify({ deviceId }),
             });
             const result = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(result?.error || "Failed to bind WhatsApp network relay");
+            if (!response.ok) throw new Error(result?.error || "Failed to configure STO Secure Delivery");
             reload();
         } catch (error: any) {
-            window.alert(error?.message || "Failed to bind WhatsApp network relay");
+            window.alert(error?.message || "Failed to configure STO Secure Delivery");
         } finally {
             setEgressBusy(false);
         }
@@ -741,7 +728,7 @@ export default function SmsRelaySettingsPage() {
                     <div style={styles.logoIcon}>📡</div>
                     <div>
                         <h1 style={styles.pageTitle}>
-                            SIM Relay
+                            Connected Devices
                             <span style={styles.liveIndicator}>
                                 <span style={{ ...styles.pulseDotAnim, background: "#22c55e", width: 6, height: 6, top: "50%", left: "50%", marginTop: -3, marginLeft: -3 }} />
                                 <span style={{ ...styles.dot.online, width: 6, height: 6 }} />
@@ -749,8 +736,7 @@ export default function SmsRelaySettingsPage() {
                             </span>
                         </h1>
                         <p style={styles.pageSubtitle}>
-                            Use a physical Android phone's SIM card as an SMS channel in
-                            Estio conversations.
+                            Manage devices used for native SMS and STO Secure Delivery.
                         </p>
                     </div>
                 </div>
@@ -813,11 +799,11 @@ export default function SmsRelaySettingsPage() {
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                         <span style={styles.egressIcon}>🔐</span>
                         <div>
-                            <p style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>WhatsApp phone egress</p>
+                            <p style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>STO Secure Delivery</p>
                             <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>
                                 {egressStatus?.egressMode === "device_tunnel"
-                                    ? `Bound to ${egressStatus.binding?.device.label || "Android device"}`
-                                    : "WhatsApp Web is currently using server egress."}
+                                    ? `Connected to ${egressStatus.binding?.device.label || "your STO device"}`
+                                    : "Connect a device to protect and route this WhatsApp session through STO."}
                             </p>
                         </div>
                     </div>
@@ -825,7 +811,7 @@ export default function SmsRelaySettingsPage() {
                         {egressStatus?.egressMode === "device_tunnel" && (
                             <span style={egressStatus.tunnelStatus === "online" ? styles.badge.online : styles.badge.offline}>
                                 <span style={egressStatus.tunnelStatus === "online" ? styles.dot.online : styles.dot.offline} />
-                                {egressStatus.tunnelStatus === "online" ? "Phone tunnel online" : "Phone tunnel offline"}
+                                {egressStatus.tunnelStatus === "online" ? "STO device online" : "STO device offline"}
                             </span>
                         )}
                         {egressStatus?.egressMode === "device_tunnel" && (
@@ -835,13 +821,13 @@ export default function SmsRelaySettingsPage() {
                             </span>
                         )}
                         <select
-                            aria-label="WhatsApp egress device"
+                            aria-label="STO Secure Delivery device"
                             disabled={egressBusy}
                             value={egressStatus?.binding?.device?.id || ""}
                             onChange={(event) => event.target.value && void bindWhatsAppEgress(event.target.value)}
                             style={{ ...styles.input, margin: 0, width: 230 }}
                         >
-                            <option value="">Select Android device…</option>
+                            <option value="">Select connected device…</option>
                             {devices.filter((device) => device.capabilities.includes("whatsapp_egress")).map((device) => (
                                 <option key={device.id} value={device.id}>{device.label}</option>
                             ))}
@@ -857,60 +843,61 @@ export default function SmsRelaySettingsPage() {
                     <div style={styles.egressBody}>
                         <div style={{
                             ...styles.routeBanner,
-                            ...(egressStatus.tunnelStatus === "online" && egressStatus.browserStatus === "ready"
+                            ...(egressStatus.tunnelStatus === "online"
+                                && egressStatus.browserStatus === "ready"
+                                && egressStatus.protectedSession.ready
                                 ? {}
                                 : { background: "#fffbeb", borderColor: "#fde68a" }),
                         }}>
                             <span style={{
                                 fontWeight: 700,
-                                color: egressStatus.tunnelStatus === "online" && egressStatus.browserStatus === "ready"
+                                color: egressStatus.tunnelStatus === "online"
+                                    && egressStatus.browserStatus === "ready"
+                                    && egressStatus.protectedSession.ready
                                     ? "#166534"
                                     : "#92400e",
                             }}>
                                 {egressStatus.tunnelStatus === "online" && egressStatus.browserStatus === "ready"
-                                    ? "Enforced route"
-                                    : "Route not ready"}
+                                    && egressStatus.protectedSession.ready
+                                    ? "STO Ready"
+                                    : "STO not ready"}
                             </span>
-                            <span style={{ color: "#475569" }}>WhatsApp Web (Chromium) → local SOCKS5 → encrypted Android WebSocket → WhatsApp</span>
+                            <span style={{ color: "#475569" }}>
+                                Messages use your connected STO device&apos;s network and protected WhatsApp session. There is no server-internet fallback.
+                            </span>
                         </div>
                         <div style={styles.proofGrid}>
                             <div style={styles.proofItem}>
-                                <span style={styles.proofLabel}>Phone connection IP</span>
-                                <span style={styles.proofValue}>{egressStatus.proof?.egressIpMasked || egressStatus.binding?.egressIpMasked || "Waiting for phone…"}</span>
-                                <span style={styles.proofHint}>Masked public IP observed by the gateway</span>
+                                <span style={styles.proofLabel}>STO device</span>
+                                <span style={styles.proofValue}>{egressStatus.binding?.device.label || "No device selected"}</span>
+                                <span style={styles.proofHint}>
+                                    {egressStatus.binding?.device.appVersion
+                                        ? `App version ${egressStatus.binding.device.appVersion}`
+                                        : "Use a user-defined alias to identify this device"}
+                                </span>
                             </div>
                             <div style={styles.proofItem}>
-                                <span style={styles.proofLabel}>Phone network</span>
+                                <span style={styles.proofLabel}>Device network</span>
                                 <span style={styles.proofValue}>{formatNetworkType(egressStatus.proof?.networkType || egressStatus.binding?.networkType)}</span>
-                                <span style={styles.proofHint}>Reported by Android</span>
+                                <span style={styles.proofHint}>The network used for the protected WhatsApp route</span>
                             </div>
                             <div style={styles.proofItem}>
-                                <span style={styles.proofLabel}>Last verified tunneled send</span>
-                                <span style={{ ...styles.proofValue, color: egressStatus.proof ? "#15803d" : "#b45309" }}>
-                                    {egressStatus.proof ? formatDateTime(egressStatus.proof.verifiedAt) : "No proof yet"}
+                                <span style={styles.proofLabel}>Protected session</span>
+                                <span style={{ ...styles.proofValue, color: egressStatus.protectedSession.ready ? "#15803d" : "#b45309" }}>
+                                    {egressStatus.protectedSession.ready ? "Encrypted and verified" : "Not verified"}
                                 </span>
                                 <span style={styles.proofHint}>
-                                    {egressStatus.proof ? `${formatLastSeen(egressStatus.proof.verifiedAt)} · gateway-confirmed traffic` : "Send a WhatsApp message to generate a receipt"}
+                                    {egressStatus.protectedSession.ready
+                                        ? "Encrypted profile storage and exclusive runtime ownership are active"
+                                        : "STO will not report ready until both protections are active"}
                                 </span>
                             </div>
                             <div style={styles.proofItem}>
-                                <span style={styles.proofLabel}>Send receipt</span>
-                                <span style={{ ...styles.proofValue, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                                    {egressStatus.proof?.messageHash ? `wa-${egressStatus.proof.messageHash}` : "—"}
+                                <span style={styles.proofLabel}>Last route verification</span>
+                                <span style={{ ...styles.proofValue, color: egressStatus.proof ? "#15803d" : "#b45309" }}>
+                                    {egressStatus.proof ? formatLastSeen(egressStatus.proof.verifiedAt) : "No verified send yet"}
                                 </span>
-                                <span style={styles.proofHint}>One-way message identifier; no content stored</span>
-                            </div>
-                            <div style={styles.proofItem}>
-                                <span style={styles.proofLabel}>Traffic during this send</span>
-                                <span style={styles.proofValue}>
-                                    ↑ {formatBytes(egressStatus.proof?.bytesToDevice)} · ↓ {formatBytes(egressStatus.proof?.bytesFromDevice)}
-                                </span>
-                                <span style={styles.proofHint}>Byte increase inside the gateway send window</span>
-                            </div>
-                            <div style={styles.proofItem}>
-                                <span style={styles.proofLabel}>Gateway node</span>
-                                <span style={styles.proofValue}>{egressStatus.proof?.gatewayNodeId || "—"}</span>
-                                <span style={styles.proofHint}>Server that issued the receipt</span>
+                                <span style={styles.proofHint}>Confirmed traffic through the connected device</span>
                             </div>
                         </div>
                     </div>

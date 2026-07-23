@@ -47,6 +47,7 @@ export type EnqueueWhatsAppOutboundResult = {
     scheduledAt: string;
     typing: WhatsAppTypingDelayResult;
     transport: WhatsAppTransport;
+    stoSecureDelivery: boolean;
     outboxStatus: string;
     queueAccepted: boolean;
     dispatchMode: "queued" | "inline_fallback_sent" | "inline_fallback_deferred";
@@ -158,6 +159,7 @@ async function tryResolveExistingByClientMessageId(input: {
             snapshot: (existing.outboundWhatsAppOutbox.payload || {})?.typingPolicySnapshot || {},
         },
         transport: (existing.outboundWhatsAppOutbox.transport || "cloud_api") as WhatsAppTransport,
+        stoSecureDelivery: Boolean((existing.outboundWhatsAppOutbox.payload || {})?.stoSecureDelivery),
         outboxStatus: String(existing.outboundWhatsAppOutbox.status || "pending"),
         queueAccepted: true,
         dispatchMode: "queued",
@@ -195,6 +197,13 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
     if (!normalizedBody) {
         throw new Error("Cannot queue an empty WhatsApp message.");
     }
+
+    const stoSecureDelivery = transport === "web_bridge" && Boolean(
+        await (db as any).whatsAppWebBridgeSession.findUnique({
+            where: { locationId },
+            select: { egressMode: true },
+        }).then((session: any) => session?.egressMode === "device_tunnel").catch(() => false)
+    );
 
     const existingByClientMessageId = await tryResolveExistingByClientMessageId({
         clientMessageId,
@@ -329,6 +338,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                             clientMessageId,
                             conversationGhlId,
                             linkPreviewRequested,
+                            stoSecureDelivery,
                         },
                     },
                 });
@@ -397,6 +407,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
                         templateComponents: input.templateComponents || undefined,
                         pricingIntent: input.pricingIntent ? String(input.pricingIntent) : undefined,
                         linkPreviewRequested: kind === "text" ? linkPreviewRequested : undefined,
+                        stoSecureDelivery,
                     },
                 },
                 select: {
@@ -561,6 +572,7 @@ export async function enqueueWhatsAppOutbound(input: EnqueueWhatsAppOutboundInpu
         scheduledAt: txResult.scheduledAt.toISOString(),
         typing: txResult.typing,
         transport,
+        stoSecureDelivery,
         outboxStatus: dispatchMode === "inline_fallback_sent"
             ? (transport === "web_bridge" ? "dispatch_accepted" : "completed")
             : (!queueAccepted ? "failed" : "pending"),

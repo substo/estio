@@ -91,7 +91,6 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
 }): Promise<WhatsAppOutboundDispatchResult> {
     const payload = (row.payload || {}) as any;
     const transport = String(row.transport || "web_bridge").trim() || "web_bridge";
-    let actualTransport = transport;
     if (transport === "evolution") {
         throw new Error("Evolution API has been retired. Recreate or resend this message through WhatsApp Web Bridge or Cloud API.");
     }
@@ -110,7 +109,7 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
         const channel = await getDefaultWhatsAppCloudChannel(row.locationId);
         const channelId = channel?.id || null;
         providerAccountId = String(channel?.phoneNumberId || row.location?.whatsappPhoneNumberId || "default");
-        await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
+        await options?.beforeProviderDispatch?.({ transport, providerAccountId });
 
         if (row.kind === "text") {
             const text = String(payload?.text || row.message?.body || "");
@@ -149,98 +148,53 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
     } else if (transport === "web_bridge") {
         const egressStatus = await getWhatsAppDeviceEgressStatus(row.locationId);
         if (egressStatus.required && !egressStatus.available) {
-            const fallbackChannel = await getDefaultWhatsAppCloudChannel(row.locationId);
-            const sessionDigits = normalizePhoneDigits(egressStatus.sessionPhone);
-            const fallbackDigits = normalizePhoneDigits(fallbackChannel?.displayPhoneNumber);
-            const customerWindowOpen = Boolean(
-                row.conversation?.whatsappCustomerServiceExpiresAt
-                && new Date(row.conversation.whatsappCustomerServiceExpiresAt).getTime() > Date.now()
-            );
-            const canUseCloudFallback = Boolean(
-                fallbackChannel?.coexistenceEnabled
-                && normalizedPhone.length >= 7
-                && sessionDigits
-                && sessionDigits === fallbackDigits
-                && (row.kind === "template" || customerWindowOpen)
-            );
-            if (!canUseCloudFallback) throw createDeviceEgressOfflineError(egressStatus.reason);
+            throw createDeviceEgressOfflineError(egressStatus.reason);
+        }
 
-            actualTransport = "cloud_api";
-            provider = WHATSAPP_CLOUD_PROVIDER;
-            providerAccountId = String(fallbackChannel?.phoneNumberId || "default");
-            await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
-            if (row.kind === "text") {
-                const text = String(payload?.text || row.message?.body || "");
-                if (!text.trim()) throw new Error("Cannot send empty WhatsApp message body.");
-                const response = await sendWhatsAppCloudText(row.locationId, normalizedPhone, text, fallbackChannel!.id, {
-                    previewUrl: typeof payload?.linkPreviewRequested === "boolean" ? payload.linkPreviewRequested : null,
-                });
-                wamId = extractCloudWamId(response);
-            } else if (row.kind === "template") {
-                const response = await sendWhatsAppCloudTemplate(row.locationId, normalizedPhone, {
-                    name: String(payload?.templateName || "").trim(),
-                    language: String(payload?.templateLanguage || "").trim(),
-                    category: payload?.templateCategory || null,
-                    components: Array.isArray(payload?.templateComponents) ? payload.templateComponents : [],
-                }, fallbackChannel!.id);
-                wamId = extractCloudWamId(response);
-            } else {
-                const { signedMediaUrl, contentType, fileName } = await createSignedMediaUrl(payload);
-                const response = await sendWhatsAppCloudMedia(row.locationId, normalizedPhone, {
-                    mediaType: toMediaType(String(row.kind || "")),
-                    mediaUrl: signedMediaUrl,
-                    caption: String(payload?.caption || "").trim() || undefined,
-                    mimetype: contentType,
-                    fileName,
-                }, fallbackChannel!.id);
-                wamId = extractCloudWamId(response);
+        provider = WHATSAPP_WEB_BRIDGE_PROVIDER;
+        providerAccountId = row.locationId;
+
+        const webBridgeRecipient = await resolveWebBridgeRecipient(row, normalizedPhone);
+        if (!webBridgeRecipient) {
+            throw new Error("Contact phone is missing and no WhatsApp Web chat id is available for this conversation.");
+        }
+        if (row.kind === "template") {
+            throw new Error("WhatsApp templates require Cloud API transport.");
+        }
+
+        await options?.beforeProviderDispatch?.({ transport, providerAccountId });
+
+        if (row.kind === "text") {
+            const text = String(payload?.text || row.message?.body || "");
+            if (!text.trim()) {
+                throw new Error("Cannot send empty WhatsApp message body.");
             }
+            const response = await sendWhatsAppWebBridgeMessage({
+                locationId: row.locationId,
+                to: webBridgeRecipient,
+                proofMessageId: row.messageId,
+                text,
+                linkPreview: typeof payload?.linkPreviewRequested === "boolean" ? payload.linkPreviewRequested : null,
+            });
+            wamId = response?.messageId ? String(response.messageId) : null;
         } else {
-            provider = WHATSAPP_WEB_BRIDGE_PROVIDER;
-            providerAccountId = row.locationId;
-
-            const webBridgeRecipient = await resolveWebBridgeRecipient(row, normalizedPhone);
-            if (!webBridgeRecipient) {
-                throw new Error("Contact phone is missing and no WhatsApp Web chat id is available for this conversation.");
-            }
-            if (row.kind === "template") {
-                throw new Error("WhatsApp templates require Cloud API transport.");
-            }
-
-            await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
-
-            if (row.kind === "text") {
-                const text = String(payload?.text || row.message?.body || "");
-                if (!text.trim()) {
-                    throw new Error("Cannot send empty WhatsApp message body.");
-                }
-                const response = await sendWhatsAppWebBridgeMessage({
-                    locationId: row.locationId,
-                    to: webBridgeRecipient,
-                    proofMessageId: row.messageId,
-                    text,
-                    linkPreview: typeof payload?.linkPreviewRequested === "boolean" ? payload.linkPreviewRequested : null,
-                });
-                wamId = response?.messageId ? String(response.messageId) : null;
-            } else {
-                const { signedMediaUrl, contentType, fileName } = await createSignedMediaUrl(payload);
-                const caption = String(payload?.caption || "").trim() || undefined;
-                const response = await sendWhatsAppWebBridgeMessage({
-                    locationId: row.locationId,
-                    to: webBridgeRecipient,
-                    proofMessageId: row.messageId,
-                    mediaUrl: signedMediaUrl,
-                    mimetype: contentType,
-                    fileName,
-                    caption,
-                });
-                wamId = response?.messageId ? String(response.messageId) : null;
-            }
+            const { signedMediaUrl, contentType, fileName } = await createSignedMediaUrl(payload);
+            const caption = String(payload?.caption || "").trim() || undefined;
+            const response = await sendWhatsAppWebBridgeMessage({
+                locationId: row.locationId,
+                to: webBridgeRecipient,
+                proofMessageId: row.messageId,
+                mediaUrl: signedMediaUrl,
+                mimetype: contentType,
+                fileName,
+                caption,
+            });
+            wamId = response?.messageId ? String(response.messageId) : null;
         }
     } else if (transport === "twilio") {
         provider = "twilio";
         providerAccountId = String(row.location?.twilioAccountSid || "default");
-        await options?.beforeProviderDispatch?.({ transport: actualTransport, providerAccountId });
+        await options?.beforeProviderDispatch?.({ transport, providerAccountId });
         const text = String(payload?.text || row.message?.body || "");
         if (!text.trim()) {
             throw new Error("Cannot send empty WhatsApp message body.");
@@ -251,9 +205,9 @@ export async function dispatchWhatsAppOutbound(row: any, options?: {
         throw new Error(`Unsupported WhatsApp transport: ${transport}`);
     }
 
-    if (!wamId && actualTransport !== "web_bridge") {
-        throw new Error(`${actualTransport} send did not return provider message id confirmation.`);
+    if (!wamId && transport !== "web_bridge") {
+        throw new Error(`${transport} send did not return provider message id confirmation.`);
     }
 
-    return { transport: actualTransport, provider, providerAccountId, wamId };
+    return { transport, provider, providerAccountId, wamId };
 }

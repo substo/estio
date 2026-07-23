@@ -6,6 +6,7 @@ import { buildWhatsAppWebBridgeSessionId, stopWhatsAppWebBridgeSession } from "@
 import { assignDeviceTunnelBindingToGateway } from "@/lib/device-tunnel/assignment";
 import { resolveDeviceTunnelCanary } from "@/lib/device-tunnel/canary-control";
 import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,9 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const location = await getLocationContext();
     if (!location) return NextResponse.json({ error: "No location" }, { status: 404 });
+    if (!await verifyUserIsLocationAdmin(userId, location.id)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const deviceId = String(body?.deviceId || "").trim();
@@ -29,7 +33,7 @@ export async function POST(req: NextRequest) {
         },
     });
     if (!device?.tunnelPublicKey) {
-        return NextResponse.json({ error: "Device has not enrolled a tunnel key" }, { status: 409 });
+        return NextResponse.json({ error: "This device is not ready for STO Secure Delivery." }, { status: 409 });
     }
 
     const currentSession = await (db as any).whatsAppWebBridgeSession.findUnique({ where: { locationId: location.id } });
@@ -92,10 +96,10 @@ export async function POST(req: NextRequest) {
             bindingId: binding.id,
         });
     } catch {
-        return NextResponse.json({ error: "Device tunnel canary configuration is invalid" }, { status: 503 });
+        return NextResponse.json({ error: "STO Secure Delivery is not configured correctly." }, { status: 503 });
     }
     if (canary.selected && !canary.active) {
-        return NextResponse.json({ error: "Device tunnel canary prerequisites are incomplete" }, { status: 503 });
+        return NextResponse.json({ error: "STO Secure Delivery prerequisites are incomplete." }, { status: 503 });
     }
 
     if (canary.active) {
@@ -115,7 +119,7 @@ export async function POST(req: NextRequest) {
                 bindingRef: redactOperationalIdentifier(binding.id, "binding"),
                 reason: "assignment_failed",
             });
-            return NextResponse.json({ error: "No healthy device tunnel gateway is available" }, { status: 503 });
+            return NextResponse.json({ error: "STO Secure Delivery is temporarily unavailable." }, { status: 503 });
         }
     }
 
@@ -125,7 +129,7 @@ export async function POST(req: NextRequest) {
         deviceRef: redactOperationalIdentifier(deviceId, "device"),
         bindingRef: redactOperationalIdentifier(binding.id, "binding"),
     });
-    return NextResponse.json({ success: true, binding });
+    return NextResponse.json({ success: true });
 }
 
 export async function DELETE() {
@@ -133,6 +137,9 @@ export async function DELETE() {
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const location = await getLocationContext();
     if (!location) return NextResponse.json({ error: "No location" }, { status: 404 });
+    if (!await verifyUserIsLocationAdmin(userId, location.id)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const session = await (db as any).whatsAppWebBridgeSession.findUnique({ where: { locationId: location.id } });
     if (session) {

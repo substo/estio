@@ -42,6 +42,7 @@ import {
     parseDatetimeLocalValue,
 } from "./scheduled-message-time";
 import { LinkifiedText } from "./linkified-text";
+import { StoSecureDeliveryIndicator } from "./sto-secure-delivery-indicator";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -997,6 +998,7 @@ export function ConversationComposer({
                                     <SelectItem value="WhatsApp" className="text-xs" disabled={isWhatsAppDisabled}>WhatsApp</SelectItem>
                                 </SelectContent>
                             </Select>
+                            <StoSecureDeliveryIndicator active={selectedChannel === "WhatsApp"} />
 
                             {onGenerateDraft && (
                                 <>

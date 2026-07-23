@@ -11,6 +11,7 @@ import {
 } from "@/lib/whatsapp/web-bridge";
 import { getStaleWhatsAppWebBridgeNonReadyReason } from "@/lib/whatsapp/web-bridge-readiness";
 import { findMatchingWhatsAppWebBridgeHealthSession } from "@/lib/whatsapp/web-bridge-diagnostics";
+import { buildStoSecureDeliveryStatus } from "@/lib/device-tunnel/sto-secure-delivery";
 
 type LocationContext = {
     id: string;
@@ -54,8 +55,33 @@ export function getStaleWebBridgeNonReadyReason(workerSession: any, lastSeenAt?:
 export async function getWhatsAppWebBridgeStatusForLocation(location: LocationContext) {
     const mode = await resolveLocationWhatsAppProviderMode(location.id);
 
-    const [session, health] = await Promise.all([
+    const [session, managedSession, health] = await Promise.all([
         getWhatsAppWebBridgeSession(location.id),
+        (db as any).whatsAppWebBridgeSession.findUnique({
+            where: { locationId: location.id },
+            include: {
+                tunnelBinding: {
+                    include: {
+                        device: {
+                            select: {
+                                label: true,
+                                platform: true,
+                                status: true,
+                                appVersion: true,
+                                lastSeenAt: true,
+                                tunnelRevokedAt: true,
+                            },
+                        },
+                    },
+                },
+                authPlacement: {
+                    select: {
+                        state: true,
+                        recoveryStatus: true,
+                    },
+                },
+            },
+        }).catch(() => null),
         getWhatsAppWebBridgeHealth().catch((error: any) => ({
             reachable: false,
             ok: false,
@@ -69,6 +95,30 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
         sessions: health.sessions,
         sessionId: expectedSessionId,
         locationId: location.id,
+    });
+    const binding = managedSession?.tunnelBinding || null;
+    const bindingFresh = Boolean(
+        binding?.lastSeenAt
+        && Date.now() - new Date(binding.lastSeenAt).getTime() <= 45_000
+    );
+    const sto = buildStoSecureDeliveryStatus({
+        configured: managedSession?.egressMode === "device_tunnel",
+        deviceAlias: binding?.device?.label || null,
+        deviceStatus: binding?.device?.status || null,
+        deviceRevoked: Boolean(binding?.device?.tunnelRevokedAt),
+        bindingStatus: binding?.status || null,
+        bindingFresh,
+        networkType: binding?.networkType || null,
+        lastConnectedAt: binding?.lastConnectedAt || null,
+        lastVerifiedAt: binding?.lastVerifiedAt || null,
+        workerReady: Boolean(workerSession?.ready),
+        workerStatus: workerSession?.status || managedSession?.status || null,
+        workerRestarting: Boolean(workerSession?.restarting),
+        runtimeLeaseEnforced: Boolean(workerSession?.runtimeLeaseEnforced),
+        sessionAuthMode: workerSession?.sessionAuthMode || null,
+        authDurableReady: Boolean(workerSession?.authDurableReady),
+        authState: workerSession?.authState || managedSession?.authPlacement?.state || null,
+        recoveryStatus: managedSession?.authPlacement?.recoveryStatus || null,
     });
 
     if (health.reachable && workerSession?.ready) {
@@ -92,10 +142,10 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
             status: "ready",
             qrcode: null,
             phone: workerSession.phone || session?.phone || null,
-            sessionId: workerSession.sessionId || expectedSessionId,
             lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
             lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
             error: null as string | null,
+            sto,
         };
     }
 
@@ -113,10 +163,10 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
                 status: "reconnecting",
                 qrcode: null,
                 phone: workerSession.phone || session?.phone || null,
-                sessionId: workerSession.sessionId || expectedSessionId,
                 lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
                 lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
-                error: staleNonReadyReason || "The previous QR expired. Generating a fresh code...",
+                error: "WhatsApp is reconnecting. Messages will remain queued until it is ready.",
+                sto,
             };
         }
         return {
@@ -125,10 +175,10 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
             status: workerStatus,
             qrcode: workerStatus === "qr" ? (session?.qrCode || null) : null,
             phone: workerSession.phone || session?.phone || null,
-            sessionId: workerSession.sessionId || expectedSessionId,
             lastSeenAt: workerSession.lastEventAt || session?.lastSeenAt?.toISOString?.() || null,
             lastReadyAt: workerSession.lastReadyAt || session?.lastReadyAt?.toISOString?.() || null,
-            error: workerSession.lastError || null,
+            error: workerSession.lastError ? "WhatsApp is not ready. Check the connection and try again." : null,
+            sto,
         };
     }
 
@@ -142,10 +192,10 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
             status: "reconnecting",
             qrcode: null,
             phone: session?.phone || null,
-            sessionId: session?.sessionId || expectedSessionId,
             lastSeenAt: session?.lastSeenAt?.toISOString?.() || null,
             lastReadyAt: session?.lastReadyAt?.toISOString?.() || null,
-            error: health.error || null,
+            error: "WhatsApp is reconnecting. Messages will remain queued until it is ready.",
+            sto,
         };
     }
 
@@ -155,9 +205,9 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
         status: session?.status || "disconnected",
         qrcode: session?.qrCode || null,
         phone: session?.phone || null,
-        sessionId: session?.sessionId || null,
         lastSeenAt: session?.lastSeenAt?.toISOString?.() || null,
         lastReadyAt: session?.lastReadyAt?.toISOString?.() || null,
-        error: session?.lastError || null,
+        error: session?.lastError ? "WhatsApp is not ready. Reconnect the linked session." : null,
+        sto,
     };
 }

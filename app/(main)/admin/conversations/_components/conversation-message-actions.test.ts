@@ -264,6 +264,34 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
     assert.equal(deriveOutboundWhatsAppUiState({ ...baseMessage, status: 'read' } as any)?.label, 'Read');
 });
 
+test('deriveOutboundWhatsAppUiState exposes the STO secure-delivery lifecycle', () => {
+    const stoMessage = {
+        ...baseMessage,
+        outboxState: {
+            id: 'job-sto',
+            status: 'pending',
+            transport: 'web_bridge',
+            stoSecureDelivery: true,
+        },
+    } as any;
+
+    assert.equal(deriveOutboundWhatsAppUiState(stoMessage)?.detail, 'Securing STO route…');
+    assert.equal(deriveOutboundWhatsAppUiState({
+        ...stoMessage,
+        outboxState: { ...stoMessage.outboxState, status: 'processing' },
+    })?.detail, 'Sending through your connected device…');
+    assert.equal(deriveOutboundWhatsAppUiState({
+        ...stoMessage,
+        status: 'dispatch_accepted',
+        outboxState: { ...stoMessage.outboxState, status: 'dispatch_accepted' },
+    })?.detail, 'Waiting for WhatsApp confirmation…');
+    assert.equal(deriveOutboundWhatsAppUiState({
+        ...stoMessage,
+        status: 'blocked_egress',
+        outboxState: { ...stoMessage.outboxState, status: 'blocked_egress' },
+    })?.detail, 'STO Device Offline · Retrying automatically');
+});
+
 test('manual resend requires an explicit failed or unconfirmed terminal state', () => {
     assert.equal(canManuallyResendOutboundMessageStatus('failed'), true);
     assert.equal(canManuallyResendOutboundMessageStatus('delivery_unconfirmed'), true);

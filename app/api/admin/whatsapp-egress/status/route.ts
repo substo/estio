@@ -4,6 +4,7 @@ import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { getWhatsAppWebBridgeHealth } from "@/lib/whatsapp/web-bridge";
 import { redactOperationalIdentifier } from "@/lib/device-tunnel/operational-redaction";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export async function GET() {
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const location = await getLocationContext();
     if (!location) return NextResponse.json({ error: "No location" }, { status: 404 });
+    if (!await verifyUserIsLocationAdmin(userId, location.id)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const [session, bridgeHealth] = await Promise.all([
         (db as any).whatsAppWebBridgeSession.findUnique({
@@ -33,6 +37,11 @@ export async function GET() {
                         },
                     },
                 },
+                authPlacement: {
+                    select: {
+                        state: true,
+                    },
+                },
             },
         }),
         getWhatsAppWebBridgeHealth().catch(() => null),
@@ -49,18 +58,19 @@ export async function GET() {
     const fresh = Boolean(binding?.lastSeenAt && Date.now() - new Date(binding.lastSeenAt).getTime() < 45_000);
     const proof = binding?.lastVerifiedAt ? {
         verifiedAt: binding.lastVerifiedAt,
-        trafficAt: binding.lastTrafficAt,
-        messageHash: binding.lastProofMessageHash,
-        bytesToDevice: binding.lastProofBytesToDevice?.toString() || "0",
-        bytesFromDevice: binding.lastProofBytesFromDevice?.toString() || "0",
-        egressIpMasked: binding.egressIpMasked,
         networkType: binding.networkType,
-        gatewayNodeId: binding.gatewayNodeId,
     } : null;
     const serializableBinding = binding ? {
-        ...binding,
-        lastProofBytesToDevice: binding.lastProofBytesToDevice?.toString() || null,
-        lastProofBytesFromDevice: binding.lastProofBytesFromDevice?.toString() || null,
+        device: {
+            id: binding.device.id,
+            label: binding.device.label,
+            platform: binding.device.platform,
+            appVersion: binding.device.appVersion,
+            lastSeenAt: binding.device.lastSeenAt,
+        },
+        networkType: binding.networkType,
+        lastConnectedAt: binding.lastConnectedAt,
+        lastVerifiedAt: binding.lastVerifiedAt,
     } : null;
     return NextResponse.json({
         egressMode: session?.egressMode || "server",
@@ -70,5 +80,12 @@ export async function GET() {
         tunnelStatus: binding?.status === "online" && fresh ? "online" : binding ? "offline" : "unbound",
         binding: serializableBinding,
         proof,
+        protectedSession: {
+            enabled: workerSession?.sessionAuthMode === "encrypted_snapshot"
+                && workerSession?.runtimeLeaseEnforced === true,
+            ready: workerSession?.authDurableReady === true
+                && workerSession?.authState === "attached",
+            state: workerSession?.authState || session?.authPlacement?.state || "unavailable",
+        },
     });
 }

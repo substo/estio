@@ -10,6 +10,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { requireSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +49,9 @@ async function getSmsRelayLocation({ required = false }: { required?: boolean } 
 
     const location = await getLocationContext();
     if (!location && required) throw new Error("No location found");
+    if (location && !await verifyUserIsLocationAdmin(userId, location.id)) {
+        throw new Error("Unauthorized");
+    }
 
     return location;
 }

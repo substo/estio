@@ -83,6 +83,8 @@ export interface MessageBubbleProps {
         outboxState?: {
             id?: string | null;
             status?: string | null;
+            transport?: string | null;
+            stoSecureDelivery?: boolean | null;
             scheduledAt?: string | null;
             attemptCount?: number;
             lastError?: string | null;

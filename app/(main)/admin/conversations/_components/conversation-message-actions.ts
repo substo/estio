@@ -29,6 +29,7 @@ type SendAck = {
     typingDelayMs?: unknown;
     typingDelayReason?: unknown;
     transport?: unknown;
+    stoSecureDelivery?: unknown;
     outboxStatus?: unknown;
 };
 
@@ -41,7 +42,7 @@ type FailureFallbackUiState = {
 };
 
 export type OutboundWhatsAppUiState = {
-    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "Send not confirmed" | "Failed" | "SMS fallback available";
+    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "STO Device Offline" | "Send not confirmed" | "Failed" | "SMS fallback available";
     tone: OutboundWhatsAppUiTone;
     icon: OutboundWhatsAppUiIcon;
     detail: string | null;
@@ -86,6 +87,8 @@ export function deriveOutboundWhatsAppUiState(message: {
     status?: string | null;
     sendState?: string | null;
     outboxState?: {
+        transport?: string | null;
+        stoSecureDelivery?: boolean | null;
         status?: string | null;
         scheduledAt?: string | null;
         attemptCount?: number | null;
@@ -103,6 +106,7 @@ export function deriveOutboundWhatsAppUiState(message: {
     const status = normalizeLower(message.status);
     const sendState = normalizeLower(message.sendState);
     const outboxStatus = normalizeLower(message.outboxState?.status);
+    const stoSecureDelivery = message.outboxState?.stoSecureDelivery === true;
     const scheduledAt = normalizeString(message.outboxState?.scheduledAt) || null;
     const scheduledDelaySeconds = getFutureDelaySeconds(scheduledAt, options?.nowMs);
     const retryAttempt = Number.isFinite(Number(message.outboxState?.attemptCount))
@@ -177,12 +181,31 @@ export function deriveOutboundWhatsAppUiState(message: {
         };
     }
 
+    if (status === "blocked_egress" || outboxStatus === "blocked_egress") {
+        return {
+            label: stoSecureDelivery ? "STO Device Offline" : "Retrying",
+            tone: "warning",
+            icon: "clock",
+            detail: stoSecureDelivery
+                ? "STO Device Offline · Retrying automatically"
+                : "Waiting for the required device route",
+            showSpinner: true,
+            canResend: false,
+            canSmsFallback: false,
+            scheduledAt,
+            retryAttempt,
+            lastError,
+        };
+    }
+
     if (status === "dispatch_accepted" || outboxStatus === "dispatch_accepted") {
         return {
             label: "Submitted",
             tone: "info",
             icon: "send",
-            detail: "Submitted to WhatsApp; awaiting its delivery receipt",
+            detail: stoSecureDelivery
+                ? "Waiting for WhatsApp confirmation…"
+                : "Submitted to WhatsApp; awaiting its delivery receipt",
             showSpinner: true,
             canResend: false,
             canSmsFallback: false,
@@ -259,7 +282,9 @@ export function deriveOutboundWhatsAppUiState(message: {
             label: "Sending",
             tone: "info",
             icon: "send",
-            detail: "Waiting for WhatsApp bridge",
+            detail: stoSecureDelivery
+                ? "Sending through your connected device…"
+                : "Waiting for WhatsApp bridge",
             showSpinner: true,
             canResend: false,
             canSmsFallback: false,
@@ -288,7 +313,7 @@ export function deriveOutboundWhatsAppUiState(message: {
         label: "Queued",
         tone: "muted",
         icon: "clock",
-        detail: "Starting WhatsApp send",
+        detail: stoSecureDelivery ? "Securing STO route…" : "Starting WhatsApp send",
         showSpinner: true,
         canResend: false,
         canSmsFallback: false,
@@ -526,6 +551,8 @@ export function getSendAckState(ack: SendAck, fallbackClientMessageId: string, o
     const typingDelayMs = Number(ack.typingDelayMs);
     const typingDelayReason = String(ack.typingDelayReason || "").trim();
     const outboxStatus = String(ack.outboxStatus || "").trim();
+    const transport = String(ack.transport || "").trim();
+    const stoSecureDelivery = ack.stoSecureDelivery === true;
 
     return {
         ackMessageId,
@@ -539,6 +566,8 @@ export function getSendAckState(ack: SendAck, fallbackClientMessageId: string, o
         typingDelayMs: Number.isFinite(typingDelayMs) ? typingDelayMs : null,
         typingDelayReason,
         outboxStatus,
+        transport,
+        stoSecureDelivery,
     };
 }
 
@@ -570,6 +599,8 @@ export function applySendAckByCorrelation(messages: Message[], args: {
             outboxState: {
                 id: ackState.outboxJobId || (message as any)?.outboxState?.id || null,
                 status: completedFallback ? 'completed' : (ackState.degradedDelivery ? 'failed' : (ackState.outboxStatus || (ackState.queued ? 'pending' : 'completed'))),
+                ...(ackState.transport ? { transport: ackState.transport } : {}),
+                ...(ackState.stoSecureDelivery ? { stoSecureDelivery: true } : {}),
                 ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}),
                 ...(ackState.typingDelayMs !== null ? { typingDelayMs: ackState.typingDelayMs } : {}),
                 ...(ackState.typingDelayReason ? { typingDelayReason: ackState.typingDelayReason } : {}),
@@ -595,14 +626,42 @@ export function applyResendAckById(messages: Message[], args: {
             status: completedFallback ? 'sent' : (dispatchAccepted ? 'dispatch_accepted' : (ackState.queued ? 'sending' : 'sent')),
             sendState: completedFallback ? 'sent' : (dispatchAccepted ? 'queued' : (ackState.degradedDelivery ? 'retrying' : (ackState.queued ? 'queued' : 'sent'))),
             outboxState: completedFallback
-                ? { id: ackState.outboxJobId || null, status: 'completed' }
+                ? {
+                    id: ackState.outboxJobId || null,
+                    status: 'completed',
+                    ...(ackState.transport ? { transport: ackState.transport } : {}),
+                    ...(ackState.stoSecureDelivery ? { stoSecureDelivery: true } : {}),
+                }
                 : dispatchAccepted
-                    ? { id: ackState.outboxJobId || null, status: 'dispatch_accepted', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
+                    ? {
+                        id: ackState.outboxJobId || null,
+                        status: 'dispatch_accepted',
+                        ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}),
+                        ...(ackState.transport ? { transport: ackState.transport } : {}),
+                        ...(ackState.stoSecureDelivery ? { stoSecureDelivery: true } : {}),
+                    }
                 : ackState.degradedDelivery
-                    ? { id: ackState.outboxJobId || null, status: 'failed', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
+                    ? {
+                        id: ackState.outboxJobId || null,
+                        status: 'failed',
+                        ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}),
+                        ...(ackState.transport ? { transport: ackState.transport } : {}),
+                        ...(ackState.stoSecureDelivery ? { stoSecureDelivery: true } : {}),
+                    }
                     : ackState.queued
-                        ? { id: ackState.outboxJobId || null, status: ackState.outboxStatus || 'pending', ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}) }
-                        : { id: ackState.outboxJobId || null, status: 'completed' },
+                        ? {
+                            id: ackState.outboxJobId || null,
+                            status: ackState.outboxStatus || 'pending',
+                            ...(ackState.scheduledAt ? { scheduledAt: ackState.scheduledAt } : {}),
+                            ...(ackState.transport ? { transport: ackState.transport } : {}),
+                            ...(ackState.stoSecureDelivery ? { stoSecureDelivery: true } : {}),
+                        }
+                        : {
+                            id: ackState.outboxJobId || null,
+                            status: 'completed',
+                            ...(ackState.transport ? { transport: ackState.transport } : {}),
+                            ...(ackState.stoSecureDelivery ? { stoSecureDelivery: true } : {}),
+                        },
         } as Message;
     });
 }

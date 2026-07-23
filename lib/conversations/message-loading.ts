@@ -501,6 +501,8 @@ export async function fetchMessagesForResolvedConversation(args: {
                 select: {
                     id: true,
                     status: true,
+                    transport: true,
+                    payload: true,
                     scheduledAt: true,
                     attemptCount: true,
                     lastError: true,
@@ -686,6 +688,8 @@ export async function fetchMessagesForResolvedConversation(args: {
                 ? {
                     id: String((m as any).outboundWhatsAppOutbox.id),
                     status: String((m as any).outboundWhatsAppOutbox.status || ""),
+                    transport: String((m as any).outboundWhatsAppOutbox.transport || ""),
+                    stoSecureDelivery: Boolean(((m as any).outboundWhatsAppOutbox.payload as any)?.stoSecureDelivery),
                     scheduledAt: (m as any).outboundWhatsAppOutbox.scheduledAt
                         ? new Date((m as any).outboundWhatsAppOutbox.scheduledAt).toISOString()
                         : null,
