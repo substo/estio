@@ -23,7 +23,6 @@ import {
     emptyTrash,
     refreshConversation,
     markConversationAsRead,
-    refetchWhatsAppMediaAttachment,
     retryWhatsAppAudioTranscript,
     requestWhatsAppAudioTranscript,
     bulkRequestWhatsAppAudioTranscripts,
@@ -111,6 +110,7 @@ import {
     markMessageFailedById,
     markMessageSendingById,
     normalizeSendError,
+    requestWhatsAppMediaRefetch,
 } from './conversation-message-actions';
 import { applyRealtimeMessagePatchToMessages } from './conversation-realtime-message-actions';
 import {
@@ -2585,9 +2585,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const selectedConversationId = activeConversation.id;
 
         try {
-            const res = await refetchWhatsAppMediaAttachment(selectedConversationId, messageId, {
-                deleteStoredObject: true,
-            });
+            const res = await requestWhatsAppMediaRefetch(selectedConversationId, messageId);
 
             if (!res?.success) {
                 toast({

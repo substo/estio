@@ -172,6 +172,8 @@ function formatMediaRefetchStage(stage?: string | null) {
             return "Queued";
         case "fetching_from_bridge":
             return "Fetching from WhatsApp Web";
+        case "recovering_stored_payload":
+            return "Recovering stored media";
         case "storing_media":
             return "Storing media";
         case "completed":

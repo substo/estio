@@ -306,6 +306,33 @@ export function createOutboundClientMessageId(): string {
     );
 }
 
+export async function requestWhatsAppMediaRefetch(
+    conversationId: string,
+    messageId: string,
+    fetchImpl: typeof fetch = fetch,
+) {
+    const response = await fetchImpl(
+        `/api/admin/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/whatsapp-media-refetch`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deleteStoredObject: true }),
+        },
+    );
+    const result = await response.json().catch(() => ({
+        success: false,
+        error: `Media re-fetch request failed (${response.status}).`,
+    }));
+    if (!response.ok || !result?.success) {
+        return {
+            ...result,
+            success: false as const,
+            error: String(result?.error || `Media re-fetch request failed (${response.status}).`),
+        };
+    }
+    return result;
+}
+
 export function buildOptimisticTextMessage(args: {
     clientMessageId: string;
     conversation: Conversation;

@@ -13,6 +13,7 @@ import {
     markMessageFailedById,
     markMessageSendingById,
     normalizeSendError,
+    requestWhatsAppMediaRefetch,
 } from './conversation-message-actions';
 
 const conversation = {
@@ -310,6 +311,30 @@ test('normalizeSendError keeps server action reload copy unchanged', () => {
     );
     assert.equal(normalizeSendError(''), 'Unknown error occurred');
     assert.equal(normalizeSendError('No route'), 'No route');
+});
+
+test('media refetch uses a deployment-stable API route', async () => {
+    let requestedUrl = "";
+    let requestedInit: RequestInit | undefined;
+    const result = await requestWhatsAppMediaRefetch(
+        "conversation/1",
+        "message/1",
+        (async (url: string | URL | Request, init?: RequestInit) => {
+            requestedUrl = String(url);
+            requestedInit = init;
+            return new Response(JSON.stringify({ success: true, queued: true }), {
+                status: 202,
+                headers: { "Content-Type": "application/json" },
+            });
+        }) as typeof fetch,
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(
+        requestedUrl,
+        "/api/admin/conversations/conversation%2F1/messages/message%2F1/whatsapp-media-refetch",
+    );
+    assert.equal(requestedInit?.method, "POST");
 });
 
 test('failed WhatsApp number-not-found message shows Android SMS fallback action when available', () => {

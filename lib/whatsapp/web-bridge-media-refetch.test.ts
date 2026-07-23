@@ -2,11 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    buildStoredBodyMediaRecovery,
     resolveRefetchChatCandidates,
     selectWhatsAppWebBridgeMediaRefetchCandidate,
     shouldAutomaticallyRefetchWhatsAppWebBridgeMedia,
     shouldRetryTransientMediaRefetchIngest,
 } from "./web-bridge-media-refetch";
+
+test("media refetch recovers a legacy JPEG payload without a bridge download", () => {
+    const body = `/9j/${"A".repeat(256)}`;
+    const recovery = buildStoredBodyMediaRecovery({ body });
+    assert.equal(recovery?.type, "image");
+    assert.equal(recovery?.body, "[Image]");
+    assert.equal(recovery?.media.data, body);
+    assert.equal(recovery?.media.mimetype, "image/jpeg");
+    assert.equal(recovery?.mediaMeta.recoveredFromStoredBody, true);
+});
 
 test("automatic media refetch is immediate for live events and bounded for reconciliation", () => {
     const nowMs = Date.parse("2026-07-23T10:00:00.000Z");
