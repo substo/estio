@@ -274,6 +274,22 @@ export interface NormalizedMessage {
     __deferredAttempt?: number; // Internal: deferred retry count for logging/limits
 }
 
+export function shouldSkipUnresolvedWebBridgeHistoryContact(args: {
+    source: NormalizedMessage["source"];
+    direction?: NormalizedMessage["direction"];
+    notificationIntent?: NormalizedMessage["notificationIntent"];
+    isGroup?: boolean;
+    contactIdentityIsLid: boolean;
+    resolvedPhone?: string | null;
+}) {
+    return args.source === "whatsapp_web_bridge"
+        && args.direction === "outbound"
+        && args.notificationIntent === "history_import"
+        && !args.isGroup
+        && args.contactIdentityIsLid
+        && !isHighConfidenceResolvedPhone(normalizeDigits(args.resolvedPhone));
+}
+
 // ... handleWhatsAppMessage ...
 
 async function reconcileExistingWebBridgeMessageBody(args: {
@@ -1411,6 +1427,20 @@ export async function processNormalizedMessage(msg: NormalizedMessage) {
         });
         if (adopted?.id) {
             return { status: "processed", id: adopted.id };
+        }
+        if (shouldSkipUnresolvedWebBridgeHistoryContact({
+            source,
+            direction,
+            notificationIntent: msg.notificationIntent,
+            isGroup,
+            contactIdentityIsLid,
+            resolvedPhone: msg.resolvedPhone,
+        })) {
+            console.warn("[WhatsApp Sync] Skipping unresolved outbound Web Bridge history identity; a live or phone-resolved message must anchor the contact.");
+            return {
+                status: "skipped",
+                reason: "unresolved_outbound_history_identity",
+            };
         }
     }
 

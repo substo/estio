@@ -66,6 +66,7 @@ import {
     extractOpaqueWhatsAppWebBridgeMediaBody,
     getSafeWhatsAppWebBridgeMessageBody,
 } from "../lib/whatsapp/web-bridge-message-body";
+import { extractWhatsAppWebBridgeContactMetadata } from "../lib/whatsapp/web-bridge-contact-metadata";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -235,27 +236,6 @@ function jidFromId(value: any) {
     return String(value?._serialized || value?.serialized || value || "").trim();
 }
 
-function phoneJidFromContact(contact: any) {
-    const candidates = [
-        contact?.id?._serialized,
-        contact?.wid?._serialized,
-        contact?.jid,
-    ].map(jidFromId).filter(Boolean);
-    return candidates.find((candidate) => /@(c\.us|s\.whatsapp\.net)$/i.test(candidate)) || "";
-}
-
-function lidJidFromContact(contact: any, fallback?: string) {
-    const candidates = [
-        contact?.lid?._serialized,
-        contact?.lid,
-        contact?.id?._serialized,
-        contact?.wid?._serialized,
-        contact?.jid,
-        fallback,
-    ].map(jidFromId).filter(Boolean);
-    return candidates.find((candidate) => /@lid$/i.test(candidate)) || "";
-}
-
 async function resolveLidAndPhoneFromClient(messageOrChat: any, fallbackJid: string) {
     const client = messageOrChat?.client;
     if (!client || typeof client.getContactLidAndPhone !== "function" || !fallbackJid) {
@@ -295,8 +275,13 @@ async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
         });
     }
 
-    const contactPhoneJid = phoneJidFromContact(contact);
-    const contactLidJid = lidJidFromContact(contact, fallbackJid);
+    const metadata = extractWhatsAppWebBridgeContactMetadata({
+        messageOrChat,
+        contact,
+        fallbackJid,
+    });
+    const contactPhoneJid = metadata.phoneJid;
+    const contactLidJid = metadata.lidJid;
     const needsResolver = !contactPhoneJid || !contactLidJid;
     const resolved = needsResolver
         ? await resolveLidAndPhoneFromClient(messageOrChat, fallbackJid)
@@ -305,14 +290,8 @@ async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
         || resolved.phoneJid
         || (/@(c\.us|s\.whatsapp\.net)$/i.test(fallbackJid) ? fallbackJid : "");
     const lidJid = contactLidJid || resolved.lidJid;
-    const displayName = String(
-        contact?.verifiedName
-        || contact?.name
-        || contact?.shortName
-        || contact?.pushname
-        || messageOrChat?.name
-        || messageOrChat?.formattedTitle
-        || ""
+    const displayName = metadata.displayName || String(
+        messageOrChat?.name || messageOrChat?.formattedTitle || ""
     ).trim();
 
     return {
@@ -320,14 +299,14 @@ async function buildContactIdentity(messageOrChat: any, fallbackJid: string) {
         remoteJid: fallbackJid,
         lidJid: lidJid || null,
         phoneJid: phoneJid || null,
-        number: contact?.number || null,
-        pushname: contact?.pushname || null,
-        name: contact?.name || null,
-        shortName: contact?.shortName || null,
-        verifiedName: contact?.verifiedName || null,
+        number: metadata.number,
+        pushname: metadata.pushname,
+        name: metadata.name,
+        shortName: metadata.shortName,
+        verifiedName: metadata.verifiedName,
         displayName: displayName || null,
-        isMyContact: typeof contact?.isMyContact === "boolean" ? contact.isMyContact : null,
-        isBusiness: typeof contact?.isBusiness === "boolean" ? contact.isBusiness : null,
+        isMyContact: metadata.isMyContact,
+        isBusiness: metadata.isBusiness,
     };
 }
 

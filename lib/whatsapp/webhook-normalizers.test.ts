@@ -14,6 +14,7 @@ import {
     getOutboundWebBridgeManualRetryMatch,
     normalizeOutboundWebBridgeRetryBodyForMatch,
     selectPreferredWhatsAppLidContact,
+    shouldSkipUnresolvedWebBridgeHistoryContact,
     shouldRejectWebBridgeOutboundLidForOwnContact,
     shouldRejectWebBridgeResolvedPhoneAsOwnPhone,
 } from "@/lib/whatsapp/sync";
@@ -685,6 +686,28 @@ test("extractReliableWebBridgePhone prefers phone JID and rejects LID number dig
     };
 
     assert.equal(extractReliableWebBridgePhone(identity, "258699151036638@lid"), "35794475454");
+});
+
+test("unresolved outbound reconciliation cannot manufacture a LID-only contact", () => {
+    assert.equal(shouldSkipUnresolvedWebBridgeHistoryContact({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        notificationIntent: "history_import",
+        contactIdentityIsLid: true,
+    }), true);
+    assert.equal(shouldSkipUnresolvedWebBridgeHistoryContact({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        notificationIntent: "live_ingress",
+        contactIdentityIsLid: true,
+    }), false);
+    assert.equal(shouldSkipUnresolvedWebBridgeHistoryContact({
+        source: "whatsapp_web_bridge",
+        direction: "outbound",
+        notificationIntent: "history_import",
+        contactIdentityIsLid: true,
+        resolvedPhone: "35799123456",
+    }), false);
 });
 
 test("getHighConfidenceWebBridgeResolvedPhone accepts mapped contact phones but rejects own phone", () => {
