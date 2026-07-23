@@ -3,6 +3,7 @@ import { normalizeDigits } from "@/lib/whatsapp/identity";
 import { parseWhatsAppWebChatIdentity } from "@/lib/whatsapp/web-bridge";
 import { getHighConfidenceWebBridgeResolvedPhone } from "@/lib/whatsapp/web-bridge-identity";
 import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge-message-identity";
+import { getSafeWhatsAppWebBridgeMessageBody } from "@/lib/whatsapp/web-bridge-message-body";
 
 export function getWhatsAppCloudInboundBody(message: any) {
     const type = String(message?.type || "other");
@@ -86,7 +87,7 @@ export function getWhatsAppWebBridgeCallBody(message: any, direction: "inbound" 
 }
 
 export function getWhatsAppWebBridgeBody(message: any, direction: "inbound" | "outbound" = "inbound") {
-    const body = String(message?.body || message?.caption || "").trim();
+    const body = getSafeWhatsAppWebBridgeMessageBody(message);
     if (body) return body;
 
     const callBody = getWhatsAppWebBridgeCallBody(message, direction);

@@ -410,6 +410,28 @@ test("normalizeWhatsAppWebBridgeMessage keeps media-only inbound messages render
     assert.equal(result.normalized?.body, "[Image]");
 });
 
+test("normalizeWhatsAppWebBridgeMessage never exposes an opaque image payload as message text", () => {
+    const result = normalizeWhatsAppWebBridgeMessage({
+        locationId: "loc_1",
+        phone: "35725000000@c.us",
+        resolvedIdentity: { phone: "35799111111", displayName: "Mia" },
+        message: {
+            fromMe: true,
+            from: "35725000000@c.us",
+            to: "35799111111@c.us",
+            id: "wam_media_opaque_1",
+            body: `/9j/${"A".repeat(512)}`,
+            type: "image",
+            timestamp: 1710000000,
+            hasMedia: true,
+            contactIdentity: { source: "worker" },
+        },
+    });
+
+    assert.equal(result.normalized?.type, "image");
+    assert.equal(result.normalized?.body, "[Image]");
+});
+
 test("normalizeWhatsAppWebBridgeMessage uses resolved inbound LID phone instead of connected account phone", () => {
     const result = normalizeWhatsAppWebBridgeMessage({
         locationId: "loc_1",

@@ -57,6 +57,10 @@ import {
     WHATSAPP_WEB_BRIDGE_RECONCILIATION_MESSAGES_PER_CHAT,
 } from "../lib/whatsapp/web-bridge-reconciliation";
 import { buildWhatsAppWebBridgeRecipientResolution } from "../lib/whatsapp/web-bridge-recipient-resolution";
+import {
+    extractOpaqueWhatsAppWebBridgeMediaBody,
+    getSafeWhatsAppWebBridgeMessageBody,
+} from "../lib/whatsapp/web-bridge-message-body";
 
 const require = createRequire(path.join(process.cwd(), "scripts", "whatsapp-web-bridge-service.ts"));
 
@@ -1008,6 +1012,15 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
     const id = getSerializedMessageId(message);
     const messageType = String(message?.type || "text");
     const caption = message?._data?.caption || "";
+    let hasMedia = Boolean(message?.hasMedia);
+    const opaqueBodyMedia = extractOpaqueWhatsAppWebBridgeMediaBody({
+        body: message?.body,
+        type: messageType,
+        hasMedia,
+        mimetype: message?._data?.mimetype,
+        maxBytes: MAX_INLINE_MEDIA_BYTES,
+    });
+    hasMedia = hasMedia || Boolean(opaqueBodyMedia);
     const remoteJid = String(message?.fromMe ? message?.to : message?.from || "").trim();
     const contactIdentity = await buildContactIdentity(message, remoteJid);
     const serialized: Record<string, any> = {
@@ -1015,18 +1028,23 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
         from: message?.from || "",
         to: message?.to || "",
         fromMe: Boolean(message?.fromMe),
-        body: message?.body || "",
+        body: getSafeWhatsAppWebBridgeMessageBody({
+            body: message?.body,
+            caption,
+            type: messageType,
+            hasMedia,
+        }),
         caption,
         type: messageType,
         timestamp: Number(message?.timestamp || Math.floor(Date.now() / 1000)),
         notifyName: message?._data?.notifyName || message?._data?.pushName || "",
         contactName: contactIdentity.displayName || message?._data?.verifiedName || message?._data?.notifyName || "",
         contactIdentity,
-        hasMedia: Boolean(message?.hasMedia),
+        hasMedia,
         ack: Number(message?.ack ?? message?._data?.ack ?? 0),
     };
 
-    if (message?.hasMedia) {
+    if (hasMedia) {
         serialized.mediaMeta = {
             mimetype: message?._data?.mimetype || "",
             filename: message?._data?.filename || message?._data?.title || "",
@@ -1036,6 +1054,22 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
             attemptedDownload: Boolean(options?.includeMedia),
             inlined: false,
         };
+        if (opaqueBodyMedia) {
+            serialized.media = {
+                mimetype: opaqueBodyMedia.mimetype,
+                filename: message?._data?.filename || message?._data?.title || "",
+                data: opaqueBodyMedia.data,
+                size: opaqueBodyMedia.size,
+                fallbackPreview: true,
+            };
+            serialized.mediaMeta = {
+                ...serialized.mediaMeta,
+                mimetype: opaqueBodyMedia.mimetype,
+                size: opaqueBodyMedia.size,
+                inlined: true,
+                fallbackPreview: true,
+            };
+        }
     }
 
     if (options?.includeMedia && message?.hasMedia && typeof message.downloadMedia === "function") {
@@ -1119,15 +1153,23 @@ async function serializeMessage(message: any, options?: { includeMedia?: boolean
                 });
             }
         } catch (error: any) {
-            serialized.mediaError = {
-                code: "download_failed",
-                message: error?.message || "Failed to download media.",
-                type: messageType,
-            };
-            console.error("[WhatsApp Web Bridge] Media download failed", {
-                messageRef: bridgeRef(id, "message"),
-                code: "MEDIA_DOWNLOAD_FAILED",
-            });
+            if (opaqueBodyMedia) {
+                console.warn("[WhatsApp Web Bridge] Using recovered media-body fallback", {
+                    messageRef: bridgeRef(id, "message"),
+                    code: "MEDIA_BODY_FALLBACK",
+                    sizeBytes: opaqueBodyMedia.size,
+                });
+            } else {
+                serialized.mediaError = {
+                    code: "download_failed",
+                    message: error?.message || "Failed to download media.",
+                    type: messageType,
+                };
+                console.error("[WhatsApp Web Bridge] Media download failed", {
+                    messageRef: bridgeRef(id, "message"),
+                    code: "MEDIA_DOWNLOAD_FAILED",
+                });
+            }
         }
     } else if (options?.includeMedia && message?.hasMedia) {
         serialized.mediaError = {

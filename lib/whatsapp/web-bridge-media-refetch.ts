@@ -9,6 +9,7 @@ import {
     isTransientWebBridgeMediaIngestError,
 } from "@/lib/whatsapp/web-bridge-media";
 import { isWhatsAppWebBridgeRecoverableMediaError } from "@/lib/whatsapp/web-bridge-stale";
+import { areWhatsAppWebBridgeMessageIdAliases } from "@/lib/whatsapp/web-bridge-message-id-alias";
 
 export type WhatsAppWebBridgeMediaRefetchStatus = "queued" | "processing" | "completed" | "failed";
 
@@ -35,6 +36,30 @@ export type WhatsAppWebBridgeMediaRefetchJob = {
     queueAttempt?: number;
     queueMaxAttempts?: number;
 };
+
+const AUTOMATIC_MEDIA_REFETCH_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const automaticMediaRefetchInFlight = new Map<string, Promise<any>>();
+
+export function shouldAutomaticallyRefetchWhatsAppWebBridgeMedia(args: {
+    event: string;
+    timestamp?: unknown;
+    nowMs?: number;
+}) {
+    if (args.event === "message" || args.event === "message_create") return true;
+    if (args.event !== "message_reconcile") return false;
+    const timestampMs = Number(args.timestamp || 0) * 1000;
+    const nowMs = Number(args.nowMs || Date.now());
+    return timestampMs > 0 && timestampMs <= nowMs && nowMs - timestampMs <= AUTOMATIC_MEDIA_REFETCH_MAX_AGE_MS;
+}
+
+export function selectWhatsAppWebBridgeMediaRefetchCandidate(records: any[], wamId: string) {
+    const target = String(wamId || "").trim();
+    if (!target) return null;
+    return (records || []).find((item: any) => {
+        const candidateId = String(item?.id || item?.messageId || "").trim();
+        return candidateId === target || areWhatsAppWebBridgeMessageIdAliases(candidateId, target);
+    }) || null;
+}
 
 type AttachmentSnapshot = {
     fileName: string | null;
@@ -231,6 +256,84 @@ export async function startWhatsAppWebBridgeMediaRefetchAttempt(args: {
     } satisfies WhatsAppWebBridgeMediaRefetchJob;
 }
 
+export async function queueAutomaticWhatsAppWebBridgeMediaRefetch(args: {
+    locationId: string;
+    messageId: string;
+}) {
+    const key = `${args.locationId}:${args.messageId}`;
+    const existing = automaticMediaRefetchInFlight.get(key);
+    if (existing) return existing;
+
+    const queued = queueAutomaticWhatsAppWebBridgeMediaRefetchUnlocked(args).finally(() => {
+        if (automaticMediaRefetchInFlight.get(key) === queued) {
+            automaticMediaRefetchInFlight.delete(key);
+        }
+    });
+    automaticMediaRefetchInFlight.set(key, queued);
+    return queued;
+}
+
+async function queueAutomaticWhatsAppWebBridgeMediaRefetchUnlocked(args: {
+    locationId: string;
+    messageId: string;
+}) {
+    const message = await db.message.findFirst({
+        where: {
+            id: args.messageId,
+            conversation: { locationId: args.locationId },
+        },
+        select: {
+            id: true,
+            conversationId: true,
+            attachments: { select: { id: true }, take: 1 },
+            syncRecords: {
+                where: { provider: "whatsapp_web_bridge" },
+                select: { metadata: true },
+                take: 1,
+            },
+        },
+    });
+    if (!message?.id) return { queued: false as const, reason: "message_missing" as const };
+    const metadata = message.syncRecords?.[0]?.metadata;
+    const mediaState = metadata && typeof metadata === "object"
+        ? (metadata as any).webBridgeMedia
+        : null;
+    if (message.attachments.length > 0 && mediaState?.meta?.fallbackPreview !== true) {
+        return { queued: false as const, reason: "attachment_exists" as const };
+    }
+    if (mediaState?.refetch?.attemptId) {
+        return { queued: false as const, reason: "refetch_already_recorded" as const };
+    }
+
+    const job = await startWhatsAppWebBridgeMediaRefetchAttempt({
+        locationId: args.locationId,
+        conversationId: message.conversationId,
+        messageId: args.messageId,
+    });
+    try {
+        const {
+            enqueueWhatsAppMediaRefetchJob,
+            initWhatsAppMediaRefetchWorker,
+        } = await import("@/lib/queue/whatsapp-media-refetch");
+        await initWhatsAppMediaRefetchWorker();
+        const queued = await enqueueWhatsAppMediaRefetchJob(job);
+        if (!queued.accepted) {
+            await markWhatsAppWebBridgeMediaRefetchAttemptFailed({
+                ...job,
+                error: "Automatic media re-fetch queue did not accept the job.",
+            });
+            return { queued: false as const, reason: "queue_rejected" as const };
+        }
+        return { queued: true as const, jobId: queued.jobId };
+    } catch (error: any) {
+        await markWhatsAppWebBridgeMediaRefetchAttemptFailed({
+            ...job,
+            error: error?.message || "Automatic media re-fetch could not start.",
+        });
+        return { queued: false as const, reason: "queue_failed" as const };
+    }
+}
+
 export async function markWhatsAppWebBridgeMediaRefetchAttemptFailed(
     args: WhatsAppWebBridgeMediaRefetchJob & { error: string; stage?: string }
 ) {
@@ -358,7 +461,7 @@ export async function processWhatsAppWebBridgeMediaRefetchAttempt(args: WhatsApp
             });
             const records = Array.isArray(response?.messages) ? response.messages : [];
             scannedMessages += records.length;
-            const candidate = records.find((item: any) => String(item?.id || item?.messageId || "").trim() === message.wamId);
+            const candidate = selectWhatsAppWebBridgeMediaRefetchCandidate(records, message.wamId);
             if (candidate) {
                 matched = candidate;
                 matchedChatId = chatId;

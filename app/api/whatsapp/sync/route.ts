@@ -8,6 +8,7 @@ import { resolveInboundWhatsAppContactIdentity } from "@/lib/whatsapp/web-bridge
 import { ingestWhatsAppWebBridgeMediaAttachment } from "@/lib/whatsapp/web-bridge-media";
 import { updateWebBridgeMediaSyncMetadata } from "@/lib/whatsapp/web-bridge-media-refetch";
 import { getHighConfidenceWebBridgeResolvedPhone } from "@/lib/whatsapp/web-bridge-identity";
+import { getWhatsAppWebBridgeBody } from "@/lib/whatsapp/webhook-normalizers";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -120,7 +121,7 @@ export async function GET(req: NextRequest) {
                                     locationId: location.id,
                                     from: fromMe ? ownPhone : contactAddress,
                                     to: fromMe ? contactAddress : ownPhone,
-                                    body: String(message?.body || message?.caption || ""),
+                                    body: getWhatsAppWebBridgeBody(message, fromMe ? "outbound" : "inbound"),
                                     type: String(message?.type || "text") as any,
                                     wamId,
                                     timestamp: new Date(Number(message?.timestamp || Date.now() / 1000) * 1000),

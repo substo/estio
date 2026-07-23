@@ -15,6 +15,10 @@ import {
     normalizeWhatsAppWebBridgeMessage,
 } from "@/lib/whatsapp/webhook-normalizers";
 import {
+    queueAutomaticWhatsAppWebBridgeMediaRefetch,
+    shouldAutomaticallyRefetchWhatsAppWebBridgeMedia,
+} from "@/lib/whatsapp/web-bridge-media-refetch";
+import {
     isDeviceTunnelRuntimeLeaseEnforcementActive,
     validateDeviceTunnelRuntimeOwnership,
     validateDeviceTunnelRuntimeOwnershipDescriptor,
@@ -44,6 +48,8 @@ async function updateBridgeMessageMediaMetadata(wamId: string, mediaState: Recor
     const current = (message.syncRecords?.[0]?.metadata && typeof message.syncRecords[0].metadata === "object")
         ? message.syncRecords[0].metadata
         : {};
+    const currentMediaState = (current as any).webBridgeMedia;
+    if (mediaState.status === "pending" && currentMediaState?.status) return;
     await (db as any).messageSync.updateMany({
         where: {
             messageId: message.id,
@@ -268,12 +274,34 @@ export async function POST(req: NextRequest) {
                     `[WhatsApp Web Bridge Webhook] Media not ingested for ${wamId}:`,
                     typeof message.mediaError === "object" ? JSON.stringify(message.mediaError) : message.mediaError
                 );
-                void updateBridgeMessageMediaMetadata(wamId, {
+                await updateBridgeMessageMediaMetadata(wamId, {
                     status: "failed",
                     reason: typeof message.mediaError === "object" ? message.mediaError.code || "worker_media_error" : "worker_media_error",
                     meta: message.mediaMeta || null,
                     error: typeof message.mediaError === "object" ? message.mediaError.message || null : String(message.mediaError || ""),
                     workerError: message.mediaError,
+                });
+            } else if (message.hasMedia && result?.status !== "deferred_unresolved_lid") {
+                await updateBridgeMessageMediaMetadata(wamId, {
+                    status: "pending",
+                    reason: "missing_media_payload",
+                    meta: message.mediaMeta || null,
+                    error: null,
+                });
+            }
+
+            if (
+                message.hasMedia
+                && (!message.media?.data || message.media?.fallbackPreview === true)
+                && result?.id
+                && shouldAutomaticallyRefetchWhatsAppWebBridgeMedia({
+                    event,
+                    timestamp: message.timestamp,
+                })
+            ) {
+                await queueAutomaticWhatsAppWebBridgeMediaRefetch({
+                    locationId,
+                    messageId: String(result.id),
                 });
             }
 

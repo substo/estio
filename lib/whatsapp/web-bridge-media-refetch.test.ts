@@ -3,8 +3,43 @@ import test from "node:test";
 
 import {
     resolveRefetchChatCandidates,
+    selectWhatsAppWebBridgeMediaRefetchCandidate,
+    shouldAutomaticallyRefetchWhatsAppWebBridgeMedia,
     shouldRetryTransientMediaRefetchIngest,
 } from "./web-bridge-media-refetch";
+
+test("automatic media refetch is immediate for live events and bounded for reconciliation", () => {
+    const nowMs = Date.parse("2026-07-23T10:00:00.000Z");
+    assert.equal(shouldAutomaticallyRefetchWhatsAppWebBridgeMedia({
+        event: "message_create",
+        timestamp: 1,
+        nowMs,
+    }), true);
+    assert.equal(shouldAutomaticallyRefetchWhatsAppWebBridgeMedia({
+        event: "message_reconcile",
+        timestamp: (nowMs - 60_000) / 1000,
+        nowMs,
+    }), true);
+    assert.equal(shouldAutomaticallyRefetchWhatsAppWebBridgeMedia({
+        event: "message_reconcile",
+        timestamp: (nowMs - 3 * 60 * 60 * 1000) / 1000,
+        nowMs,
+    }), false);
+});
+
+test("media refetch accepts local and serialized WhatsApp provider id aliases", () => {
+    const localId = "3EB0ABC123";
+    const serializedId = `true_35799123456@c.us_${localId}`;
+    const candidate = { id: localId, type: "image" };
+    assert.equal(
+        selectWhatsAppWebBridgeMediaRefetchCandidate([candidate], serializedId),
+        candidate,
+    );
+    assert.equal(
+        selectWhatsAppWebBridgeMediaRefetchCandidate([{ id: "different" }], serializedId),
+        null,
+    );
+});
 
 test("transient media ingest failure is retryable before final queue attempt", () => {
     assert.equal(
