@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     extractOpaqueWhatsAppWebBridgeMediaBody,
+    getOpaqueWhatsAppWebBridgeMediaPlaceholder,
     getSafeWhatsAppWebBridgeMessageBody,
     isOpaqueWhatsAppWebBridgeMediaBody,
 } from "./web-bridge-message-body";
@@ -68,4 +69,10 @@ test("uses captions and media placeholders instead of opaque payloads", () => {
         type: "document",
         hasMedia: true,
     }), "brochure.pdf");
+});
+
+test("maps legacy opaque media bodies to safe display placeholders", () => {
+    assert.equal(getOpaqueWhatsAppWebBridgeMediaPlaceholder(`/9j/${"A".repeat(256)}`), "[Image]");
+    assert.equal(getOpaqueWhatsAppWebBridgeMediaPlaceholder(`JVBER${"A".repeat(256)}`), "[Document]");
+    assert.equal(getOpaqueWhatsAppWebBridgeMediaPlaceholder(`T2dnUw${"A".repeat(256)}`), "[Audio]");
 });

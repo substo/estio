@@ -43,6 +43,10 @@ import {
 } from "./message-bubble-chrome";
 import { getWhatsAppFailureFallbackUiState } from "./conversation-message-actions";
 import { getMessageBubbleTheme } from "./message-bubble-theme";
+import {
+    getOpaqueWhatsAppWebBridgeMediaPlaceholder,
+    isOpaqueWhatsAppWebBridgeMediaBody,
+} from "@/lib/whatsapp/web-bridge-message-body";
 
 const EMPTY_ATTACHMENTS: NormalizedMessageAttachment[] = [];
 
@@ -178,6 +182,15 @@ export function MessageBubble({
     const isEmail = (message.type || '').toUpperCase().includes('EMAIL');
     const isSMS = (message.type || '').toUpperCase().includes('SMS') || (message.type || '').toUpperCase().includes('PHONE');
     const isWhatsApp = (message.type || '').toUpperCase().includes('WHATSAPP');
+    const displayBody = useMemo(() => (
+        isWhatsApp && isOpaqueWhatsAppWebBridgeMediaBody({
+            body: message.body,
+            type: "image",
+            hasMedia: true,
+        })
+            ? getOpaqueWhatsAppWebBridgeMediaPlaceholder(message.body)
+            : message.body
+    ), [isWhatsApp, message.body]);
     const theme = getMessageBubbleTheme({ isWhatsApp, isSMS, isEmail, isOutbound });
     const [isExpanded, setIsExpanded] = useState(!isEmail); // Emails collapsed by default
     const [isRefetchingMedia, setIsRefetchingMedia] = useState(false);
@@ -190,10 +203,10 @@ export function MessageBubble({
     const [isTranslatingMessage, setIsTranslatingMessage] = useState(false);
     const attachments = useMemo(() => normalizeMessageAttachments(message.attachments), [message.attachments]);
     const bodySharedContacts = useMemo(
-        () => deriveSharedContactsFromMessageBody(message.body || ""),
-        [message.body]
+        () => deriveSharedContactsFromMessageBody(displayBody || ""),
+        [displayBody]
     );
-    const bodyVCardDownloadHref = useMemo(() => deriveBodyVCardDownloadHref(message.body), [message.body]);
+    const bodyVCardDownloadHref = useMemo(() => deriveBodyVCardDownloadHref(displayBody), [displayBody]);
     const sharedContacts = useMemo(() => {
         const attachmentSharedContacts = attachments.flatMap((attachment) => attachment.sharedContacts || []);
         return [...bodySharedContacts, ...attachmentSharedContacts];
@@ -209,7 +222,7 @@ export function MessageBubble({
     } = useMessageBubbleActions({
         messageId: message.id,
         conversationId: message.conversationId || null,
-        body: message.body || "",
+        body: displayBody || "",
         isEmail,
         isContactMessage,
         isExpanded,
@@ -245,7 +258,7 @@ export function MessageBubble({
         contactAttachments,
         fileAttachments,
     } = useMemo(() => classifyMessageAttachments(attachments), [attachments]);
-    const hasLikelyMediaPlaceholder = isLikelyMediaPlaceholderBody(message.body);
+    const hasLikelyMediaPlaceholder = isLikelyMediaPlaceholderBody(displayBody);
     const webBridgeMedia = message.webBridgeMedia || null;
     const hasUnstoredWebBridgeMedia = deriveMediaUnavailableState({
         isWhatsApp,
@@ -255,14 +268,14 @@ export function MessageBubble({
     });
     const hasRenderableMediaAttachment = imageAttachments.length > 0 || audioAttachments.length > 0 || videoAttachments.length > 0 || contactAttachments.length > 0 || fileAttachments.length > 0;
     const linkPreviewCandidate = useMemo(() => getMessageLinkPreviewCandidate({
-        body: message.body,
+        body: displayBody,
         isEmail,
         isContactMessage,
         hasRenderableMediaAttachment,
-    }), [hasRenderableMediaAttachment, isContactMessage, isEmail, message.body]);
+    }), [displayBody, hasRenderableMediaAttachment, isContactMessage, isEmail]);
     const isMediaRefetchInProgress = ["queued", "processing"].includes(String(webBridgeMedia?.refetch?.status || ""));
     const canRefetchMedia = !!onRefetchMedia && !isMediaRefetchInProgress && isWhatsApp && !isContactMessage && (hasRenderableMediaAttachment || hasLikelyMediaPlaceholder || hasUnstoredWebBridgeMedia);
-    const shouldRenderMessageBody = isContactMessage || !shouldSuppressMediaPlaceholderBody(message.body, hasRenderableMediaAttachment);
+    const shouldRenderMessageBody = isContactMessage || !shouldSuppressMediaPlaceholderBody(displayBody, hasRenderableMediaAttachment);
     const failureFallbackUi = useMemo(() => getWhatsAppFailureFallbackUiState({
         message,
         smsRelayEnabled,
@@ -446,7 +459,7 @@ export function MessageBubble({
                             />
                         ) : (
                             <MessageBubbleBody
-                                body={message.body}
+                                body={displayBody}
                                 isEmail={isEmail}
                                 isExpanded={isExpanded}
                                 isOutbound={isOutbound}

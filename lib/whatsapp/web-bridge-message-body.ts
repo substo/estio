@@ -34,6 +34,15 @@ function inferMediaBodyContentType(body: string, declaredType: string) {
     return "";
 }
 
+export function getOpaqueWhatsAppWebBridgeMediaPlaceholder(body: unknown) {
+    const contentType = inferMediaBodyContentType(String(body || "").trim(), "");
+    if (contentType.startsWith("image/")) return "[Image]";
+    if (contentType.startsWith("audio/")) return "[Audio]";
+    if (contentType.startsWith("video/")) return "[Video]";
+    if (contentType === "application/pdf") return "[Document]";
+    return "[Media]";
+}
+
 export function isOpaqueWhatsAppWebBridgeMediaBody(args: {
     body?: unknown;
     type?: unknown;
