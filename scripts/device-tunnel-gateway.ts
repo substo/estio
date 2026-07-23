@@ -9,6 +9,7 @@ import { BoundedJtiReplayCache } from "../lib/device-tunnel/jti-replay-cache";
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
 import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
+import { DeviceTunnelStreamHealth } from "../lib/device-tunnel/stream-health";
 import {
     registerDeviceTunnelGatewayNode,
     heartbeatDeviceTunnelGatewayNode,
@@ -112,6 +113,8 @@ type ConnectedDevice = {
     ws: WebSocket;
     proxyServer: ReturnType<typeof createTcpServer>;
     proxyPort: number;
+    proxyGeneration: string;
+    streamHealth: DeviceTunnelStreamHealth;
     streams: Map<string, Socket>;
     pendingOpen: Map<string, NodeJS.Timeout>;
     bytesToDevice: bigint;
@@ -289,7 +292,17 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
                     // encrypted application data is never parsed as a second handshake.
                     state.acceptConnectRequest();
                     socket.pause();
-                    const timeout = setTimeout(() => fail(0x04), 20_000);
+                    const timeout = setTimeout(() => {
+                        const reconnectRequired = deviceBase.streamHealth.recordOpenResult(false);
+                        fail(0x04);
+                        if (reconnectRequired) {
+                            console.warn("[Device Tunnel] Stream health forced Android reconnect", {
+                                sessionRef: redactOperationalIdentifier(deviceBase.bridgeSessionId, "session"),
+                                code: "TUNNEL_STREAM_OPEN_CIRCUIT",
+                            });
+                            void disconnectDevice(deviceBase as ConnectedDevice, "Tunnel stream health check failed");
+                        }
+                    }, 20_000);
                     deviceBase.pendingOpen.set(streamId, timeout);
                     try {
                         sendFrame(deviceBase as ConnectedDevice, { type: "open", streamId, host, port });
@@ -316,8 +329,11 @@ async function disconnectDevice(device: ConnectedDevice, reason: string) {
     device.renewalFence.fence();
     for (const streamId of Array.from(device.streams.keys())) closeStream(device, streamId, false);
     device.proxyServer.close();
-    if (device.runtimeLeaseEnforcement && device.ws.readyState === WebSocket.OPEN) {
-        device.ws.close(4002, "Runtime ownership ended");
+    if (device.ws.readyState === WebSocket.OPEN) {
+        device.ws.close(
+            device.runtimeLeaseEnforcement ? 4002 : 4003,
+            device.runtimeLeaseEnforcement ? "Runtime ownership ended" : "Tunnel reconnect required",
+        );
     }
     if (!isCurrentConnection) return;
     if (device.runtimeLeaseEnforcement) await stopFencedWhatsAppBrowser(device);
@@ -445,6 +461,8 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         distributedPlacement,
         runtimeLeaseEnforcement,
         canaryExpiresAt: distributedPlacement && canary.scope ? new Date(canary.scope.expiresAt) : null,
+        proxyGeneration: randomUUID(),
+        streamHealth: new DeviceTunnelStreamHealth(3),
     };
     const proxyServer = createSocksProxy(base);
     proxyServer.listen(0, "127.0.0.1");
@@ -547,10 +565,19 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
             if (pending) clearTimeout(pending);
             device.pendingOpen.delete(streamId);
             if (!frame.ok) {
+                const reconnectRequired = device.streamHealth.recordOpenResult(false);
                 device.streams.delete(streamId);
                 socket.end(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+                if (reconnectRequired) {
+                    console.warn("[Device Tunnel] Stream health forced Android reconnect", {
+                        sessionRef: redactOperationalIdentifier(device.bridgeSessionId, "session"),
+                        code: "TUNNEL_STREAM_OPEN_CIRCUIT",
+                    });
+                    void disconnectDevice(device, "Tunnel stream health check failed");
+                }
                 return;
             }
+            device.streamHealth.recordOpenResult(true);
             socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
             socket.resume();
             return;
@@ -729,6 +756,7 @@ const server = createHttpServer(async (req, res) => {
             proxyPort: device.proxyPort,
             bindingId: device.bindingId,
             gatewayGeneration: GATEWAY_GENERATION,
+            proxyGeneration: device.proxyGeneration,
             ...(device.ownership ? { ownership: device.ownership } : {}),
         });
     }

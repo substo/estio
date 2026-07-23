@@ -446,7 +446,7 @@ function serializeManagedSession(session: ManagedSession) {
 function classifyOperationalError(value: unknown) {
     const message = String(value || "").toLowerCase();
     if (!message) return null;
-    if (message.includes("gateway generation")) return "gateway_generation_stale";
+    if (message.includes("gateway generation") || message.includes("proxy generation")) return "gateway_generation_stale";
     if (message.includes("webhook")) return "webhook_stale";
     if (message.includes("lease") || message.includes("ownership") || message.includes("fenced")) return "runtime_fenced";
     if (message.includes("profile") || message.includes("singleton") || message.includes("chromium")) return "profile_lock_held";
@@ -455,18 +455,18 @@ function classifyOperationalError(value: unknown) {
     return "bridge_operation_failed";
 }
 
-async function getDeviceTunnelGatewayGeneration() {
+async function getDeviceTunnelProxyGeneration(sessionId: string) {
     if (!DEVICE_TUNNEL_INTERNAL_SECRET) {
         throw createRuntimeOwnershipUnavailableError("WhatsApp Android egress gateway authentication is unavailable.");
     }
-    const response = await fetch(`${DEVICE_TUNNEL_GATEWAY_URL}/health`, {
+    const response = await fetch(`${DEVICE_TUNNEL_GATEWAY_URL}/sessions/${encodeURIComponent(sessionId)}`, {
         headers: { "x-device-tunnel-secret": DEVICE_TUNNEL_INTERNAL_SECRET },
         signal: AbortSignal.timeout(5_000),
     }).catch(() => null);
     const payload = response?.ok ? await response.json().catch(() => null) : null;
-    const generation = String(payload?.gatewayGeneration || "").trim();
+    const generation = String(payload?.proxyGeneration || payload?.gatewayGeneration || "").trim();
     if (!generation) {
-        throw createRuntimeOwnershipUnavailableError("WhatsApp Android egress gateway generation is unavailable.");
+        throw createRuntimeOwnershipUnavailableError("WhatsApp Android egress proxy generation is unavailable.");
     }
     return generation;
 }
@@ -484,7 +484,7 @@ async function activelyProbeManagedSession(session: ManagedSession, force = fals
         try {
             await assertManagedSessionOwnership(session);
             if (session.deviceTunnelBindingId) {
-                const gatewayGeneration = await getDeviceTunnelGatewayGeneration();
+                const gatewayGeneration = await getDeviceTunnelProxyGeneration(session.sessionId);
                 if (didDeviceTunnelGatewayGenerationChange({
                     deviceTunnelBindingId: session.deviceTunnelBindingId,
                     sessionGeneration: session.gatewayGeneration,
@@ -1244,9 +1244,9 @@ async function getDeviceTunnelProxy(
             throw createRuntimeOwnershipUnavailableError();
         }
     }
-    const gatewayGeneration = String(payload?.gatewayGeneration || "").trim();
+    const gatewayGeneration = String(payload?.proxyGeneration || payload?.gatewayGeneration || "").trim();
     if (!gatewayGeneration) {
-        throw createRuntimeOwnershipUnavailableError("The Android egress gateway did not provide a process generation.");
+        throw createRuntimeOwnershipUnavailableError("The Android egress gateway did not provide a proxy generation.");
     }
     return {
         proxyHost,
@@ -1303,7 +1303,7 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         ) {
             await fenceManagedSession(existing, "Runtime ownership changed");
         } else if (existing.deviceTunnelBindingId) {
-            const gatewayGeneration = await getDeviceTunnelGatewayGeneration();
+            const gatewayGeneration = await getDeviceTunnelProxyGeneration(sessionId);
             if (didDeviceTunnelGatewayGenerationChange({
                 deviceTunnelBindingId: existing.deviceTunnelBindingId,
                 sessionGeneration: existing.gatewayGeneration,
