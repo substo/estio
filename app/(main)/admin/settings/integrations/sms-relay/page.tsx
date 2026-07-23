@@ -794,7 +794,7 @@ export default function SmsRelaySettingsPage() {
                 </div>
             </div>
 
-            <div style={styles.egressCard}>
+            <div id="sto-secure-delivery" style={{ ...styles.egressCard, scrollMarginTop: 24 }}>
                 <div style={styles.egressHeader}>
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                         <span style={styles.egressIcon}>🔐</span>
