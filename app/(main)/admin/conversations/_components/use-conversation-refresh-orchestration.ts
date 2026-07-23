@@ -22,8 +22,8 @@ import { hasPendingTranscripts, getMessageSignature } from './conversation-trans
 
 const ACTIVE_POLL_GRACE_MS = 2500;
 const ACTIVE_ACTIVITY_REFRESH_INTERVAL_MS = 60_000;
-
-export type ConversationRealtimeMode = 'disabled' | 'connecting' | 'connected' | 'fallback';
+const CONNECTED_LIST_RECONCILE_INTERVAL_MS = 15_000;
+const CONNECTED_ACTIVE_RECONCILE_INTERVAL_MS = 5_000;
 
 export function getActiveWorkspaceRefreshOptions({
     pendingTranscripts,
@@ -45,6 +45,18 @@ export function getActiveWorkspaceRefreshOptions({
     } as const;
 }
 
+export function getConversationListReconcileIntervalMs(balancedPolling: boolean) {
+    return balancedPolling ? CONNECTED_LIST_RECONCILE_INTERVAL_MS : 3_000;
+}
+
+export function getActiveConversationReconcileIntervalMs(args: {
+    balancedPolling: boolean;
+    pendingTranscripts: boolean;
+}) {
+    if (!args.balancedPolling) return 3_000;
+    return CONNECTED_ACTIVE_RECONCILE_INTERVAL_MS;
+}
+
 type UseConversationRefreshOrchestrationArgs = {
     viewMode: 'chats' | 'deals';
     viewFilter: 'active' | 'archived' | 'trash' | 'tasks';
@@ -52,7 +64,6 @@ type UseConversationRefreshOrchestrationArgs = {
     searchQuery: string;
     isTabVisible: boolean;
     featureFlags: ConversationFeatureFlags;
-    realtimeMode: ConversationRealtimeMode;
     activeIdRef: RefObject<string | null>;
     messagesRef: RefObject<Message[]>;
     activityLogRef: RefObject<any[]>;
@@ -81,7 +92,6 @@ export function useConversationRefreshOrchestration({
     searchQuery,
     isTabVisible,
     featureFlags,
-    realtimeMode,
     activeIdRef,
     messagesRef,
     activityLogRef,
@@ -353,10 +363,8 @@ export function useConversationRefreshOrchestration({
         if (viewMode !== 'chats' || viewFilter === 'tasks') return;
         if (!isTabVisible) return;
         if (searchQuery.trim()) return;
-        if (featureFlags.realtimeSse && realtimeMode !== 'fallback') return;
-
         let cancelled = false;
-        const intervalMs = featureFlags.balancedPolling ? 15_000 : 3_000;
+        const intervalMs = getConversationListReconcileIntervalMs(featureFlags.balancedPolling);
 
         const runListDeltaSync = async () => {
             try {
@@ -398,18 +406,17 @@ export function useConversationRefreshOrchestration({
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [viewMode, viewFilter, isTabVisible, searchQuery, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, activeIdRef, conversationDeltaCursorRef, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
+    }, [viewMode, viewFilter, isTabVisible, searchQuery, featureFlags.balancedPolling, featureFlags.workspaceV2, activeIdRef, conversationDeltaCursorRef, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
 
     useEffect(() => {
         if (viewMode !== 'chats' || !activeId) return;
         if (!isTabVisible) return;
-        if (featureFlags.realtimeSse && realtimeMode !== 'fallback') return;
-
         let cancelled = false;
         const pendingTranscripts = hasPendingTranscripts(messagesRef.current);
-        const intervalMs = featureFlags.balancedPolling
-            ? (pendingTranscripts ? 8_000 : 20_000)
-            : 3_000;
+        const intervalMs = getActiveConversationReconcileIntervalMs({
+            balancedPolling: featureFlags.balancedPolling,
+            pendingTranscripts,
+        });
 
         const runActiveConversationDelta = async () => {
             const selectedConversationId = activeIdRef.current;
@@ -476,7 +483,7 @@ export function useConversationRefreshOrchestration({
                 clearInterval(intervalId);
             }
         };
-    }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, featureFlags.realtimeSse, realtimeMode, activeIdRef, messagesRef, messageSignatureRef, markConversationReadInUi, trackClientRequest, refreshActiveWorkspaceCore, setActivityLog, setConversations, setMessages]);
+    }, [viewMode, activeId, isTabVisible, featureFlags.balancedPolling, featureFlags.workspaceV2, activeIdRef, messagesRef, messageSignatureRef, markConversationReadInUi, trackClientRequest, refreshActiveWorkspaceCore, setActivityLog, setConversations, setMessages]);
 
     useEffect(() => {
         if (viewMode !== 'chats' || !activeId) return;

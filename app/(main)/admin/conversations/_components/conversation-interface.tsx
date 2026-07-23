@@ -1426,7 +1426,6 @@ export function ConversationInterface({ locationId, initialConversations, initia
         searchQuery,
         isTabVisible,
         featureFlags,
-        realtimeMode,
         activeIdRef,
         messagesRef,
         activityLogRef,

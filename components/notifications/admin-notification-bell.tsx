@@ -22,6 +22,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { NotificationCurrentBrowserCard } from "@/components/notifications/notification-current-browser-card";
+import { useNotificationPreferences } from "@/components/notifications/use-notification-preferences";
 import { cn } from "@/lib/utils";
 
 type NotificationItem = any;
@@ -36,6 +38,34 @@ function formatNotificationTime(input?: string | Date | null) {
 function getNotificationStatusTone(notification: NotificationItem) {
   if (!notification.readAt) return "border-blue-200 bg-blue-50/60";
   return "border-slate-200 bg-white";
+}
+
+function NotificationBellPushSetup() {
+  const preferences = useNotificationPreferences();
+
+  if (preferences.settingsLoading) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border bg-slate-50/70 p-3 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Checking browser notification status…
+      </div>
+    );
+  }
+
+  return (
+    <NotificationCurrentBrowserCard
+      compact
+      featureFlags={preferences.featureFlags}
+      browserSupported={preferences.browserSupported}
+      pushPermission={preferences.pushPermission}
+      pushEnabledForCurrentBrowser={preferences.pushEnabledForCurrentBrowser}
+      activePushDeviceCount={preferences.activePushDeviceCount}
+      currentBrowserSubscription={preferences.currentBrowserSubscription}
+      managingBrowserPush={preferences.managingBrowserPush}
+      onEnable={preferences.enableCurrentBrowserPush}
+      onDisable={preferences.disableCurrentBrowserPush}
+    />
+  );
 }
 
 export function AdminNotificationBell() {
@@ -209,6 +239,12 @@ export function AdminNotificationBell() {
         </div>
 
         <div className="max-h-[420px] overflow-y-auto p-4">
+          {open && snapshot?.featureFlags?.webPush !== false ? (
+            <div className="mb-4">
+              <NotificationBellPushSetup />
+            </div>
+          ) : null}
+
           <div>
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-2">

@@ -5,7 +5,11 @@ import {
     ACTIVE_REFRESH_MESSAGE_LIMIT,
     THREAD_TARGET_MESSAGE_COUNT,
 } from '@/lib/conversations/thread-hydration';
-import { getActiveWorkspaceRefreshOptions } from './use-conversation-refresh-orchestration';
+import {
+    getActiveConversationReconcileIntervalMs,
+    getActiveWorkspaceRefreshOptions,
+    getConversationListReconcileIntervalMs,
+} from './use-conversation-refresh-orchestration';
 
 test('active workspace refresh uses first-paint message options when transcripts are not pending', () => {
     assert.deepEqual(getActiveWorkspaceRefreshOptions({
@@ -31,4 +35,24 @@ test('active workspace refresh uses full thread and activity options when transc
         activityLimit: 23,
         refreshMode: 'active_refresh',
     });
+});
+
+test('connected conversations keep a lightweight polling safety net', () => {
+    assert.equal(getConversationListReconcileIntervalMs(true), 15_000);
+    assert.equal(getActiveConversationReconcileIntervalMs({
+        balancedPolling: true,
+        pendingTranscripts: false,
+    }), 5_000);
+    assert.equal(getActiveConversationReconcileIntervalMs({
+        balancedPolling: true,
+        pendingTranscripts: true,
+    }), 5_000);
+});
+
+test('unbalanced conversation polling retains the fast diagnostic interval', () => {
+    assert.equal(getConversationListReconcileIntervalMs(false), 3_000);
+    assert.equal(getActiveConversationReconcileIntervalMs({
+        balancedPolling: false,
+        pendingTranscripts: false,
+    }), 3_000);
 });
