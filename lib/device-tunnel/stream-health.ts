@@ -20,3 +20,10 @@ export class DeviceTunnelStreamHealth {
         return this.consecutiveOpenFailures;
     }
 }
+
+export function attachLiveDeviceTunnelProxyState<
+    RuntimeState extends object,
+    ProxyState extends object,
+>(runtimeState: RuntimeState, proxyState: ProxyState): RuntimeState & ProxyState {
+    return Object.assign(runtimeState, proxyState);
+}

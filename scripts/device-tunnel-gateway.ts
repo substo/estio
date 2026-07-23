@@ -9,7 +9,10 @@ import { BoundedJtiReplayCache } from "../lib/device-tunnel/jti-replay-cache";
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
 import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
-import { DeviceTunnelStreamHealth } from "../lib/device-tunnel/stream-health";
+import {
+    attachLiveDeviceTunnelProxyState,
+    DeviceTunnelStreamHealth,
+} from "../lib/device-tunnel/stream-health";
 import {
     registerDeviceTunnelGatewayNode,
     heartbeatDeviceTunnelGatewayNode,
@@ -472,7 +475,10 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
     });
     const address = proxyServer.address();
     if (!address || typeof address === "string") throw new Error("Failed to bind tunnel proxy");
-    device = { ...base, proxyServer, proxyPort: address.port };
+    // The SOCKS server closes over `base`, so runtime lease renewals must update
+    // that same object. Copying here leaves the proxy with the initial
+    // leaseExpiresAt and makes every new stream fail once the first TTL elapses.
+    device = attachLiveDeviceTunnelProxyState(base, { proxyServer, proxyPort: address.port });
 
     devicesByBridgeSession.set(device.bridgeSessionId, device);
     const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
