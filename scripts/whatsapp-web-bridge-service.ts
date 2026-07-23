@@ -13,10 +13,15 @@ import {
 import { didWhatsAppWebSessionReachReadyBeforeInitializeError } from "../lib/whatsapp/web-bridge-initialize";
 import { classifyWhatsAppWebBridgeUnhandledRejection } from "../lib/whatsapp/web-bridge-process-errors";
 import {
+    buildWhatsAppWebBridgeTextSendOptions,
     getWhatsAppWebBridgeLinkPreviewPolicy,
     getWhatsAppWebBridgeDispatchConfirmationPolicy,
+    isWhatsAppWebBridgeLinkPreviewUrlEligible,
     requireWhatsAppWebBridgeSentMessageId,
+    sanitizeWhatsAppWebBridgeLinkPreview,
+    WHATSAPP_WEB_BRIDGE_LINK_PREVIEW_TIMEOUT_MS,
 } from "../lib/whatsapp/web-bridge-send";
+import { fetchWhatsAppWebBridgeOpenGraphPreview } from "../lib/whatsapp/web-bridge-link-preview-fallback";
 import {
     classifyWhatsAppWebBridgeRequestError,
     isWhatsAppWebBridgeOpaqueRuntimeError,
@@ -121,6 +126,8 @@ type ManagedSession = {
     initialCheckpointInFlight?: boolean;
     reconciliationInFlight?: Promise<void> | null;
     lastReconciliationAt?: Date | null;
+    linkPreviewNativeLookup?: { url: string; promise: Promise<unknown> } | null;
+    linkPreviewFallbackLookup?: { url: string; promise: Promise<Record<string, unknown> | null> } | null;
 };
 
 const sessions = new Map<string, ManagedSession>();
@@ -1536,6 +1543,128 @@ async function stopSession(sessionId: string, checkpoint = true) {
     if (session?.client) await quiesceManagedSession(session, checkpoint);
 }
 
+type WhatsAppWebBridgeLinkPreviewResolution = {
+    extra: Record<string, unknown> | null;
+    reason:
+        | "not_requested"
+        | "ineligible_url"
+        | "lookup_busy"
+        | "lookup_timeout"
+        | "lookup_failed"
+        | "preview_missing"
+        | "native_ready"
+        | "open_graph_ready";
+};
+
+async function resolveWhatsAppWebBridgeLinkPreview(
+    session: ManagedSession,
+    requested: boolean,
+    url: string | null,
+): Promise<WhatsAppWebBridgeLinkPreviewResolution> {
+    if (!requested) return { extra: null, reason: "not_requested" };
+    if (!url || !isWhatsAppWebBridgeLinkPreviewUrlEligible(url)) {
+        return { extra: null, reason: "ineligible_url" };
+    }
+    const candidates: Array<Promise<WhatsAppWebBridgeLinkPreviewResolution>> = [];
+    let nativeLookup = session.linkPreviewNativeLookup?.url === url
+        ? session.linkPreviewNativeLookup.promise
+        : null;
+    if (!nativeLookup && !session.linkPreviewNativeLookup) {
+        nativeLookup = session.client.pupPage.evaluate((targetUrl: string) => {
+            const action = (window as any).require("WAWebLinkPreviewChatAction");
+            if (!action?.getLinkPreview) return null;
+            return Promise.resolve(action.getLinkPreview(targetUrl)).then((value: any) => {
+                const candidate = value?.data && typeof value.data === "object"
+                    ? value.data
+                    : value;
+                if (!candidate || typeof candidate !== "object") return null;
+                return {
+                    title: typeof candidate.title === "string" ? candidate.title : null,
+                    description: typeof candidate.description === "string" ? candidate.description : null,
+                    thumbnail: typeof candidate.thumbnail === "string" ? candidate.thumbnail : null,
+                    hqThumbnail: typeof candidate.hqThumbnail === "string"
+                        ? candidate.hqThumbnail
+                        : typeof candidate.thumbnailHQ === "string"
+                            ? candidate.thumbnailHQ
+                            : null,
+                    jpegThumbnail: typeof candidate.jpegThumbnail === "string" ? candidate.jpegThumbnail : null,
+                };
+            });
+        }, url);
+        const trackedNativeLookup = { url, promise: nativeLookup };
+        session.linkPreviewNativeLookup = trackedNativeLookup;
+        void nativeLookup.then(
+            () => {
+                if (session.linkPreviewNativeLookup === trackedNativeLookup) {
+                    session.linkPreviewNativeLookup = null;
+                }
+            },
+            () => {
+                if (session.linkPreviewNativeLookup === trackedNativeLookup) {
+                    session.linkPreviewNativeLookup = null;
+                }
+            },
+        );
+    }
+    if (nativeLookup) {
+        candidates.push(nativeLookup.then((rawPreview) => {
+            const extra = sanitizeWhatsAppWebBridgeLinkPreview(rawPreview, url);
+            if (!extra) throw new Error("native_preview_missing");
+            return { extra, reason: "native_ready" as const };
+        }));
+    }
+
+    let fallbackLookup = session.linkPreviewFallbackLookup?.url === url
+        ? session.linkPreviewFallbackLookup.promise
+        : null;
+    if (!fallbackLookup && !session.linkPreviewFallbackLookup) {
+        fallbackLookup = fetchWhatsAppWebBridgeOpenGraphPreview(url, {
+            timeoutMs: WHATSAPP_WEB_BRIDGE_LINK_PREVIEW_TIMEOUT_MS,
+        });
+        const trackedFallbackLookup = { url, promise: fallbackLookup };
+        session.linkPreviewFallbackLookup = trackedFallbackLookup;
+        void fallbackLookup.then(
+            () => {
+                if (session.linkPreviewFallbackLookup === trackedFallbackLookup) {
+                    session.linkPreviewFallbackLookup = null;
+                }
+            },
+            () => {
+                if (session.linkPreviewFallbackLookup === trackedFallbackLookup) {
+                    session.linkPreviewFallbackLookup = null;
+                }
+            },
+        );
+    }
+    if (fallbackLookup) {
+        candidates.push(fallbackLookup.then((rawPreview) => {
+            const extra = sanitizeWhatsAppWebBridgeLinkPreview(rawPreview, url);
+            if (!extra) throw new Error("open_graph_preview_missing");
+            return { extra, reason: "open_graph_ready" as const };
+        }));
+    }
+    if (candidates.length === 0) {
+        return { extra: null, reason: "lookup_busy" };
+    }
+
+    try {
+        return await withTimeout(
+            Promise.any(candidates),
+            WHATSAPP_WEB_BRIDGE_LINK_PREVIEW_TIMEOUT_MS,
+            "WhatsApp link preview lookup",
+        );
+    } catch (error: any) {
+        return {
+            extra: null,
+            reason: String(error?.message || "").includes("timed out")
+                ? "lookup_timeout"
+                : error instanceof AggregateError
+                    ? "preview_missing"
+                : "lookup_failed",
+        };
+    }
+}
+
 async function sendMessage(sessionId: string, payload: any) {
     const session = sessions.get(sessionId);
     if (!session?.client || !session.ready) throw new Error("WhatsApp Web session is not ready.");
@@ -1580,27 +1709,44 @@ async function sendMessage(sessionId: string, payload: any) {
         const linkPreviewRequested = typeof payload.linkPreview === "boolean"
             ? payload.linkPreview
             : preview.shouldRequestPreview;
-        // whatsapp-web.js resolves previews before dispatch without a bounded preview-only
-        // deadline. A stalled metadata lookup must not block the message itself.
-        const linkPreviewPolicy = getWhatsAppWebBridgeLinkPreviewPolicy({ requested: linkPreviewRequested });
-        const dispatchConfirmation = getWhatsAppWebBridgeDispatchConfirmationPolicy();
+        // Resolve the native WhatsApp preview before beginning the delivery proof.
+        // The library lookup itself stays disabled during send so a stalled preview
+        // can never make the message outcome ambiguous.
+        const resolvedPreview = await resolveWhatsAppWebBridgeLinkPreview(
+            session,
+            linkPreviewRequested,
+            preview.url,
+        );
+        const linkPreviewPolicy = getWhatsAppWebBridgeLinkPreviewPolicy({
+            requested: linkPreviewRequested,
+            previewReady: Boolean(resolvedPreview.extra),
+        });
         const proofNonce = await beginDeviceTunnelSendProof(session);
         const sent = await withStaleRecovery(session, () => withTimeout(
-            session.client.sendMessage(to, text, {
-                linkPreview: linkPreviewPolicy.enabled,
-                waitUntilMsgSent: dispatchConfirmation.waitUntilMsgSent,
-            }),
+            session.client.sendMessage(
+                to,
+                text,
+                buildWhatsAppWebBridgeTextSendOptions(resolvedPreview.extra),
+            ),
             OPERATION_TIMEOUT_MS,
             `WhatsApp text send ${sessionId}`
         ));
         const messageId = requireWhatsAppWebBridgeSentMessageId(sent);
         const proofMessageId = messageId || String(payload.proofMessageId || "").trim();
         const egressProof = await recordDeviceTunnelSendProof(session, proofMessageId, proofNonce);
-        if (linkPreviewPolicy.suppressed) {
-            console.log("[WhatsApp Web Bridge] Blocking link preview suppressed for reliable dispatch", {
+        if (linkPreviewPolicy.injected) {
+            console.log("[WhatsApp Web Bridge] Bounded link preview attached", {
+                sessionRef: bridgeRef(sessionId, "session"),
+                toKind: /@lid$/i.test(to) ? "lid" : /@c\.us$/i.test(to) ? "phone" : "other",
+                linkPreviewHost: preview.host,
+                messageRef: bridgeRef(messageId, "message"),
+            });
+        } else if (linkPreviewPolicy.suppressed) {
+            console.log("[WhatsApp Web Bridge] Link preview unavailable; sent text without blocking", {
                 sessionRef: bridgeRef(sessionId, "session"),
                 toKind: /@lid$/i.test(to) ? "lid" : /@c\.us$/i.test(to) ? "phone" : "other",
                 linkPreviewRequested: true,
+                linkPreviewReason: resolvedPreview.reason,
                 messageRef: bridgeRef(messageId, "message"),
             });
         }
@@ -1608,7 +1754,9 @@ async function sendMessage(sessionId: string, payload: any) {
             messageId,
             egressProof,
             linkPreviewRequested,
+            linkPreviewInjected: linkPreviewPolicy.injected,
             linkPreviewSuppressed: linkPreviewPolicy.suppressed,
+            linkPreviewReason: resolvedPreview.reason,
             linkPreviewHost: preview.host,
             sentLinksCount: Array.isArray(sent?.links) ? sent.links.length : undefined,
         };

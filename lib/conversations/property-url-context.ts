@@ -1,5 +1,7 @@
 import { load } from "cheerio";
 import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import net from "node:net";
 
 export type PropertyMessageUrlContextResult = {
@@ -19,6 +21,7 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 700_000;
 const MAX_SOURCE_TEXT_CHARS = 8_000;
 const MAX_REDIRECTS = 5;
+const MAX_PINNED_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 const BLOCKED_HOSTS = new Set([
     "localhost",
@@ -28,29 +31,138 @@ const BLOCKED_HOSTS = new Set([
 function isPrivateIpAddress(address: string): boolean {
     if (net.isIPv4(address)) {
         const parts = address.split(".").map((part) => Number.parseInt(part, 10));
-        const [a, b] = parts;
+        const [a, b, c] = parts;
         return (
             a === 10
             || a === 127
+            || (a === 100 && b >= 64 && b <= 127)
             || (a === 172 && b >= 16 && b <= 31)
             || (a === 192 && b === 168)
+            || (a === 192 && b === 0 && (c === 0 || c === 2))
+            || (a === 198 && b >= 18 && b <= 19)
+            || (a === 198 && b === 51 && c === 100)
+            || (a === 203 && b === 0 && c === 113)
             || (a === 169 && b === 254)
             || a === 0
+            || a >= 224
         );
     }
 
     if (net.isIPv6(address)) {
         const normalized = address.toLowerCase();
+        if (normalized.startsWith("::ffff:")) {
+            const mapped = normalized.slice("::ffff:".length);
+            if (net.isIPv4(mapped)) return isPrivateIpAddress(mapped);
+            const words = mapped.split(":");
+            if (words.length === 2 && words.every((word) => /^[0-9a-f]{1,4}$/.test(word))) {
+                const high = Number.parseInt(words[0], 16);
+                const low = Number.parseInt(words[1], 16);
+                return isPrivateIpAddress([
+                    high >> 8,
+                    high & 0xff,
+                    low >> 8,
+                    low & 0xff,
+                ].join("."));
+            }
+            return true;
+        }
         return (
             normalized === "::1"
             || normalized.startsWith("fc")
             || normalized.startsWith("fd")
-            || normalized.startsWith("fe80")
+            || /^fe[89ab]/.test(normalized)
+            || normalized.startsWith("ff")
+            || normalized.startsWith("64:ff9b:")
+            || normalized.startsWith("100:")
+            || normalized.startsWith("2001:db8:")
             || normalized === "::"
         );
     }
 
     return false;
+}
+
+export function selectPinnedPublicAddress(
+    addresses: Array<{ address: string; family: number }>,
+) {
+    if (
+        addresses.length === 0
+        || addresses.some((item) => isPrivateIpAddress(item.address))
+    ) {
+        return null;
+    }
+    return addresses[0];
+}
+
+async function fetchPinnedPublicHttpResponse(
+    url: URL,
+    options: {
+        accept: string;
+        signal: AbortSignal;
+    },
+) {
+    const addresses = await lookup(url.hostname, { all: true, verbatim: false });
+    const selected = selectPinnedPublicAddress(addresses);
+    if (!selected) {
+        throw new PropertyUrlFetchError("Private network URLs are not supported.", "unsafe_url");
+    }
+    const pinnedLookup = ((
+        _hostname: string,
+        lookupOptions: { all?: boolean } | number,
+        callback: (...args: any[]) => void,
+    ) => {
+        if (typeof lookupOptions === "object" && lookupOptions?.all) {
+            callback(null, [selected]);
+            return;
+        }
+        callback(null, selected.address, selected.family);
+    }) as any;
+    const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+
+    return new Promise<Response>((resolve, reject) => {
+        const req = request(url, {
+            method: "GET",
+            signal: options.signal,
+            lookup: pinnedLookup,
+            headers: {
+                "Accept": options.accept,
+                "User-Agent": "Mozilla/5.0 (compatible; EstioPropertyMessageBot/1.0)",
+            },
+        }, (response) => {
+            const chunks: Buffer[] = [];
+            let totalBytes = 0;
+            response.on("data", (chunk: Buffer | Uint8Array) => {
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                totalBytes += buffer.length;
+                if (totalBytes > MAX_PINNED_RESPONSE_BYTES) {
+                    response.destroy(new PropertyUrlFetchError("The response exceeded the safe size limit.", "response_too_large"));
+                    return;
+                }
+                chunks.push(buffer);
+            });
+            response.on("error", reject);
+            response.on("end", () => {
+                const headers = new Headers();
+                for (const [name, value] of Object.entries(response.headers)) {
+                    if (Array.isArray(value)) {
+                        for (const item of value) headers.append(name, item);
+                    } else if (value !== undefined) {
+                        headers.set(name, String(value));
+                    }
+                }
+                const body = [204, 205, 304].includes(response.statusCode || 0)
+                    ? null
+                    : Buffer.concat(chunks);
+                resolve(new Response(body, {
+                    status: response.statusCode || 500,
+                    statusText: response.statusMessage || "",
+                    headers,
+                }));
+            });
+        });
+        req.on("error", reject);
+        req.end();
+    });
 }
 
 export async function validatePublicHttpUrl(rawUrl: string): Promise<{ ok: true; url: URL } | { ok: false; error: string }> {
@@ -75,6 +187,15 @@ export async function validatePublicHttpUrl(rawUrl: string): Promise<{ ok: true;
 
     if (net.isIP(hostname) && isPrivateIpAddress(hostname)) {
         return { ok: false, error: "Private network URLs are not supported." };
+    }
+    if (
+        parsed.port
+        && !(
+            (parsed.protocol === "http:" && parsed.port === "80")
+            || (parsed.protocol === "https:" && parsed.port === "443")
+        )
+    ) {
+        return { ok: false, error: "Only standard web ports are supported." };
     }
 
     try {
@@ -240,15 +361,21 @@ export async function fetchPublicHttpResponse(
             if (visited.has(normalizedUrl)) throw new PropertyUrlFetchError("The URL redirects in a loop.", "redirect_loop");
             visited.add(normalizedUrl);
 
-            const response = await fetchImpl(normalizedUrl, {
-                method: "GET",
-                redirect: "manual",
-                signal: controller.signal,
-                headers: {
-                    "Accept": options.accept || "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
-                    "User-Agent": "Mozilla/5.0 (compatible; EstioPropertyMessageBot/1.0)",
-                },
-            });
+            const accept = options.accept || "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8";
+            const response = options.fetchImpl
+                ? await fetchImpl(normalizedUrl, {
+                    method: "GET",
+                    redirect: "manual",
+                    signal: controller.signal,
+                    headers: {
+                        "Accept": accept,
+                        "User-Agent": "Mozilla/5.0 (compatible; EstioPropertyMessageBot/1.0)",
+                    },
+                })
+                : await fetchPinnedPublicHttpResponse(parsed, {
+                    accept,
+                    signal: controller.signal,
+                });
 
             if (![301, 302, 303, 307, 308].includes(response.status)) {
                 return { response, finalUrl: normalizedUrl };

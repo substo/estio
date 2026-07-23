@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     extractPropertyUrlContext,
+    selectPinnedPublicAddress,
     validatePublicHttpUrl,
 } from "./property-url-context";
 
@@ -93,6 +94,31 @@ test("validatePublicHttpUrl rejects private and non-http URLs", async () => {
         ok: false,
         error: "Local URLs are not supported.",
     });
+    assert.deepEqual(await validatePublicHttpUrl("https://example.com:8443/a"), {
+        ok: false,
+        error: "Only standard web ports are supported.",
+    });
+});
+
+test("pinned public fetches reject private, mixed, mapped, and reserved DNS answers", () => {
+    assert.deepEqual(selectPinnedPublicAddress([
+        { address: "93.184.216.34", family: 4 },
+    ]), { address: "93.184.216.34", family: 4 });
+    for (const addresses of [
+        [{ address: "127.0.0.1", family: 4 }],
+        [{ address: "::ffff:127.0.0.1", family: 6 }],
+        [{ address: "::ffff:7f00:1", family: 6 }],
+        [{ address: "100.64.0.1", family: 4 }],
+        [{ address: "192.0.2.1", family: 4 }],
+        [{ address: "198.51.100.1", family: 4 }],
+        [{ address: "203.0.113.1", family: 4 }],
+        [{ address: "93.184.216.34", family: 4 }, { address: "10.0.0.1", family: 4 }],
+        [{ address: "febf::1", family: 6 }],
+        [{ address: "64:ff9b::7f00:1", family: 6 }],
+        [{ address: "2001:db8::1", family: 6 }],
+    ]) {
+        assert.equal(selectPinnedPublicAddress(addresses), null);
+    }
 });
 
 test("extractPropertyUrlContext validates redirects and resolves metadata from the final URL", async () => {
