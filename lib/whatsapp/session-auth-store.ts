@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { DeviceTunnelRuntimeOwnership } from "../device-tunnel/runtime-ownership";
-import { validateDeviceTunnelRuntimeOwnership } from "../device-tunnel/runtime-ownership";
+import {
+    sameDeviceTunnelRuntimeOwnership,
+    validateDeviceTunnelRuntimeOwnership,
+} from "../device-tunnel/runtime-ownership";
 import {
     beginSessionAuthAttach,
     beginSessionAuthDetach,
@@ -73,10 +76,23 @@ export class SessionAuthPlacementStore {
                             ownerInstanceId: placement.ownerInstanceId, leaseEpoch: placement.leaseEpoch,
                         }
                         : null;
-                    if (priorOwnership && await validateDeviceTunnelRuntimeOwnership({ db: tx, ownership: priorOwnership })) {
+                    const priorOwnershipAuthoritative = Boolean(
+                        priorOwnership
+                        && await validateDeviceTunnelRuntimeOwnership({ db: tx, ownership: priorOwnership }),
+                    );
+                    const expiredSameOwnerOperation = Boolean(
+                        priorOwnershipAuthoritative
+                        && sameDeviceTunnelRuntimeOwnership(priorOwnership, ownership)
+                        && placement.operationDeadlineAt
+                        && placement.operationDeadlineAt.getTime() <= Date.now(),
+                    );
+                    if (priorOwnershipAuthoritative && !expiredSameOwnerOperation) {
                         throw new Error("Session-auth placement is still owned by an authoritative runtime lease");
                     }
                     const canRestore = placement.currentGeneration > 0;
+                    const recoveryErrorCode = expiredSameOwnerOperation
+                        ? "expired_owner_operation_fenced"
+                        : "stale_owner_fenced";
                     placement = record(await tx.whatsAppSessionAuthPlacement.update({
                         where: { id: placement.id },
                         data: {
@@ -85,11 +101,17 @@ export class SessionAuthPlacementStore {
                             authEpoch: placement.authEpoch + 1,
                             operationId: null, operationStartedAt: null, operationDeadlineAt: null,
                             recoveryStatus: canRestore ? "restoring_previous" : "relink_required",
-                            lastErrorCode: "stale_owner_fenced",
+                            lastErrorCode: recoveryErrorCode,
                         },
                     }));
                     await tx.whatsAppSessionAuthAuditEvent.create({
-                        data: auditData(placement, "stale_owner_fenced", canRestore ? "fallback" : "relink_required", undefined, "stale_owner_fenced"),
+                        data: auditData(
+                            placement,
+                            recoveryErrorCode,
+                            canRestore ? "fallback" : "relink_required",
+                            undefined,
+                            recoveryErrorCode,
+                        ),
                     });
                     if (!canRestore) {
                         placement = record(await tx.whatsAppSessionAuthPlacement.update({

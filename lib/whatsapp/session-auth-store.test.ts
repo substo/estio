@@ -145,3 +145,58 @@ test("non-authoritative owner cannot detach a durable profile without a checkpoi
         /not authoritative/,
     );
 });
+
+test("authoritative owner fences and retries its own expired attach operation", async () => {
+    const { db, state } = fakeDb();
+    Object.assign(state.placement, {
+        state: "attaching",
+        gatewayNodeId: ownership.gatewayNodeId,
+        assignmentEpoch: ownership.assignmentEpoch,
+        ownerInstanceId: ownership.ownerInstanceId,
+        leaseEpoch: ownership.leaseEpoch,
+        authEpoch: 8,
+        operationId: "expired-attach",
+        operationStartedAt: new Date(Date.now() - 180_000),
+        operationDeadlineAt: new Date(Date.now() - 60_000),
+    });
+    const store = new SessionAuthPlacementStore(db);
+
+    const claimed = await store.claimAttach(ownership);
+
+    assert.equal(claimed.placement.state, "attaching");
+    assert.equal(claimed.placement.authEpoch, 10);
+    assert.notEqual(claimed.placement.operationId, "expired-attach");
+    assert.deepEqual(state.audits.map((item: any) => ({
+        eventType: item.eventType,
+        errorCode: item.errorCode,
+    })), [
+        {
+            eventType: "expired_owner_operation_fenced",
+            errorCode: "expired_owner_operation_fenced",
+        },
+        { eventType: "attach_claimed", errorCode: null },
+    ]);
+});
+
+test("authoritative owner cannot replace its own unexpired attach operation", async () => {
+    const { db, state } = fakeDb();
+    Object.assign(state.placement, {
+        state: "attaching",
+        gatewayNodeId: ownership.gatewayNodeId,
+        assignmentEpoch: ownership.assignmentEpoch,
+        ownerInstanceId: ownership.ownerInstanceId,
+        leaseEpoch: ownership.leaseEpoch,
+        authEpoch: 8,
+        operationId: "live-attach",
+        operationStartedAt: new Date(),
+        operationDeadlineAt: new Date(Date.now() + 60_000),
+    });
+    const store = new SessionAuthPlacementStore(db);
+
+    await assert.rejects(
+        store.claimAttach(ownership),
+        /still owned by an authoritative runtime lease/,
+    );
+    assert.equal(state.placement.operationId, "live-attach");
+    assert.equal(state.audits.length, 0);
+});

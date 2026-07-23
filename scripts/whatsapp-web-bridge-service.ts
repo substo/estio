@@ -1333,12 +1333,24 @@ async function startSession(sessionId: string, locationId: string, expectedOwner
         }
     }
 
-    const tunnelProxy = await getDeviceTunnelProxy(sessionId, locationId, expectedOwnership);
+    let tunnelProxy: Awaited<ReturnType<typeof getDeviceTunnelProxy>>;
+    try {
+        tunnelProxy = await getDeviceTunnelProxy(sessionId, locationId, expectedOwnership);
+    } catch (error: any) {
+        if (!error?.code) error.code = "DEVICE_TUNNEL_PROXY_RESOLUTION_FAILED";
+        throw error;
+    }
     const runtimeLeaseEnforced = Boolean(expectedOwnership || tunnelProxy?.ownership);
     const authDurableRequired = runtimeLeaseEnforced && Boolean(SESSION_AUTH_COORDINATOR);
-    const authAttachment = authDurableRequired && SESSION_AUTH_COORDINATOR && tunnelProxy?.ownership
-        ? await SESSION_AUTH_COORDINATOR.attach({ ownership: tunnelProxy.ownership, bridgeSessionId: sessionId })
-        : null;
+    let authAttachment: any = null;
+    try {
+        authAttachment = authDurableRequired && SESSION_AUTH_COORDINATOR && tunnelProxy?.ownership
+            ? await SESSION_AUTH_COORDINATOR.attach({ ownership: tunnelProxy.ownership, bridgeSessionId: sessionId })
+            : null;
+    } catch (error: any) {
+        if (!error?.code) error.code = "SESSION_AUTH_ATTACH_FAILED";
+        throw error;
+    }
     const { Client, LocalAuth } = require("whatsapp-web.js");
     const client = new Client({
         userAgent: BROWSER_USER_AGENT,
@@ -1948,6 +1960,8 @@ const server = createServer(async (req, res) => {
                     console.error("[WhatsApp Web Bridge] Failed to start session", {
                         sessionRef: bridgeRef(sessionId, "session"),
                         code: "SESSION_START_FAILED",
+                        causeCode: String(error?.code || "UNKNOWN").slice(0, 64),
+                        causeName: String(error?.name || "Error").slice(0, 64),
                     });
                 });
                 return json(res, 202, { success: true, sessionId, status: "starting" });
@@ -2114,10 +2128,12 @@ async function bootstrapPersistedSessions() {
     });
 
     for (const row of rows) {
-        startSession(String(row.sessionId), String(row.locationId)).catch((error) => {
+        startSession(String(row.sessionId), String(row.locationId)).catch((error: any) => {
             console.error("[WhatsApp Web Bridge] Failed to bootstrap persisted session", {
                 sessionRef: bridgeRef(row.sessionId, "session"),
                 code: "PERSISTED_SESSION_BOOTSTRAP_FAILED",
+                causeCode: String(error?.code || "UNKNOWN").slice(0, 64),
+                causeName: String(error?.name || "Error").slice(0, 64),
             });
         });
     }
