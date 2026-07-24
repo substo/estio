@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,7 +61,6 @@ export function GoogleSyncManager({
     const [googleData, setGoogleData] = useState<any>(null);
     const [searchQuery, setSearchQuery] = useState(getPreferredGoogleContactSearchQuery(contact));
     const [searchResults, setSearchResults] = useState<any[]>([]);
-    const warmedSearchRef = useRef(false);
 
     const isLinked = !!contact?.googleContactId;
     const hasError = !!contact?.error;
@@ -109,12 +108,33 @@ export function GoogleSyncManager({
 
     // Initial Fetch logic
     useEffect(() => {
-        if (!open || warmedSearchRef.current) return;
-        warmedSearchRef.current = true;
-        warmupGoogleContactsSearchAction().catch(() => {
+        if (!open) return;
+        let cancelled = false;
+
+        warmupGoogleContactsSearchAction().then(result => {
+            if (
+                cancelled ||
+                isLinked ||
+                !result.success ||
+                !('refreshed' in result) ||
+                !result.refreshed
+            ) return;
+
+            // The first directory snapshot is built independently of the
+            // dialog. Re-run the lookup once it is ready so a phone hit that
+            // Google's search endpoint missed appears without another click.
+            const initialQuery = getPreferredGoogleContactSearchQuery(contact);
+            if (initialQuery) {
+                handleSearch(initialQuery, true, { phoneFallback: false });
+            }
+        }).catch(() => {
             // Warmup is best-effort; visible search actions handle auth/errors.
         });
-    }, [open]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open, contact.id, isLinked]);
 
     useEffect(() => {
         if (!open) return;
@@ -134,7 +154,7 @@ export function GoogleSyncManager({
             // Always go to search mode if not linked
             setStep('search');
         }
-    }, [open, isLinked, contact.googleContactId]); // removed contact.email dependency to avoid flapping
+    }, [open, isLinked, contact.id, contact.googleContactId]);
 
     const [notConnected, setNotConnected] = useState(false);
     const [authExpired, setAuthExpired] = useState(false);

@@ -262,6 +262,8 @@ model User {
   googleTasklistTitle           String? // Cached display name for preferred Google Tasks list
   googleCalendarId              String? // Preferred Google Calendar id for viewing sync-out
   googleCalendarTitle           String? // Cached display name for preferred Google Calendar
+  googleContactDirectoryState   GoogleContactDirectoryState?
+  googleContactDirectoryEntries GoogleContactDirectoryEntry[]
   gmailSyncState                GmailSyncState?
   gmailSyncOutboxJobs           GmailSyncOutbox[]
 
@@ -3601,6 +3603,44 @@ model OutlookSyncState {
   lastSyncedAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GoogleContactDirectoryState {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  refreshedAt  DateTime @default(now())
+  contactCount Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GoogleContactDirectoryEntry {
+  id              String   @id @default(cuid())
+  userId          String
+  resourceName    String
+  name            String?
+  email           String?
+  phone           String?
+  photo           String?  @db.Text
+  etag            String?
+  googleUpdatedAt DateTime?
+  normalizedName  String   @default("")
+  normalizedEmail String   @default("")
+  searchText      String   @default("") @db.Text
+  phoneDigits     String   @default("")
+  phoneSuffix     String   @default("")
+  phoneKeys       String[] @default([])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resourceName])
+  @@index([userId, phoneDigits])
+  @@index([userId, phoneSuffix])
+  @@index([userId, normalizedEmail])
+  @@index([userId, normalizedName])
+  @@index([phoneKeys], type: Gin)
 }
 
 model WebPushSubscription {

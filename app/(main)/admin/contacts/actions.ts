@@ -1641,8 +1641,8 @@ export async function warmupGoogleContactsSearchAction() {
     }
 
     const { warmupGoogleContactsSearch } = await import('@/lib/google/people');
-    await warmupGoogleContactsSearch(user.id);
-    return { success: true };
+    const result = await warmupGoogleContactsSearch(user.id);
+    return { success: true, refreshed: result.refreshed };
   } catch (error: any) {
     if (error.message === 'GOOGLE_AUTH_EXPIRED') {
       return { success: false, message: 'GOOGLE_AUTH_EXPIRED' };

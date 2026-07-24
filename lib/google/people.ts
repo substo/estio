@@ -9,6 +9,12 @@ import {
     SETTINGS_SECRET_KEYS,
     isSettingsDualWriteLegacyEnabled,
 } from '@/lib/settings/constants';
+import {
+    getGoogleContactDirectoryIndexStatus,
+    mapGooglePersonToSearchResult,
+    replaceGoogleContactDirectoryIndex,
+    searchGoogleContactDirectoryIndex,
+} from './contact-directory-index';
 
 function getPrimaryGooglePhone(person?: people_v1.Schema$Person | null): string | undefined {
     const phone = person?.phoneNumbers?.find((pn: any) => pn?.canonicalForm || pn?.value) || person?.phoneNumbers?.[0];
@@ -740,27 +746,60 @@ async function findMatchingGoogleContact(
 const GOOGLE_CONTACT_SEARCH_LIST_FIELDS = 'names,emailAddresses,phoneNumbers';
 const GOOGLE_CONTACT_SEARCH_DETAIL_FIELDS = 'names,emailAddresses,phoneNumbers,photos,metadata';
 const GOOGLE_CONTACT_SEARCH_SOURCES = ['READ_SOURCE_TYPE_CONTACT', 'READ_SOURCE_TYPE_PROFILE'] as const;
+const googleContactDirectoryRefreshes = new Map<string, Promise<{ refreshed: boolean }>>();
 
-export async function warmupGoogleContactsSearch(userId: string) {
+async function refreshGoogleContactDirectory(
+    userId: string,
+    force = false,
+): Promise<{ refreshed: boolean }> {
+    const status = await getGoogleContactDirectoryIndexStatus(userId);
+    if (!force && status.fresh) return { refreshed: false };
+
     try {
         const auth = await getValidAccessToken(userId);
         const people = google.people({ version: 'v1', auth });
+        const contacts = [];
+        let pageToken: string | undefined;
 
-        await people.people.searchContacts({
-            query: '',
-            readMask: GOOGLE_CONTACT_SEARCH_LIST_FIELDS,
-            pageSize: 1,
-            sources: [...GOOGLE_CONTACT_SEARCH_SOURCES]
-        });
+        do {
+            const response = await people.people.connections.list({
+                resourceName: 'people/me',
+                pageSize: 1000,
+                personFields: GOOGLE_CONTACT_SEARCH_DETAIL_FIELDS,
+                pageToken,
+            });
 
-        return true;
+            for (const person of response.data.connections || []) {
+                contacts.push(mapGooglePersonToSearchResult(person, getPrimaryGooglePhone, extractGoogleUpdateTime));
+            }
+            pageToken = response.data.nextPageToken || undefined;
+        } while (pageToken);
+
+        await replaceGoogleContactDirectoryIndex(userId, contacts);
+        return { refreshed: true };
     } catch (e: any) {
         if (e.code === 401 || (e.code === 400 && e.message?.includes('invalid_grant'))) {
             throw new Error('GOOGLE_AUTH_EXPIRED');
         }
         console.error('[warmupGoogleContactsSearch] Failed:', e);
-        return false;
+        return { refreshed: false };
     }
+}
+
+export async function warmupGoogleContactsSearch(
+    userId: string,
+    options: { force?: boolean } = {},
+): Promise<{ refreshed: boolean }> {
+    const runningRefresh = googleContactDirectoryRefreshes.get(userId);
+    if (runningRefresh && !options.force) return runningRefresh;
+    if (runningRefresh) {
+        await runningRefresh.catch(() => undefined);
+    }
+
+    const refresh = refreshGoogleContactDirectory(userId, options.force)
+        .finally(() => googleContactDirectoryRefreshes.delete(userId));
+    googleContactDirectoryRefreshes.set(userId, refresh);
+    return refresh;
 }
 
 export async function searchGoogleContacts(
@@ -769,14 +808,22 @@ export async function searchGoogleContacts(
     options: { phoneFallback?: boolean; includeMetadata?: boolean; pageSize?: number } = {}
 ) {
     try {
-        const auth = await getValidAccessToken(userId);
-        const people = google.people({ version: 'v1', auth });
-
         const phoneQuery = isPhoneQuery(query);
         const allowPhoneFallback = options.phoneFallback ?? true;
         const includeMetadata = options.includeMetadata ?? false;
         const readMask = includeMetadata ? GOOGLE_CONTACT_SEARCH_DETAIL_FIELDS : GOOGLE_CONTACT_SEARCH_LIST_FIELDS;
         const pageSize = Math.max(1, Math.min(Math.floor(options.pageSize || 10), 30));
+        const indexed = await searchGoogleContactDirectoryIndex(userId, query, pageSize);
+
+        // A complete snapshot makes both hits and misses definitive without a
+        // Google round trip. Stale snapshots remain useful while the dialog's
+        // warm-up request refreshes them in the background.
+        if (indexed.available) {
+            return indexed.results;
+        }
+
+        const auth = await getValidAccessToken(userId);
+        const people = google.people({ version: 'v1', auth });
 
         // Try searchContacts first (works for names/emails, unreliable for phones)
         const response = await people.people.searchContacts({

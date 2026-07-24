@@ -1,5 +1,5 @@
 
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { handleGoogleCallback } from '@/lib/google/auth';
 import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
@@ -93,6 +93,21 @@ export async function GET(req: NextRequest) {
 
         // Exchange for tokens using consistent base URL
         await handleGoogleCallback(code, user.id, baseUrl);
+
+        // Build the local contacts search directory after connection so the
+        // first Sync Manager lookup does not need to wait on Google. Clear any
+        // prior snapshot first because the user may have connected a different
+        // Google account.
+        after(async () => {
+            try {
+                const { clearGoogleContactDirectoryIndex } = await import('@/lib/google/contact-directory-index');
+                const { warmupGoogleContactsSearch } = await import('@/lib/google/people');
+                await clearGoogleContactDirectoryIndex(user.id);
+                await warmupGoogleContactsSearch(user.id, { force: true });
+            } catch (indexError) {
+                console.error('[Google Callback] Failed to prepare contact search index:', indexError);
+            }
+        });
 
         console.log('[Google Callback] Success! Redirecting...');
 
