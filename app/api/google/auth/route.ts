@@ -7,6 +7,9 @@ import {
     GOOGLE_OAUTH_STATE_TTL_SECONDS,
     createGoogleOAuthState,
 } from '@/lib/google/oauth-state';
+import { verifySettingsEncryptionReady } from '@/lib/settings/crypto';
+import { classifyGoogleOAuthError } from '@/lib/google/oauth-errors';
+import { randomUUID } from 'node:crypto';
 
 export async function GET(req: NextRequest) {
     try {
@@ -23,6 +26,10 @@ export async function GET(req: NextRequest) {
 
         console.log('[Google Auth] Using base URL:', baseUrl);
 
+        // Do not send a user through Google consent when secure token storage
+        // is unavailable. This verifies both KMS encrypt and decrypt access.
+        await verifySettingsEncryptionReady();
+
         const state = createGoogleOAuthState();
         const url = getGoogleAuthUrl(baseUrl, state);
         const response = NextResponse.redirect(url);
@@ -37,8 +44,17 @@ export async function GET(req: NextRequest) {
         });
 
         return response;
-    } catch (error) {
-        console.error('Google Auth Error:', error);
-        return new NextResponse('Internal Error', { status: 500 });
+    } catch (error: any) {
+        const errorId = randomUUID();
+        const errorCode = classifyGoogleOAuthError(error);
+        console.error(`[Google Auth] Error (${errorId}):`, error?.message || error);
+
+        const baseUrl = process.env.APP_BASE_URL
+            || process.env.NEXT_PUBLIC_APP_URL
+            || req.nextUrl.origin;
+        const redirectUrl = new URL('/admin/settings/integrations/google', baseUrl);
+        redirectUrl.searchParams.set('google_error', errorCode);
+        redirectUrl.searchParams.set('google_error_id', errorId);
+        return NextResponse.redirect(redirectUrl);
     }
 }

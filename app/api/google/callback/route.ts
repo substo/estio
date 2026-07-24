@@ -5,6 +5,7 @@ import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
 import { randomUUID } from 'node:crypto';
 import { GOOGLE_OAUTH_STATE_COOKIE, isGoogleOAuthStateValid } from '@/lib/google/oauth-state';
+import { classifyGoogleOAuthError } from '@/lib/google/oauth-errors';
 
 function googleSettingsRedirect(
     baseUrl: string,
@@ -104,10 +105,11 @@ export async function GET(req: NextRequest) {
 
     } catch (error: any) {
         const errorId = randomUUID();
+        const errorCode = classifyGoogleOAuthError(error);
         console.error(`[Google Callback] Error (${errorId}):`, error?.message || error);
         console.error(`[Google Callback] Stack (${errorId}):`, error?.stack);
         const internalErrorRes = googleSettingsRedirect(baseUrl, {
-            google_error: 'internal_error',
+            google_error: errorCode,
             google_error_id: errorId,
         });
         clearGoogleOAuthStateCookie(internalErrorRes);

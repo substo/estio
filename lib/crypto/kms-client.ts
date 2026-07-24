@@ -25,10 +25,13 @@ export function normalizeAndValidateKmsKeyPath(rawValue: string | undefined): st
 }
 
 class KmsClient {
-    private client: KeyManagementServiceClient;
+    private client: KeyManagementServiceClient | null = null;
 
-    constructor() {
-        this.client = new KeyManagementServiceClient();
+    private getClient(): KeyManagementServiceClient {
+        if (!this.client) {
+            this.client = new KeyManagementServiceClient();
+        }
+        return this.client;
     }
 
     private get keyPath(): string | undefined {
@@ -48,7 +51,7 @@ class KmsClient {
         // Generate DEK from local CSPRNG, then wrap it with KMS master key.
         const plaintextDek = crypto.randomBytes(32);
         try {
-            const [encryptResponse] = await this.client.encrypt({
+            const [encryptResponse] = await this.getClient().encrypt({
                 name: keyName,
                 plaintext: plaintextDek,
             });
@@ -75,7 +78,7 @@ class KmsClient {
         const keyName = this.keyPath;
         if (!keyName || !encryptedDek) return null;
 
-        const [decryptResponse] = await this.client.decrypt({
+        const [decryptResponse] = await this.getClient().decrypt({
             name: keyName,
             ciphertext: Buffer.from(encryptedDek, "base64"),
         });

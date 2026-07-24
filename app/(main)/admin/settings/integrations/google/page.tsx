@@ -15,6 +15,9 @@ import {
     getGoogleIntegrationSettingsForRead,
     googleIntegrationSettingsSelect,
 } from "@/lib/google/settings";
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
+import { resolveGoogleConnectionState } from "@/lib/google/connection-state";
 
 type GoogleTasklistOption = {
     id: string;
@@ -33,6 +36,7 @@ const GOOGLE_ERROR_MESSAGE_BY_CODE: Record<string, string> = {
     oauth_denied: "Google authorization was denied or canceled. Please try again and approve permissions.",
     missing_code: "Google did not return an authorization code. Please retry the connection flow.",
     internal_error: "We could not complete Google connection due to a server-side issue. Please retry shortly.",
+    secure_storage_unavailable: "Secure Google credential storage is temporarily unavailable. Your credentials were not replaced. Please retry after an administrator restores the encryption service.",
 };
 
 async function loadGoogleTasklistOptions(userId: string, googleSettings: any) {
@@ -108,7 +112,27 @@ export default async function GoogleIntegrationPage({
 
     const googleSettings = await getGoogleIntegrationSettingsForRead(user);
 
-    const isConnected = !!user.googleAccessToken;
+    const [hasEncryptedAccessToken, hasEncryptedRefreshToken] = await Promise.all([
+        settingsService.hasSecret({
+            scopeType: "USER",
+            scopeId: user.id,
+            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
+        }),
+        settingsService.hasSecret({
+            scopeType: "USER",
+            scopeId: user.id,
+            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
+        }),
+    ]);
+    const isConnected = resolveGoogleConnectionState({
+        syncEnabled: googleSettings.googleSyncEnabled,
+        hasEncryptedAccessToken,
+        hasEncryptedRefreshToken,
+        legacyAccessToken: user.googleAccessToken,
+        legacyRefreshToken: user.googleRefreshToken,
+    });
     const resolvedParams = await searchParams;
     const isNewConnection = resolvedParams?.google_connected === 'true';
     const googleErrorCode = typeof resolvedParams?.google_error === "string"
@@ -158,7 +182,11 @@ export default async function GoogleIntegrationPage({
                 <div className="rounded-md bg-red-50 p-4 text-red-700 dark:bg-red-900/10 dark:text-red-400">
                     <div className="flex items-center">
                         <AlertCircle className="mr-2 h-5 w-5" />
-                        <p>{googleErrorMessage}{googleErrorId ? ` (Ref: ${googleErrorId})` : ""}</p>
+                        <p>
+                            {googleErrorMessage}
+                            {isConnected ? " Your existing Google connection remains active." : ""}
+                            {googleErrorId ? ` (Ref: ${googleErrorId})` : ""}
+                        </p>
                     </div>
                 </div>
             )}

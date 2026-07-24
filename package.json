@@ -14,6 +14,7 @@
         "ops:viewings:retention": "tsx scripts/cleanup-viewing-session-retention.ts",
         "lint": "next lint",
         "settings:backfill": "tsx scripts/settings/backfill.ts",
+        "settings:kms-preflight": "tsx scripts/settings/kms-preflight.ts",
         "settings:rotate-secrets": "tsx scripts/settings/rotate-secrets.ts",
         "perf:conversations:db": "node scripts/perf/conversations-db-load-check.js",
         "perf:conversations:e2e": "node scripts/perf/conversations-e2e-smoke.js",

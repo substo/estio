@@ -388,6 +388,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         . ./.env
         set +a
     fi
+    echo "🔐 Verifying secure settings storage..."
+    npm run settings:kms-preflight
     PORT="\$TARGET_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$TARGET_APP_NAME" -- start
 
     echo "🩺 Waiting for target health check..."

@@ -76,6 +76,26 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
         throw new Error("User not found");
     }
 
+    // Persist credentials before enabling the integration document. Secret
+    // encryption failures must not leave a new connection marked as enabled.
+    await settingsService.setSecret({
+        scopeType: "USER",
+        scopeId: userId,
+        domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
+        plaintext: tokens.access_token,
+        actorUserId: userId,
+    });
+    if (tokens.refresh_token) {
+        await settingsService.setSecret({
+            scopeType: "USER",
+            scopeId: userId,
+            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
+            plaintext: tokens.refresh_token,
+            actorUserId: userId,
+        });
+    }
     await settingsService.upsertDocument({
         scopeType: "USER",
         scopeId: userId,
@@ -97,24 +117,6 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
         actorUserId: userId,
         schemaVersion: 1,
     });
-    await settingsService.setSecret({
-        scopeType: "USER",
-        scopeId: userId,
-        domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-        secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
-        plaintext: tokens.access_token,
-        actorUserId: userId,
-    });
-    if (tokens.refresh_token) {
-        await settingsService.setSecret({
-            scopeType: "USER",
-            scopeId: userId,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
-            plaintext: tokens.refresh_token,
-            actorUserId: userId,
-        });
-    }
 
     if (isSettingsDualWriteLegacyEnabled()) {
         // Save tokens to legacy columns for compatibility during migration window.
@@ -122,7 +124,9 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
             where: { id: userId },
             data: {
                 googleAccessToken: tokens.access_token,
-                googleRefreshToken: tokens.refresh_token, // Only present on first consent or forced consent
+                // Google may omit this on reconnect; preserve the existing
+                // refresh token instead of replacing it with null.
+                ...(tokens.refresh_token && { googleRefreshToken: tokens.refresh_token }),
                 googleSyncEnabled: true,
             }
         });

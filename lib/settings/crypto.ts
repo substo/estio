@@ -129,3 +129,31 @@ export async function reEncryptSettingsSecretValue(
         plaintext,
     });
 }
+
+/**
+ * Proves that the configured settings key can encrypt and decrypt before a
+ * user enters an external authorization flow. This catches missing KMS IAM,
+ * disabled/missing keys, and invalid local keyring configuration early.
+ */
+export async function verifySettingsEncryptionReady(): Promise<void> {
+    if (!process.env.GCP_KMS_KEY_PATH) {
+        getSettingsPrimaryKey();
+        return;
+    }
+
+    const generated = await kmsClient.generateDataKey();
+    if (!generated) {
+        throw new Error("Settings KMS is configured but did not return an encrypted data key.");
+    }
+
+    let decrypted: Buffer | null = null;
+    try {
+        decrypted = await kmsClient.decryptDataKey(generated.encryptedDek);
+        if (!decrypted || !crypto.timingSafeEqual(generated.plaintextDek, decrypted)) {
+            throw new Error("Settings KMS encryption preflight failed.");
+        }
+    } finally {
+        generated.plaintextDek.fill(0);
+        decrypted?.fill(0);
+    }
+}
