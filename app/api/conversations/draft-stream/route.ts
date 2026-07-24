@@ -210,6 +210,7 @@ export async function POST(req: NextRequest) {
                     requestElapsedMs: Date.now() - requestStartedAt,
                     firstChunkMs,
                     hasDraft: !!result?.draft,
+                    truncated: result?.truncated === true,
                     generateDraftTelemetry: result?.telemetry?.stageMs || null,
                 });
                 push({

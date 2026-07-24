@@ -193,6 +193,18 @@ export function useConversationComposerAiDraft({
                     onDraftChange(streamedBuffer);
                 }
             );
+            if (result?.truncated) {
+                onDraftChange(previousComposerDraft);
+                onAiDraftFeedbackChange?.(null);
+                toast.error("The AI response reached its length limit. Your previous draft was restored; please try again.");
+                logComposerDraftTiming("client_truncated_result_rejected", {
+                    conversationId: conversation?.id || null,
+                    elapsedMs: Date.now() - startedAt,
+                    streamedChars: streamedBuffer.length,
+                    model: result.model || modelOverride || selectedModel || null,
+                });
+                return;
+            }
             const text = result?.draft || null;
             const selectedDraft = selectComposerFinalDraftText({
                 streamedText: streamedBuffer,

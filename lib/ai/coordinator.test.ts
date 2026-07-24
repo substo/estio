@@ -8,10 +8,33 @@ import {
     estimateDraftGenerationCost,
     isOpenAiDraftModel,
     looksLikeSendReadyDraftInstruction,
+    resolveFastDraftMaxOutputTokens,
     resolveDraftChannelName,
     shouldRetryGeminiDraftWithPinnedFallback,
     stripUngroundedMapUrls,
 } from "./coordinator";
+
+test("fast drafts expand their output budget when preserving long operator text", () => {
+    assert.equal(resolveFastDraftMaxOutputTokens({
+        isEmail: false,
+        modelName: "gemini-flash-latest",
+    }), 1200);
+    assert.equal(resolveFastDraftMaxOutputTokens({
+        isEmail: true,
+        modelName: "gemini-flash-latest",
+        preservedText: "Short email",
+    }), 2200);
+    assert.equal(resolveFastDraftMaxOutputTokens({
+        isEmail: false,
+        modelName: "gemini-flash-latest",
+        preservedText: "x".repeat(6000),
+    }), 2256);
+    assert.equal(resolveFastDraftMaxOutputTokens({
+        isEmail: false,
+        modelName: "unknown-model",
+        preservedText: "x".repeat(100_000),
+    }), 8192);
+});
 
 test("buildContactRequirementGuide includes non-empty requirement guidance", () => {
     const guide = buildContactRequirementGuide({

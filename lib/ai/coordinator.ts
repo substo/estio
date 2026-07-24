@@ -82,6 +82,9 @@ const TIMELINE_FETCH_TAKE = 96;
 const TIMELINE_FAST_FETCH_TAKE = 32;
 const FAST_CHAT_MAX_OUTPUT_TOKENS = 1200;
 const FAST_EMAIL_MAX_OUTPUT_TOKENS = 2200;
+const FAST_DRAFT_PRESERVATION_MAX_OUTPUT_TOKENS = 8192;
+const FAST_DRAFT_PRESERVATION_TOKEN_HEADROOM = 256;
+const FAST_DRAFT_PRESERVATION_CHARS_PER_TOKEN = 3;
 const MODEL_OUTPUT_TOKEN_LIMITS: Record<string, number> = {
     "gemini-2.5-flash-lite": 65536,
     "gemini-2.5-flash": 65536,
@@ -101,6 +104,26 @@ function getModelMaxOutputTokens(modelName: string): number {
     // Pattern match for any Gemini 2.5+ or 3.x model
     if (/gemini-(?:2\.5|3)/i.test(modelName)) return 65536;
     return MODEL_OUTPUT_DEFAULT_LIMIT;
+}
+
+export function resolveFastDraftMaxOutputTokens(args: {
+    isEmail: boolean;
+    modelName: string;
+    preservedText?: string | null;
+}) {
+    const baseline = args.isEmail ? FAST_EMAIL_MAX_OUTPUT_TOKENS : FAST_CHAT_MAX_OUTPUT_TOKENS;
+    const preservedChars = String(args.preservedText || "").length;
+    if (!preservedChars) return baseline;
+
+    const preservationBudget = Math.ceil(
+        preservedChars / FAST_DRAFT_PRESERVATION_CHARS_PER_TOKEN
+    ) + FAST_DRAFT_PRESERVATION_TOKEN_HEADROOM;
+    const safeLimit = Math.min(
+        getModelMaxOutputTokens(args.modelName),
+        FAST_DRAFT_PRESERVATION_MAX_OUTPUT_TOKENS
+    );
+
+    return Math.min(safeLimit, Math.max(baseline, preservationBudget));
 }
 
 export function isOpenAiDraftModel(modelName: string): boolean {
@@ -682,6 +705,8 @@ export async function generateDraft(context: CoordinationContext) {
             streamed: boolean;
             maxOutputTokens: number;
             thinkingBudget: number | null;
+            finishReason: string | null;
+            truncated: boolean;
         };
         cache: {
             state: "hit" | "miss" | "disabled" | "error";
@@ -719,6 +744,8 @@ export async function generateDraft(context: CoordinationContext) {
             streamed: false,
             maxOutputTokens: 0, // Updated after model resolution
             thinkingBudget: DRAFT_THINKING_BUDGET_SIMPLE,
+            finishReason: null,
+            truncated: false,
         },
         cache: {
             state: "disabled",
@@ -1050,7 +1077,11 @@ export async function generateDraft(context: CoordinationContext) {
         }
 
         const maxOutputTokens = isFastDraft
-            ? (isEmail ? FAST_EMAIL_MAX_OUTPUT_TOKENS : FAST_CHAT_MAX_OUTPUT_TOKENS)
+            ? resolveFastDraftMaxOutputTokens({
+                isEmail,
+                modelName: actualModelName,
+                preservedText: normalizedBaseDraft || (instructionLooksSendReady ? normalizedInstruction : null),
+            })
             : getModelMaxOutputTokens(actualModelName);
         const thinkingBudget = isFastDraft
             ? DRAFT_THINKING_BUDGET_SIMPLE
@@ -1386,6 +1417,8 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
         // Detect truncation via finishReason
         const finishReason = response?.candidates?.[0]?.finishReason;
         const wasTruncated = finishReason === "MAX_TOKENS";
+        telemetry.model.finishReason = typeof finishReason === "string" ? finishReason : null;
+        telemetry.model.truncated = wasTruncated;
         if (wasTruncated) {
             console.warn(`[AI Draft] Output was truncated (finishReason=MAX_TOKENS). Model: ${actualModelName}, maxOutputTokens: ${maxOutputTokens}.`);
         }
@@ -1549,6 +1582,8 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             stageMs: telemetry.stageMs,
             model: telemetry.model,
             prompt: telemetry.prompt,
+            finishReason: telemetry.model.finishReason,
+            truncated: telemetry.model.truncated,
         }));
 
         return {

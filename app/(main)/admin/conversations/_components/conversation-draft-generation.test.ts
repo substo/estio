@@ -29,6 +29,15 @@ test('selectComposerFinalDraftText preserves streamed formatting when final text
     assert.equal(selectComposerFinalDraftText({ streamedText: '', finalText: flattened }), flattened);
 });
 
+test('generate draft results preserve the backend truncation signal for composer safety', () => {
+    const result = {
+        draft: 'Partial response',
+        truncated: true,
+    } satisfies import('./conversation-draft-generation').GenerateDraftResult;
+
+    assert.equal(result.truncated, true);
+});
+
 test('resolveDraftStreamTimeoutMs gives completion-chunk providers enough time', () => {
     assert.equal(resolveDraftStreamTimeoutMs('gemini-flash-latest'), 12_000);
     assert.equal(resolveDraftStreamTimeoutMs('chatgpt_subscription:gpt-5.5'), 45_000);

@@ -12,6 +12,7 @@ export type GenerateDraftResult = {
     routeReason?: string | null;
     requiresHumanApproval?: boolean | null;
     model?: string | null;
+    truncated?: boolean;
     blockedReason?: "property_import_pending" | null;
     pendingPropertyReferences?: string[];
 };
