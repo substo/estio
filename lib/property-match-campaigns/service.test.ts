@@ -5,6 +5,7 @@ import {
   applyInteractionSimilarityToStructuredMatch,
   buildPropertyMatchDecisionContext,
   buildAiReviewClaimWhere,
+  buildPropertyMatchModelAttempts,
   buildPriorPropertyShareSearchTerms,
   buildPropertyMatchContactWhere,
   canCandidateDraftOrSend,
@@ -12,6 +13,7 @@ import {
   findPriorPropertyShareEvidence,
   isPropertyMatchCampaignStopped,
   normalizeAiMatchAssessment,
+  normalizePropertyMatchFallbackPolicy,
   propertyMatchCandidateQueue,
   propertyMatchCampaignStatusAfterCounts,
   propertySourceSnapshot,
@@ -35,6 +37,43 @@ const SOURCE_TEST_MARKET = {
     { id: "kato-paphos", label: "Kato Paphos", aliases: [], parentId: "paphos", kind: "locality" as const },
   ],
 };
+
+test("property campaign fallback policy stays with the selected provider by default", () => {
+  assert.equal(normalizePropertyMatchFallbackPolicy(undefined), "same_provider");
+  assert.deepEqual(
+    buildPropertyMatchModelAttempts("chatgpt_subscription:gpt-5.4-mini", "same_provider"),
+    [
+      "chatgpt_subscription:gpt-5.4-mini",
+      "chatgpt_subscription:gpt-5.4-mini",
+      "chatgpt_subscription:gpt-5.4",
+    ],
+  );
+});
+
+test("property campaign paid fallback is explicit and follows subscription retries", () => {
+  assert.deepEqual(
+    buildPropertyMatchModelAttempts("chatgpt_subscription:gpt-5.4-mini", "allow_paid"),
+    [
+      "chatgpt_subscription:gpt-5.4-mini",
+      "chatgpt_subscription:gpt-5.4-mini",
+      "chatgpt_subscription:gpt-5.4",
+      "gemini-2.5-flash",
+    ],
+  );
+});
+
+test("failed AI reviews remain visible as retryable errors instead of unsuitable leads", () => {
+  const failed = {
+    reviewerStatus: "pending",
+    aiVerdict: "maybe",
+    aiReviewStatus: "failed",
+  };
+  assert.equal(propertyMatchCandidateQueue(failed), "ai_error");
+  const counts = summarizePropertyMatchCandidateQueues([failed]);
+  assert.equal(counts.aiErrorCount, 1);
+  assert.equal(counts.notMatchCount, 0);
+  assert.equal(counts.reviewCount, 0);
+});
 
 test("AI match normalizer conservatively rejects low-confidence recommendations", () => {
   const result = normalizeAiMatchAssessment({
@@ -472,6 +511,7 @@ test("property match queue classifier separates campaign work outcomes", () => {
     skippedCount: 1,
     rejectedCount: 1,
     needsProfileVerificationCount: 0,
+    aiErrorCount: 0,
     notMatchCount: 1,
     alreadySharedCount: 1,
   });
@@ -488,13 +528,13 @@ test("property match queue sends completed lead-like recommendations to review",
   assert.equal(propertyMatchCandidateQueue(candidate), "review");
 });
 
-test("failed AI reviews do not enter the human recommendation queue", () => {
+test("failed AI reviews enter the retryable error queue", () => {
   assert.equal(propertyMatchCandidateQueue({
     reviewerStatus: "pending",
     aiVerdict: "maybe",
     aiReviewStatus: "failed",
     contact: { profileVerificationStatus: "verified_lead" },
-  }), "not_match");
+  }), "ai_error");
 });
 
 test("property match queue separates profile verification blockers from not matches", () => {

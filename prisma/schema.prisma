@@ -2852,6 +2852,8 @@ model PropertyMatchCampaign {
   messagePurpose String  @default("new_listing")
   messageLength  String  @default("short")
   priorityNote   String? @db.Text
+  scoringModel   String?
+  fallbackPolicy String  @default("same_provider") // same_provider | allow_paid
   propertySnapshot Json?
   collectionStatus String  @default("pending") // pending | processing | done | canceled | failed
   collectionCursor String?
@@ -2895,6 +2897,7 @@ model PropertyMatchCandidate {
   structuredVerdict String  @default("maybe") // yes | maybe | no
   aiVerdict         String  @default("maybe") // yes | maybe | no
   aiReviewStatus    String  @default("done") // pending | processing | done | failed
+  aiReviewAttempts  Int     @default(0)
   aiReviewLockedAt  DateTime?
   aiReviewLockedBy  String?
   reviewerStatus   String  @default("pending") // pending | approved | rejected | sent | skipped

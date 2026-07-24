@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 import {
     CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX,
@@ -78,6 +78,19 @@ test("buildCodexCliCommand can rely on Codex login cache without access token", 
         if (originalToken === undefined) delete process.env.CODEX_ACCESS_TOKEN;
         else process.env.CODEX_ACCESS_TOKEN = originalToken;
     }
+});
+
+test("buildCodexCliCommand passes a strict output schema to Codex", () => {
+    const command = buildCodexCliCommand({
+        model: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4-mini`,
+        prompt: "Return JSON",
+        outputFile: "/tmp/out.txt",
+        outputSchemaFile: "/tmp/schema.json",
+    });
+
+    const schemaIndex = command.args.indexOf("--output-schema");
+    assert.notEqual(schemaIndex, -1);
+    assert.equal(command.args[schemaIndex + 1], "/tmp/schema.json");
 });
 
 test("buildCodexTextPrompt forbids filesystem/tool behavior", () => {
@@ -168,6 +181,39 @@ test("callChatGptSubscriptionWithMetadata runs Codex CLI through injectable runn
         assert.equal(result.text, "subscription answer");
         assert.equal(result.model, "gpt-5.4-mini");
         assert.equal(result.usage.totalTokens > 0, true);
+    } finally {
+        if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
+        else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;
+    }
+});
+
+test("callChatGptSubscriptionWithMetadata writes and uses the supplied JSON schema", async () => {
+    const originalTransport = process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
+    process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = "codex_cli";
+
+    try {
+        let schema: any = null;
+        await callChatGptSubscriptionWithMetadata(
+            "chatgpt_subscription:gpt-5.4-mini",
+            "System",
+            "Input",
+            {
+                accessToken: "token",
+                jsonSchema: {
+                    type: "object",
+                    properties: { ok: { type: "boolean" } },
+                    required: ["ok"],
+                },
+                runner: async (_command: string, args: string[]) => {
+                    const schemaIndex = args.indexOf("--output-schema");
+                    schema = JSON.parse(await readFile(args[schemaIndex + 1], "utf8"));
+                    const outputIndex = args.indexOf("--output-last-message") + 1;
+                    await writeFile(args[outputIndex], "{\"ok\":true}", "utf8");
+                    return { stdout: "", stderr: "" } as any;
+                },
+            },
+        );
+        assert.deepEqual(schema.required, ["ok"]);
     } finally {
         if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
         else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;

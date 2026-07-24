@@ -85,6 +85,40 @@ test("callLLMWithMetadata routes openai-prefixed models through Responses API", 
     }
 });
 
+test("OpenAI JSON mode uses a strict schema when one is supplied", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-test";
+    let body: any = null;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body || "{}"));
+        return new Response(JSON.stringify({
+            output_text: "{\"ok\":true}",
+            usage: {},
+        }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    try {
+        await callLLMWithMetadata("openai:gpt-test", "System", "Input", {
+            jsonMode: true,
+            jsonSchemaName: "test_response",
+            jsonSchema: {
+                type: "object",
+                properties: { ok: { type: "boolean" } },
+                required: ["ok"],
+            },
+        });
+        assert.equal(body.text.format.type, "json_schema");
+        assert.equal(body.text.format.name, "test_response");
+        assert.equal(body.text.format.strict, true);
+        assert.deepEqual(body.text.format.schema.required, ["ok"]);
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
+        else process.env.OPENAI_API_KEY = originalApiKey;
+    }
+});
+
 test("callLLMWithMetadata fails before calling OpenAI when no key is configured", async () => {
     const originalFetch = globalThis.fetch;
     const originalApiKey = process.env.OPENAI_API_KEY;

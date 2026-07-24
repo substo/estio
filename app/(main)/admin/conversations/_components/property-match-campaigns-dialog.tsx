@@ -29,12 +29,14 @@ import {
     getPropertyMatchCampaignDetailAction,
     listPropertyMatchCampaignsAction,
     processPropertyMatchCampaignBatchAction,
+    retryPropertyMatchCampaignAiErrorsAction,
     reviewPropertyMatchCandidateAction,
     savePropertyMatchCandidateDraftAction,
     savePropertyMatchCampaignModelPreferenceAction,
     searchPropertyMatchCampaignPropertiesAction,
     sendPropertyMatchCandidateAction,
     updatePropertyMatchCampaignAction,
+    updatePropertyMatchCampaignProcessingConfigAction,
 } from "../actions";
 
 type PropertyResult = {
@@ -63,6 +65,8 @@ type Campaign = {
     sentCount: number;
     queueCounts?: QueueCounts | null;
     priorityNote?: string | null;
+    scoringModel?: string | null;
+    fallbackPolicy?: "same_provider" | "allow_paid" | null;
     collectionStatus?: string | null;
     lastError?: string | null;
 };
@@ -78,6 +82,7 @@ type QueueCounts = {
     skippedCount: number;
     rejectedCount: number;
     needsProfileVerificationCount: number;
+    aiErrorCount: number;
     notMatchCount: number;
     alreadySharedCount: number;
 };
@@ -88,6 +93,7 @@ type Candidate = {
     conversationId?: string | null;
     aiVerdict: "yes" | "maybe" | "no";
     aiReviewStatus?: string | null;
+    aiReviewAttempts?: number;
     reviewerStatus: string;
     confidence?: number | null;
     matchSummary?: string | null;
@@ -148,7 +154,8 @@ type CampaignDetail = {
     candidates: Candidate[];
 };
 
-type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "not_match" | "already_shared" | "all";
+type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "ai_error" | "not_match" | "already_shared" | "all";
+type FallbackPolicy = "same_provider" | "allow_paid";
 type MobileCampaignView = "campaigns" | "campaign" | "review";
 type CampaignDetailMode = "overview" | "review";
 type BatchProgress = {
@@ -172,6 +179,7 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
     { value: "skipped", label: "Skipped", countKey: "skippedCount" },
     { value: "rejected", label: "Rejected", countKey: "rejectedCount" },
     { value: "needs_profile_verification", label: "Missing info", countKey: "needsProfileVerificationCount" },
+    { value: "ai_error", label: "AI errors", countKey: "aiErrorCount" },
     { value: "not_match", label: "Not suitable", countKey: "notMatchCount" },
     { value: "already_shared", label: "Already shared", countKey: "alreadySharedCount" },
     { value: "all", label: "All", countKey: "allCount" },
@@ -242,6 +250,7 @@ function campaignQueueCounts(campaign?: Campaign | null): QueueCounts {
         skippedCount: campaign?.queueCounts?.skippedCount ?? 0,
         rejectedCount: campaign?.queueCounts?.rejectedCount ?? 0,
         needsProfileVerificationCount: campaign?.queueCounts?.needsProfileVerificationCount ?? 0,
+        aiErrorCount: campaign?.queueCounts?.aiErrorCount ?? 0,
         notMatchCount: campaign?.queueCounts?.notMatchCount ?? campaign?.noCount ?? 0,
         alreadySharedCount: campaign?.queueCounts?.alreadySharedCount ?? 0,
     };
@@ -263,6 +272,7 @@ function queueEmptyLabel(queue: Queue) {
     if (queue === "skipped") return "No skipped contacts yet.";
     if (queue === "rejected") return "No rejected contacts yet.";
     if (queue === "needs_profile_verification") return "No contacts are waiting on profile or requirement info.";
+    if (queue === "ai_error") return "No AI reviews need retrying.";
     if (queue === "not_match") return "No contacts were marked as not a match.";
     if (queue === "already_shared") return "No contacts already had this property shared.";
     return "No candidates in this campaign.";
@@ -332,6 +342,7 @@ export function PropertyMatchCampaignsDialog({
     const [propertyUrl, setPropertyUrl] = useState("");
     const [propertyText, setPropertyText] = useState("");
     const [priorityNote, setPriorityNote] = useState("");
+    const [campaignFallbackPolicy, setCampaignFallbackPolicy] = useState<FallbackPolicy>("same_provider");
     const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
     const [editTitle, setEditTitle] = useState("");
     const [editPriorityNote, setEditPriorityNote] = useState("");
@@ -373,6 +384,7 @@ export function PropertyMatchCampaignsDialog({
                 if (model && modelValues.has(model)) {
                     handleCampaignModelChange(model);
                 }
+                setCampaignFallbackPolicy(result?.fallbackPolicy === "allow_paid" ? "allow_paid" : "same_provider");
             })
             .catch((error) => {
                 console.error("Failed to load property campaign model preference", error);
@@ -381,13 +393,6 @@ export function PropertyMatchCampaignsDialog({
             cancelled = true;
         };
     }, [availableModels.length, handleCampaignModelChange, modelValues, open]);
-
-    const handlePersistentCampaignModelChange = useCallback((model: string) => {
-        handleCampaignModelChange(model);
-        void savePropertyMatchCampaignModelPreferenceAction(model).catch((error) => {
-            console.error("Failed to save property campaign model preference", error);
-        });
-    }, [handleCampaignModelChange]);
 
     const selectedProperty = useMemo(
         () => properties.find((property) => property.id === selectedPropertyId) || null,
@@ -400,6 +405,50 @@ export function PropertyMatchCampaignsDialog({
         setCampaigns(campaignRows);
         return campaignRows;
     }, []);
+
+    const persistCampaignAiPreference = useCallback((model: string, fallbackPolicy: FallbackPolicy) => {
+        void savePropertyMatchCampaignModelPreferenceAction(model, fallbackPolicy).catch((error) => {
+            console.error("Failed to save property campaign AI preference", error);
+        });
+    }, []);
+
+    const persistActiveCampaignAiConfig = useCallback((
+        campaignId: string | null,
+        model: string,
+        fallbackPolicy: FallbackPolicy,
+    ) => {
+        if (!campaignId || !model) return;
+        void updatePropertyMatchCampaignProcessingConfigAction(campaignId, {
+            scoringModel: model,
+            fallbackPolicy,
+        }).then(() => refreshCampaigns()).catch((error) => {
+            console.error("Failed to update campaign AI settings", error);
+        });
+    }, [refreshCampaigns]);
+
+    const handlePersistentCampaignModelChange = useCallback((model: string, fallbackPolicyOverride?: FallbackPolicy) => {
+        const fallbackPolicy = fallbackPolicyOverride || campaignFallbackPolicy;
+        handleCampaignModelChange(model);
+        persistCampaignAiPreference(model, fallbackPolicy);
+        persistActiveCampaignAiConfig(selectedCampaignId, model, fallbackPolicy);
+    }, [campaignFallbackPolicy, handleCampaignModelChange, persistActiveCampaignAiConfig, persistCampaignAiPreference, selectedCampaignId]);
+
+    const handleDefaultCampaignModelChange = useCallback((model: string) => {
+        handleCampaignModelChange(model);
+        persistCampaignAiPreference(model, campaignFallbackPolicy);
+    }, [campaignFallbackPolicy, handleCampaignModelChange, persistCampaignAiPreference]);
+
+    const handleFallbackPolicyChange = useCallback((fallbackPolicy: FallbackPolicy, modelOverride?: string | null) => {
+        setCampaignFallbackPolicy(fallbackPolicy);
+        const model = modelOverride || selectedCampaignModel || defaultCampaignModel;
+        persistCampaignAiPreference(model, fallbackPolicy);
+        persistActiveCampaignAiConfig(selectedCampaignId, model, fallbackPolicy);
+    }, [defaultCampaignModel, persistActiveCampaignAiConfig, persistCampaignAiPreference, selectedCampaignId, selectedCampaignModel]);
+
+    const handleDefaultFallbackPolicyChange = useCallback((fallbackPolicy: FallbackPolicy) => {
+        setCampaignFallbackPolicy(fallbackPolicy);
+        persistCampaignAiPreference(selectedCampaignModel || defaultCampaignModel, fallbackPolicy);
+    }, [defaultCampaignModel, persistCampaignAiPreference, selectedCampaignModel]);
 
     const loadCampaigns = useCallback(() => {
         startTransition(async () => {
@@ -607,7 +656,19 @@ export function PropertyMatchCampaignsDialog({
 
         try {
             for (;;) {
-                const res = await processPropertyMatchCampaignBatchAction(campaignId, LIVE_BATCH_LIMIT, selectedCampaignModel || defaultCampaignModel || null);
+                const campaign = campaigns.find((item) => item.id === campaignId);
+                const scoringModel = campaign?.scoringModel || selectedCampaignModel || defaultCampaignModel || null;
+                const fallbackPolicy = campaign?.fallbackPolicy === "allow_paid"
+                    ? "allow_paid"
+                    : campaign?.fallbackPolicy === "same_provider"
+                        ? "same_provider"
+                        : campaignFallbackPolicy;
+                const res = await processPropertyMatchCampaignBatchAction(
+                    campaignId,
+                    LIVE_BATCH_LIMIT,
+                    scoringModel,
+                    fallbackPolicy,
+                );
                 if (processingRunRef.current !== runId) return;
                 if (!res.success) {
                     setError(res.error || "Batch processing failed.");
@@ -677,7 +738,7 @@ export function PropertyMatchCampaignsDialog({
                 setProcessingCampaignId(null);
             }
         }
-    }, [defaultCampaignModel, queue, refreshCampaigns, refreshDetail, selectedCampaignModel]);
+    }, [campaignFallbackPolicy, campaigns, defaultCampaignModel, queue, refreshCampaigns, refreshDetail, selectedCampaignModel]);
 
     const createCampaignFromProperty = () => {
         if (!selectedPropertyId) return;
@@ -686,6 +747,8 @@ export function PropertyMatchCampaignsDialog({
             const res = await createPropertyMatchCampaignAction({
                 propertyId: selectedPropertyId,
                 priorityNote,
+                scoringModel: selectedCampaignModel || defaultCampaignModel || null,
+                fallbackPolicy: campaignFallbackPolicy,
             });
             if (!res.success) {
                 setError(res.error || "Could not create campaign.");
@@ -708,6 +771,8 @@ export function PropertyMatchCampaignsDialog({
                 propertyUrl,
                 propertyText,
                 priorityNote,
+                scoringModel: selectedCampaignModel || defaultCampaignModel || null,
+                fallbackPolicy: campaignFallbackPolicy,
             });
             if (!res.success) {
                 setError(res.error || "Could not create campaign.");
@@ -727,6 +792,22 @@ export function PropertyMatchCampaignsDialog({
     const processMore = () => {
         if (!selectedCampaignId) return;
         void runCampaignBatchLive(selectedCampaignId, queue);
+    };
+
+    const retryAiErrors = () => {
+        if (!selectedCampaignId) return;
+        const campaignId = selectedCampaignId;
+        setError("");
+        startTransition(async () => {
+            const res = await retryPropertyMatchCampaignAiErrorsAction(campaignId);
+            if (!res.success) {
+                setError(res.error || "Could not retry AI errors.");
+                return;
+            }
+            await refreshCampaigns();
+            await refreshDetail(campaignId, queue);
+            if (res.retried > 0) void runCampaignBatchLive(campaignId, queue);
+        });
     };
 
     const stopProcessing = () => {
@@ -969,6 +1050,12 @@ export function PropertyMatchCampaignsDialog({
     const activeCampaignIsBatchBusy = processingCampaignId === activeCampaign?.id;
     const activeBatchProgress = batchProgress?.campaignId === activeCampaign?.id ? batchProgress : null;
     const activeQueueCounts = campaignQueueCounts(activeCampaign);
+    const activeCampaignModel = activeCampaign?.scoringModel || selectedCampaignModel || defaultCampaignModel;
+    const activeFallbackPolicy: FallbackPolicy = activeCampaign?.fallbackPolicy === "allow_paid"
+        ? "allow_paid"
+        : activeCampaign?.fallbackPolicy === "same_provider"
+            ? "same_provider"
+            : campaignFallbackPolicy;
     const activeProgressPercent = progressPercent(activeCampaign);
     const activeProcessingStage = campaignProcessingStage(activeCampaign, activeBatchProgress);
     const activeElapsedTime = formatElapsedTime(activeBatchProgress?.startedAt, progressNow);
@@ -1045,6 +1132,29 @@ export function PropertyMatchCampaignsDialog({
                         <div className="flex flex-col gap-3 md:min-h-0 md:flex-1">
                             <div className="rounded-md border bg-white p-3">
                                 <div className="text-xs font-semibold uppercase text-slate-500">New campaign</div>
+                                <div className="mt-2 grid gap-2">
+                                    <AiModelSelect
+                                        value={selectedCampaignModel || defaultCampaignModel}
+                                        models={availableModels}
+                                        onValueChange={handleDefaultCampaignModelChange}
+                                        disabled={modelCatalogLoading}
+                                        triggerClassName="h-8 min-w-0 w-full text-xs"
+                                        itemClassName="text-xs"
+                                        placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
+                                    />
+                                    <select
+                                        value={campaignFallbackPolicy}
+                                        onChange={(event) => handleDefaultFallbackPolicyChange(event.target.value as FallbackPolicy)}
+                                        className="h-8 w-full rounded-md border bg-white px-2 text-xs"
+                                        aria-label="New campaign AI fallback policy"
+                                    >
+                                        <option value="same_provider">Stay with selected provider</option>
+                                        <option value="allow_paid">Allow paid API fallback</option>
+                                    </select>
+                                    <div className="text-[10px] leading-snug text-slate-500">
+                                        Paid API fallback is used only after the selected provider cannot return a valid result.
+                                    </div>
+                                </div>
                                 <div className="mt-2 flex gap-1">
                                     <input
                                         value={propertyQuery}
@@ -1197,14 +1307,25 @@ export function PropertyMatchCampaignsDialog({
                                         {detailMode === "overview" ? (
                                         <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex">
                                             <AiModelSelect
-                                                value={selectedCampaignModel || defaultCampaignModel}
+                                                value={activeCampaignModel}
                                                 models={availableModels}
-                                                onValueChange={handlePersistentCampaignModelChange}
+                                                onValueChange={(model) => handlePersistentCampaignModelChange(model, activeFallbackPolicy)}
                                                 disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling || modelCatalogLoading}
                                                 triggerClassName="h-8 min-w-0 text-xs sm:w-56"
                                                 itemClassName="text-xs"
                                                 placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
                                             />
+                                            <select
+                                                value={activeFallbackPolicy}
+                                                onChange={(event) => handleFallbackPolicyChange(event.target.value as FallbackPolicy, activeCampaignModel)}
+                                                disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling}
+                                                className="h-8 min-w-0 rounded-md border bg-white px-2 text-xs sm:w-52"
+                                                aria-label="Campaign AI fallback policy"
+                                                title="Choose whether this campaign may switch to a paid API provider after selected-provider retries fail"
+                                            >
+                                                <option value="same_provider">Selected provider only</option>
+                                                <option value="allow_paid">Allow paid API fallback</option>
+                                            </select>
                                             <Button
                                                 type="button"
                                                 size="sm"
@@ -1231,6 +1352,18 @@ export function PropertyMatchCampaignsDialog({
                                                         <StopCircle className="mr-1.5 h-3 w-3" />
                                                     )}
                                                     {activeCampaignIsCanceling ? "Stopping..." : "Stop"}
+                                                </Button>
+                                            ) : null}
+                                            {activeQueueCounts.aiErrorCount > 0 ? (
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-8 text-xs text-amber-700 hover:text-amber-800"
+                                                    onClick={retryAiErrors}
+                                                    disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling || isPending}
+                                                >
+                                                    Retry {activeQueueCounts.aiErrorCount} AI error{activeQueueCounts.aiErrorCount === 1 ? "" : "s"}
                                                 </Button>
                                             ) : null}
                                         </div>
@@ -1398,7 +1531,7 @@ export function PropertyMatchCampaignsDialog({
                                             const isBusy = busyCandidateId === candidate.id;
                                             const canReview = candidate.reviewerStatus === "pending"
                                                 && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-                                                && (candidate.aiReviewStatus === "done" || candidate.aiReviewStatus === "failed" || !candidate.aiReviewStatus);
+                                                && (candidate.aiReviewStatus === "done" || !candidate.aiReviewStatus);
                                             const showDraftControls = canReview || candidate.reviewerStatus === "approved";
                                             const decisionDate = candidate.sentAt || candidate.reviewedAt;
                                             return (

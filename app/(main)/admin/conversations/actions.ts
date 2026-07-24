@@ -147,10 +147,12 @@ import {
     markPropertyMatchCandidateAlreadyShared,
     markPropertyMatchCandidateSent,
     processPropertyMatchCampaignBatch,
+    retryPropertyMatchCampaignAiErrors,
     savePropertyMatchCandidateDraft,
     savePropertyMatchCandidateGeneratedDraft,
     sortPropertyMatchSearchRows,
     updatePropertyMatchCampaign,
+    updatePropertyMatchCampaignProcessingConfig,
     updatePropertyMatchCandidateReview,
 } from "@/lib/property-match-campaigns/service";
 import { extractPropertyUrlContext } from "@/lib/conversations/property-url-context";
@@ -7373,6 +7375,8 @@ function serializePropertyMatchCampaign(row: any) {
         sentCount: row.sentCount || 0,
         queueCounts: row.queueCounts || null,
         priorityNote: row.priorityNote || null,
+        scoringModel: row.scoringModel || null,
+        fallbackPolicy: row.fallbackPolicy || "same_provider",
         propertySnapshot: row.propertySnapshot || null,
         collectionStatus: row.collectionStatus || null,
         lastError: row.lastError || null,
@@ -7388,6 +7392,7 @@ function serializePropertyMatchCandidate(row: any) {
         structuredVerdict: row.structuredVerdict,
         aiVerdict: row.aiVerdict,
         aiReviewStatus: row.aiReviewStatus,
+        aiReviewAttempts: row.aiReviewAttempts || 0,
         reviewerStatus: row.reviewerStatus,
         confidence: row.confidence,
         score: row.score,
@@ -7443,20 +7448,31 @@ export async function getPropertyMatchCampaignModelPreferenceAction() {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
         if (!actor.hasAccess || !actor.userId) return { model: null as string | null };
-        const doc = await settingsService.getDocument<{ propertyMatchCampaignModel?: string | null }>({
+        const doc = await settingsService.getDocument<{
+            propertyMatchCampaignModel?: string | null;
+            propertyMatchCampaignFallbackPolicy?: "same_provider" | "allow_paid" | null;
+        }>({
             scopeType: "USER",
             scopeId: actor.userId,
             domain: SETTINGS_DOMAINS.USER_AI_PREFERENCES,
         });
         const model = String(doc?.payload?.propertyMatchCampaignModel || "").trim();
-        return { model: model || null };
+        return {
+            model: model || null,
+            fallbackPolicy: doc?.payload?.propertyMatchCampaignFallbackPolicy === "allow_paid"
+                ? "allow_paid" as const
+                : "same_provider" as const,
+        };
     } catch (error) {
         console.error("[property-match-campaigns] model preference load failed", error);
-        return { model: null as string | null };
+        return { model: null as string | null, fallbackPolicy: "same_provider" as const };
     }
 }
 
-export async function savePropertyMatchCampaignModelPreferenceAction(model: string) {
+export async function savePropertyMatchCampaignModelPreferenceAction(
+    model: string,
+    fallbackPolicy: "same_provider" | "allow_paid" = "same_provider",
+) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7475,9 +7491,14 @@ export async function savePropertyMatchCampaignModelPreferenceAction(model: stri
             payload: {
                 ...(existing?.payload || {}),
                 propertyMatchCampaignModel: normalizedModel || null,
+                propertyMatchCampaignFallbackPolicy: fallbackPolicy === "allow_paid" ? "allow_paid" : "same_provider",
             },
         });
-        return { success: true as const, model: normalizedModel || null };
+        return {
+            success: true as const,
+            model: normalizedModel || null,
+            fallbackPolicy: fallbackPolicy === "allow_paid" ? "allow_paid" as const : "same_provider" as const,
+        };
     } catch (error) {
         console.error("[property-match-campaigns] model preference save failed", error);
         return { success: false as const, error: "Could not save model preference." };
@@ -7549,6 +7570,8 @@ export async function searchPropertyMatchCampaignPropertiesAction(query?: string
 export async function createPropertyMatchCampaignAction(input: {
     propertyId: string;
     priorityNote?: string | null;
+    scoringModel?: string | null;
+    fallbackPolicy?: "same_provider" | "allow_paid" | null;
 }) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -7559,6 +7582,8 @@ export async function createPropertyMatchCampaignAction(input: {
             locationId: location.id,
             propertyId: String(input?.propertyId || "").trim(),
             priorityNote: input?.priorityNote || null,
+            scoringModel: input?.scoringModel || null,
+            fallbackPolicy: input?.fallbackPolicy || "same_provider",
             actorUserId: actor.userId || null,
         });
         revalidatePath("/admin/conversations");
@@ -7573,6 +7598,8 @@ export async function createPropertyMatchCampaignFromSourceAction(input: {
     propertyUrl?: string | null;
     propertyText?: string | null;
     priorityNote?: string | null;
+    scoringModel?: string | null;
+    fallbackPolicy?: "same_provider" | "allow_paid" | null;
 }) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -7598,6 +7625,8 @@ export async function createPropertyMatchCampaignFromSourceAction(input: {
             extractedDescription: extracted?.success ? extracted.description || null : null,
             extractedText: extracted?.success ? extracted.sourceText || null : null,
             priorityNote: input?.priorityNote || null,
+            scoringModel: input?.scoringModel || null,
+            fallbackPolicy: input?.fallbackPolicy || "same_provider",
             actorUserId: actor.userId || null,
         });
         revalidatePath("/admin/conversations");
@@ -7632,7 +7661,7 @@ export async function listContactPropertyRecommendationsAction(contactId: string
 
 export async function getPropertyMatchCampaignDetailAction(
     campaignId: string,
-    queue?: "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "not_match" | "already_shared" | "all",
+    queue?: "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "ai_error" | "not_match" | "already_shared" | "all",
 ) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -7678,6 +7707,32 @@ export async function updatePropertyMatchCampaignAction(campaignId: string, inpu
     }
 }
 
+export async function updatePropertyMatchCampaignProcessingConfigAction(
+    campaignId: string,
+    input: {
+        scoringModel: string;
+        fallbackPolicy: "same_provider" | "allow_paid";
+    },
+) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const result = await updatePropertyMatchCampaignProcessingConfig({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+            scoringModel: String(input?.scoringModel || "").trim(),
+            fallbackPolicy: input?.fallbackPolicy === "allow_paid" ? "allow_paid" : "same_provider",
+        });
+        revalidatePath("/admin/conversations");
+        if (!result.success) return result;
+        return { success: true as const, campaign: serializePropertyMatchCampaign(result.campaign) };
+    } catch (error) {
+        console.error("[property-match-campaigns] processing config update failed", error);
+        return { success: false as const, error: "Could not update campaign AI settings." };
+    }
+}
+
 export async function deletePropertyMatchCampaignAction(campaignId: string) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -7695,7 +7750,12 @@ export async function deletePropertyMatchCampaignAction(campaignId: string) {
     }
 }
 
-export async function processPropertyMatchCampaignBatchAction(campaignId: string, limit?: number, modelOverride?: string | null) {
+export async function processPropertyMatchCampaignBatchAction(
+    campaignId: string,
+    limit?: number,
+    modelOverride?: string | null,
+    fallbackPolicy: "same_provider" | "allow_paid" = "same_provider",
+) {
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7705,6 +7765,7 @@ export async function processPropertyMatchCampaignBatchAction(campaignId: string
             campaignId: String(campaignId || "").trim(),
             limit,
             model: String(modelOverride || "").trim() || null,
+            fallbackPolicy,
             actorUserId: actor.userId || null,
         });
         revalidatePath("/admin/conversations");
@@ -7712,6 +7773,23 @@ export async function processPropertyMatchCampaignBatchAction(campaignId: string
     } catch (error) {
         console.error("[property-match-campaigns] batch processing failed", error);
         return { success: false as const, error: "Batch processing failed." };
+    }
+}
+
+export async function retryPropertyMatchCampaignAiErrorsAction(campaignId: string) {
+    try {
+        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+        const actor = await resolveLocationActorContext(location.id);
+        if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
+        const result = await retryPropertyMatchCampaignAiErrors({
+            locationId: location.id,
+            campaignId: String(campaignId || "").trim(),
+        });
+        revalidatePath("/admin/conversations");
+        return result;
+    } catch (error) {
+        console.error("[property-match-campaigns] retry AI errors failed", error);
+        return { success: false as const, error: "Could not retry AI errors." };
     }
 }
 

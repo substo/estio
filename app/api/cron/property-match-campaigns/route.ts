@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       },
       orderBy: [{ updatedAt: "asc" }],
       take: campaignLimit,
-      select: { id: true, locationId: true },
+      select: { id: true, locationId: true, scoringModel: true, fallbackPolicy: true },
     });
 
     const results = [];
@@ -36,6 +36,8 @@ export async function GET(request: NextRequest) {
         locationId: campaign.locationId,
         campaignId: campaign.id,
         limit: candidateLimit,
+        model: campaign.scoringModel,
+        fallbackPolicy: campaign.fallbackPolicy === "allow_paid" ? "allow_paid" : "same_provider",
       });
       results.push({ campaignId: campaign.id, ...result });
     }

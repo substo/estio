@@ -13,6 +13,8 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 interface CallLLMOptions {
     jsonMode?: boolean;
+    jsonSchema?: Record<string, unknown>;
+    jsonSchemaName?: string;
     temperature?: number;
     maxOutputTokens?: number;
     thinkingBudget?: number;
@@ -122,7 +124,14 @@ function buildOpenAiRequestBody(modelId: string, systemPrompt: string, userConte
 
     if (options.jsonMode) {
         body.text = {
-            format: { type: "json_object" },
+            format: options.jsonSchema
+                ? {
+                    type: "json_schema",
+                    name: options.jsonSchemaName || "structured_response",
+                    strict: true,
+                    schema: options.jsonSchema,
+                }
+                : { type: "json_object" },
         };
     }
 
@@ -197,7 +206,9 @@ export async function callLLM(
         return result.text;
     }
     if (isChatGptSubscriptionModelId(modelId)) {
-        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent);
+        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
+            jsonSchema: options.jsonSchema,
+        });
         return result.text;
     }
 
@@ -223,7 +234,10 @@ export async function callLLM(
 
     const model = genAI.getGenerativeModel({
         model: modelId,
-        generationConfig: buildGenerationConfig(options),
+        generationConfig: {
+            ...buildGenerationConfig(options),
+            ...(options.jsonSchema ? { responseSchema: options.jsonSchema } : {}),
+        },
     });
 
     const prompt = userContent
@@ -247,7 +261,9 @@ export async function callLLMWithMetadata(
         return callOpenAIWithMetadata(modelId, systemPrompt, userContent, options);
     }
     if (isChatGptSubscriptionModelId(modelId)) {
-        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent);
+        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
+            jsonSchema: options.jsonSchema,
+        });
         return {
             text: result.text,
             provider: "chatgpt_subscription",
@@ -279,7 +295,10 @@ export async function callLLMWithMetadata(
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
         model: modelId,
-        generationConfig: buildGenerationConfig(options),
+        generationConfig: {
+            ...buildGenerationConfig(options),
+            ...(options.jsonSchema ? { responseSchema: options.jsonSchema } : {}),
+        },
     });
 
     const prompt = userContent ? [systemPrompt, userContent] : [systemPrompt];

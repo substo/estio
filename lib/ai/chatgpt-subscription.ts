@@ -206,6 +206,7 @@ export function buildCodexCliCommand(args: {
     model: string;
     prompt: string;
     outputFile: string;
+    outputSchemaFile?: string | null;
     accessToken?: string | null;
 }): CodexCliCommand {
     const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
@@ -220,25 +221,28 @@ export function buildCodexCliCommand(args: {
         delete env.CODEX_ACCESS_TOKEN;
     }
 
+    const commandArgs = [
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--ephemeral",
+        "--ignore-rules",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-C",
+        cwd,
+        "-m",
+        model,
+    ];
+    if (args.outputSchemaFile) {
+        commandArgs.push("--output-schema", args.outputSchemaFile);
+    }
+    commandArgs.push("--output-last-message", args.outputFile, args.prompt);
+
     return {
         command,
-        args: [
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--ephemeral",
-            "--ignore-rules",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "-C",
-            cwd,
-            "-m",
-            model,
-            "--output-last-message",
-            args.outputFile,
-            args.prompt,
-        ],
+        args: commandArgs,
         env,
         authMode: accessToken ? "access_token" : "codex_login_cache",
     };
@@ -275,7 +279,11 @@ export async function callChatGptSubscriptionWithMetadata(
     modelId: string,
     systemPrompt: string,
     userContent?: string,
-    options: { accessToken?: string | null; runner?: CodexCliRunner } = {}
+    options: {
+        accessToken?: string | null;
+        runner?: CodexCliRunner;
+        jsonSchema?: Record<string, unknown> | null;
+    } = {}
 ): Promise<ChatGptSubscriptionResult> {
     if (!isChatGptSubscriptionTransportEnabled()) {
         throw new Error("ChatGPT subscription transport is disabled. Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli on a trusted server with Codex CLI installed.");
@@ -284,11 +292,16 @@ export async function callChatGptSubscriptionWithMetadata(
     const accessToken = String(options.accessToken || await resolveChatGptSubscriptionAccessToken() || "").trim();
     const tempDir = await mkdtemp(path.join(tmpdir(), "estio-chatgpt-subscription-"));
     const outputFile = path.join(tempDir, "last-message.txt");
+    const outputSchemaFile = options.jsonSchema ? path.join(tempDir, "output-schema.json") : null;
     const prompt = buildCodexTextPrompt(systemPrompt, userContent);
+    if (outputSchemaFile) {
+        await writeFile(outputSchemaFile, JSON.stringify(options.jsonSchema), "utf8");
+    }
     const command = buildCodexCliCommand({
         model: modelId,
         prompt,
         outputFile,
+        outputSchemaFile,
         accessToken,
     });
 

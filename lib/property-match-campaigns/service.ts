@@ -4,6 +4,13 @@ import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
+import {
+  CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX,
+  stripChatGptSubscriptionModelPrefix,
+} from "@/lib/ai/chatgpt-subscription";
+import { OPENAI_MODEL_VALUE_PREFIX } from "@/lib/ai/openai-models";
+import { settingsService } from "@/lib/settings/service";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
 import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
 import { extractLegacyCrmRefCandidates } from "@/lib/crm/old-crm-import";
@@ -31,9 +38,11 @@ export type PropertyMatchCampaignQueue =
   | "skipped"
   | "rejected"
   | "needs_profile_verification"
+  | "ai_error"
   | "not_match"
   | "already_shared"
   | "all";
+export type PropertyMatchFallbackPolicy = "same_provider" | "allow_paid";
 
 const CAMPAIGN_STATUSES = new Set(["draft", "processing", "review", "completed", "canceled", "failed"]);
 const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "skipped"]);
@@ -46,6 +55,7 @@ const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const CONTACT_COLLECTION_BATCH_SIZE = 40;
 const AI_SCORING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_AI_SCORING_CONCURRENCY || 4)));
 const PROPERTY_MATCH_FAST_MODEL = String(process.env.PROPERTY_MATCH_FAST_MODEL || GEMINI_FLASH_LITE_LATEST_ALIAS).trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
+const DEFAULT_PROPERTY_MATCH_FALLBACK_POLICY: PropertyMatchFallbackPolicy = "same_provider";
 const CAMPAIGN_STOPPED_STATUS = "canceled";
 const CAMPAIGN_STOPPED_ERROR = "Processing stopped by user.";
 const PROPERTY_TYPE_HINTS = [
@@ -61,6 +71,75 @@ const PROPERTY_TYPE_HINTS = [
   "Plot",
   "Land",
 ];
+
+const PROPERTY_MATCH_RESPONSE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    recommend: { type: "boolean" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    matchSummary: { type: "string" },
+    reasoning: { type: "string" },
+    evidence: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          field: { type: "string" },
+          quote: { type: "string" },
+          supports: { type: "string", enum: ["yes", "maybe", "no"] },
+        },
+        required: ["field", "quote", "supports"],
+      },
+    },
+  },
+  required: ["recommend", "confidence", "matchSummary", "reasoning", "evidence"],
+};
+
+export function normalizePropertyMatchFallbackPolicy(value: unknown): PropertyMatchFallbackPolicy {
+  return value === "allow_paid" ? "allow_paid" : DEFAULT_PROPERTY_MATCH_FALLBACK_POLICY;
+}
+
+function propertyMatchModelProvider(model: string): "chatgpt_subscription" | "openai" | "gemini" {
+  if (model.startsWith(CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX)) return "chatgpt_subscription";
+  if (model.startsWith(OPENAI_MODEL_VALUE_PREFIX)) return "openai";
+  return "gemini";
+}
+
+function sameProviderFallbackModel(model: string): string | null {
+  const provider = propertyMatchModelProvider(model);
+  if (provider === "chatgpt_subscription") {
+    const raw = stripChatGptSubscriptionModelPrefix(model);
+    return raw === "gpt-5.4"
+      ? `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.5`
+      : `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4`;
+  }
+  if (provider === "gemini") {
+    return model === GEMINI_FLASH_STABLE_FALLBACK ? null : GEMINI_FLASH_STABLE_FALLBACK;
+  }
+  return model === `${OPENAI_MODEL_VALUE_PREFIX}gpt-4.1`
+    ? null
+    : `${OPENAI_MODEL_VALUE_PREFIX}gpt-4.1`;
+}
+
+export function buildPropertyMatchModelAttempts(
+  primaryModel: string,
+  fallbackPolicy: PropertyMatchFallbackPolicy,
+): string[] {
+  const primary = normalizeText(primaryModel, 120) || PROPERTY_MATCH_FAST_MODEL;
+  const attempts = [primary, primary];
+  const sameProvider = sameProviderFallbackModel(primary);
+  if (sameProvider && sameProvider !== primary) attempts.push(sameProvider);
+  if (
+    fallbackPolicy === "allow_paid"
+    && propertyMatchModelProvider(primary) === "chatgpt_subscription"
+    && !attempts.includes(GEMINI_FLASH_STABLE_FALLBACK)
+  ) {
+    attempts.push(GEMINI_FLASH_STABLE_FALLBACK);
+  }
+  return attempts;
+}
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -133,7 +212,7 @@ export function propertyMatchCandidateQueue(candidate: {
   if (hasPriorPropertyShareEvidence(candidate)) return "already_shared";
   if (hasProfileVerificationBlock(candidate)) return "needs_profile_verification";
   if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
-  if (aiReviewStatus === "failed") return "not_match";
+  if (aiReviewStatus === "failed") return "ai_error";
   if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
   return "not_match";
@@ -160,6 +239,7 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
     skippedCount: 0,
     rejectedCount: 0,
     needsProfileVerificationCount: 0,
+    aiErrorCount: 0,
     notMatchCount: 0,
     alreadySharedCount: 0,
   };
@@ -177,6 +257,7 @@ export function summarizePropertyMatchCandidateQueues(rows: Array<{
     else if (queue === "skipped") counts.skippedCount += 1;
     else if (queue === "rejected") counts.rejectedCount += 1;
     else if (queue === "needs_profile_verification") counts.needsProfileVerificationCount += 1;
+    else if (queue === "ai_error") counts.aiErrorCount += 1;
     else if (queue === "not_match") counts.notMatchCount += 1;
     else if (queue === "already_shared") counts.alreadySharedCount += 1;
   }
@@ -1504,6 +1585,8 @@ export async function createPropertyMatchCampaign(args: {
   propertyId: string;
   actorUserId?: string | null;
   priorityNote?: string | null;
+  scoringModel?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
 }) {
   const property = await db.property.findFirst({
     where: { id: args.propertyId, locationId: args.locationId },
@@ -1523,6 +1606,8 @@ export async function createPropertyMatchCampaign(args: {
       title: `${property.title} match campaign`,
       status: "processing",
       priorityNote: normalizeText(args.priorityNote, 2000),
+      scoringModel: normalizeText(args.scoringModel, 120),
+      fallbackPolicy: normalizePropertyMatchFallbackPolicy(args.fallbackPolicy),
       propertySnapshot: snapshot,
       collectionStatus: "pending",
       processingStartedAt: new Date(),
@@ -1542,6 +1627,8 @@ export async function createPropertyMatchCampaignFromSource(args: {
   extractedText?: string | null;
   actorUserId?: string | null;
   priorityNote?: string | null;
+  scoringModel?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
 }) {
   const marketContext = await getLocationMarketContext(args.locationId);
   const sourceText = [
@@ -1630,6 +1717,8 @@ export async function createPropertyMatchCampaignFromSource(args: {
       title: `${snapshot.reference || snapshot.title} match campaign`,
       status: "processing",
       priorityNote: normalizeText(args.priorityNote, 2000),
+      scoringModel: normalizeText(args.scoringModel, 120),
+      fallbackPolicy: normalizePropertyMatchFallbackPolicy(args.fallbackPolicy),
       propertySnapshot: snapshot,
       collectionStatus: "pending",
       processingStartedAt: new Date(),
@@ -1882,6 +1971,43 @@ async function releasePropertyMatchAiLocks(args: {
   });
 }
 
+export async function retryPropertyMatchCampaignAiErrors(args: {
+  locationId: string;
+  campaignId: string;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    select: { id: true },
+  });
+  if (!campaign) return { success: false as const, error: "Campaign not found." };
+
+  const retried = await db.propertyMatchCandidate.updateMany({
+    where: {
+      campaignId: campaign.id,
+      locationId: args.locationId,
+      aiReviewStatus: "failed",
+    },
+    data: {
+      aiReviewStatus: "pending",
+      aiReviewLockedAt: null,
+      aiReviewLockedBy: null,
+      lastError: null,
+    },
+  });
+  if (retried.count > 0) {
+    await db.propertyMatchCampaign.update({
+      where: { id: campaign.id },
+      data: {
+        status: "processing",
+        processingFinishedAt: null,
+        lastError: null,
+      },
+    });
+    await refreshCampaignCounts(campaign.id);
+  }
+  return { success: true as const, retried: retried.count };
+}
+
 export async function cancelPropertyMatchCampaignBatch(args: {
   locationId: string;
   campaignId: string;
@@ -1926,12 +2052,14 @@ async function scoreCandidateWithAi(args: {
   campaign: AnyRecord;
   candidate: AnyRecord;
   model?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
   actorUserId?: string | null;
 }) {
-  const modelName = normalizeText(args.model, 120)
+  const primaryModel = normalizeText(args.model, 120)
     || PROPERTY_MATCH_FAST_MODEL
     || await resolveAiModelDefault(args.locationId, "general")
     || GEMINI_FLASH_STABLE_FALLBACK;
+  const fallbackPolicy = normalizePropertyMatchFallbackPolicy(args.fallbackPolicy);
   const prompt = `Decide whether this real-estate contact should be sent this property.
 
 Return JSON only:
@@ -1973,28 +2101,52 @@ ${decisionContext.contactSummary}
 PROPERTY SUMMARY
 ${decisionContext.propertySummary}`;
 
-  const result = await callLLMWithMetadata(modelName, prompt, userContent, {
-    jsonMode: true,
-    temperature: 0.1,
-    maxOutputTokens: 700,
-    thinkingBudget: PROPERTY_MATCH_THINKING_BUDGET,
-    locationId: args.locationId,
-  });
-  const parsed = extractJsonObject(result.text);
-  const normalized = normalizeAiMatchAssessment(parsed, {
-    ...(args.candidate.evidence || {}),
-    warnings,
-    decisionContext,
-  });
+  const attemptedModels: string[] = [];
+  const attemptErrors: string[] = [];
+  let result: Awaited<ReturnType<typeof callLLMWithMetadata>> | null = null;
+  let normalized: ReturnType<typeof normalizeAiMatchAssessment> | null = null;
+  for (const modelName of buildPropertyMatchModelAttempts(primaryModel, fallbackPolicy)) {
+    attemptedModels.push(modelName);
+    try {
+      const attemptResult = await callLLMWithMetadata(modelName, prompt, userContent, {
+        jsonMode: true,
+        jsonSchema: PROPERTY_MATCH_RESPONSE_SCHEMA,
+        jsonSchemaName: "property_match_assessment",
+        temperature: 0.1,
+        maxOutputTokens: 700,
+        thinkingBudget: PROPERTY_MATCH_THINKING_BUDGET,
+        locationId: args.locationId,
+      });
+      const parsed = extractJsonObject(attemptResult.text);
+      normalized = normalizeAiMatchAssessment(parsed, {
+        ...(args.candidate.evidence || {}),
+        warnings,
+        decisionContext,
+      });
+      result = attemptResult;
+      break;
+    } catch (error) {
+      attemptErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!result || !normalized) {
+    const failure = attemptErrors[attemptErrors.length - 1] || "AI review failed.";
+    throw new Error(`AI review failed after ${attemptedModels.length} attempt${attemptedModels.length === 1 ? "" : "s"}: ${failure}`);
+  }
   const promptTokens = Number(result.usage.promptTokens || 0);
   const completionTokens = Number(result.usage.completionTokens || 0);
   const totalTokens = Number(result.usage.totalTokens || promptTokens + completionTokens);
-  const meteredModel = result.model || modelName;
+  const meteredModel = result.model || attemptedModels[attemptedModels.length - 1] || primaryModel;
   normalized.evidence = attachPropertyMatchAiRunEvidence(normalized.evidence, {
-    modelRequested: modelName,
+    modelRequested: primaryModel,
     modelUsed: meteredModel,
     provider: result.provider,
   });
+  normalized.evidence.aiRun = {
+    ...normalized.evidence.aiRun,
+    fallbackPolicy,
+    attemptedModels,
+  };
   const estimatedCostUsd = calculateRunCost(meteredModel, promptTokens, completionTokens);
 
   await securelyRecordAiUsage({
@@ -2011,8 +2163,10 @@ ${decisionContext.propertySummary}`;
     metadata: {
       campaignId: args.campaign.id,
       candidateId: args.candidate.id,
-      modelRequested: modelName,
+      modelRequested: primaryModel,
       modelUsed: meteredModel,
+      fallbackPolicy,
+      attemptedModels,
       totalTokens,
       estimatedCostUsd,
       verdict: normalized.verdict,
@@ -2022,18 +2176,63 @@ ${decisionContext.propertySummary}`;
   return normalized;
 }
 
+async function resolvePropertyMatchCampaignProcessingConfig(args: {
+  campaign: AnyRecord;
+  model?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
+}) {
+  let scoringModel = normalizeText(args.model, 120) || normalizeText(args.campaign.scoringModel, 120);
+  let fallbackPolicy = normalizePropertyMatchFallbackPolicy(
+    args.fallbackPolicy ?? args.campaign.fallbackPolicy,
+  );
+
+  if (!scoringModel && args.campaign.createdByUserId) {
+    const preference = await settingsService.getDocument<{
+      propertyMatchCampaignModel?: string | null;
+      propertyMatchCampaignFallbackPolicy?: PropertyMatchFallbackPolicy | null;
+    }>({
+      scopeType: "USER",
+      scopeId: args.campaign.createdByUserId,
+      domain: SETTINGS_DOMAINS.USER_AI_PREFERENCES,
+    }).catch(() => null);
+    scoringModel = normalizeText(preference?.payload?.propertyMatchCampaignModel, 120);
+    fallbackPolicy = normalizePropertyMatchFallbackPolicy(
+      preference?.payload?.propertyMatchCampaignFallbackPolicy || fallbackPolicy,
+    );
+  }
+
+  scoringModel = scoringModel || PROPERTY_MATCH_FAST_MODEL;
+  if (
+    scoringModel !== args.campaign.scoringModel
+    || fallbackPolicy !== args.campaign.fallbackPolicy
+  ) {
+    await db.propertyMatchCampaign.update({
+      where: { id: args.campaign.id },
+      data: { scoringModel, fallbackPolicy },
+    });
+  }
+
+  return { scoringModel, fallbackPolicy };
+}
+
 export async function processPropertyMatchCampaignBatch(args: {
   locationId: string;
   campaignId: string;
   actorUserId?: string | null;
   limit?: number;
   model?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
 }) {
   const campaign = await db.propertyMatchCampaign.findFirst({
     where: { id: args.campaignId, locationId: args.locationId },
   });
   if (!campaign) return { success: false as const, error: "Campaign not found." };
   if (!CAMPAIGN_STATUSES.has(campaign.status)) return { success: false as const, error: "Invalid campaign status." };
+  const processingConfig = await resolvePropertyMatchCampaignProcessingConfig({
+    campaign,
+    model: args.model,
+    fallbackPolicy: args.fallbackPolicy,
+  });
 
   const limit = Math.max(1, Math.min(20, Number(args.limit || 5)));
   const workerId = [
@@ -2176,7 +2375,8 @@ export async function processPropertyMatchCampaignBatch(args: {
         locationId: args.locationId,
         campaign: refreshedCampaign,
         candidate,
-        model: args.model || null,
+        model: processingConfig.scoringModel,
+        fallbackPolicy: processingConfig.fallbackPolicy,
         actorUserId: args.actorUserId || null,
       });
       const updatedCandidate = await db.propertyMatchCandidate.updateMany({
@@ -2193,6 +2393,7 @@ export async function processPropertyMatchCampaignBatch(args: {
           reasoning: ai.reasoning,
           matchSummary: ai.matchSummary,
           aiReviewStatus: "done",
+          aiReviewAttempts: { increment: 1 },
           aiReviewLockedAt: null,
           aiReviewLockedBy: null,
           lastError: null,
@@ -2222,6 +2423,7 @@ export async function processPropertyMatchCampaignBatch(args: {
           },
           reasoning: "AI review failed; kept for human review.",
           aiReviewStatus: "failed",
+          aiReviewAttempts: { increment: 1 },
           aiReviewLockedAt: null,
           aiReviewLockedBy: null,
           lastError: error?.message || "AI review failed.",
@@ -2243,7 +2445,8 @@ export async function processPropertyMatchCampaignBatch(args: {
       failed: aiResults.reduce((sum, result) => sum + result.failed, 0),
       stopped: aiResults.some((result) => result.stopped),
       concurrency: Math.min(AI_SCORING_CONCURRENCY, limit),
-      model: normalizeText(args.model, 120) || PROPERTY_MATCH_FAST_MODEL,
+      model: processingConfig.scoringModel,
+      fallbackPolicy: processingConfig.fallbackPolicy,
       elapsedMs: Date.now() - aiScoringStartedAt,
     });
   }
@@ -2448,6 +2651,29 @@ export async function updatePropertyMatchCampaign(args: {
   return { success: true as const, campaign: updated };
 }
 
+export async function updatePropertyMatchCampaignProcessingConfig(args: {
+  locationId: string;
+  campaignId: string;
+  scoringModel: string;
+  fallbackPolicy: PropertyMatchFallbackPolicy;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    select: { id: true },
+  });
+  if (!campaign) return { success: false as const, error: "Campaign not found." };
+  const scoringModel = normalizeText(args.scoringModel, 120);
+  if (!scoringModel) return { success: false as const, error: "Select an AI model." };
+  const updated = await db.propertyMatchCampaign.update({
+    where: { id: campaign.id },
+    data: {
+      scoringModel,
+      fallbackPolicy: normalizePropertyMatchFallbackPolicy(args.fallbackPolicy),
+    },
+  });
+  return { success: true as const, campaign: updated };
+}
+
 export async function deletePropertyMatchCampaign(args: {
   locationId: string;
   campaignId: string;
@@ -2544,6 +2770,9 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
         { reasoning: { contains: "already been shared", mode: "insensitive" } },
       ],
     };
+  }
+  if (queue === "ai_error") {
+    return { aiReviewStatus: "failed" };
   }
   return {
     reviewerStatus: "pending",
