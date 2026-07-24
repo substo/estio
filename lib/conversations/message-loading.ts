@@ -213,15 +213,26 @@ function isWebBridgeProviderIdAliasDuplicate(left: any, right: any) {
     const leftDirection = String(left?.direction || "");
     const rightDirection = String(right?.direction || "");
     if (!["inbound", "outbound"].includes(leftDirection) || leftDirection !== rightDirection) return false;
-    if (String(left?.source || "") !== "whatsapp_web_bridge" || String(right?.source || "") !== "whatsapp_web_bridge") return false;
+    const leftSource = String(left?.source || "");
+    const rightSource = String(right?.source || "");
+    if (leftSource !== "whatsapp_web_bridge" && rightSource !== "whatsapp_web_bridge") return false;
+    if (leftDirection === "inbound" && (leftSource !== "whatsapp_web_bridge" || rightSource !== "whatsapp_web_bridge")) return false;
     if (String(left?.conversationId || "") !== String(right?.conversationId || "")) return false;
-    if (getMessageTimestampMs(left) <= 0 || getMessageTimestampMs(left) !== getMessageTimestampMs(right)) return false;
+    const leftTimestampMs = getMessageTimestampMs(left);
+    const rightTimestampMs = getMessageTimestampMs(right);
+    if (leftTimestampMs <= 0 || rightTimestampMs <= 0 || Math.abs(leftTimestampMs - rightTimestampMs) > 5 * 60 * 1000) return false;
 
     const leftBody = normalizeMessageBodyForDedupe(left?.body);
     const rightBody = normalizeMessageBodyForDedupe(right?.body);
-    return !!leftBody
-        && leftBody === rightBody
+    return (!leftBody || !rightBody || leftBody === rightBody)
         && areWhatsAppWebBridgeMessageIdAliases(left?.wamId, right?.wamId);
+}
+
+function getWebBridgeAliasCanonicalPriority(message: any) {
+    if (message?.clientMessageId || message?.outboundWhatsAppOutbox || message?.outboxState) return 3;
+    if (["app_user", "scheduled_message"].includes(String(message?.source || ""))) return 2;
+    if (isWhatsAppWebBridgeSerializedMessageId(message?.wamId)) return 1;
+    return 0;
 }
 
 export function collapseWebBridgeProviderIdAliasesForDisplay<T extends Record<string, any>>(messages: T[]): T[] {
@@ -235,7 +246,9 @@ export function collapseWebBridgeProviderIdAliasesForDisplay<T extends Record<st
         }
 
         const existing = output[duplicateIndex];
-        const canonical = isWhatsAppWebBridgeSerializedMessageId(message.wamId) ? message : existing;
+        const canonical = getWebBridgeAliasCanonicalPriority(message) > getWebBridgeAliasCanonicalPriority(existing)
+            ? message
+            : existing;
         const other = canonical === message ? existing : message;
         output[duplicateIndex] = {
             ...canonical,

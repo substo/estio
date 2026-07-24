@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     areWhatsAppWebBridgeMessageIdAliases,
     getWhatsAppWebBridgeLocalMessageId,
+    getWhatsAppWebBridgeMessageIdLookupIds,
     isWhatsAppWebBridgeSerializedMessageId,
     selectCanonicalizableWhatsAppWebBridgeAlias,
 } from "./web-bridge-message-id-alias";
@@ -16,6 +17,15 @@ test("recognizes a local WhatsApp Web message id inside its serialized id", () =
     assert.equal(isWhatsAppWebBridgeSerializedMessageId(serializedId), true);
     assert.equal(areWhatsAppWebBridgeMessageIdAliases(localId, serializedId), true);
     assert.equal(areWhatsAppWebBridgeMessageIdAliases(serializedId, localId), true);
+});
+
+test("builds exact and local lookup ids for serialized provider acknowledgements", () => {
+    const localId = "3EB0LOCALMESSAGEID";
+    const serializedId = `true_198247318593740@lid_${localId}`;
+
+    assert.deepEqual(getWhatsAppWebBridgeMessageIdLookupIds(serializedId), [serializedId, localId]);
+    assert.deepEqual(getWhatsAppWebBridgeMessageIdLookupIds(localId), [localId]);
+    assert.deepEqual(getWhatsAppWebBridgeMessageIdLookupIds(""), []);
 });
 
 test("selects one exact safe alias and fails closed for ambiguous or app-originated rows", () => {

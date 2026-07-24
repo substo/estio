@@ -86,6 +86,7 @@ export function deriveOutboundWhatsAppUiState(message: {
     direction?: string | null;
     status?: string | null;
     sendState?: string | null;
+    source?: string | null;
     outboxState?: {
         transport?: string | null;
         stoSecureDelivery?: boolean | null;
@@ -106,6 +107,8 @@ export function deriveOutboundWhatsAppUiState(message: {
     const status = normalizeLower(message.status);
     const sendState = normalizeLower(message.sendState);
     const outboxStatus = normalizeLower(message.outboxState?.status);
+    const usesLinkedWhatsAppSession = normalizeLower(message.outboxState?.transport) === "web_bridge"
+        || normalizeLower(message.source) === "whatsapp_web_bridge";
     const stoSecureDelivery = message.outboxState?.stoSecureDelivery === true;
     const scheduledAt = normalizeString(message.outboxState?.scheduledAt) || null;
     const scheduledDelaySeconds = getFutureDelaySeconds(scheduledAt, options?.nowMs);
@@ -141,7 +144,9 @@ export function deriveOutboundWhatsAppUiState(message: {
             label: "Read",
             tone: "success",
             icon: "checkCheck",
-            detail: null,
+            detail: usesLinkedWhatsAppSession
+                ? "Read by contact · sender phone history is not verified"
+                : null,
             showSpinner: false,
             canResend: false,
             canSmsFallback: false,
@@ -156,7 +161,9 @@ export function deriveOutboundWhatsAppUiState(message: {
             label: "Delivered",
             tone: "success",
             icon: "checkCheck",
-            detail: null,
+            detail: usesLinkedWhatsAppSession
+                ? "Delivered to contact · sender phone history is not verified"
+                : null,
             showSpinner: false,
             canResend: false,
             canSmsFallback: false,

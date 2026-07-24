@@ -13,6 +13,16 @@ export function isWhatsAppWebBridgeSerializedMessageId(value: unknown): boolean 
     return getWhatsAppWebBridgeLocalMessageId(value) !== null;
 }
 
+export function getWhatsAppWebBridgeMessageIdLookupIds(value: unknown): string[] {
+    const messageId = String(value || "").trim();
+    if (!messageId) return [];
+
+    const localMessageId = getWhatsAppWebBridgeLocalMessageId(messageId);
+    return localMessageId && localMessageId !== messageId
+        ? [messageId, localMessageId]
+        : [messageId];
+}
+
 export function areWhatsAppWebBridgeMessageIdAliases(leftValue: unknown, rightValue: unknown): boolean {
     const left = String(leftValue || "").trim();
     const right = String(rightValue || "").trim();

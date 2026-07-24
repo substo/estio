@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { publishConversationRealtimeEvent } from "@/lib/realtime/conversation-events";
 import { WHATSAPP_CLOUD_PROVIDER, mapWhatsAppCloudStatus } from "@/lib/whatsapp/client";
 import { parseWhatsAppWebhookTimestamp } from "@/lib/whatsapp/webhook-normalizers";
+import { getWhatsAppWebBridgeMessageIdLookupIds } from "@/lib/whatsapp/web-bridge-message-id-alias";
 
 function logWhatsAppSendLifecycle(event: string, payload: Record<string, unknown>) {
     console.info(JSON.stringify({
@@ -103,10 +104,26 @@ export async function processStatusUpdate(wamId: string, rawStatus: string) {
 
     console.log(`[WhatsApp Sync] Updating status for ${wamId}: ${rawStatus} -> ${status}`);
 
-    const existingMessage = await (db as any).message.findFirst({
-        where: { wamId },
+    const messageIdAliases = getWhatsAppWebBridgeMessageIdLookupIds(wamId);
+    let existingMessage = await (db as any).message.findFirst({
+        where: { wamId: { in: messageIdAliases } },
         select: { id: true, status: true },
     });
+    if (!existingMessage?.id) {
+        const sync = await (db as any).messageSync.findFirst({
+            where: {
+                provider: "whatsapp_web_bridge",
+                providerMessageId: { in: messageIdAliases },
+            },
+            select: { messageId: true },
+        });
+        if (sync?.messageId) {
+            existingMessage = await (db as any).message.findUnique({
+                where: { id: sync.messageId },
+                select: { id: true, status: true },
+            });
+        }
+    }
     if (!existingMessage?.id) return { matched: false, status };
 
     const statusAdvanceFilter = getWhatsAppDeliveryStatusAdvanceFilter(status);

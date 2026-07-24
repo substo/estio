@@ -54,6 +54,41 @@ test("collapseWebBridgeProviderIdAliasesForDisplay preserves genuine repeated se
     assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([first, second]), [first, second]);
 });
 
+test("collapseWebBridgeProviderIdAliasesForDisplay keeps the app row when its mirrored bridge alias arrives later", () => {
+    const localId = "3EB0LOCALMESSAGEID";
+    const appRow = {
+        id: "app-row",
+        clientMessageId: "cmid-1",
+        conversationId: "conversation-1",
+        body: "Recipient-confirmed message",
+        type: "WhatsApp",
+        direction: "outbound",
+        source: "app_user",
+        status: "sent",
+        wamId: localId,
+        createdAt: new Date("2026-07-24T06:17:42.000Z"),
+        outboundWhatsAppOutbox: { id: "outbox-1", status: "completed" },
+        attachments: [],
+    };
+    const bridgeMirror = {
+        id: "bridge-mirror",
+        conversationId: "conversation-1",
+        body: "Recipient-confirmed message",
+        type: "WhatsApp",
+        direction: "outbound",
+        source: "whatsapp_web_bridge",
+        status: "delivered",
+        wamId: `true_43757193965656@lid_${localId}`,
+        createdAt: new Date("2026-07-24T06:17:51.000Z"),
+        attachments: [],
+    };
+
+    assert.deepEqual(collapseWebBridgeProviderIdAliasesForDisplay([appRow, bridgeMirror]), [{
+        ...appRow,
+        status: "delivered",
+    }]);
+});
+
 test("collapseWebBridgeProviderIdAliasesForDisplay requires matching outbound bridge context", () => {
     const localId = "3EB0LOCALMESSAGEID";
     const base = {

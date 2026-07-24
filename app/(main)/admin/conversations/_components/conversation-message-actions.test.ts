@@ -264,6 +264,24 @@ test('deriveOutboundWhatsAppUiState maps processing, retrying, failed, sent, del
     assert.equal(deriveOutboundWhatsAppUiState({ ...baseMessage, status: 'read' } as any)?.label, 'Read');
 });
 
+test('deriveOutboundWhatsAppUiState separates recipient delivery from linked sender-phone history', () => {
+    const delivered = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'delivered',
+        outboxState: { id: 'job-1', status: 'completed', transport: 'web_bridge' },
+    } as any);
+    const readMirror = deriveOutboundWhatsAppUiState({
+        ...baseMessage,
+        status: 'read',
+        source: 'whatsapp_web_bridge',
+    } as any);
+
+    assert.equal(delivered?.label, 'Delivered');
+    assert.equal(delivered?.detail, 'Delivered to contact · sender phone history is not verified');
+    assert.equal(readMirror?.label, 'Read');
+    assert.equal(readMirror?.detail, 'Read by contact · sender phone history is not verified');
+});
+
 test('deriveOutboundWhatsAppUiState exposes the STO secure-delivery lifecycle', () => {
     const stoMessage = {
         ...baseMessage,

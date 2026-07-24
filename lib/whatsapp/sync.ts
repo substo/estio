@@ -16,6 +16,7 @@ import { upsertWebBridgeIdentityMap } from "@/lib/whatsapp/web-bridge-identity";
 import { getWebBridgeDuplicateBodyReconciliation } from "@/lib/whatsapp/web-bridge-message-reconciliation";
 import {
     areWhatsAppWebBridgeMessageIdAliases,
+    getWhatsAppWebBridgeLocalMessageId,
     isWhatsAppWebBridgeSerializedMessageId,
     selectCanonicalizableWhatsAppWebBridgeAlias,
 } from "@/lib/whatsapp/web-bridge-message-id-alias";
@@ -655,6 +656,87 @@ async function tryCanonicalizeWebBridgeMessageIdAlias(args: {
 }) {
     if (args.source !== "whatsapp_web_bridge") {
         return null;
+    }
+
+    const localMessageId = args.direction === "outbound"
+        ? getWhatsAppWebBridgeLocalMessageId(args.wamId)
+        : null;
+    if (localMessageId) {
+        const appAlias = await (db as any).message.findUnique({
+            where: { wamId: localMessageId },
+            include: {
+                outboundWhatsAppOutbox: true,
+                conversation: { include: { contact: true } },
+            },
+        });
+        const appAliasLocationId = String(appAlias?.conversation?.locationId || "");
+        const isSafeAppAlias = !!appAlias?.id
+            && appAliasLocationId === args.locationId
+            && String(appAlias.direction || "") === "outbound"
+            && ["app_user", "scheduled_message"].includes(String(appAlias.source || ""))
+            && areWhatsAppWebBridgeMessageIdAliases(appAlias.wamId, args.wamId);
+        if (isSafeAppAlias) {
+            await (db as any).message.updateMany({
+                where: {
+                    id: appAlias.id,
+                    status: { in: ["sending", "queued", "pending", "processing", "dispatch_accepted", "delivery_unconfirmed"] },
+                },
+                data: {
+                    status: "dispatch_accepted",
+                    updatedAt: new Date(),
+                },
+            });
+            await (db as any).whatsAppOutboundOutbox.updateMany({
+                where: {
+                    messageId: appAlias.id,
+                    status: { in: ["pending", "processing", "failed", "delivery_unconfirmed"] },
+                },
+                data: {
+                    status: "dispatch_accepted",
+                    processedAt: null,
+                    lockedAt: null,
+                    lockedBy: null,
+                    lastError: null,
+                },
+            }).catch(() => undefined);
+            await (db as any).messageSync.upsert({
+                where: {
+                    messageId_provider_providerAccountId: {
+                        messageId: appAlias.id,
+                        provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                        providerAccountId: args.providerAccountId,
+                    },
+                },
+                create: {
+                    messageId: appAlias.id,
+                    conversationId: appAlias.conversationId,
+                    locationId: args.locationId,
+                    provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+                    providerAccountId: args.providerAccountId,
+                    providerMessageId: args.wamId,
+                    providerThreadId: args.providerThreadId,
+                    status: "synced",
+                    remoteUpdatedAt: args.timestamp,
+                    lastSyncedAt: new Date(),
+                    metadata: {
+                        source: args.source,
+                        adoptedSerializedOutboundAlias: true,
+                        localProviderMessageId: localMessageId,
+                    },
+                },
+                update: {
+                    providerMessageId: args.wamId,
+                    providerThreadId: args.providerThreadId,
+                    status: "synced",
+                    remoteUpdatedAt: args.timestamp,
+                    lastSyncedAt: new Date(),
+                    lastError: null,
+                },
+            });
+
+            console.log("[WhatsApp Sync] Adopted serialized Web Bridge id into the existing app outbound message.");
+            return { id: String(appAlias.id), message: appAlias };
+        }
     }
 
     const incomingBody = normalizeOutboundWebBridgeRetryBodyForMatch(args.body);
