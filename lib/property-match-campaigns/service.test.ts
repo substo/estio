@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   attachPropertyMatchAiRunEvidence,
   applyInteractionSimilarityToStructuredMatch,
+  buildPropertyMatchDecisionContext,
   buildAiReviewClaimWhere,
   buildPriorPropertyShareSearchTerms,
   buildPropertyMatchContactWhere,
@@ -35,7 +36,7 @@ const SOURCE_TEST_MARKET = {
   ],
 };
 
-test("AI match normalizer downgrades low-confidence yes to maybe", () => {
+test("AI match normalizer conservatively rejects low-confidence recommendations", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "yes",
     confidence: 0.42,
@@ -49,7 +50,7 @@ test("AI match normalizer downgrades low-confidence yes to maybe", () => {
     },
   });
 
-  assert.equal(result.verdict, "maybe");
+  assert.equal(result.verdict, "no");
   assert.equal(result.confidence, 0.42);
   assert.equal(result.evidence.structured.needsAi, false);
 });
@@ -87,7 +88,7 @@ test("AI run evidence preserves candidate evidence and records requested and use
   });
 });
 
-test("AI match normalizer downgrades yes when structured evidence lacks concrete anchors", () => {
+test("AI match normalizer rejects yes when evidence lacks concrete anchors", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "yes",
     confidence: 0.9,
@@ -108,12 +109,12 @@ test("AI match normalizer downgrades yes when structured evidence lacks concrete
     },
   });
 
-  assert.equal(result.verdict, "maybe");
+  assert.equal(result.verdict, "no");
   assert.match(result.reasoning, /lacks enough concrete positive evidence/i);
   assert.equal(result.evidence.structured.needsAi, false);
 });
 
-test("AI match normalizer cannot override structured blockers", () => {
+test("AI judgment can override heuristic mismatches when contact evidence supports it", () => {
   const result = normalizeAiMatchAssessment({
     verdict: "yes",
     confidence: 0.95,
@@ -126,7 +127,7 @@ test("AI match normalizer cannot override structured blockers", () => {
     },
   });
 
-  assert.equal(result.verdict, "no");
+  assert.equal(result.verdict, "yes");
   assert.equal(result.evidence.structured.needsAi, false);
 });
 
@@ -178,6 +179,50 @@ test("AI match normalizer clamps invalid confidence and invalid verdict", () => 
 
   assert.equal(result.verdict, "maybe");
   assert.equal(result.confidence, 1);
+});
+
+test("AI match normalizer accepts the simplified recommend boolean", () => {
+  const result = normalizeAiMatchAssessment({
+    recommend: true,
+    confidence: 0.9,
+    summary: "Location and budget fit.",
+  });
+
+  assert.equal(result.verdict, "yes");
+  assert.equal(result.matchSummary, "Location and budget fit.");
+});
+
+test("decision context presents requirements, interests, sent history, and property as two summaries", () => {
+  const context = buildPropertyMatchDecisionContext({
+    propertySnapshot: {
+      reference: "DT4001",
+      type: "Villa",
+      price: 420000,
+      bedrooms: 3,
+      propertyLocation: "Peyia",
+    },
+    campaignProfile: {
+      requirementSummary: "Villa in Peyia, 3 bedrooms, up to EUR 450,000.",
+      interactions: {
+        sentPropertyReferences: ["DT3990"],
+        positiveExamples: [{
+          property: { reference: "DT3980", type: "Villa", bedrooms: 3, propertyLocation: "Peyia" },
+        }],
+        negativeExamples: [],
+      },
+    },
+    recentMessages: [
+      { direction: "outbound", body: "How about this one?" },
+      { direction: "inbound", body: "Peyia is still my preferred area." },
+    ],
+  });
+
+  assert.match(context.contactSummary, /Current requirements: Villa in Peyia/i);
+  assert.match(context.contactSummary, /Interested\/positive history: DT3980/i);
+  assert.match(context.contactSummary, /Previously sent: DT3990/i);
+  assert.match(context.contactSummary, /Peyia is still my preferred area/i);
+  assert.doesNotMatch(context.contactSummary, /How about this one/);
+  assert.match(context.propertySummary, /DT4001/);
 });
 
 test("pending AI candidates cannot enter review or draft flow", () => {
@@ -252,7 +297,7 @@ test("only successfully completed AI candidates can enter human review", () => {
   }), false);
 });
 
-test("unverified lead-like candidates cannot enter review and draft flow", () => {
+test("lead-like candidates can use a completed property decision without a separate verification gate", () => {
   const candidate = {
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -260,8 +305,8 @@ test("unverified lead-like candidates cannot enter review and draft flow", () =>
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(canCandidateEnterHumanReview(candidate), false);
-  assert.equal(canCandidateDraftOrSend(candidate), false);
+  assert.equal(canCandidateEnterHumanReview(candidate), true);
+  assert.equal(canCandidateDraftOrSend(candidate), true);
 });
 
 test("property match contact filter removes only known ineligible identities", () => {
@@ -391,7 +436,7 @@ test("AI review claim filter reclaims stale processing locks", () => {
 
   assert.deepEqual(where.id, { in: ["cand_1", "cand_2"] });
   assert.equal(where.reviewerStatus, "pending");
-  assert.deepEqual(where.contact, { profileVerificationStatus: "verified_lead" });
+  assert.equal(where.contact, undefined);
   assert.deepEqual(where.OR, [
     { aiReviewStatus: "pending" },
     {
@@ -432,7 +477,7 @@ test("property match queue classifier separates campaign work outcomes", () => {
   });
 });
 
-test("property match queue sends unverified lead-like yes candidates to needs info", () => {
+test("property match queue sends completed lead-like recommendations to review", () => {
   const candidate = {
     reviewerStatus: "pending",
     aiVerdict: "yes",
@@ -440,7 +485,7 @@ test("property match queue sends unverified lead-like yes candidates to needs in
     contact: { profileVerificationStatus: null },
   };
 
-  assert.equal(propertyMatchCandidateQueue(candidate), "needs_profile_verification");
+  assert.equal(propertyMatchCandidateQueue(candidate), "review");
 });
 
 test("failed AI reviews do not enter the human recommendation queue", () => {

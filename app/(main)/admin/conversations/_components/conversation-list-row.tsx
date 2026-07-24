@@ -1,7 +1,7 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Conversation } from "@/lib/ghl/conversations";
 import { cn } from "@/lib/utils";
-import { Clock3, Link as LinkIcon } from "lucide-react";
+import { Clock3, Link as LinkIcon, Sparkles } from "lucide-react";
 import { getConversationChannelInfo } from "./conversation-channel-info";
 
 interface ConversationListRowProps {
@@ -12,6 +12,7 @@ interface ConversationListRowProps {
     onSelect: (id: string) => void;
     onToggleSelect?: (id: string, checked: boolean) => void;
     onHoverConversation?: (id: string) => void;
+    onOpenPropertyCampaign?: (campaignId: string, candidateId: string) => void;
 }
 
 const CONTACT_TYPE_TONES: Record<string, string> = {
@@ -67,6 +68,7 @@ export function ConversationListRow({
     onSelect,
     onToggleSelect,
     onHoverConversation,
+    onOpenPropertyCampaign,
 }: ConversationListRowProps) {
     const channel = getConversationChannelInfo(conversation);
     const contactTypeLabel = formatContactTypeLabel(conversation.contactType);
@@ -159,6 +161,27 @@ export function ConversationListRow({
                                 {scheduledCount} scheduled{scheduledTime ? ` · ${scheduledTime}` : ""}
                             </span>
                         </span>
+                    )}
+                    {conversation.propertyRecommendation && (
+                        <button
+                            type="button"
+                            title={`Recommended property: ${conversation.propertyRecommendation.label}`}
+                            className="inline-flex h-4 max-w-[170px] shrink-0 items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[9px] font-semibold leading-none text-emerald-800 hover:bg-emerald-100"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenPropertyCampaign?.(
+                                    conversation.propertyRecommendation!.campaignId,
+                                    conversation.propertyRecommendation!.candidateId,
+                                );
+                            }}
+                        >
+                            <Sparkles className="h-2.5 w-2.5 shrink-0" />
+                            <span className="truncate">
+                                {conversation.propertyRecommendation.count > 1
+                                    ? `${conversation.propertyRecommendation.count} recommended`
+                                    : `Send ${conversation.propertyRecommendation.label}`}
+                            </span>
+                        </button>
                     )}
                 </div>
             </div>

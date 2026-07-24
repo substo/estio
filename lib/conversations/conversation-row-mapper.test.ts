@@ -42,6 +42,21 @@ test("mapConversationRowToUi preserves default reply language fallback", () => {
     assert.equal(mapped.contactType, "Lead");
 });
 
+test("mapConversationRowToUi exposes the latest property recommendation badge target", () => {
+    const propertyRecommendation = {
+        count: 2,
+        campaignId: "campaign-1",
+        candidateId: "candidate-1",
+        label: "DT4001",
+    };
+    const mapped = mapConversationRowToUi(
+        { ...baseRow, propertyRecommendation },
+        { id: "loc-internal" },
+    );
+
+    assert.deepEqual(mapped.propertyRecommendation, propertyRecommendation);
+});
+
 test("mapConversationRowToUi keeps likely GHL ids as provider ids and rejects local aliases", () => {
     const ghlMapped = mapConversationRowToUi(baseRow, { id: "loc-internal" });
     const localMapped = mapConversationRowToUi(

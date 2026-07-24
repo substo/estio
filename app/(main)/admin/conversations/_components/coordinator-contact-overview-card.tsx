@@ -39,6 +39,7 @@ interface CoordinatorContactOverviewCardProps {
     onContactSaved?: (patch: ContactIdentityPatch) => void;
     onContactMerged?: (targetContactId: string, targetConversationId?: string | null) => void;
     onContactContextUpdated: (context: any) => void;
+    onOpenPropertyCampaign?: (campaignId: string, candidateId: string) => void;
 }
 
 function normalizeContactValue(value: unknown): string {
@@ -143,9 +144,11 @@ function formatConfidence(value: unknown) {
 function RecommendedPropertiesSection({
     contactId,
     conversationId,
+    onOpenCampaign,
 }: {
     contactId: string;
     conversationId: string;
+    onOpenCampaign?: (campaignId: string, candidateId: string) => void;
 }) {
     const [items, setItems] = useState<ContactPropertyRecommendation[]>([]);
     const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -317,6 +320,17 @@ function RecommendedPropertiesSection({
                                         {warnings[0]}
                                     </div>
                                 ) : null}
+                                {onOpenCampaign ? (
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="mt-2 h-7 w-full border-emerald-200 bg-white text-[10px] text-emerald-800 hover:bg-emerald-50"
+                                        onClick={() => onOpenCampaign(item.campaignId, item.candidateId)}
+                                    >
+                                        Open campaign match
+                                    </Button>
+                                ) : null}
                                 {canReview || draft ? (
                                     <div className="mt-2 space-y-1.5">
                                         <Textarea
@@ -385,6 +399,7 @@ export function CoordinatorContactOverviewCard({
     onContactSaved,
     onContactMerged,
     onContactContextUpdated,
+    onOpenPropertyCampaign,
 }: CoordinatorContactOverviewCardProps) {
     const canEditContact = hasFullContactContext(contactContext);
     const isShellContact = isShellContactContext(contactContext);
@@ -651,6 +666,7 @@ export function CoordinatorContactOverviewCard({
                                                     <RecommendedPropertiesSection
                                                         contactId={contact.id}
                                                         conversationId={conversationId}
+                                                        onOpenCampaign={onOpenPropertyCampaign}
                                                     />
                                                 </div>
                                             )}

@@ -5,8 +5,9 @@ import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { deriveComposerInitialChannel } from "@/lib/conversations/channel-summary";
-import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import { resolvePropertyPublicUrl } from "@/lib/properties/public-url";
+import { extractLegacyCrmRefCandidates } from "@/lib/crm/old-crm-import";
+import { importOldCrmPropertyToLocalDb } from "@/lib/crm/old-crm-property-import-service";
 import { getLocationMarketContext, type LocationMarketContext } from "@/lib/locations/market-context";
 import {
   evaluateStructuredPropertyMatch,
@@ -15,7 +16,6 @@ import {
   type ContactRequirementInput,
   type StructuredMatchResult,
 } from "@/lib/property-match-campaigns/matching";
-import { verifyContactProfile } from "@/lib/ai/contact-verification/service";
 import { resolveContactPropertyMatchProfile } from "@/lib/property-match-campaigns/profile";
 import { recordContactPropertyInteraction } from "@/lib/property-match-campaigns/profile-service";
 import {
@@ -37,10 +37,13 @@ export type PropertyMatchCampaignQueue =
 
 const CAMPAIGN_STATUSES = new Set(["draft", "processing", "review", "completed", "canceled", "failed"]);
 const REVIEWER_STATUSES = new Set(["pending", "approved", "rejected", "sent", "skipped"]);
-const LOW_CONFIDENCE_YES_THRESHOLD = 0.65;
+const LOW_CONFIDENCE_YES_THRESHOLD = 0.72;
+const PROPERTY_MATCH_THINKING_BUDGET = Math.max(
+  256,
+  Math.min(4096, Number(process.env.PROPERTY_MATCH_THINKING_BUDGET || 1024)),
+);
 const AI_REVIEW_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const CONTACT_COLLECTION_BATCH_SIZE = 40;
-const PROFILE_VERIFICATION_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_PROFILE_VERIFICATION_CONCURRENCY || 4)));
 const AI_SCORING_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.PROPERTY_MATCH_AI_SCORING_CONCURRENCY || 4)));
 const PROPERTY_MATCH_FAST_MODEL = String(process.env.PROPERTY_MATCH_FAST_MODEL || GEMINI_FLASH_LITE_LATEST_ALIAS).trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
 const CAMPAIGN_STOPPED_STATUS = "canceled";
@@ -58,8 +61,6 @@ const PROPERTY_TYPE_HINTS = [
   "Plot",
   "Land",
 ];
-const PROFILE_VERIFICATION_BLOCK_SUMMARY = "Needs contact info before campaign matching.";
-const PROFILE_VERIFICATION_BLOCK_REASON = "Contact profile is not verified as a buyer/renter lead; skipped campaign AI review.";
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -134,7 +135,6 @@ export function propertyMatchCandidateQueue(candidate: {
   if (aiReviewStatus === "pending" || aiReviewStatus === "processing") return "processing";
   if (aiReviewStatus === "failed") return "not_match";
   if (reviewerStatus === "pending" && aiVerdict === "no") return "not_match";
-  if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe") && !candidateProfileIsVerified(candidate)) return "needs_profile_verification";
   if (reviewerStatus === "pending" && (aiVerdict === "yes" || aiVerdict === "maybe")) return "review";
   return "not_match";
 }
@@ -338,47 +338,40 @@ export function normalizeAiMatchAssessment(raw: AnyRecord, fallbackEvidence: Any
   const confidence = Number.isFinite(Number(raw.confidence))
     ? Math.max(0, Math.min(1, Number(raw.confidence)))
     : 0.5;
-  const requestedVerdict = normalizeVerdict(raw.verdict);
+  const requestedVerdict = typeof raw.recommend === "boolean"
+    ? raw.recommend ? "yes" : "no"
+    : normalizeVerdict(raw.verdict);
   const structuredEvidence = fallbackEvidence?.structured || {};
-  const warnings = Array.isArray(fallbackEvidence?.warnings)
-    ? fallbackEvidence.warnings.map((warning: unknown) => String(warning || "").toLowerCase())
-    : [];
-  const hasStaleRequirementWarning = warnings.some((warning: string) =>
-    warning.includes("requirement fields are stale") || warning.includes("never been assessed")
-  );
   const qualificationEvidence = structuredEvidence.qualificationEvidence || null;
-  const hasHardMismatch = Array.isArray(structuredEvidence.hardMismatches) && structuredEvidence.hardMismatches.length > 0;
   const hasDisqualifier = Array.isArray(structuredEvidence.disqualifiers) && structuredEvidence.disqualifiers.length > 0;
-  const hasStructuredBlocker = hasDisqualifier
-    || (hasHardMismatch && !hasStaleRequirementWarning)
-    || (structuredEvidence.verdict === "no" && !hasStaleRequirementWarning);
+  const hasStructuredBlocker = hasDisqualifier;
   const lacksPositiveEvidence = Boolean(qualificationEvidence) && (
     Boolean(qualificationEvidence.sparseLead)
     || Number(qualificationEvidence.anchorCount || 0) < Number(qualificationEvidence.minimumAnchorsForYes || 2)
     || Number(qualificationEvidence.concreteFitAnchorCount || 0) < Number(qualificationEvidence.minimumConcreteFitAnchorsForYes || 2)
     || Number(qualificationEvidence.groundingFitAnchorCount || 0) < 1
   );
-  const verdict = hasStructuredBlocker
+  const verdict: MatchVerdict = hasStructuredBlocker
     ? "no"
     : requestedVerdict === "yes" && lacksPositiveEvidence
-    ? "maybe"
+    ? "no"
     : requestedVerdict === "yes" && confidence < LOW_CONFIDENCE_YES_THRESHOLD
-    ? "maybe"
+    ? "no"
     : requestedVerdict;
 
   return {
     verdict,
     confidence,
-    reasoning: verdict === "maybe" && requestedVerdict === "yes" && lacksPositiveEvidence
-      ? "The contact lacks enough concrete positive evidence for a definite recommendation; kept for human review."
+    reasoning: verdict === "no" && requestedVerdict === "yes" && lacksPositiveEvidence
+      ? "Do not recommend: the contact lacks enough concrete positive evidence."
       : normalizeText(raw.reasoning, 3000) || (
-        verdict === "maybe" && requestedVerdict === "yes"
-          ? "AI confidence was too low for a definite yes; kept for human review."
+        verdict === "no" && requestedVerdict === "yes"
+          ? "Do not recommend: AI confidence was below the recommendation threshold."
           : hasStructuredBlocker
-            ? "Structured matching found a hard mismatch or disqualifier; AI cannot override it."
-          : "AI reviewed the ambiguous requirements."
+            ? "The contact is not eligible to receive property recommendations."
+          : "AI compared the contact summary with the property summary."
       ),
-    matchSummary: normalizeText(raw.matchSummary, 1200) || "AI reviewed the lead against this property.",
+    matchSummary: normalizeText(raw.matchSummary || raw.summary, 1200) || "AI compared the contact and property summaries.",
     evidence: {
       ...fallbackEvidence,
       structured: {
@@ -710,8 +703,11 @@ function structuredCandidateData(args: {
     && structured.verdict === "no"
     && (structured.hardMismatches?.length || 0) > 0
     && (structured.disqualifiers?.length || 0) === 0;
-  const effectiveVerdict = structuredNeedsConversationReview ? "maybe" : structured.verdict;
-  const effectiveNeedsAi = structuredNeedsConversationReview ? true : structured.needsAi;
+  const hasEligibilityBlocker = (structured.disqualifiers?.length || 0) > 0;
+  const effectiveVerdict = hasEligibilityBlocker ? "no" : "maybe";
+  // Every eligible contact gets the same final AI comparison. Structured matching
+  // remains supporting evidence, not a second decision engine.
+  const effectiveNeedsAi = !hasEligibilityBlocker;
   const preferredChannel = deriveComposerInitialChannel(conversation as any);
   return {
     locationId: args.locationId,
@@ -804,8 +800,7 @@ export function canCandidateEnterHumanReview(candidate: {
 }) {
   return candidate.reviewerStatus === "pending"
     && (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-    && isAiReviewTerminal(candidate.aiReviewStatus)
-    && candidateProfileIsVerified(candidate);
+    && isAiReviewTerminal(candidate.aiReviewStatus);
 }
 
 export function canCandidateDraftOrSend(candidate: {
@@ -815,16 +810,7 @@ export function canCandidateDraftOrSend(candidate: {
   profileVerificationStatus?: unknown;
 }) {
   return (candidate.aiVerdict === "yes" || candidate.aiVerdict === "maybe")
-    && isAiReviewTerminal(candidate.aiReviewStatus)
-    && candidateProfileIsVerified(candidate);
-}
-
-function candidateProfileIsVerified(candidate: {
-  contact?: { profileVerificationStatus?: unknown } | null;
-  profileVerificationStatus?: unknown;
-}) {
-  return candidate.contact?.profileVerificationStatus === "verified_lead"
-    || candidate.profileVerificationStatus === "verified_lead";
+    && isAiReviewTerminal(candidate.aiReviewStatus);
 }
 
 type PropertyMatchContactCursor = {
@@ -949,79 +935,6 @@ function campaignContactSelect(locationId: string) {
   };
 }
 
-async function getCampaignContactSnapshot(args: {
-  locationId: string;
-  contactId: string;
-}) {
-  return db.contact.findFirst({
-    where: { id: args.contactId, locationId: args.locationId },
-    select: campaignContactSelect(args.locationId),
-  });
-}
-
-function profileVerificationBlockCandidateData(args: {
-  locationId: string;
-  campaignId: string;
-  contact: AnyRecord;
-}) {
-  const conversation = args.contact.conversations?.[0];
-  if (!conversation?.id) return null;
-  return {
-    locationId: args.locationId,
-    campaignId: args.campaignId,
-    contactId: args.contact.id,
-    conversationId: conversation.id,
-    structuredVerdict: "no",
-    aiVerdict: "no",
-    aiReviewStatus: "done",
-    aiReviewLockedAt: null,
-    aiReviewLockedBy: null,
-    reviewerStatus: "pending",
-    score: -1,
-    confidence: 0.95,
-    evidence: {
-      profileVerificationBlock: {
-        status: args.contact.profileVerificationStatus || "unknown",
-        summary: args.contact.profileVerificationSummary || null,
-        source: args.contact.profileVerificationSource || "campaign_preflight",
-      },
-      structured: {
-        needsAi: false,
-      },
-    },
-    reasoning: PROFILE_VERIFICATION_BLOCK_REASON,
-    matchSummary: PROFILE_VERIFICATION_BLOCK_SUMMARY,
-    preferredChannel: deriveComposerInitialChannel(conversation as any),
-    lastError: null,
-  };
-}
-
-async function ensureCampaignContactProfileVerified(args: {
-  locationId: string;
-  contact: AnyRecord;
-  conversationId?: string | null;
-}) {
-  if (args.contact.profileVerificationStatus === "verified_lead") return args.contact;
-  const result = await verifyContactProfile({
-    locationId: args.locationId,
-    contactId: args.contact.id,
-    conversationId: args.conversationId || null,
-    sourceType: "campaign_preflight",
-    contactSnapshot: args.contact,
-    reprocessCampaignBlocks: false,
-    modelOverride: PROPERTY_MATCH_FAST_MODEL,
-  });
-  if (!result.success) return null;
-  if (result.created) return null;
-  if (result.assessment?.status !== "verified_lead") return null;
-
-  const refreshed = await getCampaignContactSnapshot({
-    locationId: args.locationId,
-    contactId: args.contact.id,
-  });
-  return refreshed?.profileVerificationStatus === "verified_lead" ? refreshed : null;
-}
-
 export function buildAiReviewClaimWhere(args: {
   campaignId: string;
   locationId: string;
@@ -1033,7 +946,6 @@ export function buildAiReviewClaimWhere(args: {
     campaignId: args.campaignId,
     locationId: args.locationId,
     reviewerStatus: "pending",
-    contact: { profileVerificationStatus: "verified_lead" },
     OR: [
       { aiReviewStatus: "pending" },
       {
@@ -1466,34 +1378,44 @@ function formatPropertyFacts(snapshot: AnyRecord): string {
   ].filter(Boolean).join("\n");
 }
 
-function formatRequirementFacts(contact: AnyRecord): string {
-  const requirement = contactRequirementInput(contact);
+function formatInteractionExample(example: AnyRecord): string {
+  const property = example?.property || {};
   return [
-    contact.name ? `Contact: ${contact.name}` : null,
-    requirement.requirementStatus ? `Status: ${requirement.requirementStatus}` : null,
-    requirement.requirementDistrict ? `District: ${requirement.requirementDistrict}` : null,
-    requirement.requirementBedrooms ? `Bedrooms: ${requirement.requirementBedrooms}` : null,
-    requirement.requirementMinPrice ? `Min price: ${requirement.requirementMinPrice}` : null,
-    requirement.requirementMaxPrice ? `Max price: ${requirement.requirementMaxPrice}` : null,
-    requirement.requirementCondition ? `Condition: ${requirement.requirementCondition}` : null,
-    requirement.requirementPropertyTypes?.length ? `Types: ${requirement.requirementPropertyTypes.join(", ")}` : null,
-    requirement.requirementPropertyLocations?.length ? `Locations: ${requirement.requirementPropertyLocations.join(", ")}` : null,
-    requirement.requirementOtherDetails ? `Other details: ${requirement.requirementOtherDetails}` : null,
-    requirement.requirementSummary ? `Requirement summary: ${requirement.requirementSummary}` : null,
-  ].filter(Boolean).join("\n");
+    property.reference || property.title || "Property",
+    property.type,
+    property.bedrooms != null ? `${property.bedrooms} bed` : null,
+    property.price != null ? `${property.price}` : null,
+    property.propertyLocation || property.city,
+    example.reason ? `reason: ${example.reason}` : null,
+  ].filter(Boolean).join(" · ");
 }
 
-function formatContactProfileFacts(contact: AnyRecord): string {
-  return [
-    contact.name ? `Name: ${contact.name}` : null,
-    contact.contactType ? `Contact type: ${contact.contactType}` : null,
-    contact.leadGoal ? `Lead goal: ${contact.leadGoal}` : null,
-    contact.profileVerificationStatus ? `Profile verification: ${contact.profileVerificationStatus}` : "Profile verification: unknown",
-    contact.profileVerificationConfidence != null ? `Profile confidence: ${contact.profileVerificationConfidence}` : null,
-    contact.profileVerificationSummary ? `Profile summary: ${contact.profileVerificationSummary}` : null,
-    contact.email ? "Has email: yes" : null,
-    contact.phone ? "Has phone: yes" : null,
-  ].filter(Boolean).join("\n");
+export function buildPropertyMatchDecisionContext(args: {
+  propertySnapshot: AnyRecord;
+  campaignProfile?: AnyRecord | null;
+  recentMessages?: Array<{ direction?: string | null; body?: string | null }>;
+}) {
+  const profile = args.campaignProfile || {};
+  const interactions = profile.interactions || {};
+  const recentClientMessages = (args.recentMessages || [])
+    .filter((message) => String(message.direction || "").toLowerCase() === "inbound")
+    .map((message) => normalizeText(message.body, 500))
+    .filter(Boolean)
+    .slice(-8);
+  const positive = (interactions.positiveExamples || []).slice(0, 5).map(formatInteractionExample);
+  const negative = (interactions.negativeExamples || []).slice(0, 5).map(formatInteractionExample);
+  const sent = (interactions.sentPropertyReferences || []).slice(0, 20);
+
+  return {
+    contactSummary: [
+      `Current requirements: ${profile.requirementSummary || "No concrete current requirements recorded."}`,
+      `Interested/positive history: ${positive.length ? positive.join(" | ") : interactions.positivePropertyReferences?.join(", ") || "None recorded."}`,
+      `Rejected/negative history: ${negative.length ? negative.join(" | ") : interactions.negativePropertyReferences?.join(", ") || "None recorded."}`,
+      `Previously sent: ${sent.length ? sent.join(", ") : "None recorded."}`,
+      recentClientMessages.length ? `Recent client statements:\n${recentClientMessages.map((text) => `- ${text}`).join("\n")}` : null,
+    ].filter(Boolean).join("\n"),
+    propertySummary: formatPropertyFacts(args.propertySnapshot),
+  };
 }
 
 function candidateProfileWarnings(candidate: AnyRecord): string[] {
@@ -1634,16 +1556,62 @@ export async function createPropertyMatchCampaignFromSource(args: {
     marketContext,
   });
   const reference = normalizeText(snapshotWithoutLink.reference, 120);
-  const linkedProperty = reference
-    ? await db.property.findFirst({
-      where: {
+  const identityCandidates = extractLegacyCrmRefCandidates([
+    args.propertyUrl,
+    args.propertyText,
+    args.extractedTitle,
+    args.extractedDescription,
+    args.extractedText,
+  ].filter(Boolean).join("\n"));
+  const legacyIds = identityCandidates.map((candidate) => candidate.oldCrmPropertyId);
+  const publicReferences = Array.from(new Set([
+    reference,
+    ...identityCandidates.map((candidate) => candidate.publicReference),
+  ].filter(Boolean))) as string[];
+  let linkedProperty = await db.property.findFirst({
+    where: {
+      locationId: args.locationId,
+      OR: [
+        ...(publicReferences.length ? [{
+          reference: { in: publicReferences, mode: "insensitive" as const },
+        }] : []),
+        ...(legacyIds.length ? [{ legacyCrmPropertyId: { in: legacyIds } }] : []),
+        ...(args.propertyUrl ? [{
+          externalPublicUrl: { equals: args.propertyUrl, mode: "insensitive" as const },
+        }] : []),
+      ],
+    },
+  });
+  let importWarning: string | null = null;
+  if (!linkedProperty && args.actorUserId && identityCandidates[0]) {
+    try {
+      const imported = await importOldCrmPropertyToLocalDb({
+        actorUserId: args.actorUserId,
         locationId: args.locationId,
-        reference: { equals: reference, mode: "insensitive" },
-      },
-    })
-    : null;
+        oldCrmPropertyId: identityCandidates[0].oldCrmPropertyId,
+        publicReference: identityCandidates[0].publicReference,
+      });
+      linkedProperty = await db.property.findFirst({
+        where: { id: imported.propertyId, locationId: args.locationId },
+      });
+      importWarning = imported.warnings.length ? imported.warnings.join(" ") : null;
+    } catch (error) {
+      console.warn("[property-match-campaigns] old CRM source property import failed; continuing with source snapshot", {
+        locationId: args.locationId,
+        reference: identityCandidates[0].publicReference,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      importWarning = "The old CRM property could not be imported, so this campaign is using the URL snapshot.";
+    }
+  }
+  const effectivePropertyUrl = linkedProperty
+    ? (await resolvePropertyPublicUrl({
+      locationId: args.locationId,
+      property: linkedProperty,
+    })) || normalizeText(args.propertyUrl, 1200)
+    : normalizeText(args.propertyUrl, 1200);
   const snapshot = propertySourceSnapshot({
-    url: args.propertyUrl,
+    url: effectivePropertyUrl,
     sourceText,
     title: args.extractedTitle,
     description: args.extractedDescription,
@@ -1669,7 +1637,12 @@ export async function createPropertyMatchCampaignFromSource(args: {
   });
 
   await refreshCampaignCounts(campaign.id);
-  return { success: true as const, campaignId: campaign.id, linkedPropertyId: linkedProperty?.id || null };
+  return {
+    success: true as const,
+    campaignId: campaign.id,
+    linkedPropertyId: linkedProperty?.id || null,
+    importWarning,
+  };
 }
 
 async function collectPropertyMatchCandidatesBatch(args: {
@@ -1732,42 +1705,13 @@ async function collectPropertyMatchCandidatesBatch(args: {
   const propertySnapshotForCampaign = args.campaign.propertySnapshot || {};
   const propertyInput = propertyMatchInput(propertySnapshotForCampaign);
   const marketContext = await getLocationMarketContext(args.locationId);
-  const verificationStartedAt = Date.now();
-  const verificationResults = await mapWithConcurrency(contacts as AnyRecord[], PROFILE_VERIFICATION_CONCURRENCY, async (contact) => {
-    const conversation = contact.conversations[0];
-    if (!conversation?.id) return { verifiedContact: null, blocker: null };
-    const verifiedContact = await ensureCampaignContactProfileVerified({
-      locationId: args.locationId,
-      contact,
-      conversationId: conversation.id,
-    });
-    if (verifiedContact) {
-      return { verifiedContact, blocker: null };
-    }
-    return {
-      verifiedContact: null,
-      blocker: profileVerificationBlockCandidateData({
-        locationId: args.locationId,
-        campaignId: args.campaign.id,
-        contact,
-      }),
-    };
-  });
-  const candidateContacts = verificationResults
-    .map((result) => result.verifiedContact)
-    .filter(Boolean) as AnyRecord[];
-  const blockerData = verificationResults
-    .map((result) => result.blocker)
-    .filter(Boolean) as AnyRecord[];
-  logPropertyMatchCampaignTiming("collection_verified_contacts", {
+  const candidateContacts = contacts as AnyRecord[];
+  const blockerData: AnyRecord[] = [];
+  logPropertyMatchCampaignTiming("collection_contacts", {
     locationId: args.locationId,
     campaignId: args.campaign.id,
     contactsScanned: contacts.length,
-    verifiedContacts: candidateContacts.length,
-    blockedContacts: blockerData.length,
-    concurrency: PROFILE_VERIFICATION_CONCURRENCY,
-    model: PROPERTY_MATCH_FAST_MODEL,
-    elapsedMs: Date.now() - verificationStartedAt,
+    candidateContacts: candidateContacts.length,
   });
 
   const baseCandidateData = candidateContacts.flatMap((contact: any) => {
@@ -1988,11 +1932,11 @@ async function scoreCandidateWithAi(args: {
     || PROPERTY_MATCH_FAST_MODEL
     || await resolveAiModelDefault(args.locationId, "general")
     || GEMINI_FLASH_STABLE_FALLBACK;
-  const prompt = `You review whether a real-estate lead should receive a new listing.
+  const prompt = `Decide whether this real-estate contact should be sent this property.
 
 Return JSON only:
 {
-  "verdict": "yes"|"maybe"|"no",
+  "recommend": boolean,
   "confidence": number,
   "matchSummary": string,
   "reasoning": string,
@@ -2000,26 +1944,14 @@ Return JSON only:
 }
 
 Rules:
-- Use structured requirements as hard filters only when they are current and supported by the contact conversation.
-- If structured.disqualifiers are present, verdict must be no.
-- If structured.hardMismatches are present and warnings do not say requirement fields are stale, verdict must be no.
-- If warnings say requirement fields are stale or never assessed, use the contact profile and conversation as the source of truth; do not reject only because old structured fields conflict.
-- Treat the structured dimension rows as useful evidence for goal, location, price, bedrooms, type, and stopped-search intent, but prefer newer explicit conversation evidence when stored fields are stale.
-- Interpret place names, currencies, and local geography only within the supplied location market context. Never import assumptions from another office or country.
-- Absence of conflicts is not a match. Broad values like "Any District", "Any Bedrooms", "Any price", empty locations/types, or missing details are neutral, not positive evidence.
-- Choose yes only when there are at least two concrete positive fit anchors from the contact's requirements or recent messages, such as matching location, type, bedrooms, budget, required features, size, or a clearly similar prior enquiry. Matching sale/rent intent, verified-lead status, and broad "Any" fields are eligibility signals, not fit anchors.
-- A definite yes must include at least one grounding fit anchor: location, bedrooms, budget, or size. Type/feature overlap alone is a maybe unless the conversation explicitly says the client is open-ended.
-- If the contact recently asked for land/plots and this listing is a house/villa/apartment, verdict must be no unless the conversation also clearly says they are open to this listing type.
-- Do not use property facts alone as proof. Evidence for yes must quote or reference the contact-side requirement/message that makes the property a close fit.
-- Use interactionSimilarity only when it names a positively received or explicitly rejected prior property. A strong positive similarity is one concrete fit anchor, not a complete recommendation by itself.
-- Treat properties merely sent by an agent as neutral exposure. Never infer preference from sent history or silence.
-- If interactionSimilarity includes a negative caution, review its recorded rejection reason. Do not repeat the same price, location, or size problem without current evidence that the concern changed.
-- Use unstructured requirements and summary to decide yes vs maybe.
-- Choose yes only when sending is clearly reasonable.
-- Choose maybe when there is a plausible fit but missing, stale, or ambiguous information.
-- Choose no when the listing conflicts with current requirements.
-- Never recommend sending to owners/agents/non-seeker contacts.
-- Treat profile verification warnings as uncertainty, not an automatic no for lead-like contacts.`;
+- Recommend only when the contact summary contains clear positive evidence that this property fits.
+- Compare current requirements first, then use interested/rejected property history as supporting evidence.
+- Previously sent properties are neutral history. Never treat silence after a send as interest.
+- Do not recommend the same property if it is listed as previously sent.
+- Newer explicit client statements override older stored requirements.
+- Missing, broad, stale, or contradictory information means recommend=false.
+- A good recommendation normally matches at least two important needs, including one of location, budget, bedrooms, or size.
+- Explain the decisive matches or conflicts plainly. Do not invent facts.`;
 
   const recentMessages = await db.message.findMany({
     where: { conversationId: args.candidate.conversationId || "" },
@@ -2027,59 +1959,32 @@ Rules:
     take: 30,
     select: { id: true, direction: true, body: true, createdAt: true },
   });
-  const messageText = recentMessages.reverse().map((message) => {
-    const speaker = message.direction === "inbound" ? "Client" : "Agent";
-    return `[${message.id}] ${speaker}: ${normalizeText(message.body, 800) || ""}`;
-  }).join("\n");
-  const scheduledMessageContext = args.candidate.conversationId
-    ? await getScheduledMessageAiContext({
-      locationId: args.locationId,
-      conversationId: args.candidate.conversationId,
-    }).catch(() => "")
-    : "";
+  recentMessages.reverse();
   const warnings = candidateProfileWarnings(args.candidate);
+  const decisionContext = buildPropertyMatchDecisionContext({
+    propertySnapshot: args.campaign.propertySnapshot || {},
+    campaignProfile: args.candidate.evidence?.campaignProfile || null,
+    recentMessages,
+  });
 
-  const userContent = `Property:
-${formatPropertyFacts(args.campaign.propertySnapshot || {})}
+  const userContent = `CONTACT SUMMARY
+${decisionContext.contactSummary}
 
-Contact profile:
-${formatContactProfileFacts(args.candidate.contact || {})}
-
-Contact requirements:
-${formatRequirementFacts(args.candidate.contact || {})}
-
-Warnings:
-${warnings.length ? warnings.map((warning) => `- ${warning}`).join("\n") : "None."}
-
-Structured match:
-${JSON.stringify(args.candidate.evidence?.structured || {}, null, 2)}
-
-Location market context:
-${JSON.stringify(args.candidate.evidence?.marketContext || {}, null, 2)}
-
-Campaign profile:
-${JSON.stringify(args.candidate.evidence?.campaignProfile || {}, null, 2)}
-
-Property interaction similarity:
-${JSON.stringify(args.candidate.evidence?.interactionSimilarity || {}, null, 2)}
-
-Recent messages:
-${messageText || "No recent messages."}
-
-Scheduled future outbound messages:
-${scheduledMessageContext || "None."}`;
+PROPERTY SUMMARY
+${decisionContext.propertySummary}`;
 
   const result = await callLLMWithMetadata(modelName, prompt, userContent, {
     jsonMode: true,
     temperature: 0.1,
-    maxOutputTokens: 900,
-    thinkingBudget: 0,
+    maxOutputTokens: 700,
+    thinkingBudget: PROPERTY_MATCH_THINKING_BUDGET,
     locationId: args.locationId,
   });
   const parsed = extractJsonObject(result.text);
   const normalized = normalizeAiMatchAssessment(parsed, {
     ...(args.candidate.evidence || {}),
     warnings,
+    decisionContext,
   });
   const promptTokens = Number(result.usage.promptTokens || 0);
   const completionTokens = Number(result.usage.completionTokens || 0);
@@ -2398,7 +2303,7 @@ export async function listContactPropertyRecommendations(args: {
       locationId: args.locationId,
       contactId: args.contactId,
       ...(args.conversationId ? { conversationId: args.conversationId } : {}),
-      aiVerdict: { in: ["yes", "maybe"] },
+      aiVerdict: "yes",
       aiReviewStatus: "done",
       reviewerStatus: { notIn: ["rejected", "skipped"] },
       NOT: alreadySharedCandidateWhere(),
@@ -2463,6 +2368,7 @@ export async function listContactPropertyRecommendations(args: {
         currency: snapshot.currency || "EUR",
         city: property.city || snapshot.city || null,
         propertyLocation: property.propertyLocation || snapshot.propertyLocation || null,
+        sourceUrl: snapshot.sourceUrl || null,
       },
       aiVerdict: row.aiVerdict,
       aiReviewStatus: row.aiReviewStatus,
@@ -2475,6 +2381,11 @@ export async function listContactPropertyRecommendations(args: {
       sentAt: row.sentAt,
       reviewedAt: row.reviewedAt,
       warnings: warningEvidence.length ? warningEvidence : candidateProfileWarnings(row),
+      contactSummary: row.evidence?.decisionContext?.contactSummary
+        || row.evidence?.campaignProfile?.requirementSummary
+        || null,
+      interactionSummary: row.evidence?.campaignProfile?.interactionSummary || null,
+      propertySummary: row.evidence?.decisionContext?.propertySummary || formatPropertyFacts(snapshot),
     };
   });
 }
@@ -2614,7 +2525,6 @@ function propertyMatchCandidateWhereForQueue(queue: PropertyMatchCampaignQueue) 
       reviewerStatus: "pending",
       aiVerdict: { in: ["yes", "maybe"] },
       aiReviewStatus: "done",
-      contact: { profileVerificationStatus: "verified_lead" },
     };
   }
   if (queue === "approved") return { reviewerStatus: "approved" };

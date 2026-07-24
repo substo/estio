@@ -154,6 +154,7 @@ import {
     updatePropertyMatchCandidateReview,
 } from "@/lib/property-match-campaigns/service";
 import { extractPropertyUrlContext } from "@/lib/conversations/property-url-context";
+import { extractLegacyCrmRefCandidates } from "@/lib/crm/old-crm-import";
 import {
     buildWhatsAppOutboundUploadKey,
     createWhatsAppMediaUploadUrl as createWhatsAppMediaUploadSignedUrl,
@@ -7584,7 +7585,8 @@ export async function createPropertyMatchCampaignFromSourceAction(input: {
         let extracted: Awaited<ReturnType<typeof extractPropertyUrlContext>> | null = null;
         if (propertyUrl) {
             extracted = await extractPropertyUrlContext(propertyUrl);
-            if (!extracted.success && !propertyText) {
+            const canResolveOldCrmProperty = extractLegacyCrmRefCandidates(propertyUrl).length > 0;
+            if (!extracted.success && !propertyText && !canResolveOldCrmProperty) {
                 return { success: false as const, error: extracted.error || "Could not read that property URL." };
             }
         }

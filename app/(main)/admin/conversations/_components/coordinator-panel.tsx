@@ -52,6 +52,7 @@ interface CoordinatorPanelProps {
     onSuggestionsGenerated?: (suggestions: string[]) => void;
     onContactSaved?: (patch: ContactIdentityPatch) => void;
     onContactMerged?: (targetContactId: string, targetConversationId?: string | null) => void;
+    onOpenPropertyCampaign?: (campaignId: string, candidateId: string) => void;
 }
 
 interface DealContactOption {
@@ -84,7 +85,8 @@ export function CoordinatorPanel({
     onDeselect,
     onSuggestionsGenerated,
     onContactSaved,
-    onContactMerged
+    onContactMerged,
+    onOpenPropertyCampaign,
 }: CoordinatorPanelProps) {
     const [reasoning, setReasoning] = useState("");
     const [error, setError] = useState<string | null>(null);
@@ -312,6 +314,7 @@ export function CoordinatorPanel({
                 onContactSaved={handleContactSaved}
                 onContactMerged={onContactMerged}
                 onContactContextUpdated={setContactContext}
+                onOpenPropertyCampaign={onOpenPropertyCampaign}
             />
 
             {(!lazySidebarDataEnabled || loadedSidebarTabs.tasks) && (

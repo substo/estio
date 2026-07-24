@@ -1201,6 +1201,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [syncAllOpen, setSyncAllOpen] = useState(false);
     const [newConversationOpen, setNewConversationOpen] = useState(false);
     const [propertyCampaignsOpen, setPropertyCampaignsOpen] = useState(false);
+    const [propertyCampaignTarget, setPropertyCampaignTarget] = useState<{
+        campaignId: string;
+        candidateId: string;
+    } | null>(null);
+    const openPropertyCampaignMatch = useCallback((campaignId: string, candidateId: string) => {
+        setPropertyCampaignTarget({ campaignId, candidateId });
+        setPropertyCampaignsOpen(true);
+    }, []);
 
     useEffect(() => {
         messageSignatureRef.current = getMessageSignature(messages);
@@ -3116,6 +3124,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onNewConversationClick={() => setNewConversationOpen(true)}
             onSyncAllClick={() => setSyncAllOpen(true)}
             onCampaignsClick={() => setPropertyCampaignsOpen(true)}
+            onOpenPropertyCampaign={openPropertyCampaignMatch}
             disablePreviewCard={isMobileViewport}
         />
     );
@@ -3217,6 +3226,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(activeConversation.id, patch)}
                 onContactMerged={(targetId, targetConvId) => handleContactMerged(activeConversation.id, targetId, targetConvId)}
+                onOpenPropertyCampaign={openPropertyCampaignMatch}
             />
         ) : <div className="h-full bg-slate-50 dark:bg-slate-950" />
     ) : (
@@ -3238,6 +3248,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onSuggestionsGenerated={handleMissionSuggestionsGenerated}
                 onContactSaved={(patch) => handleConversationContactSaved(dealMissionConversation.id, patch)}
                 onContactMerged={(targetId, targetConvId) => handleContactMerged(dealMissionConversation.id, targetId, targetConvId)}
+                onOpenPropertyCampaign={openPropertyCampaignMatch}
                 dealContacts={dealContacts}
                 selectedDealConversationId={dealMissionConversation.id}
                 onSelectDealConversation={(conversationId) => setActiveId(conversationId)}
@@ -3467,7 +3478,12 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
             <PropertyMatchCampaignsDialog
                 open={propertyCampaignsOpen}
-                onOpenChange={setPropertyCampaignsOpen}
+                onOpenChange={(nextOpen) => {
+                    setPropertyCampaignsOpen(nextOpen);
+                    if (!nextOpen) setPropertyCampaignTarget(null);
+                }}
+                initialCampaignId={propertyCampaignTarget?.campaignId || null}
+                initialCandidateId={propertyCampaignTarget?.candidateId || null}
                 onOpenConversation={(conversationId) => {
                     setPropertyCampaignsOpen(false);
                     updateUrl({ id: conversationId, view: 'active', mode: null }, 'push');

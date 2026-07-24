@@ -12,6 +12,7 @@ interface ConversationListItemProps {
     onSelect: (id: string) => void;
     onToggleSelect?: (id: string, checked: boolean) => void;
     onHoverConversation?: (id: string) => void;
+    onOpenPropertyCampaign?: (campaignId: string, candidateId: string) => void;
 }
 
 export function ConversationListItem({
@@ -23,6 +24,7 @@ export function ConversationListItem({
     onSelect,
     onToggleSelect,
     onHoverConversation,
+    onOpenPropertyCampaign,
 }: ConversationListItemProps) {
     const row = (
         <ConversationListRow
@@ -33,6 +35,7 @@ export function ConversationListItem({
             onSelect={onSelect}
             onToggleSelect={onToggleSelect}
             onHoverConversation={onHoverConversation}
+            onOpenPropertyCampaign={onOpenPropertyCampaign}
         />
     );
 

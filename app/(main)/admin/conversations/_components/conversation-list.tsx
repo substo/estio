@@ -14,6 +14,7 @@ interface ConversationListProps {
     selectedId: string | null;
     onSelect: (id: string) => void;
     onHoverConversation?: (id: string) => void;
+    onOpenPropertyCampaign?: (campaignId: string, candidateId: string) => void;
     hasMore?: boolean;
     isLoadingMore?: boolean;
     onLoadMore?: () => void;
@@ -55,6 +56,7 @@ export function ConversationList({
     selectedId,
     onSelect,
     onHoverConversation,
+    onOpenPropertyCampaign,
     hasMore = false,
     isLoadingMore = false,
     onLoadMore,
@@ -251,6 +253,7 @@ export function ConversationList({
                                 onSelect={onSelect}
                                 onToggleSelect={onToggleSelect}
                                 onHoverConversation={onHoverConversation}
+                                onOpenPropertyCampaign={onOpenPropertyCampaign}
                             />
                         </div>
                     );

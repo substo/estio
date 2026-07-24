@@ -41,6 +41,12 @@ export interface Conversation {
         nextBody: string | null;
         reviewRecommended: boolean;
     } | null;
+    propertyRecommendation?: {
+        count: number;
+        campaignId: string;
+        candidateId: string;
+        label: string;
+    } | null;
 }
 
 export interface MessageTranslationVariant {

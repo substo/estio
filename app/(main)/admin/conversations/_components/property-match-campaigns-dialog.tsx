@@ -311,10 +311,14 @@ export function PropertyMatchCampaignsDialog({
     open,
     onOpenChange,
     onOpenConversation,
+    initialCampaignId,
+    initialCandidateId,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onOpenConversation?: (conversationId: string) => void;
+    initialCampaignId?: string | null;
+    initialCandidateId?: string | null;
 }) {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
@@ -453,6 +457,22 @@ export function PropertyMatchCampaignsDialog({
             }
         }
     }, [applyCampaignDetail, queue]);
+
+    useEffect(() => {
+        if (!open || !initialCampaignId) return;
+        setSelectedCampaignId(initialCampaignId);
+        setQueue("all");
+        setDetailMode("review");
+        setMobileView("review");
+        setFocusedCandidateIndex(0);
+        void refreshDetail(initialCampaignId, "all");
+    }, [initialCampaignId, open, refreshDetail]);
+
+    useEffect(() => {
+        if (!open || !initialCandidateId || detail?.campaign.id !== initialCampaignId) return;
+        const candidateIndex = detail.candidates.findIndex((candidate) => candidate.id === initialCandidateId);
+        if (candidateIndex >= 0) setFocusedCandidateIndex(candidateIndex);
+    }, [detail, initialCampaignId, initialCandidateId, open]);
 
     const loadDetail = useCallback((campaignId: string, nextQueue = queue) => {
         startTransition(() => {
@@ -1470,6 +1490,22 @@ export function PropertyMatchCampaignsDialog({
 
                                                     <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-xs text-slate-700">
                                                         <div className="font-medium">{candidate.matchSummary || "Match review"}</div>
+                                                        {candidate.evidence?.decisionContext ? (
+                                                            <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                                                                <div className="rounded border bg-white p-2">
+                                                                    <div className="text-[10px] font-semibold uppercase text-slate-500">Contact requirements & history</div>
+                                                                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
+                                                                        {candidate.evidence.decisionContext.contactSummary}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="rounded border bg-white p-2">
+                                                                    <div className="text-[10px] font-semibold uppercase text-slate-500">Property summary</div>
+                                                                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
+                                                                        {candidate.evidence.decisionContext.propertySummary}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
                                                         {dimensions.length > 0 ? (
                                                             <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                                                                 {dimensions.map((dimension) => (

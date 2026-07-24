@@ -180,6 +180,50 @@ async function fetchHasOutboundMessageByConversationId(conversationIds: string[]
     return new Map(rows.map((row) => [row.conversationId, true]));
 }
 
+async function buildPropertyRecommendationSummaryMap(
+    locationId: string,
+    conversationIds: string[],
+): Promise<Map<string, { count: number; campaignId: string; candidateId: string; label: string }>> {
+    const uniqueIds = Array.from(new Set(conversationIds.map((id) => String(id || "").trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return new Map();
+    const rows = await db.propertyMatchCandidate.findMany({
+        where: {
+            locationId,
+            conversationId: { in: uniqueIds },
+            aiVerdict: "yes",
+            aiReviewStatus: "done",
+            reviewerStatus: { in: ["pending", "approved"] },
+        },
+        select: {
+            id: true,
+            conversationId: true,
+            campaignId: true,
+            updatedAt: true,
+            campaign: { select: { title: true, propertySnapshot: true } },
+        },
+        orderBy: [{ updatedAt: "desc" }],
+    });
+    const grouped = new Map<string, typeof rows>();
+    for (const row of rows) {
+        if (!row.conversationId) continue;
+        const existing = grouped.get(row.conversationId) || [];
+        existing.push(row);
+        grouped.set(row.conversationId, existing);
+    }
+    const result = new Map<string, { count: number; campaignId: string; candidateId: string; label: string }>();
+    for (const [conversationId, candidates] of grouped) {
+        const first = candidates[0];
+        const snapshot = (first.campaign.propertySnapshot || {}) as Record<string, unknown>;
+        result.set(conversationId, {
+            count: candidates.length,
+            campaignId: first.campaignId,
+            candidateId: first.id,
+            label: String(snapshot.reference || snapshot.title || first.campaign.title || "Property"),
+        });
+    }
+    return result;
+}
+
 export async function queryConversationListSnapshot(args: {
     locationId: string;
     status: ConversationListStatus;
@@ -265,16 +309,18 @@ export async function mapConversationListSnapshotRows(args: {
     const dealMap = new Map<string, { id: string; title: string }>(args.dealMapEntries);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id || "");
     const conversationIds = args.rows.map((row: any) => row.id);
-    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap] = await Promise.all([
+    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap, propertyRecommendationMap] = await Promise.all([
         fetchLatestMessageMetadataByConversationId(conversationIds),
         fetchHasOutboundMessageByConversationId(conversationIds),
         buildScheduledMessageSummaryMap(args.location.id || "", conversationIds),
+        buildPropertyRecommendationSummaryMap(args.location.id || "", conversationIds),
     ]);
     return args.rows.map((row: any) => mapConversationRowToUi(
         {
             ...row,
             hasOutboundMessage: outboundMessageMap.get(row.id) || false,
             scheduledMessages: scheduledMessageSummaryMap.get(row.id) || null,
+            propertyRecommendation: propertyRecommendationMap.get(row.id) || null,
         },
         args.location,
         dealMap,
@@ -299,10 +345,11 @@ export async function hydrateRankedConversationRows(args: {
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, fetchedRows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
     const conversationIds = fetchedRows.map((row) => row.id);
-    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap] = await Promise.all([
+    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap, propertyRecommendationMap] = await Promise.all([
         fetchLatestMessageMetadataByConversationId(conversationIds),
         fetchHasOutboundMessageByConversationId(conversationIds),
         buildScheduledMessageSummaryMap(args.location.id, conversationIds),
+        buildPropertyRecommendationSummaryMap(args.location.id, conversationIds),
     ]);
 
     const rankIndex = new Map<string, number>();
@@ -320,6 +367,7 @@ export async function hydrateRankedConversationRows(args: {
             ...row,
             hasOutboundMessage: outboundMessageMap.get(row.id) || false,
             scheduledMessages: scheduledMessageSummaryMap.get(row.id) || null,
+            propertyRecommendation: propertyRecommendationMap.get(row.id) || null,
         },
         args.location,
         dealMap,
@@ -367,10 +415,11 @@ export async function queryConversationListDelta(args: {
     const dealMap = await buildActiveDealMapForConversationRows(args.location.id, rows);
     const locationDefaultReplyLanguage = await getLocationDefaultReplyLanguage(args.location.id);
     const conversationIds = rows.map((row) => row.id);
-    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap] = await Promise.all([
+    const [latestMessageMap, outboundMessageMap, scheduledMessageSummaryMap, propertyRecommendationMap] = await Promise.all([
         fetchLatestMessageMetadataByConversationId(conversationIds),
         fetchHasOutboundMessageByConversationId(conversationIds),
         buildScheduledMessageSummaryMap(args.location.id, conversationIds),
+        buildPropertyRecommendationSummaryMap(args.location.id, conversationIds),
     ]);
 
     const deltas = rows.map((row) => {
@@ -387,6 +436,7 @@ export async function queryConversationListDelta(args: {
                     ...row,
                     hasOutboundMessage: outboundMessageMap.get(row.id) || false,
                     scheduledMessages: scheduledMessageSummaryMap.get(row.id) || null,
+                    propertyRecommendation: propertyRecommendationMap.get(row.id) || null,
                 },
                 args.location,
                 dealMap,
