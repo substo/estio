@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { verifyCronAuthorization } from "@/lib/cron/auth";
 import { CronGuard } from "@/lib/cron/guard";
-import { processPropertyMatchCampaignBatch } from "@/lib/property-match-campaigns/service";
+import { processPropertyMatchCampaignUntilIdle } from "@/lib/property-match-campaigns/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
@@ -32,10 +32,11 @@ export async function GET(request: NextRequest) {
 
     const results = [];
     for (const campaign of campaigns) {
-      const result = await processPropertyMatchCampaignBatch({
+      const result = await processPropertyMatchCampaignUntilIdle({
         locationId: campaign.locationId,
         campaignId: campaign.id,
         limit: candidateLimit,
+        timeBudgetMs: 50_000,
         model: campaign.scoringModel,
         fallbackPolicy: campaign.fallbackPolicy === "allow_paid" ? "allow_paid" : "same_provider",
       });

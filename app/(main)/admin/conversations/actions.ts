@@ -7379,6 +7379,8 @@ function serializePropertyMatchCampaign(row: any) {
         fallbackPolicy: row.fallbackPolicy || "same_provider",
         propertySnapshot: row.propertySnapshot || null,
         collectionStatus: row.collectionStatus || null,
+        processingStartedAt: row.processingStartedAt?.toISOString?.() || null,
+        processingFinishedAt: row.processingFinishedAt?.toISOString?.() || null,
         lastError: row.lastError || null,
     };
 }

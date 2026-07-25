@@ -29,6 +29,7 @@ import {
   comparePropertyToInteractionProfile,
   type PropertyInteractionSimilarity,
 } from "@/lib/property-match-campaigns/interaction-similarity";
+import { acquirePropertyMatchCampaignWorkerLease } from "@/lib/property-match-campaigns/worker-lease";
 
 type AnyRecord = Record<string, any>;
 export type PropertyMatchCampaignQueue =
@@ -2215,6 +2216,41 @@ async function resolvePropertyMatchCampaignProcessingConfig(args: {
   return { scoringModel, fallbackPolicy };
 }
 
+export async function startPropertyMatchCampaignProcessing(args: {
+  locationId: string;
+  campaignId: string;
+  model?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+  });
+  if (!campaign) return { success: false as const, error: "Campaign not found." };
+  const processingConfig = await resolvePropertyMatchCampaignProcessingConfig({
+    campaign,
+    model: args.model,
+    fallbackPolicy: args.fallbackPolicy,
+  });
+  const resumingStoppedCampaign = isPropertyMatchCampaignStopped(campaign);
+  const updated = await db.propertyMatchCampaign.update({
+    where: { id: campaign.id },
+    data: {
+      status: "processing",
+      ...(resumingStoppedCampaign ? {
+        collectionStatus: campaign.collectionStatus === "done" ? "done" : "pending",
+        collectionLockedAt: null,
+        collectionLockedBy: null,
+      } : {}),
+      processingStartedAt: new Date(),
+      processingFinishedAt: null,
+      lastError: null,
+      scoringModel: processingConfig.scoringModel,
+      fallbackPolicy: processingConfig.fallbackPolicy,
+    },
+  });
+  return { success: true as const, campaign: updated };
+}
+
 export async function processPropertyMatchCampaignBatch(args: {
   locationId: string;
   campaignId: string;
@@ -2479,6 +2515,74 @@ export async function processPropertyMatchCampaignBatch(args: {
   };
 }
 
+export async function processPropertyMatchCampaignUntilIdle(args: {
+  locationId: string;
+  campaignId: string;
+  actorUserId?: string | null;
+  model?: string | null;
+  fallbackPolicy?: PropertyMatchFallbackPolicy | null;
+  timeBudgetMs?: number;
+  limit?: number;
+}) {
+  const lease = await acquirePropertyMatchCampaignWorkerLease(args.campaignId);
+  if (!lease.acquired) {
+    return {
+      success: true as const,
+      collected: 0,
+      processed: 0,
+      failed: 0,
+      waves: 0,
+      remaining: true,
+      stopped: false,
+      status: "processing",
+      skipped: true as const,
+      reason: "already_processing",
+      elapsedMs: 0,
+    };
+  }
+  const startedAt = Date.now();
+  const timeBudgetMs = Math.max(5_000, Math.min(120_000, Number(args.timeBudgetMs || 50_000)));
+  const limit = Math.max(1, Math.min(AI_SCORING_CONCURRENCY, Number(args.limit || AI_SCORING_CONCURRENCY)));
+  let collected = 0;
+  let processed = 0;
+  let failed = 0;
+  let waves = 0;
+  let latest: Awaited<ReturnType<typeof processPropertyMatchCampaignBatch>> | null = null;
+
+  try {
+    do {
+      latest = await processPropertyMatchCampaignBatch({
+        locationId: args.locationId,
+        campaignId: args.campaignId,
+        actorUserId: args.actorUserId || null,
+        model: args.model || null,
+        fallbackPolicy: args.fallbackPolicy,
+        limit,
+      });
+      waves += 1;
+      if (!latest.success) return { ...latest, collected, processed, failed, waves };
+      collected += Number(latest.collected || 0);
+      processed += Number(latest.processed || 0);
+      failed += Number(latest.failed || 0);
+      if (latest.stopped || !latest.remaining) break;
+    } while (Date.now() - startedAt < timeBudgetMs);
+
+    return {
+      success: true as const,
+      collected,
+      processed,
+      failed,
+      waves,
+      remaining: Boolean(latest?.success && latest.remaining && !latest.stopped),
+      stopped: Boolean(latest?.success && latest.stopped),
+      status: latest?.success ? latest.status : "failed",
+      elapsedMs: Date.now() - startedAt,
+    };
+  } finally {
+    await lease.release();
+  }
+}
+
 export async function listPropertyMatchCampaigns(args: {
   locationId: string;
   limit?: number;
@@ -2516,6 +2620,27 @@ export async function listPropertyMatchCampaigns(args: {
   // belong to the selected campaign detail request; loading every candidate and
   // its AI evidence here makes opening the campaign browser scale with all leads.
   return campaigns;
+}
+
+export async function getPropertyMatchCampaignProgress(args: {
+  locationId: string;
+  campaignId: string;
+}) {
+  const campaign = await db.propertyMatchCampaign.findFirst({
+    where: { id: args.campaignId, locationId: args.locationId },
+    include: {
+      property: { select: { id: true, title: true, reference: true, price: true, city: true, propertyLocation: true } },
+    },
+  });
+  if (!campaign) return null;
+  const [campaignWithCounts] = await withPropertyMatchQueueCounts(args.locationId, [campaign as any]);
+  const queueCounts = campaignWithCounts?.queueCounts || summarizePropertyMatchCandidateQueues([]);
+  return {
+    ...(campaignWithCounts || campaign),
+    totalCandidates: queueCounts.allCount,
+    processedCandidates: Math.max(0, queueCounts.allCount - queueCounts.pendingAiCount),
+    queueCounts,
+  };
 }
 
 export async function listContactPropertyRecommendations(args: {

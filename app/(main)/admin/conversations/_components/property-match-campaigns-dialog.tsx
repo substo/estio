@@ -20,7 +20,6 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-    cancelPropertyMatchCampaignBatchAction,
     createPropertyMatchCampaignAction,
     createPropertyMatchCampaignFromSourceAction,
     deletePropertyMatchCampaignAction,
@@ -28,7 +27,6 @@ import {
     getPropertyMatchCampaignModelPreferenceAction,
     getPropertyMatchCampaignDetailAction,
     listPropertyMatchCampaignsAction,
-    processPropertyMatchCampaignBatchAction,
     retryPropertyMatchCampaignAiErrorsAction,
     reviewPropertyMatchCandidateAction,
     savePropertyMatchCandidateDraftAction,
@@ -68,6 +66,8 @@ type Campaign = {
     scoringModel?: string | null;
     fallbackPolicy?: "same_provider" | "allow_paid" | null;
     collectionStatus?: string | null;
+    processingStartedAt?: string | null;
+    processingFinishedAt?: string | null;
     lastError?: string | null;
 };
 
@@ -171,6 +171,8 @@ type BatchProgress = {
     startedAt: number;
     lastUpdatedAt: number;
     pollCount: number;
+    observedProcessedCandidates: number;
+    observedTotalCandidates: number;
     message: string;
 };
 
@@ -189,9 +191,8 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
 
 const PROPERTY_SEARCH_LIMIT = 12;
 const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
-const LIVE_BATCH_LIMIT = 20;
 const PROPERTY_MATCH_MODEL_USAGE_KEY = "property-match-campaigns";
-const LIVE_BATCH_POLL_MS = 3500;
+const LIVE_BATCH_POLL_MS = 1500;
 
 function formatMoney(value?: number | null) {
     return Number.isFinite(Number(value)) ? `€${Number(value).toLocaleString()}` : "No price";
@@ -326,6 +327,9 @@ function campaignProcessingStage(campaign?: Campaign | null, progress?: BatchPro
     if (progress?.phase === "done") return "Complete";
     if (campaign?.collectionStatus === "processing") return "Checking contacts for this property";
     if (Number(counts.processingAiCount || 0) > 0) return `Scoring ${counts.processingAiCount} possible prospect${counts.processingAiCount === 1 ? "" : "s"}`;
+    if (progress?.phase === "analyzing" && Number(counts.pendingAiCount || 0) > 0) {
+        return `${counts.pendingAiCount} contact${counts.pendingAiCount === 1 ? "" : "s"} queued safely`;
+    }
     if (Number(counts.pendingAiCount || 0) > 0) return "Preparing possible prospects to score";
     if (campaign?.status === "processing") return "Updating prospect results";
     return "Ready";
@@ -523,11 +527,15 @@ export function PropertyMatchCampaignsDialog({
         candidates: unknown[];
         queue: Queue;
     }) => {
+        const campaign = res.campaign as Campaign;
         setDetail({
-            campaign: res.campaign as Campaign,
+            campaign,
             candidates: res.candidates as Candidate[],
             queue: res.queue,
         });
+        setCampaigns((current) => current.map((item) => (
+            item.id === campaign.id ? { ...item, ...campaign } : item
+        )));
         setFocusedCandidateIndex(0);
         setDrafts((current) => {
             const next = { ...current };
@@ -642,26 +650,102 @@ export function PropertyMatchCampaignsDialog({
     }, [loadDetail, open, queue, selectedCampaignId]);
 
     useEffect(() => {
+        if (!open || !selectedCampaignId || processingCampaignId === selectedCampaignId) return;
+        const campaign = campaigns.find((item) => item.id === selectedCampaignId);
+        if (!campaignCanStop(campaign)) return;
+        const startedAt = campaign?.processingStartedAt
+            ? new Date(campaign.processingStartedAt).getTime()
+            : Date.now();
+        setProcessingCampaignId(selectedCampaignId);
+        setProgressNow(Date.now());
+        setBatchProgress({
+            campaignId: selectedCampaignId,
+            phase: campaign?.collectionStatus === "processing" ? "collecting" : "analyzing",
+            collected: 0,
+            analyzed: 0,
+            failed: 0,
+            lastCollected: 0,
+            lastProcessed: 0,
+            startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
+            lastUpdatedAt: Date.now(),
+            pollCount: 0,
+            observedProcessedCandidates: Number(campaign?.processedCandidates || 0),
+            observedTotalCandidates: Number(campaign?.totalCandidates || 0),
+            message: "Following background progress...",
+        });
+    }, [campaigns, open, processingCampaignId, selectedCampaignId]);
+
+    useEffect(() => {
         if (!open || !processingCampaignId) return;
+        let tickCount = 0;
         const tick = async () => {
             try {
-                const [rows, refreshed] = await Promise.all([
-                    refreshCampaigns(),
-                    refreshDetail(processingCampaignId, queue),
-                ]);
-                const campaign = refreshed?.campaign || rows.find((item) => item.id === processingCampaignId) || null;
+                const response = await fetch(
+                    `/api/admin/conversations/property-match-campaigns/${encodeURIComponent(processingCampaignId)}/processing`,
+                    { cache: "no-store" },
+                );
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok || !result?.success || !result?.campaign) {
+                    throw new Error(result?.error || "Could not refresh campaign progress.");
+                }
+                const campaign = result.campaign as Campaign;
+                const counts = campaignQueueCounts(campaign);
+                tickCount += 1;
+                setCampaigns((current) => {
+                    const exists = current.some((item) => item.id === campaign.id);
+                    return exists
+                        ? current.map((item) => item.id === campaign.id ? { ...item, ...campaign } : item)
+                        : [campaign, ...current];
+                });
                 setProgressNow(Date.now());
                 setBatchProgress((current) => {
                     if (!current || current.campaignId !== processingCampaignId) return current;
-                    const stage = campaignProcessingStage(campaign, current);
+                    const processedCandidates = Number(campaign.processedCandidates || 0);
+                    const totalCandidates = Number(campaign.totalCandidates || 0);
+                    const stepProcessed = Math.max(0, processedCandidates - current.observedProcessedCandidates);
+                    const stepCollected = Math.max(0, totalCandidates - current.observedTotalCandidates);
+                    const stopped = campaignIsStopped(campaign);
+                    const done = !stopped
+                        && campaign.status !== "processing"
+                        && campaign.collectionStatus !== "processing"
+                        && counts.pendingAiCount === 0;
+                    const phase: BatchProgress["phase"] = stopped
+                        ? "stopped"
+                        : done
+                            ? "done"
+                            : campaign.collectionStatus === "processing"
+                                ? "collecting"
+                                : "analyzing";
                     return {
                         ...current,
-                        phase: campaign?.collectionStatus === "processing" ? "collecting" : current.phase,
+                        phase,
+                        collected: current.collected + stepCollected,
+                        analyzed: current.analyzed + stepProcessed,
+                        lastCollected: stepCollected,
+                        lastProcessed: stepProcessed,
+                        observedProcessedCandidates: processedCandidates,
+                        observedTotalCandidates: totalCandidates,
                         lastUpdatedAt: Date.now(),
                         pollCount: current.pollCount + 1,
-                        message: stage,
+                        message: stopped
+                            ? "Processing stopped."
+                            : done
+                                ? "Analysis complete."
+                                : "Running in the background. Results update as each contact finishes.",
                     };
                 });
+                const terminal = campaignIsStopped(campaign)
+                    || (
+                        campaign.status !== "processing"
+                        && campaign.collectionStatus !== "processing"
+                        && counts.pendingAiCount === 0
+                    );
+                if (terminal) {
+                    setProcessingCampaignId((current) => current === processingCampaignId ? null : current);
+                    await refreshDetail(processingCampaignId, queue);
+                } else if (detailMode === "review" && tickCount % 2 === 0) {
+                    await refreshDetail(processingCampaignId, queue);
+                }
             } catch (error) {
                 console.error("Failed to refresh campaign progress", error);
             }
@@ -671,7 +755,7 @@ export function PropertyMatchCampaignsDialog({
         }, LIVE_BATCH_POLL_MS);
         void tick();
         return () => window.clearInterval(interval);
-    }, [open, processingCampaignId, queue, refreshCampaigns, refreshDetail]);
+    }, [detailMode, open, processingCampaignId, queue, refreshDetail]);
 
     useEffect(() => {
         if (!open || !processingCampaignId) return;
@@ -699,15 +783,19 @@ export function PropertyMatchCampaignsDialog({
         void loadPropertyOptions(propertyQuery, PROPERTY_SEARCH_LIMIT);
     };
 
-    const runCampaignBatchLive = useCallback(async (campaignId: string, nextQueue = queue) => {
+    const runCampaignBatchLive = useCallback(async (campaignId: string, _nextQueue = queue) => {
         const runId = processingRunRef.current + 1;
         processingRunRef.current = runId;
         const startedAt = Date.now();
+        const initialCampaign = detail?.campaign.id === campaignId
+            ? detail.campaign
+            : campaigns.find((item) => item.id === campaignId);
+        const initialPending = campaignQueueCounts(initialCampaign).pendingAiCount;
         setProcessingCampaignId(campaignId);
         setProgressNow(startedAt);
         setBatchProgress({
             campaignId,
-            phase: "collecting",
+            phase: initialPending > 0 ? "analyzing" : "collecting",
             collected: 0,
             analyzed: 0,
             failed: 0,
@@ -716,99 +804,54 @@ export function PropertyMatchCampaignsDialog({
             startedAt,
             lastUpdatedAt: startedAt,
             pollCount: 0,
-            message: "Starting batch...",
+            observedProcessedCandidates: Number(initialCampaign?.processedCandidates || 0),
+            observedTotalCandidates: Number(initialCampaign?.totalCandidates || 0),
+            message: "Starting background review...",
         });
         setError("");
-
-        let collected = 0;
-        let analyzed = 0;
-        let failed = 0;
-
         try {
-            for (;;) {
-                const campaign = campaigns.find((item) => item.id === campaignId);
-                const scoringModel = campaign?.scoringModel || selectedCampaignModel || defaultCampaignModel || null;
-                const fallbackPolicy = campaign?.fallbackPolicy === "allow_paid"
-                    ? "allow_paid"
-                    : campaign?.fallbackPolicy === "same_provider"
-                        ? "same_provider"
-                        : campaignFallbackPolicy;
-                const res = await processPropertyMatchCampaignBatchAction(
-                    campaignId,
-                    LIVE_BATCH_LIMIT,
-                    scoringModel,
-                    fallbackPolicy,
-                );
-                if (processingRunRef.current !== runId) return;
-                if (!res.success) {
-                    setError(res.error || "Batch processing failed.");
-                    setBatchProgress((current) => current?.campaignId === campaignId ? {
-                        ...current,
-                        phase: "failed",
-                        message: res.error || "Batch processing failed.",
-                    } : current);
-                    return;
-                }
-
-                const stepCollected = Number(res.collected || 0);
-                const stepProcessed = Number(res.processed || 0);
-                const stepFailed = Number(res.failed || 0);
-                collected += stepCollected;
-                analyzed += stepProcessed;
-                failed += stepFailed;
-
-                const [rows, refreshed] = await Promise.all([
-                    refreshCampaigns(),
-                    refreshDetail(campaignId, nextQueue),
-                ]);
-                if (processingRunRef.current !== runId) return;
-
-                const refreshedCampaign = refreshed?.campaign || rows.find((campaign) => campaign.id === campaignId) || null;
-                const counts = campaignQueueCounts(refreshedCampaign);
-                const pending = counts.pendingAiCount;
-                const phase = res.stopped ? "stopped" : res.remaining ? "analyzing" : "done";
-                const baseMessage = res.stopped
-                    ? "Processing stopped."
-                    : res.remaining
-                        ? campaignProcessingStage(refreshedCampaign, {
-                            campaignId,
-                            phase,
-                            collected,
-                            analyzed,
-                            failed,
-                            lastCollected: stepCollected,
-                            lastProcessed: stepProcessed,
-                            startedAt,
-                            lastUpdatedAt: Date.now(),
-                            pollCount: 0,
-                            message: "",
-                        })
-                        : "Analysis complete.";
-
-                setBatchProgress({
-                    campaignId,
-                    phase,
-                    collected,
-                    analyzed,
-                    failed,
-                    lastCollected: stepCollected,
-                    lastProcessed: stepProcessed,
-                    startedAt,
-                    lastUpdatedAt: Date.now(),
-                    pollCount: 0,
-                    message: pending > 0 && !res.stopped ? `${baseMessage} · ${pending} still checking` : baseMessage,
-                });
-
-                if (res.stopped || !res.remaining) return;
-                await new Promise((resolve) => window.setTimeout(resolve, 250));
-                if (processingRunRef.current !== runId) return;
+            const campaign = initialCampaign || campaigns.find((item) => item.id === campaignId);
+            const response = await fetch(
+                `/api/admin/conversations/property-match-campaigns/${encodeURIComponent(campaignId)}/processing`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        model: campaign?.scoringModel || selectedCampaignModel || defaultCampaignModel || null,
+                        fallbackPolicy: campaign?.fallbackPolicy === "allow_paid"
+                            ? "allow_paid"
+                            : campaign?.fallbackPolicy === "same_provider"
+                                ? "same_provider"
+                                : campaignFallbackPolicy,
+                    }),
+                },
+            );
+            const result = await response.json().catch(() => ({}));
+            if (processingRunRef.current !== runId) return;
+            if (!response.ok || !result?.success) {
+                throw new Error(result?.error || "Could not start background processing.");
             }
-        } finally {
-            if (processingRunRef.current === runId) {
-                setProcessingCampaignId(null);
+            if (result.campaign) {
+                setCampaigns((current) => current.map((item) => (
+                    item.id === campaignId ? { ...item, ...result.campaign } : item
+                )));
             }
+            setBatchProgress((current) => current?.campaignId === campaignId ? {
+                ...current,
+                phase: "analyzing",
+                message: "Running in the background. You can close this window.",
+            } : current);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Could not start background processing.";
+            setError(message);
+            setProcessingCampaignId(null);
+            setBatchProgress((current) => current?.campaignId === campaignId ? {
+                ...current,
+                phase: "failed",
+                message,
+            } : current);
         }
-    }, [campaignFallbackPolicy, campaigns, defaultCampaignModel, queue, refreshCampaigns, refreshDetail, selectedCampaignModel]);
+    }, [campaignFallbackPolicy, campaigns, defaultCampaignModel, detail, queue, selectedCampaignModel]);
 
     const createCampaignFromProperty = () => {
         if (!selectedPropertyId) return;
@@ -895,8 +938,12 @@ export function PropertyMatchCampaignsDialog({
         setCancelingCampaignId(campaignId);
         startTransition(async () => {
             try {
-                const res = await cancelPropertyMatchCampaignBatchAction(campaignId);
-                if (!res.success) setError(res.error || "Could not stop batch processing.");
+                const response = await fetch(
+                    `/api/admin/conversations/property-match-campaigns/${encodeURIComponent(campaignId)}/processing`,
+                    { method: "DELETE" },
+                );
+                const res = await response.json().catch(() => ({}));
+                if (!response.ok || !res.success) setError(res.error || "Could not stop processing.");
                 setBatchProgress((current) => current?.campaignId === campaignId ? {
                     ...current,
                     phase: "stopped",
@@ -1121,8 +1168,8 @@ export function PropertyMatchCampaignsDialog({
     };
 
     const activeCampaignDetail = detail?.campaign.id === selectedCampaignId ? detail : null;
-    const activeCampaign = activeCampaignDetail?.campaign
-        || campaigns.find((campaign) => campaign.id === selectedCampaignId)
+    const activeCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId)
+        || activeCampaignDetail?.campaign
         || null;
     const activeDetail = activeCampaignDetail?.queue === queue ? activeCampaignDetail : null;
     const activeCountsAreExact = Boolean(activeCampaignDetail?.campaign.queueCounts);
@@ -1143,6 +1190,10 @@ export function PropertyMatchCampaignsDialog({
     const activeProgressPercent = progressPercent(activeCampaign);
     const activeProcessingStage = campaignProcessingStage(activeCampaign, activeBatchProgress);
     const activeElapsedTime = formatElapsedTime(activeBatchProgress?.startedAt, progressNow);
+    const activeVisibleProcessingCount = Number(activeQueueCounts.processingAiCount || 0);
+    const activeVisibleWaitingCount = activeQueueCounts.queuedAiCount == null
+        ? Math.max(0, activeQueueCounts.pendingAiCount - activeVisibleProcessingCount)
+        : Number(activeQueueCounts.queuedAiCount);
     const activeCandidates = activeDetail?.candidates || [];
     const normalizedFocusedCandidateIndex = activeCandidates.length
         ? Math.min(Math.max(focusedCandidateIndex, 0), activeCandidates.length - 1)
@@ -1541,7 +1592,7 @@ export function PropertyMatchCampaignsDialog({
                                                 disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling}
                                             >
                                                 {activeCampaignIsBatchBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
-                                                {activeCampaignIsBatchBusy ? "Processing..." : activeCampaignIsStopped ? "Resume batch" : "Process batch"}
+                                                {activeCampaignIsBatchBusy ? "Processing..." : activeCampaignIsStopped ? "Resume processing" : "Start processing"}
                                             </Button>
                                             {activeCampaignIsProcessing ? (
                                                 <Button
@@ -1603,7 +1654,7 @@ export function PropertyMatchCampaignsDialog({
                                                     <span className="truncate">{activeProcessingStage}</span>
                                                 </div>
                                                 <div className="shrink-0 text-[11px] text-indigo-700 tabular-nums">
-                                                    {activeElapsedTime} · {activeProgressPercent}%
+                                                    {activeElapsedTime} · {activeProgressPercent}% overall
                                                 </div>
                                             </div>
                                             <div className="mt-1 text-[11px] leading-snug text-indigo-800">
@@ -1621,12 +1672,12 @@ export function PropertyMatchCampaignsDialog({
                                                     <div className="font-medium tabular-nums">{activeQueueCounts.reviewCount} to review</div>
                                                 </div>
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
-                                                    <div className="text-[10px] uppercase text-indigo-500">This run</div>
-                                                    <div className="font-medium tabular-nums">+{activeBatchProgress.lastCollected} checked · +{activeBatchProgress.lastProcessed} scored</div>
+                                                    <div className="text-[10px] uppercase text-indigo-500">Completed live</div>
+                                                    <div className="font-medium tabular-nums">+{activeBatchProgress.analyzed} reviewed</div>
                                                 </div>
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
-                                                    <div className="text-[10px] uppercase text-indigo-500">Still checking</div>
-                                                    <div className="font-medium tabular-nums">{activeQueueCounts.queuedAiCount ?? activeQueueCounts.pendingAiCount} waiting · {activeQueueCounts.processingAiCount ?? 0} scoring</div>
+                                                    <div className="text-[10px] uppercase text-indigo-500">Live activity</div>
+                                                    <div className="font-medium tabular-nums">{activeVisibleWaitingCount} waiting · {activeVisibleProcessingCount} reviewing</div>
                                                 </div>
                                                 <div className="rounded border border-indigo-100 bg-white/70 px-2 py-1">
                                                     <div className="text-[10px] uppercase text-indigo-500">Missing info</div>
@@ -1635,7 +1686,11 @@ export function PropertyMatchCampaignsDialog({
                                             </div>
                                             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-indigo-800">
                                                 <span>{activeBatchProgress.message}</span>
-                                                <span>updated {activeBatchProgress.pollCount}x</span>
+                                                <span>
+                                                    {activeBatchProgress.pollCount > 0
+                                                        ? "Live · updated just now"
+                                                        : "Connecting to live progress"}
+                                                </span>
                                                 {activeBatchProgress.failed ? <span>{activeBatchProgress.failed} failed</span> : null}
                                             </div>
                                         </div>
@@ -1823,7 +1878,7 @@ export function PropertyMatchCampaignsDialog({
                                                     </div>
                                                     {needsProfileVerification ? (
                                                         <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
-                                                            This is an older blocked candidate. Refresh contact requirements or rerun the batch to score the property fit with profile uncertainty shown as a warning.
+                                                            This is an older blocked candidate. Refresh contact requirements or rerun processing to score the property fit with profile uncertainty shown as a warning.
                                                         </div>
                                                     ) : null}
 
