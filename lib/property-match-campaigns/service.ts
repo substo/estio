@@ -2482,16 +2482,40 @@ export async function processPropertyMatchCampaignBatch(args: {
 export async function listPropertyMatchCampaigns(args: {
   locationId: string;
   limit?: number;
+  query?: string | null;
 }) {
+  const query = normalizeText(args.query, 120);
   const campaigns = await db.propertyMatchCampaign.findMany({
-    where: { locationId: args.locationId },
+    where: {
+      locationId: args.locationId,
+      ...(query ? {
+        OR: [
+          { title: { contains: query, mode: "insensitive" } },
+          {
+            property: {
+              is: {
+                OR: [
+                  { title: { contains: query, mode: "insensitive" } },
+                  { reference: { contains: query, mode: "insensitive" } },
+                  { city: { contains: query, mode: "insensitive" } },
+                  { propertyLocation: { contains: query, mode: "insensitive" } },
+                ],
+              },
+            },
+          },
+        ],
+      } : {}),
+    },
     include: {
       property: { select: { id: true, title: true, reference: true, price: true, city: true, propertyLocation: true } },
     },
     orderBy: { createdAt: "desc" },
-    take: Math.max(1, Math.min(50, Number(args.limit || 20))),
+    take: Math.max(1, Math.min(50, Number(args.limit || 50))),
   });
-  return withPropertyMatchQueueCounts(args.locationId, campaigns as AnyRecord[]);
+  // Campaign rows already carry denormalized headline totals. Exact queue counts
+  // belong to the selected campaign detail request; loading every candidate and
+  // its AI evidence here makes opening the campaign browser scale with all leads.
+  return campaigns;
 }
 
 export async function listContactPropertyRecommendations(args: {
@@ -2603,10 +2627,8 @@ async function withPropertyMatchQueueCounts(locationId: string, campaigns: AnyRe
       aiVerdict: true,
       aiReviewStatus: true,
       reviewerStatus: true,
-      evidence: true,
       matchSummary: true,
       reasoning: true,
-      contact: { select: { profileVerificationStatus: true } },
     },
   });
   const byCampaign = new Map<string, any[]>();

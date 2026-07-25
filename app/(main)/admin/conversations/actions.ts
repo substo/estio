@@ -7507,7 +7507,7 @@ export async function savePropertyMatchCampaignModelPreferenceAction(
 
 export async function searchPropertyMatchCampaignPropertiesAction(query?: string, limit = DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT) {
     const trimmed = String(query || "").trim();
-    if (trimmed.length < 2) return [];
+    if (trimmed.length === 1) return [];
 
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
@@ -7637,11 +7637,15 @@ export async function createPropertyMatchCampaignFromSourceAction(input: {
     }
 }
 
-export async function listPropertyMatchCampaignsAction() {
+export async function listPropertyMatchCampaignsAction(query?: string) {
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return [];
-    const rows = await listPropertyMatchCampaigns({ locationId: location.id });
+    const rows = await listPropertyMatchCampaigns({
+        locationId: location.id,
+        query: String(query || "").trim() || null,
+        limit: 50,
+    });
     return rows.map(serializePropertyMatchCampaign);
 }
 

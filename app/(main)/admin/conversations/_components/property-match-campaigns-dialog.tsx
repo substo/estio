@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Check, Link2, List, Loader2, Megaphone, Pencil, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
+import { Check, Database, Link2, List, Loader2, Megaphone, Pencil, Plus, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
@@ -156,6 +156,7 @@ type CampaignDetail = {
 
 type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "ai_error" | "not_match" | "already_shared" | "all";
 type FallbackPolicy = "same_provider" | "allow_paid";
+type CampaignCreationSource = "database" | "website";
 type MobileCampaignView = "campaigns" | "campaign" | "review";
 type CampaignDetailMode = "overview" | "review";
 type BatchProgress = {
@@ -186,7 +187,6 @@ const QUEUE_OPTIONS: Array<{ value: Queue; label: string; countKey: keyof QueueC
 ];
 
 const PROPERTY_SEARCH_LIMIT = 12;
-const MIN_PROPERTY_SEARCH_LENGTH = 2;
 const PROPERTY_SEARCH_DEBOUNCE_MS = 350;
 const LIVE_BATCH_LIMIT = 20;
 const PROPERTY_MATCH_MODEL_USAGE_KEY = "property-match-campaigns";
@@ -331,6 +331,10 @@ export function PropertyMatchCampaignsDialog({
     initialCandidateId?: string | null;
 }) {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+    const [campaignsLoading, setCampaignsLoading] = useState(false);
+    const [campaignSearch, setCampaignSearch] = useState("");
+    const [createCampaignOpen, setCreateCampaignOpen] = useState(false);
+    const [campaignCreationSource, setCampaignCreationSource] = useState<CampaignCreationSource>("database");
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
     const [detail, setDetail] = useState<CampaignDetail | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
@@ -359,8 +363,11 @@ export function PropertyMatchCampaignsDialog({
     const [focusedCandidateIndex, setFocusedCandidateIndex] = useState(0);
     const [isPending, startTransition] = useTransition();
     const propertySearchRequestIdRef = useRef(0);
+    const campaignSearchRequestIdRef = useRef(0);
     const detailRequestIdRef = useRef(0);
     const campaignPrefetchStartedRef = useRef(false);
+    const lastCampaignLoadAtRef = useRef(0);
+    const campaignSearchRef = useRef("");
     const processingRunRef = useRef(0);
     const { models: availableModels, resolveModelForKind, loading: modelCatalogLoading } = useAiModelCatalog();
     const defaultCampaignModel = resolveModelForKind("general");
@@ -399,10 +406,19 @@ export function PropertyMatchCampaignsDialog({
         [properties, selectedPropertyId],
     );
 
-    const refreshCampaigns = useCallback(async () => {
-        const rows = await listPropertyMatchCampaignsAction();
+    useEffect(() => {
+        campaignSearchRef.current = campaignSearch;
+    }, [campaignSearch]);
+
+    const refreshCampaigns = useCallback(async (queryOverride?: string) => {
+        const query = queryOverride ?? campaignSearchRef.current;
+        const requestId = campaignSearchRequestIdRef.current + 1;
+        campaignSearchRequestIdRef.current = requestId;
+        const rows = await listPropertyMatchCampaignsAction(query);
+        if (campaignSearchRequestIdRef.current !== requestId) return [] as Campaign[];
         const campaignRows = rows as Campaign[];
         setCampaigns(campaignRows);
+        lastCampaignLoadAtRef.current = Date.now();
         return campaignRows;
     }, []);
 
@@ -450,13 +466,25 @@ export function PropertyMatchCampaignsDialog({
         persistCampaignAiPreference(selectedCampaignModel || defaultCampaignModel, fallbackPolicy);
     }, [defaultCampaignModel, persistCampaignAiPreference, selectedCampaignModel]);
 
-    const loadCampaigns = useCallback(() => {
+    const loadCampaigns = useCallback((queryOverride?: string) => {
+        const requestedQuery = (queryOverride ?? campaignSearchRef.current).trim();
+        setCampaignsLoading(true);
         startTransition(async () => {
-            const rows = await refreshCampaigns();
-            setSelectedCampaignId((current) => {
-                if (current && rows.some((campaign) => campaign.id === current)) return current;
-                return rows[0]?.id || null;
-            });
+            try {
+                const rows = await refreshCampaigns(queryOverride);
+                if (requestedQuery !== campaignSearchRef.current.trim()) return;
+                setSelectedCampaignId((current) => {
+                    if (current && rows.some((campaign) => campaign.id === current)) return current;
+                    return rows[0]?.id || null;
+                });
+            } catch (error) {
+                console.error("Failed to load property campaigns", error);
+                setError("Could not load campaigns.");
+            } finally {
+                if (requestedQuery === campaignSearchRef.current.trim()) {
+                    setCampaignsLoading(false);
+                }
+            }
         });
     }, [refreshCampaigns]);
 
@@ -464,7 +492,7 @@ export function PropertyMatchCampaignsDialog({
         if (open || campaignPrefetchStartedRef.current) return;
         campaignPrefetchStartedRef.current = true;
         const timeout = window.setTimeout(() => {
-            loadCampaigns();
+            loadCampaigns("");
         }, 750);
         return () => window.clearTimeout(timeout);
     }, [loadCampaigns, open]);
@@ -531,7 +559,7 @@ export function PropertyMatchCampaignsDialog({
 
     const loadPropertyOptions = useCallback(async (query: string, limit = PROPERTY_SEARCH_LIMIT) => {
         const trimmed = query.trim();
-        if (trimmed.length < MIN_PROPERTY_SEARCH_LENGTH) {
+        if (trimmed.length === 1) {
             propertySearchRequestIdRef.current += 1;
             setProperties([]);
             setSelectedPropertyId(null);
@@ -563,8 +591,20 @@ export function PropertyMatchCampaignsDialog({
         if (!open) return;
         setMobileView("campaigns");
         clearPropertyPicker();
-        loadCampaigns();
+        if (!lastCampaignLoadAtRef.current || Date.now() - lastCampaignLoadAtRef.current > 30_000) {
+            loadCampaigns("");
+        }
     }, [clearPropertyPicker, loadCampaigns, open]);
+
+    useEffect(() => {
+        if (!open) return;
+        const trimmed = campaignSearch.trim();
+        if (!trimmed) return;
+        const timeout = window.setTimeout(() => {
+            loadCampaigns(trimmed);
+        }, 250);
+        return () => window.clearTimeout(timeout);
+    }, [campaignSearch, loadCampaigns, open]);
 
     useEffect(() => {
         if (!open || !selectedCampaignId) return;
@@ -610,9 +650,9 @@ export function PropertyMatchCampaignsDialog({
     }, [open, processingCampaignId]);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open || !createCampaignOpen || campaignCreationSource !== "database") return;
         const trimmed = propertyQuery.trim();
-        if (trimmed.length < MIN_PROPERTY_SEARCH_LENGTH) {
+        if (trimmed.length === 1) {
             propertySearchRequestIdRef.current += 1;
             setPropertySearchLoading(false);
             setProperties([]);
@@ -623,7 +663,7 @@ export function PropertyMatchCampaignsDialog({
             void loadPropertyOptions(trimmed, PROPERTY_SEARCH_LIMIT);
         }, PROPERTY_SEARCH_DEBOUNCE_MS);
         return () => window.clearTimeout(timeout);
-    }, [loadPropertyOptions, open, propertyQuery]);
+    }, [campaignCreationSource, createCampaignOpen, loadPropertyOptions, open, propertyQuery]);
 
     const searchProperties = () => {
         void loadPropertyOptions(propertyQuery, PROPERTY_SEARCH_LIMIT);
@@ -757,8 +797,12 @@ export function PropertyMatchCampaignsDialog({
             setSelectedCampaignId(res.campaignId);
             setMobileView("campaign");
             setDetailMode("overview");
+            setCreateCampaignOpen(false);
+            setCampaignSearch("");
+            campaignSearchRef.current = "";
             setPriorityNote("");
-            await refreshCampaigns();
+            clearPropertyPicker();
+            await refreshCampaigns("");
             await runCampaignBatchLive(res.campaignId, "review");
         });
     };
@@ -781,10 +825,13 @@ export function PropertyMatchCampaignsDialog({
             setSelectedCampaignId(res.campaignId);
             setMobileView("campaign");
             setDetailMode("overview");
+            setCreateCampaignOpen(false);
+            setCampaignSearch("");
+            campaignSearchRef.current = "";
             setPriorityNote("");
             setPropertyUrl("");
             setPropertyText("");
-            await refreshCampaigns();
+            await refreshCampaigns("");
             await runCampaignBatchLive(res.campaignId, "review");
         });
     };
@@ -1127,121 +1174,207 @@ export function PropertyMatchCampaignsDialog({
                     </div>
                 </DialogHeader>
 
-                <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
-                    <aside className={`${mobileView === "campaigns" ? "flex" : "hidden"} min-h-0 flex-col overflow-y-auto border-r bg-slate-50/70 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:flex`}>
-                        <div className="flex flex-col gap-3 md:min-h-0 md:flex-1">
-                            <div className="rounded-md border bg-white p-3">
-                                <div className="text-xs font-semibold uppercase text-slate-500">New campaign</div>
-                                <div className="mt-2 grid gap-2">
-                                    <AiModelSelect
-                                        value={selectedCampaignModel || defaultCampaignModel}
-                                        models={availableModels}
-                                        onValueChange={handleDefaultCampaignModelChange}
-                                        disabled={modelCatalogLoading}
-                                        triggerClassName="h-8 min-w-0 w-full text-xs"
-                                        itemClassName="text-xs"
-                                        placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
-                                    />
-                                    <select
-                                        value={campaignFallbackPolicy}
-                                        onChange={(event) => handleDefaultFallbackPolicyChange(event.target.value as FallbackPolicy)}
-                                        className="h-8 w-full rounded-md border bg-white px-2 text-xs"
-                                        aria-label="New campaign AI fallback policy"
-                                    >
-                                        <option value="same_provider">Stay with selected provider</option>
-                                        <option value="allow_paid">Allow paid API fallback</option>
-                                    </select>
-                                    <div className="text-[10px] leading-snug text-slate-500">
-                                        Paid API fallback is used only after the selected provider cannot return a valid result.
-                                    </div>
-                                </div>
-                                <div className="mt-2 flex gap-1">
-                                    <input
-                                        value={propertyQuery}
-                                        onChange={(event) => setPropertyQuery(event.target.value)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === "Enter") searchProperties();
+                <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[360px_minmax(0,1fr)]">
+                    <aside className={`${mobileView === "campaigns" ? "flex" : "hidden"} min-h-0 flex-col gap-2 overflow-hidden border-r bg-slate-50/70 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:flex`}>
+                        <div className="flex items-center justify-between gap-2">
+                            <div>
+                                <div className="text-sm font-semibold text-slate-900">Campaigns</div>
+                                <div className="text-[11px] text-slate-500">{campaigns.length} shown</div>
+                            </div>
+                            <Button
+                                type="button"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => setCreateCampaignOpen((current) => !current)}
+                            >
+                                {createCampaignOpen ? <X className="mr-1.5 h-3.5 w-3.5" /> : <Plus className="mr-1.5 h-3.5 w-3.5" />}
+                                {createCampaignOpen ? "Close" : "New campaign"}
+                            </Button>
+                        </div>
+
+                        <div className="relative">
+                            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                            <input
+                                value={campaignSearch}
+                                onChange={(event) => {
+                                    const value = event.target.value;
+                                    setCampaignSearch(value);
+                                    if (!value.trim()) loadCampaigns("");
+                                }}
+                                className="h-9 w-full rounded-md border bg-white pl-8 pr-12 text-xs"
+                                placeholder="Find by campaign, property, ref or area"
+                                aria-label="Search property campaigns"
+                            />
+                            {campaignSearch ? (
+                                <>
+                                    {campaignsLoading ? <Loader2 className="absolute right-8 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-slate-400" /> : null}
+                                    <button
+                                        type="button"
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                        onClick={() => {
+                                            setCampaignSearch("");
+                                            loadCampaigns("");
                                         }}
-                                        className="h-8 min-w-0 flex-1 rounded-md border px-2 text-xs"
-                                        placeholder="Search ref, title, area"
-                                    />
-                                    <Button type="button" size="icon" variant="outline" className="h-8 w-8" onClick={searchProperties}>
-                                        {propertySearchLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                                    </Button>
+                                        aria-label="Clear campaign search"
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </button>
+                                </>
+                            ) : campaignsLoading ? (
+                                <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-slate-400" />
+                            ) : null}
+                        </div>
+
+                        {createCampaignOpen ? (
+                            <div className="max-h-[65%] shrink-0 overflow-y-auto rounded-md border bg-white p-3 shadow-sm">
+                                <div className="grid grid-cols-2 rounded-md bg-slate-100 p-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setCampaignCreationSource("database")}
+                                        className={`flex h-8 items-center justify-center rounded text-xs font-medium ${campaignCreationSource === "database" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+                                    >
+                                        <Database className="mr-1.5 h-3.5 w-3.5" />
+                                        Database property
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCampaignCreationSource("website")}
+                                        className={`flex h-8 items-center justify-center rounded text-xs font-medium ${campaignCreationSource === "website" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+                                    >
+                                        <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                                        URL or text
+                                    </button>
                                 </div>
-                                <div className="mt-2 max-h-32 space-y-1 overflow-y-auto md:max-h-36">
-                                    {properties.map((property) => (
-                                        <button
-                                            key={property.id}
-                                            type="button"
-                                            onClick={() => setSelectedPropertyId(property.id)}
-                                            className={`w-full rounded-md border px-2 py-1.5 text-left text-xs ${selectedPropertyId === property.id ? "border-emerald-400 bg-emerald-50" : "bg-white hover:bg-slate-50"}`}
-                                        >
-                                            <div className="truncate font-medium text-slate-900">{property.title}</div>
-                                            <div className="truncate text-[11px] text-slate-500">
-                                                {[property.reference, property.type, property.bedrooms != null ? `${property.bedrooms} bed` : null, property.propertyLocation || property.city, formatMoney(property.price)].filter(Boolean).join(" · ")}
-                                            </div>
-                                        </button>
-                                    ))}
-                                    {!propertySearchLoading && propertyQuery.trim().length > 0 && propertyQuery.trim().length < MIN_PROPERTY_SEARCH_LENGTH ? (
-                                        <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Type at least 2 characters.</div>
-                                    ) : null}
-                                    {!propertySearchLoading && propertyQuery.trim().length === 0 && properties.length === 0 ? (
-                                        <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Search by reference, title, or area.</div>
-                                    ) : null}
-                                    {!propertySearchLoading && propertyQuery.trim().length >= 2 && properties.length === 0 ? (
-                                        <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">No matching properties.</div>
-                                    ) : null}
-                                </div>
+
+                                {campaignCreationSource === "database" ? (
+                                    <>
+                                        <div className="mt-2 flex gap-1">
+                                            <input
+                                                value={propertyQuery}
+                                                onChange={(event) => setPropertyQuery(event.target.value)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === "Enter") searchProperties();
+                                                }}
+                                                className="h-8 min-w-0 flex-1 rounded-md border px-2 text-xs"
+                                                placeholder="Search property ref, title or area"
+                                                autoFocus
+                                            />
+                                            <Button type="button" size="icon" variant="outline" className="h-8 w-8" onClick={searchProperties}>
+                                                {propertySearchLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                                            </Button>
+                                        </div>
+                                        <div className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+                                            {properties.map((property) => (
+                                                <button
+                                                    key={property.id}
+                                                    type="button"
+                                                    onClick={() => setSelectedPropertyId(property.id)}
+                                                    className={`w-full rounded-md border px-2 py-1.5 text-left text-xs ${selectedPropertyId === property.id ? "border-emerald-400 bg-emerald-50" : "bg-white hover:bg-slate-50"}`}
+                                                >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="truncate font-medium text-slate-900">{property.title}</div>
+                                                        {property.reference ? <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[10px]">{property.reference}</Badge> : null}
+                                                    </div>
+                                                    <div className="truncate text-[11px] text-slate-500">
+                                                        {[property.type, property.bedrooms != null ? `${property.bedrooms} bed` : null, property.propertyLocation || property.city, formatMoney(property.price)].filter(Boolean).join(" · ")}
+                                                    </div>
+                                                </button>
+                                            ))}
+                                            {!propertySearchLoading && propertyQuery.trim().length === 1 ? (
+                                                <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">Type one more character.</div>
+                                            ) : null}
+                                            {!propertySearchLoading && propertyQuery.trim().length !== 1 && properties.length === 0 ? (
+                                                <div className="rounded-md border border-dashed px-2 py-2 text-[11px] text-slate-500">
+                                                    {propertyQuery.trim() ? "No matching database properties." : "No recent database properties found."}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="mt-2 space-y-2">
+                                        <input
+                                            value={propertyUrl}
+                                            onChange={(event) => setPropertyUrl(event.target.value)}
+                                            className="h-8 w-full rounded-md border px-2 text-xs"
+                                            placeholder="Official or old CRM property URL"
+                                        />
+                                        <Textarea
+                                            value={propertyText}
+                                            onChange={(event) => setPropertyText(event.target.value)}
+                                            rows={3}
+                                            className="min-h-20 text-xs"
+                                            placeholder="Paste property details if the page cannot be read"
+                                        />
+                                    </div>
+                                )}
+
                                 <Textarea
                                     value={priorityNote}
                                     onChange={(event) => setPriorityNote(event.target.value)}
                                     rows={2}
                                     className="mt-2 min-h-14 text-xs"
-                                    placeholder="Optional priority note"
+                                    placeholder="Optional matching note"
                                 />
+
+                                <details className="mt-2 rounded-md border bg-slate-50">
+                                    <summary className="cursor-pointer px-2 py-2 text-xs font-medium text-slate-700">AI settings</summary>
+                                    <div className="grid gap-2 border-t p-2">
+                                        <AiModelSelect
+                                            value={selectedCampaignModel || defaultCampaignModel}
+                                            models={availableModels}
+                                            onValueChange={handleDefaultCampaignModelChange}
+                                            disabled={modelCatalogLoading}
+                                            triggerClassName="h-8 min-w-0 w-full text-xs"
+                                            itemClassName="text-xs"
+                                            placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
+                                        />
+                                        <select
+                                            value={campaignFallbackPolicy}
+                                            onChange={(event) => handleDefaultFallbackPolicyChange(event.target.value as FallbackPolicy)}
+                                            className="h-8 w-full rounded-md border bg-white px-2 text-xs"
+                                            aria-label="New campaign AI fallback policy"
+                                        >
+                                            <option value="same_provider">Stay with selected provider</option>
+                                            <option value="allow_paid">Allow paid API fallback</option>
+                                        </select>
+                                        <div className="text-[10px] leading-snug text-slate-500">
+                                            Paid fallback runs only if the selected provider cannot return a valid result.
+                                        </div>
+                                    </div>
+                                </details>
+
                                 <Button
                                     type="button"
                                     size="sm"
-                                    className="mt-2 h-8 w-full text-xs"
-                                    disabled={!selectedProperty || isPending}
-                                    onClick={createCampaignFromProperty}
+                                    className="mt-2 h-9 w-full text-xs"
+                                    disabled={
+                                        campaignCreationSource === "database"
+                                            ? !selectedProperty || isPending
+                                            : (!propertyUrl.trim() && !propertyText.trim()) || isPending
+                                    }
+                                    onClick={campaignCreationSource === "database" ? createCampaignFromProperty : createCampaignFromSource}
                                 >
                                     {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Megaphone className="mr-1.5 h-3 w-3" />}
-                                    Create campaign
-                                </Button>
-                                <div className="my-3 border-t" />
-                                <div className="text-xs font-semibold uppercase text-slate-500">Website source</div>
-                                <input
-                                    value={propertyUrl}
-                                    onChange={(event) => setPropertyUrl(event.target.value)}
-                                    className="mt-2 h-8 w-full rounded-md border px-2 text-xs"
-                                    placeholder="Official property URL"
-                                />
-                                <Textarea
-                                    value={propertyText}
-                                    onChange={(event) => setPropertyText(event.target.value)}
-                                    rows={3}
-                                    className="mt-2 min-h-20 text-xs"
-                                    placeholder="Paste property text if the page cannot be read"
-                                />
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="mt-2 h-8 w-full text-xs"
-                                    disabled={(!propertyUrl.trim() && !propertyText.trim()) || isPending}
-                                    onClick={createCampaignFromSource}
-                                >
-                                    {isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Link2 className="mr-1.5 h-3 w-3" />}
-                                    Create from URL/text
+                                    Create and find matching contacts
                                 </Button>
                             </div>
+                        ) : null}
 
-                            <div className="flex flex-col space-y-1 md:min-h-0 md:flex-1">
-                                <div className="px-1 text-xs font-semibold uppercase text-slate-500">Campaigns</div>
-                                <div className="space-y-1 pr-1 md:min-h-0 md:flex-1 md:overflow-y-auto">
-                                    {campaigns.map((campaign) => (
+                        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                            <div className="space-y-1">
+                                {campaignsLoading && campaigns.length === 0 ? (
+                                    Array.from({ length: 4 }).map((_, index) => (
+                                        <div key={index} className="h-16 animate-pulse rounded-md border bg-white" />
+                                    ))
+                                ) : null}
+                                {!campaignsLoading && campaigns.length === 0 ? (
+                                    <div className="rounded-md border border-dashed bg-white px-3 py-8 text-center text-xs text-slate-500">
+                                        {campaignSearch.trim() ? "No campaigns match this search." : "No property campaigns yet."}
+                                    </div>
+                                ) : null}
+                                {campaigns.map((campaign) => {
+                                    const counts = campaignQueueCounts(campaign);
+                                    return (
                                         <div
                                             key={campaign.id}
                                             className={`rounded-md border text-xs ${selectedCampaignId === campaign.id ? "border-indigo-300 bg-indigo-50" : "bg-white hover:bg-slate-50"}`}
@@ -1251,21 +1384,17 @@ export function PropertyMatchCampaignsDialog({
                                                 onClick={() => selectCampaign(campaign.id)}
                                                 className="w-full px-2 py-2 text-left"
                                             >
-                                                <div className="truncate font-medium text-slate-900">{campaignLabel(campaign)}</div>
-                                                <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
-                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
-                                                    <span>{campaignQueueCounts(campaign).reviewCount} review</span>
-                                                    {campaignQueueCounts(campaign).needsProfileVerificationCount ? (
-                                                        <span>{campaignQueueCounts(campaign).needsProfileVerificationCount} info</span>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className="truncate font-medium text-slate-900">{campaignLabel(campaign)}</div>
+                                                    {campaign.property?.reference ? (
+                                                        <span className="shrink-0 font-mono text-[10px] text-slate-500">{campaign.property.reference}</span>
                                                     ) : null}
-                                                    <span>{campaignQueueCounts(campaign).sentCount} sent</span>
-                                                    <span>{campaignQueueCounts(campaign).notMatchCount} no</span>
                                                 </div>
-                                                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-slate-500">
-                                                    <span>{campaignQueueCounts(campaign).approvedCount} approved</span>
-                                                    <span>{campaignQueueCounts(campaign).skippedCount} skipped</span>
-                                                    <span>{campaignQueueCounts(campaign).rejectedCount} rejected</span>
-                                                    <span>{campaignQueueCounts(campaign).alreadySharedCount} shared</span>
+                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
+                                                    <span>{campaign.processedCandidates}/{campaign.totalCandidates} checked</span>
+                                                    <span>{counts.reviewCount} ready</span>
+                                                    <span>{counts.sentCount} sent</span>
                                                 </div>
                                             </button>
                                             <div className="flex justify-end gap-1 border-t border-slate-100 px-1 py-1">
@@ -1277,8 +1406,8 @@ export function PropertyMatchCampaignsDialog({
                                                 </Button>
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </aside>
