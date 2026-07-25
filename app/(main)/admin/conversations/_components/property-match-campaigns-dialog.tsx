@@ -1862,12 +1862,18 @@ export function PropertyMatchCampaignsDialog({
                                                                         {candidate.evidence.decisionContext.contactSummary}
                                                                     </div>
                                                                 </details>
-                                                                <div className="rounded border bg-white p-2">
-                                                                    <div className="text-[10px] font-semibold uppercase text-slate-500">Property summary</div>
-                                                                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
+                                                                <details className="group rounded border bg-white">
+                                                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[10px] font-semibold uppercase text-slate-600">
+                                                                        <span>Property summary</span>
+                                                                        <span className="flex shrink-0 items-center gap-1 normal-case font-normal text-slate-400">
+                                                                            View
+                                                                            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div className="border-t px-2 py-2 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
                                                                         {candidate.evidence.decisionContext.propertySummary}
                                                                     </div>
-                                                                </div>
+                                                                </details>
                                                             </div>
                                                         ) : null}
                                                         {candidate.reasoning ? <div className="mt-1 line-clamp-3 text-slate-600 sm:line-clamp-none">{candidate.reasoning}</div> : null}
