@@ -152,6 +152,7 @@ type Candidate = {
 type CampaignDetail = {
     campaign: Campaign;
     candidates: Candidate[];
+    queue: Queue;
 };
 
 type Queue = "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "ai_error" | "not_match" | "already_shared" | "all";
@@ -203,6 +204,19 @@ function confidenceLabel(value?: number | null) {
 
 function campaignLabel(campaign?: Campaign | null) {
     return campaign?.title || campaign?.property?.title || "Untitled campaign";
+}
+
+function isIncludedSubscriptionModel(modelValue?: string | null) {
+    return String(modelValue || "").startsWith("chatgpt_subscription:");
+}
+
+function campaignModelFriendlyLabel(model: { value: string; label: string }) {
+    const modelName = model.label
+        .replace(/^ChatGPT Subscription\s*/i, "ChatGPT · ")
+        .trim();
+    return isIncludedSubscriptionModel(model.value)
+        ? `Included with subscription — ${modelName}`
+        : `Pay per use — ${modelName}`;
 }
 
 function candidateRequirementLine(candidate: Candidate) {
@@ -380,6 +394,13 @@ export function PropertyMatchCampaignsDialog({
         defaultModel: defaultCampaignModel,
     });
     const modelValues = useMemo(() => new Set(availableModels.map((model) => model.value)), [availableModels]);
+    const campaignModelOptions = useMemo(
+        () => availableModels.map((model) => ({
+            ...model,
+            label: campaignModelFriendlyLabel(model),
+        })),
+        [availableModels],
+    );
 
     useEffect(() => {
         if (!open || availableModels.length === 0) return;
@@ -500,8 +521,13 @@ export function PropertyMatchCampaignsDialog({
     const applyCampaignDetail = useCallback((res: {
         campaign: unknown;
         candidates: unknown[];
+        queue: Queue;
     }) => {
-        setDetail({ campaign: res.campaign as Campaign, candidates: res.candidates as Candidate[] });
+        setDetail({
+            campaign: res.campaign as Campaign,
+            candidates: res.candidates as Candidate[],
+            queue: res.queue,
+        });
         setFocusedCandidateIndex(0);
         setDrafts((current) => {
             const next = { ...current };
@@ -526,7 +552,11 @@ export function PropertyMatchCampaignsDialog({
                 return null;
             }
             setError("");
-            applyCampaignDetail({ campaign: res.campaign, candidates: res.candidates as unknown[] });
+            applyCampaignDetail({
+                campaign: res.campaign,
+                candidates: res.candidates as unknown[],
+                queue: nextQueue,
+            });
             return { campaign: res.campaign as Campaign, candidates: res.candidates as Candidate[] };
         } finally {
             if (detailRequestIdRef.current === requestId) {
@@ -941,6 +971,9 @@ export function PropertyMatchCampaignsDialog({
     };
 
     const setQueueAndReload = (nextQueue: Queue) => {
+        if (nextQueue === queue && selectedCampaignId) {
+            loadDetail(selectedCampaignId, nextQueue);
+        }
         setQueue(nextQueue);
         setFocusedCandidateIndex(0);
     };
@@ -1087,10 +1120,12 @@ export function PropertyMatchCampaignsDialog({
         window.location.href = `/admin/conversations?id=${encodeURIComponent(candidate.conversationId)}`;
     };
 
-    const activeCampaign = (detail?.campaign.id === selectedCampaignId ? detail.campaign : null)
+    const activeCampaignDetail = detail?.campaign.id === selectedCampaignId ? detail : null;
+    const activeCampaign = activeCampaignDetail?.campaign
         || campaigns.find((campaign) => campaign.id === selectedCampaignId)
         || null;
-    const activeDetail = detail?.campaign.id === activeCampaign?.id ? detail : null;
+    const activeDetail = activeCampaignDetail?.queue === queue ? activeCampaignDetail : null;
+    const activeCountsAreExact = Boolean(activeCampaignDetail?.campaign.queueCounts);
     const activeCampaignIsProcessing = processingCampaignId === activeCampaign?.id || campaignCanStop(activeCampaign);
     const activeCampaignIsCanceling = cancelingCampaignId === activeCampaign?.id;
     const activeCampaignIsStopped = campaignIsStopped(activeCampaign);
@@ -1098,6 +1133,8 @@ export function PropertyMatchCampaignsDialog({
     const activeBatchProgress = batchProgress?.campaignId === activeCampaign?.id ? batchProgress : null;
     const activeQueueCounts = campaignQueueCounts(activeCampaign);
     const activeCampaignModel = activeCampaign?.scoringModel || selectedCampaignModel || defaultCampaignModel;
+    const defaultCampaignUsesSubscription = isIncludedSubscriptionModel(selectedCampaignModel || defaultCampaignModel);
+    const activeCampaignUsesSubscription = isIncludedSubscriptionModel(activeCampaignModel);
     const activeFallbackPolicy: FallbackPolicy = activeCampaign?.fallbackPolicy === "allow_paid"
         ? "allow_paid"
         : activeCampaign?.fallbackPolicy === "same_provider"
@@ -1156,7 +1193,11 @@ export function PropertyMatchCampaignsDialog({
                                     onClick={() => {
                                         setMobileView("review");
                                         setDetailMode("review");
-                                        setQueue("review");
+                                        if (queue === "review" && selectedCampaignId) {
+                                            loadDetail(selectedCampaignId, "review");
+                                        } else {
+                                            setQueue("review");
+                                        }
                                         setFocusedCandidateIndex(0);
                                     }}
                                 >
@@ -1317,29 +1358,53 @@ export function PropertyMatchCampaignsDialog({
                                 />
 
                                 <details className="mt-2 rounded-md border bg-slate-50">
-                                    <summary className="cursor-pointer px-2 py-2 text-xs font-medium text-slate-700">AI settings</summary>
+                                    <summary className="cursor-pointer px-2 py-2 text-xs font-medium text-slate-700">
+                                        <span className="flex items-center justify-between gap-2">
+                                            <span>AI choice</span>
+                                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${defaultCampaignUsesSubscription ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                                                {defaultCampaignUsesSubscription ? "Included" : "Pay per use"}
+                                            </span>
+                                        </span>
+                                    </summary>
                                     <div className="grid gap-2 border-t p-2">
+                                        <label className="text-[11px] font-medium text-slate-700">How should this campaign use AI?</label>
                                         <AiModelSelect
                                             value={selectedCampaignModel || defaultCampaignModel}
-                                            models={availableModels}
+                                            models={campaignModelOptions}
                                             onValueChange={handleDefaultCampaignModelChange}
                                             disabled={modelCatalogLoading}
                                             triggerClassName="h-8 min-w-0 w-full text-xs"
                                             itemClassName="text-xs"
                                             placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
                                         />
-                                        <select
-                                            value={campaignFallbackPolicy}
-                                            onChange={(event) => handleDefaultFallbackPolicyChange(event.target.value as FallbackPolicy)}
-                                            className="h-8 w-full rounded-md border bg-white px-2 text-xs"
-                                            aria-label="New campaign AI fallback policy"
-                                        >
-                                            <option value="same_provider">Stay with selected provider</option>
-                                            <option value="allow_paid">Allow paid API fallback</option>
-                                        </select>
-                                        <div className="text-[10px] leading-snug text-slate-500">
-                                            Paid fallback runs only if the selected provider cannot return a valid result.
+                                        <div className={`rounded-md border px-2 py-2 text-[11px] leading-snug ${defaultCampaignUsesSubscription ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                                            {defaultCampaignUsesSubscription
+                                                ? "Included with your existing ChatGPT subscription. This campaign adds no pay-per-use charge."
+                                                : "Pay per use. The AI service charges according to how much is used."}
                                         </div>
+                                        {defaultCampaignUsesSubscription ? (
+                                            <>
+                                                <label className="mt-1 text-[11px] font-medium text-slate-700">If the included AI is unavailable</label>
+                                                <select
+                                                    value={campaignFallbackPolicy}
+                                                    onChange={(event) => handleDefaultFallbackPolicyChange(event.target.value as FallbackPolicy)}
+                                                    className="h-8 w-full rounded-md border bg-white px-2 text-xs"
+                                                    aria-label="New campaign backup choice"
+                                                >
+                                                    <option value="same_provider">Keep using my subscription</option>
+                                                    <option value="allow_paid">Continue with pay-per-use backup</option>
+                                                </select>
+                                                <div className="text-[10px] leading-snug text-slate-500">
+                                                    {campaignFallbackPolicy === "allow_paid"
+                                                        ? "If subscription attempts fail, the campaign can continue using a service that charges by usage."
+                                                        : "If there is a problem, the campaign will retry without switching to pay-per-use billing."}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className="text-[10px] leading-snug text-slate-500">
+                                                If there is a problem, the campaign retries the selected pay-per-use service.
+                                            </div>
+                                        )}
                                     </div>
                                 </details>
 
@@ -1393,7 +1458,11 @@ export function PropertyMatchCampaignsDialog({
                                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
                                                     <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{campaign.status}</Badge>
                                                     <span>{campaign.processedCandidates}/{campaign.totalCandidates} checked</span>
-                                                    <span>{counts.reviewCount} ready</span>
+                                                    <span>
+                                                        {campaign.queueCounts
+                                                            ? `${counts.reviewCount} ready`
+                                                            : `${Number(campaign.yesCount || 0) + Number(campaign.maybeCount || 0)} potential`}
+                                                    </span>
                                                     <span>{counts.sentCount} sent</span>
                                                 </div>
                                             </button>
@@ -1424,12 +1493,18 @@ export function PropertyMatchCampaignsDialog({
                                             {detailMode === "overview" ? (
                                                 <div className="mt-1 text-xs text-slate-500">
                                                     {activeCampaign.processedCandidates}/{activeCampaign.totalCandidates} contacts checked
-                                                    {activeQueueCounts.reviewCount ? ` · ${activeQueueCounts.reviewCount} prospects ready` : ""}
+                                                    {activeCountsAreExact && activeQueueCounts.reviewCount
+                                                        ? ` · ${activeQueueCounts.reviewCount} prospects ready`
+                                                        : !activeCountsAreExact
+                                                            ? " · checking exact results"
+                                                            : ""}
                                                     {activeQueueCounts.pendingAiCount ? ` · ${activeQueueCounts.pendingAiCount} still checking` : ""}
                                                 </div>
                                             ) : (
                                                 <div className="mt-1 text-xs text-slate-500">
-                                                    Contact {activeCandidates.length ? normalizedFocusedCandidateIndex + 1 : 0} of {activeCandidates.length} ready for review
+                                                    {!activeDetail || detailLoading
+                                                        ? "Loading contacts ready for review..."
+                                                        : `Contact ${activeCandidates.length ? normalizedFocusedCandidateIndex + 1 : 0} of ${activeCandidates.length} ready for review`}
                                                 </div>
                                             )}
                                         </div>
@@ -1437,24 +1512,26 @@ export function PropertyMatchCampaignsDialog({
                                         <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex">
                                             <AiModelSelect
                                                 value={activeCampaignModel}
-                                                models={availableModels}
+                                                models={campaignModelOptions}
                                                 onValueChange={(model) => handlePersistentCampaignModelChange(model, activeFallbackPolicy)}
                                                 disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling || modelCatalogLoading}
-                                                triggerClassName="h-8 min-w-0 text-xs sm:w-56"
+                                                triggerClassName="h-8 min-w-0 text-xs sm:w-64"
                                                 itemClassName="text-xs"
                                                 placeholder={modelCatalogLoading ? "Loading models..." : "AI model"}
                                             />
-                                            <select
-                                                value={activeFallbackPolicy}
-                                                onChange={(event) => handleFallbackPolicyChange(event.target.value as FallbackPolicy, activeCampaignModel)}
-                                                disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling}
-                                                className="h-8 min-w-0 rounded-md border bg-white px-2 text-xs sm:w-52"
-                                                aria-label="Campaign AI fallback policy"
-                                                title="Choose whether this campaign may switch to a paid API provider after selected-provider retries fail"
-                                            >
-                                                <option value="same_provider">Selected provider only</option>
-                                                <option value="allow_paid">Allow paid API fallback</option>
-                                            </select>
+                                            {activeCampaignUsesSubscription ? (
+                                                <select
+                                                    value={activeFallbackPolicy}
+                                                    onChange={(event) => handleFallbackPolicyChange(event.target.value as FallbackPolicy, activeCampaignModel)}
+                                                    disabled={activeCampaignIsBatchBusy || activeCampaignIsCanceling}
+                                                    className="h-8 min-w-0 rounded-md border bg-white px-2 text-xs sm:w-56"
+                                                    aria-label="Campaign backup choice"
+                                                    title="Choose whether to stay within your subscription or continue with pay-per-use AI if needed"
+                                                >
+                                                    <option value="same_provider">Subscription only</option>
+                                                    <option value="allow_paid">Pay-per-use backup allowed</option>
+                                                </select>
+                                            ) : null}
                                             <Button
                                                 type="button"
                                                 size="sm"
@@ -1510,7 +1587,7 @@ export function PropertyMatchCampaignsDialog({
                                                         className="h-7 shrink-0 px-2 text-xs"
                                                         onClick={() => setQueueAndReload(item.value)}
                                                     >
-                                                        {item.label} {campaignQueueCounts(activeCampaign)[item.countKey]}
+                                                        {item.label} {activeCountsAreExact ? campaignQueueCounts(activeCampaign)[item.countKey] : "…"}
                                                     </Button>
                                                 ))}
                                             </div>
@@ -1621,7 +1698,7 @@ export function PropertyMatchCampaignsDialog({
                                 </div>
 
                                 <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-                                    {detailMode === "review" && detailLoading && !activeDetail ? (
+                                    {detailMode === "review" && !activeDetail ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">
                                             <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
                                             Loading campaign contacts...
@@ -1635,7 +1712,7 @@ export function PropertyMatchCampaignsDialog({
                                                         <div key={item.value} className="rounded-md border bg-slate-50 px-1.5 py-1.5">
                                                             <div className="truncate text-[9px] uppercase text-slate-500">{item.label}</div>
                                                             <div className="mt-0.5 text-base font-semibold leading-none text-slate-900">
-                                                                {campaignQueueCounts(activeCampaign)[item.countKey]}
+                                                                {activeCountsAreExact ? campaignQueueCounts(activeCampaign)[item.countKey] : "…"}
                                                             </div>
                                                         </div>
                                                     ))}
@@ -1644,7 +1721,7 @@ export function PropertyMatchCampaignsDialog({
                                         </div>
                                     ) : (
                                     <>
-                                    {!detailLoading && visibleCandidates.length === 0 ? (
+                                    {activeDetail && !detailLoading && visibleCandidates.length === 0 ? (
                                         <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">{queueEmptyLabel(queue)}</div>
                                     ) : null}
                                     <div className="space-y-2">
