@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Check, Database, Link2, List, Loader2, Megaphone, Pencil, Plus, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
+import { Check, ChevronDown, Database, Link2, List, Loader2, Megaphone, Pencil, Plus, Search, Send, StopCircle, Trash2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AiModelSelect } from "@/components/ai/ai-model-select";
@@ -1829,22 +1829,6 @@ export function PropertyMatchCampaignsDialog({
 
                                                     <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-xs text-slate-700">
                                                         <div className="font-medium">{candidate.matchSummary || "Match review"}</div>
-                                                        {candidate.evidence?.decisionContext ? (
-                                                            <div className="mt-2 grid gap-2 lg:grid-cols-2">
-                                                                <div className="rounded border bg-white p-2">
-                                                                    <div className="text-[10px] font-semibold uppercase text-slate-500">Contact requirements & history</div>
-                                                                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
-                                                                        {candidate.evidence.decisionContext.contactSummary}
-                                                                    </div>
-                                                                </div>
-                                                                <div className="rounded border bg-white p-2">
-                                                                    <div className="text-[10px] font-semibold uppercase text-slate-500">Property summary</div>
-                                                                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
-                                                                        {candidate.evidence.decisionContext.propertySummary}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        ) : null}
                                                         {dimensions.length > 0 ? (
                                                             <div className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                                                                 {dimensions.map((dimension) => (
@@ -1862,6 +1846,28 @@ export function PropertyMatchCampaignsDialog({
                                                                         </div>
                                                                     </div>
                                                                 ))}
+                                                            </div>
+                                                        ) : null}
+                                                        {candidate.evidence?.decisionContext ? (
+                                                            <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                                                                <details className="group rounded border bg-white">
+                                                                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[10px] font-semibold uppercase text-slate-600">
+                                                                        <span>Contact requirements & history</span>
+                                                                        <span className="flex shrink-0 items-center gap-1 normal-case font-normal text-slate-400">
+                                                                            View
+                                                                            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div className="border-t px-2 py-2 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
+                                                                        {candidate.evidence.decisionContext.contactSummary}
+                                                                    </div>
+                                                                </details>
+                                                                <div className="rounded border bg-white p-2">
+                                                                    <div className="text-[10px] font-semibold uppercase text-slate-500">Property summary</div>
+                                                                    <div className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-700">
+                                                                        {candidate.evidence.decisionContext.propertySummary}
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         ) : null}
                                                         {candidate.reasoning ? <div className="mt-1 line-clamp-3 text-slate-600 sm:line-clamp-none">{candidate.reasoning}</div> : null}
