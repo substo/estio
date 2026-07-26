@@ -199,7 +199,12 @@ import {
     initWhatsAppMediaRefetchWorker,
 } from "@/lib/queue/whatsapp-media-refetch";
 import { hasOpenWhatsAppCustomerServiceWindow } from "@/lib/whatsapp/customer-window";
-import { getHighConfidenceWebBridgeResolvedPhone } from "@/lib/whatsapp/web-bridge-identity";
+import {
+    getHighConfidenceWebBridgeResolvedPhone,
+    hasValidatedWebBridgePhoneIdentity,
+    invalidateValidatedWebBridgePhoneIdentity,
+    recordValidatedWebBridgePhoneIdentity,
+} from "@/lib/whatsapp/web-bridge-identity";
 import { getWhatsAppWebBridgeBody } from "@/lib/whatsapp/webhook-normalizers";
 import type { WhatsAppTransport, WhatsAppTemplateComponent } from "@/lib/whatsapp/client";
 import {
@@ -226,7 +231,7 @@ import {
 } from "@/lib/conversations/outbound-send-failure";
 import {
     availableChannel,
-    unverifiedAvailableChannel,
+    resolveWebBridgeWhatsAppChannelCapability,
     unavailableChannel,
     type ConversationChannelCapabilities,
 } from "@/lib/conversations/channel-capabilities";
@@ -8173,6 +8178,7 @@ async function resolveConversationChannelCapabilitiesForLocation(
         select: {
             contact: {
                 select: {
+                    id: true,
                     name: true,
                     phone: true,
                     email: true,
@@ -8242,29 +8248,56 @@ async function resolveConversationChannelCapabilitiesForLocation(
     if (hasUsablePhone) {
         const mode = await resolveLocationWhatsAppProviderMode(location.id);
         if (mode === "web_bridge") {
-            try {
-                const preferredChatId = await getWhatsAppWebBridgeConversationChatId({
-                    locationId: location.id,
-                    conversationId,
+            const hasValidatedPhone = await hasValidatedWebBridgePhoneIdentity({
+                locationId: location.id,
+                contactId: contact.id,
+                phone: phoneValue,
+            });
+            if (hasValidatedPhone) {
+                whatsAppCapability = resolveWebBridgeWhatsAppChannelCapability({
+                    hasEstablishedConversation: true,
                 });
-                const resolved = await resolveWhatsAppWebBridgeChatForPhone({
-                    locationId: location.id,
-                    phone: phoneValue,
-                    preferredChatId,
-                });
-                whatsAppCapability = isResolvedWhatsAppWebBridgeChatAvailable(resolved)
-                    ? availableChannel()
-                    : isResolvedWhatsAppWebBridgeChatVerificationUnknown(resolved)
-                        ? unverifiedAvailableChannel("WhatsApp registration will be confirmed when sending.")
-                        : unavailableChannel("whatsapp_number_not_found", "This number is not available on WhatsApp.");
-            } catch (error: any) {
-                const classification = classifyOutboundSendFailure(error);
-                if (classification.code === "WHATSAPP_NUMBER_NOT_FOUND") {
-                    whatsAppCapability = unavailableChannel("whatsapp_number_not_found", classification.label);
-                } else if (classification.code === "WHATSAPP_AUTH") {
-                    whatsAppCapability = unavailableChannel("whatsapp_not_connected", classification.label);
-                } else {
-                    whatsAppCapability = unavailableChannel("unknown", error?.message || "Could not verify WhatsApp availability.");
+            } else {
+                try {
+                    const resolved = await resolveWhatsAppWebBridgeChatForPhone({
+                        locationId: location.id,
+                        phone: phoneValue,
+                    });
+                    const verificationUnknown = isResolvedWhatsAppWebBridgeChatVerificationUnknown(resolved);
+                    const resolvedAvailable = isResolvedWhatsAppWebBridgeChatAvailable(resolved);
+                    if (resolvedAvailable) {
+                        await recordValidatedWebBridgePhoneIdentity({
+                            locationId: location.id,
+                            contactId: contact.id,
+                            phone: phoneValue,
+                        });
+                    } else if (!verificationUnknown) {
+                        await invalidateValidatedWebBridgePhoneIdentity({
+                            locationId: location.id,
+                            contactId: contact.id,
+                            phone: phoneValue,
+                        });
+                    }
+                    whatsAppCapability = resolveWebBridgeWhatsAppChannelCapability({
+                        resolvedAvailable,
+                        verificationUnknown,
+                        definitiveNotFound: !verificationUnknown,
+                    });
+                } catch (error: any) {
+                    const classification = classifyOutboundSendFailure(error);
+                    if (classification.code === "WHATSAPP_NUMBER_NOT_FOUND") {
+                        await invalidateValidatedWebBridgePhoneIdentity({
+                            locationId: location.id,
+                            contactId: contact.id,
+                            phone: phoneValue,
+                        });
+                    }
+                    whatsAppCapability = resolveWebBridgeWhatsAppChannelCapability({
+                        definitiveNotFound: classification.code === "WHATSAPP_NUMBER_NOT_FOUND",
+                        label: classification.code === "WHATSAPP_NUMBER_NOT_FOUND"
+                            ? classification.label
+                            : "WhatsApp is restoring. Messages can be queued and will send when the secure route is ready.",
+                    });
                 }
             }
         } else {

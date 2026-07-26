@@ -99,6 +99,29 @@ export function deriveProvisionalConversationChannelCapabilities(
     return capabilities;
 }
 
+export function preserveEstablishedWhatsAppAvailability(
+    capabilities: ConversationChannelCapabilities,
+    provisionalCapabilities: ConversationChannelCapabilities,
+): ConversationChannelCapabilities {
+    if (!provisionalCapabilities.WhatsApp.available || capabilities.WhatsApp.available) {
+        return capabilities;
+    }
+
+    if (
+        capabilities.WhatsApp.reason === "whatsapp_number_not_found"
+        || capabilities.WhatsApp.reason === "missing_phone"
+        || capabilities.WhatsApp.reason === "masked_phone"
+        || capabilities.WhatsApp.reason === "invalid_phone"
+    ) {
+        return capabilities;
+    }
+
+    return {
+        ...capabilities,
+        WhatsApp: provisionalCapabilities.WhatsApp,
+    };
+}
+
 export function buildConversationChannelCapabilityCacheKey(
     conversation: Conversation | null | undefined,
     options: { smsRelayEnabled?: boolean } = {}
@@ -167,10 +190,11 @@ export function useConversationComposerChannel({
     smsRelayEnabled = false,
 }: UseConversationComposerChannelArgs) {
     const [selectedChannel, setSelectedChannel] = useState<ComposerChannel>(getInitialComposerChannel(conversation, { smsRelayEnabled }));
-    const [capabilities, setCapabilities] = useState<ConversationChannelCapabilities>(() =>
-        readCachedCapabilities(buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled }))
-        || deriveProvisionalConversationChannelCapabilities(conversation, { smsRelayEnabled })
-    );
+    const [capabilities, setCapabilities] = useState<ConversationChannelCapabilities>(() => {
+        const provisional = deriveProvisionalConversationChannelCapabilities(conversation, { smsRelayEnabled });
+        const cached = readCachedCapabilities(buildConversationChannelCapabilityCacheKey(conversation, { smsRelayEnabled }));
+        return cached ? preserveEstablishedWhatsAppAvailability(cached, provisional) : provisional;
+    });
     const [whatsAppEligibility, setWhatsAppEligibility] = useState<WhatsAppEligibilityState>({ status: "checking" });
     const [smsEligibility, setSmsEligibility] = useState<SmsEligibilityState>({ status: "checking" });
     const userSelectedChannelRef = useRef(false);
@@ -193,20 +217,24 @@ export function useConversationComposerChannel({
         const cachedCapabilities = readCachedCapabilities(cacheKey);
         const provisionalCapabilities = deriveProvisionalConversationChannelCapabilities(conversation, { smsRelayEnabled });
         if (cachedCapabilities) {
-            setCapabilities(cachedCapabilities);
+            const reconciledCapabilities = preserveEstablishedWhatsAppAvailability(
+                cachedCapabilities,
+                provisionalCapabilities,
+            );
+            setCapabilities(reconciledCapabilities);
             setSmsEligibility(
-                cachedCapabilities.SMS.available || cachedCapabilities.SMS_RELAY.available
+                reconciledCapabilities.SMS.available || reconciledCapabilities.SMS_RELAY.available
                     ? { status: "eligible" }
-                    : { status: "ineligible", reason: cachedCapabilities.SMS.label || cachedCapabilities.SMS_RELAY.label || undefined }
+                    : { status: "ineligible", reason: reconciledCapabilities.SMS.label || reconciledCapabilities.SMS_RELAY.label || undefined }
             );
             setWhatsAppEligibility(
-                cachedCapabilities.WhatsApp.available
+                reconciledCapabilities.WhatsApp.available
                     ? { status: "eligible" }
-                    : { status: "ineligible", reason: cachedCapabilities.WhatsApp.label || undefined }
+                    : { status: "ineligible", reason: reconciledCapabilities.WhatsApp.label || undefined }
             );
             setSelectedChannel((prev) => selectComposerChannelAfterCapabilityUpdate({
                 previousChannel: prev,
-                capabilities: cachedCapabilities,
+                capabilities: reconciledCapabilities,
                 userSelectedChannel: userSelectedChannelRef.current,
             }));
         } else {

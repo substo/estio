@@ -8,6 +8,7 @@ import {
     deriveProvisionalConversationChannelCapabilities,
     getConversationChannelCapabilityCacheMaxAge,
     isConversationChannelCapabilityCacheFresh,
+    preserveEstablishedWhatsAppAvailability,
     selectComposerChannelAfterCapabilityUpdate,
 } from "./use-conversation-composer-channel";
 import {
@@ -110,6 +111,44 @@ test("provisional channel state trusts actual WhatsApp message evidence", () => 
     } as Conversation, { smsRelayEnabled: false });
 
     assert.equal(capabilities.WhatsApp.available, true);
+});
+
+test("established WhatsApp message evidence overrides a stale temporary negative cache immediately", () => {
+    const cached: ConversationChannelCapabilities = {
+        WhatsApp: unavailableChannel("whatsapp_not_connected", "WhatsApp is restoring."),
+        SMS: unavailableChannel("ghl_sms_not_configured"),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+    const provisional = deriveProvisionalConversationChannelCapabilities({
+        id: "conv_1",
+        contactPhone: "+35797428827",
+        lastMessageChannel: "WhatsApp",
+        lastMessageId: "msg_1",
+    } as Conversation);
+
+    const reconciled = preserveEstablishedWhatsAppAvailability(cached, provisional);
+
+    assert.equal(reconciled.WhatsApp.available, true);
+    assert.equal(reconciled.WhatsApp.status, "available");
+});
+
+test("definitive number-not-found cache is not overridden by old message evidence", () => {
+    const cached: ConversationChannelCapabilities = {
+        WhatsApp: unavailableChannel("whatsapp_number_not_found"),
+        SMS: unavailableChannel("ghl_sms_not_configured"),
+        SMS_RELAY: unavailableChannel("sms_relay_disabled"),
+        Email: unavailableChannel("missing_email"),
+    };
+    const provisional: ConversationChannelCapabilities = {
+        ...cached,
+        WhatsApp: availableChannel(),
+    };
+
+    assert.equal(
+        preserveEstablishedWhatsAppAvailability(cached, provisional).WhatsApp.available,
+        false
+    );
 });
 
 test("provisional channel state allows email from local address", () => {

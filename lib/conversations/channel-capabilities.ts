@@ -64,6 +64,30 @@ export function unknownChannel(label = "Could not verify channel availability.")
     return { status: "unknown", available: false, reason: "unknown", label };
 }
 
+export function resolveWebBridgeWhatsAppChannelCapability(input: {
+    hasEstablishedConversation?: boolean;
+    resolvedAvailable?: boolean;
+    verificationUnknown?: boolean;
+    definitiveNotFound?: boolean;
+    label?: string | null;
+}): ConversationChannelCapability {
+    if (input.hasEstablishedConversation || input.resolvedAvailable) {
+        return availableChannel();
+    }
+
+    if (input.definitiveNotFound && !input.verificationUnknown) {
+        return unavailableChannel(
+            "whatsapp_number_not_found",
+            input.label || "This number is not available on WhatsApp."
+        );
+    }
+
+    return unverifiedAvailableChannel(
+        input.label
+        || "WhatsApp availability will be confirmed when sending. If the secure route is restoring, the message will wait safely."
+    );
+}
+
 export function createDefaultChannelCapabilities(): ConversationChannelCapabilities {
     return {
         SMS: checkingChannel("Checking SMS availability."),

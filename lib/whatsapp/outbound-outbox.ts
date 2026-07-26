@@ -7,6 +7,7 @@ import { dispatchWhatsAppOutbound } from "@/lib/whatsapp/outbound-dispatch";
 import { classifyOutboundSendFailure } from "@/lib/conversations/outbound-send-failure";
 import { isDeviceEgressOfflineError } from "@/lib/device-tunnel/status";
 import { isWhatsAppWebBridgeDeliveryUnconfirmedError } from "@/lib/whatsapp/web-bridge-send";
+import { invalidateValidatedWebBridgePhoneIdentity } from "@/lib/whatsapp/web-bridge-identity";
 import {
     buildWhatsAppRateLimitWindows,
     createWhatsAppRateLimitMember,
@@ -597,6 +598,15 @@ export async function processWhatsAppOutboundOutboxJob(args: {
                 reason: error.decision.reason || "WhatsApp rate limit reached.",
                 retryDelayMs: error.decision.retryDelayMs,
                 nextEligibleAt: error.decision.nextEligibleAt,
+            });
+        }
+        const failureClassification = classifyOutboundSendFailure(error);
+        if (row.transport === "web_bridge" && failureClassification.code === "WHATSAPP_NUMBER_NOT_FOUND") {
+            await invalidateValidatedWebBridgePhoneIdentity({
+                locationId: row.locationId,
+                contactId: row.contactId,
+                phone: row.contact?.phone,
+                source: "outbound_number_not_found",
             });
         }
         const message = normalizeError(error);

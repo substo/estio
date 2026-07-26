@@ -6,6 +6,7 @@ import {
     getConversationContactIdentity,
     getBestAvailableDefaultChannel,
     getFirstAvailableChannel,
+    resolveWebBridgeWhatsAppChannelCapability,
     unavailableChannel,
     type ConversationChannelCapabilities,
 } from "./channel-capabilities";
@@ -76,4 +77,36 @@ test("best default channel prefers WhatsApp over available SMS channels", () => 
 
     capabilities.WhatsApp = unavailableChannel("whatsapp_number_not_found");
     assert.equal(getBestAvailableDefaultChannel(capabilities), "SMS_RELAY");
+});
+
+test("established Web Bridge history keeps WhatsApp immediately available during session restoration", () => {
+    const capability = resolveWebBridgeWhatsAppChannelCapability({
+        hasEstablishedConversation: true,
+        label: "WhatsApp is restoring.",
+    });
+
+    assert.equal(capability.available, true);
+    assert.equal(capability.status, "available");
+    assert.equal(capability.reason, null);
+});
+
+test("temporary Web Bridge readiness failure remains selectable and fail-closed", () => {
+    const capability = resolveWebBridgeWhatsAppChannelCapability({
+        label: "WhatsApp is restoring. The message will remain queued.",
+    });
+
+    assert.equal(capability.available, true);
+    assert.equal(capability.status, "unknown");
+    assert.equal(capability.reason, "unknown");
+});
+
+test("definitive Web Bridge number-not-found result disables WhatsApp", () => {
+    const capability = resolveWebBridgeWhatsAppChannelCapability({
+        definitiveNotFound: true,
+        label: "This number is not available on WhatsApp.",
+    });
+
+    assert.equal(capability.available, false);
+    assert.equal(capability.status, "unavailable");
+    assert.equal(capability.reason, "whatsapp_number_not_found");
 });

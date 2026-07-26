@@ -70,6 +70,111 @@ export function getHighConfidenceWebBridgeResolvedPhone(identity: any, ownPhone?
     return resolvedDigits;
 }
 
+export function isValidatedWebBridgePhoneIdentityMatch(
+    identity: {
+        identityType?: string | null;
+        identityValue?: string | null;
+        phone?: string | null;
+        confidence?: string | null;
+    } | null | undefined,
+    phone: unknown,
+) {
+    const expectedPhone = normalizeDigits(phone);
+    if (!isHighConfidenceResolvedPhone(expectedPhone)) return false;
+    if (String(identity?.confidence || "").trim().toLowerCase() !== "high") return false;
+
+    const mappedPhone = normalizeDigits(identity?.phone);
+    const identityPhone = String(identity?.identityType || "").trim().toLowerCase() === "phone"
+        ? normalizeDigits(identity?.identityValue)
+        : "";
+    return mappedPhone === expectedPhone || identityPhone === expectedPhone;
+}
+
+export async function hasValidatedWebBridgePhoneIdentity(args: {
+    locationId: string;
+    contactId: string;
+    phone: unknown;
+}) {
+    const phone = normalizeDigits(args.phone);
+    if (!isHighConfidenceResolvedPhone(phone)) return false;
+
+    const identity = await (db as any).whatsAppIdentityMap.findFirst({
+        where: {
+            locationId: args.locationId,
+            contactId: args.contactId,
+            provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+            confidence: "high",
+            OR: [
+                { phone },
+                { identityType: "phone", identityValue: phone },
+            ],
+        },
+        select: {
+            identityType: true,
+            identityValue: true,
+            phone: true,
+            confidence: true,
+        },
+        orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
+    }).catch(() => null);
+
+    return isValidatedWebBridgePhoneIdentityMatch(identity, phone);
+}
+
+export async function recordValidatedWebBridgePhoneIdentity(args: {
+    locationId: string;
+    contactId: string;
+    phone: unknown;
+    source?: string | null;
+}) {
+    const phone = normalizeDigits(args.phone);
+    if (!isHighConfidenceResolvedPhone(phone)) return null;
+
+    return upsertWebBridgeIdentityMap({
+        locationId: args.locationId,
+        contactId: args.contactId,
+        identityType: "phone",
+        identityValue: phone,
+        phone,
+        confidence: "high",
+        source: args.source || "eligibility_check",
+        lastSeenAt: new Date(),
+    });
+}
+
+export async function invalidateValidatedWebBridgePhoneIdentity(args: {
+    locationId: string;
+    contactId: string;
+    phone: unknown;
+    source?: string | null;
+}) {
+    const phone = normalizeDigits(args.phone);
+    if (!isHighConfidenceResolvedPhone(phone)) return 0;
+
+    const result = await (db as any).whatsAppIdentityMap.updateMany({
+        where: {
+            locationId: args.locationId,
+            contactId: args.contactId,
+            provider: WHATSAPP_WEB_BRIDGE_PROVIDER,
+            confidence: "high",
+            OR: [
+                { phone },
+                { identityType: "phone", identityValue: phone },
+            ],
+        },
+        data: {
+            confidence: "unresolved",
+            source: args.source || "number_not_found",
+            lastSeenAt: new Date(),
+        },
+    }).catch((error: any) => {
+        console.warn("[WhatsApp Web Bridge Identity] Failed to invalidate phone validation:", error?.message || error);
+        return null;
+    });
+
+    return Number(result?.count || 0);
+}
+
 export async function resolveWebBridgeIdentity(args: {
     locationId: string;
     remoteJid: string;

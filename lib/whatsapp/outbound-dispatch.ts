@@ -21,6 +21,10 @@ import {
     createDeviceEgressOfflineError,
     getWhatsAppDeviceEgressStatus,
 } from "@/lib/device-tunnel/status";
+import {
+    hasValidatedWebBridgePhoneIdentity,
+    recordValidatedWebBridgePhoneIdentity,
+} from "@/lib/whatsapp/web-bridge-identity";
 
 export type WhatsAppOutboundDispatchResult = {
     transport: string;
@@ -45,7 +49,14 @@ function extractTwilioMessageId(response: any): string | null {
 }
 
 async function resolveWebBridgeRecipient(row: any, normalizedPhone: string) {
-    const webBridgeConversationChatId = row.conversationId
+    const hasValidatedPhone = row.contactId && normalizedPhone
+        ? await hasValidatedWebBridgePhoneIdentity({
+            locationId: row.locationId,
+            contactId: row.contactId,
+            phone: normalizedPhone,
+        })
+        : false;
+    const webBridgeConversationChatId = hasValidatedPhone && row.conversationId
         ? await getWhatsAppWebBridgeConversationChatId({
             locationId: row.locationId,
             conversationId: row.conversationId,
@@ -61,6 +72,14 @@ async function resolveWebBridgeRecipient(row: any, normalizedPhone: string) {
         if (!isResolvedWhatsAppWebBridgeChatAvailable(resolved)
             && !isResolvedWhatsAppWebBridgeChatUsableForSend(resolved)) {
             throw new Error("This number is not available on WhatsApp.");
+        }
+        if (row.contactId && isResolvedWhatsAppWebBridgeChatAvailable(resolved)) {
+            await recordValidatedWebBridgePhoneIdentity({
+                locationId: row.locationId,
+                contactId: row.contactId,
+                phone: normalizedPhone,
+                source: "outbound_resolution",
+            });
         }
         return String(resolved.chatId || "").trim();
     }
