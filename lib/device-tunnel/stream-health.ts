@@ -1,5 +1,5 @@
 export class DeviceTunnelStreamHealth {
-    private consecutiveOpenFailures = 0;
+    private consecutiveOpenTimeouts = 0;
 
     constructor(private readonly failureThreshold = 3) {
         if (!Number.isInteger(failureThreshold) || failureThreshold < 1) {
@@ -7,17 +7,17 @@ export class DeviceTunnelStreamHealth {
         }
     }
 
-    recordOpenResult(ok: boolean) {
-        if (ok) {
-            this.consecutiveOpenFailures = 0;
-            return false;
-        }
-        this.consecutiveOpenFailures += 1;
-        return this.consecutiveOpenFailures >= this.failureThreshold;
+    recordOpenResponse() {
+        this.consecutiveOpenTimeouts = 0;
+    }
+
+    recordOpenTimeout() {
+        this.consecutiveOpenTimeouts += 1;
+        return this.consecutiveOpenTimeouts >= this.failureThreshold;
     }
 
     get failureCount() {
-        return this.consecutiveOpenFailures;
+        return this.consecutiveOpenTimeouts;
     }
 }
 

@@ -49,6 +49,21 @@ test("STO reports session restoration before generic route unavailability", () =
     assert.equal(result.label, "WhatsApp Session Restoring");
 });
 
+test("STO reports the live device outage instead of masking it as session restoration", () => {
+    const result = buildStoSecureDeliveryStatus({
+        ...readyInput,
+        deviceStatus: "online",
+        bindingStatus: "online",
+        bindingFresh: false,
+        workerReady: false,
+        authDurableReady: false,
+        authState: "recovering",
+        recoveryStatus: "restoring_previous",
+    });
+    assert.equal(result.state, "device_offline");
+    assert.equal(result.label, "STO Device Offline");
+});
+
 test("STO never claims ready for a local or unfenced browser profile", () => {
     for (const input of [
         { ...readyInput, runtimeLeaseEnforced: false },

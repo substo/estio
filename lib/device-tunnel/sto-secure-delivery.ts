@@ -94,19 +94,6 @@ export function buildStoSecureDeliveryStatus(input: StoSecureDeliveryStatusInput
         };
     }
 
-    if (
-        ["attaching", "detaching", "recovering"].includes(authState)
-        || recoveryStatus === "restoring_previous"
-    ) {
-        return {
-            ...base,
-            state: "session_restoring",
-            label: "WhatsApp Session Restoring",
-            detail: "Estio is restoring and verifying the protected WhatsApp session.",
-            protectedSession: false,
-        };
-    }
-
     const deviceOnline = normalize(input.deviceStatus) === "online"
         && normalize(input.bindingStatus) === "online"
         && input.bindingFresh === true;
@@ -117,6 +104,19 @@ export function buildStoSecureDeliveryStatus(input: StoSecureDeliveryStatusInput
             label: "STO Device Offline",
             detail: "Messages will remain queued until the connected STO device is online.",
             protectedSession,
+        };
+    }
+
+    if (
+        ["attaching", "detaching", "recovering"].includes(authState)
+        || recoveryStatus === "restoring_previous"
+    ) {
+        return {
+            ...base,
+            state: "session_restoring",
+            label: "WhatsApp Session Restoring",
+            detail: "Estio is restoring and verifying the protected WhatsApp session.",
+            protectedSession: false,
         };
     }
 

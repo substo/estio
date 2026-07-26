@@ -6,21 +6,21 @@ import {
     DeviceTunnelStreamHealth,
 } from "./stream-health";
 
-test("stream health opens the reconnect circuit after consecutive failures", () => {
+test("stream health opens the reconnect circuit after consecutive unanswered requests", () => {
     const health = new DeviceTunnelStreamHealth(3);
-    assert.equal(health.recordOpenResult(false), false);
-    assert.equal(health.recordOpenResult(false), false);
-    assert.equal(health.recordOpenResult(false), true);
+    assert.equal(health.recordOpenTimeout(), false);
+    assert.equal(health.recordOpenTimeout(), false);
+    assert.equal(health.recordOpenTimeout(), true);
     assert.equal(health.failureCount, 3);
 });
 
-test("a successful stream resets the failure circuit", () => {
+test("any device response resets the transport failure circuit", () => {
     const health = new DeviceTunnelStreamHealth(3);
-    health.recordOpenResult(false);
-    health.recordOpenResult(false);
-    assert.equal(health.recordOpenResult(true), false);
+    health.recordOpenTimeout();
+    health.recordOpenTimeout();
+    health.recordOpenResponse();
     assert.equal(health.failureCount, 0);
-    assert.equal(health.recordOpenResult(false), false);
+    assert.equal(health.recordOpenTimeout(), false);
 });
 
 test("the SOCKS proxy and lease renewer retain one live runtime state", () => {

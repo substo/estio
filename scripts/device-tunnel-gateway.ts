@@ -296,7 +296,7 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
                     state.acceptConnectRequest();
                     socket.pause();
                     const timeout = setTimeout(() => {
-                        const reconnectRequired = deviceBase.streamHealth.recordOpenResult(false);
+                        const reconnectRequired = deviceBase.streamHealth.recordOpenTimeout();
                         fail(0x04);
                         if (reconnectRequired) {
                             console.warn("[Device Tunnel] Stream health forced Android reconnect", {
@@ -570,20 +570,15 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
             const pending = device.pendingOpen.get(streamId);
             if (pending) clearTimeout(pending);
             device.pendingOpen.delete(streamId);
+            // An explicit response proves that the control tunnel is responsive,
+            // even when Android could not open this particular destination.
+            // Destination/DNS failures must not tear down the entire STO route.
+            device.streamHealth.recordOpenResponse();
             if (!frame.ok) {
-                const reconnectRequired = device.streamHealth.recordOpenResult(false);
                 device.streams.delete(streamId);
                 socket.end(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
-                if (reconnectRequired) {
-                    console.warn("[Device Tunnel] Stream health forced Android reconnect", {
-                        sessionRef: redactOperationalIdentifier(device.bridgeSessionId, "session"),
-                        code: "TUNNEL_STREAM_OPEN_CIRCUIT",
-                    });
-                    void disconnectDevice(device, "Tunnel stream health check failed");
-                }
                 return;
             }
-            device.streamHealth.recordOpenResult(true);
             socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
             socket.resume();
             return;
