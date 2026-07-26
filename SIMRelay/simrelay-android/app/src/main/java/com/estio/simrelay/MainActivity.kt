@@ -85,18 +85,15 @@ class MainActivity : AppCompatActivity() {
 
         btnToggleService.setOnClickListener {
             if (RelayForegroundService.isRunning && TunnelForegroundService.isRunning) {
+                RelayReliability.setShouldRun(this, false)
+                RelayReliability.cancel(this)
                 stopService(Intent(this, RelayForegroundService::class.java))
                 stopService(Intent(this, TunnelForegroundService::class.java))
                 Toast.makeText(this, "Service Stopped", Toast.LENGTH_SHORT).show()
             } else {
-                val intent = Intent(this, RelayForegroundService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(intent)
-                    startForegroundService(Intent(this, TunnelForegroundService::class.java))
-                } else {
-                    startService(intent)
-                    startService(Intent(this, TunnelForegroundService::class.java))
-                }
+                RelayReliability.setShouldRun(this, true)
+                RelayReliability.schedulePeriodic(this)
+                RelayReliability.startPairedServices(this)
                 Toast.makeText(this, "Service Started", Toast.LENGTH_SHORT).show()
             }
             // Small delay to allow service to start/stop before updating UI
@@ -104,6 +101,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnUnpair.setOnClickListener {
+            RelayReliability.setShouldRun(this, false)
+            RelayReliability.cancel(this)
             stopService(Intent(this, RelayForegroundService::class.java))
             stopService(Intent(this, TunnelForegroundService::class.java))
             val prefs = SecurePrefs.get(this)
@@ -115,10 +114,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (RelayForegroundService.isRunning && !TunnelForegroundService.isRunning) {
-            val tunnelIntent = Intent(this, TunnelForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(tunnelIntent)
-            else startService(tunnelIntent)
+        if (RelayForegroundService.isRunning && !TunnelForegroundService.isRunning && RelayReliability.shouldRun(this)) {
+            RelayReliability.startPairedServices(this)
         }
         updateUI()
         btnToggleService.postDelayed({ updateUI() }, 500)
@@ -234,20 +231,15 @@ class MainActivity : AppCompatActivity() {
                         prefs.edit()
                             .putString("device_token", token)
                             .putString("base_url", baseUrl)
+                            .putBoolean(RelayReliability.PREF_STO_SHOULD_RUN, true)
                             .apply()
                             
                         ApiClient.initToken(token)
                         Toast.makeText(this@MainActivity, "Paired Successfully!", Toast.LENGTH_LONG).show()
                         
                         // Auto-start service
-                        val intent = Intent(this@MainActivity, RelayForegroundService::class.java)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                            startForegroundService(Intent(this@MainActivity, TunnelForegroundService::class.java))
-                        } else {
-                            startService(intent)
-                            startService(Intent(this@MainActivity, TunnelForegroundService::class.java))
-                        }
+                        RelayReliability.schedulePeriodic(this@MainActivity)
+                        RelayReliability.startPairedServices(this@MainActivity)
                         updateUI()
                     } else {
                         Toast.makeText(this@MainActivity, "Pairing Failed", Toast.LENGTH_LONG).show()

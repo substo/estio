@@ -21,11 +21,15 @@ import kotlinx.coroutines.launch
 class TunnelForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "EstioWhatsAppNetworkRelay"
+        const val ACTION_RESTART = "com.estio.simrelay.RESTART_STO"
         @Volatile
         var isRunning = false
             private set
         @Volatile
         var isConnected = false
+            private set
+        @Volatile
+        var lastErrorCode: String? = null
             private set
     }
 
@@ -62,9 +66,12 @@ class TunnelForegroundService : Service() {
             startForeground(2, notification)
         }
 
-        if (tunnelClient != null && tunnelJob?.isActive == true) return START_STICKY
         val prefs = SecurePrefs.get(this)
         val token = prefs.getString("device_token", null) ?: run {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (!RelayReliability.shouldRun(this)) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -76,15 +83,28 @@ class TunnelForegroundService : Service() {
                 it.registerDefaultNetworkCallback(networkCallback)
             }
         }
+        if (intent?.action != ACTION_RESTART && tunnelClient != null && tunnelJob?.isActive == true) {
+            return START_STICKY
+        }
+        restartTunnelClient()
+        isRunning = true
+        return START_STICKY
+    }
+
+    private fun restartTunnelClient() {
+        isConnected = false
+        lastErrorCode = null
+        tunnelJob?.cancel()
         tunnelClient?.close()
         lateinit var client: DeviceTunnelClient
-        client = DeviceTunnelClient(this, scope) { connected ->
-            if (tunnelClient === client) isConnected = connected
+        client = DeviceTunnelClient(this, scope) { connected, errorCode ->
+            if (tunnelClient === client) {
+                isConnected = connected
+                lastErrorCode = errorCode
+            }
         }
         tunnelClient = client
         tunnelJob = scope.launch { client.runForever() }
-        isRunning = true
-        return START_STICKY
     }
 
     override fun onDestroy() {
@@ -94,8 +114,14 @@ class TunnelForegroundService : Service() {
         tunnelJob = null
         isRunning = false
         isConnected = false
+        lastErrorCode = null
         scope.cancel()
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (RelayReliability.shouldRun(this)) RelayReliability.scheduleImmediate(this)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

@@ -13,6 +13,7 @@ export type StoSecureDeliveryStatus = {
     deviceAlias: string | null;
     networkType: string | null;
     lastConnectedAt: string | null;
+    lastSeenAt: string | null;
     lastVerifiedAt: string | null;
     protectedSession: boolean;
 };
@@ -26,6 +27,7 @@ type StoSecureDeliveryStatusInput = {
     bindingFresh?: boolean;
     networkType?: string | null;
     lastConnectedAt?: string | Date | null;
+    lastSeenAt?: string | Date | null;
     lastVerifiedAt?: string | Date | null;
     workerReady?: boolean;
     workerStatus?: string | null;
@@ -53,6 +55,7 @@ export function buildStoSecureDeliveryStatus(input: StoSecureDeliveryStatusInput
         deviceAlias: String(input.deviceAlias || "").trim() || null,
         networkType: normalize(input.networkType) || null,
         lastConnectedAt: iso(input.lastConnectedAt),
+        lastSeenAt: iso(input.lastSeenAt),
         lastVerifiedAt: iso(input.lastVerifiedAt),
     };
     const authState = normalize(input.authState);
@@ -101,8 +104,8 @@ export function buildStoSecureDeliveryStatus(input: StoSecureDeliveryStatusInput
         return {
             ...base,
             state: "device_offline",
-            label: "STO Device Offline",
-            detail: "Messages will remain queued until the connected STO device is online.",
+            label: "STO Relay Offline",
+            detail: "Estio cannot currently reach the STO relay. The phone may still be powered on; messages remain queued safely.",
             protectedSession,
         };
     }

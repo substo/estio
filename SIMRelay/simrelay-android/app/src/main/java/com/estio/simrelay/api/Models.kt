@@ -36,6 +36,22 @@ data class TunnelTokenResponse(
     val assignmentEpoch: Int
 )
 
+data class HeartbeatRequest(
+    val app_version: String,
+    val sto_reconnect_applied_generation: Long,
+    val sto_state: String,
+    val sto_error_code: String? = null,
+    val battery_optimization_ignored: Boolean,
+)
+
+data class HeartbeatResponse(
+    val status: String,
+    val ts: String,
+    val sto_should_run: Boolean = true,
+    val sto_reconnect_generation: Long = 0,
+    val sto_reconnect_requested_at: String? = null,
+)
+
 data class Job(
     val job_id: String,
     val to: String,

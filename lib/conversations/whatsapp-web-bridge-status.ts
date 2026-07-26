@@ -110,6 +110,7 @@ export async function getWhatsAppWebBridgeStatusForLocation(location: LocationCo
         bindingFresh,
         networkType: binding?.networkType || null,
         lastConnectedAt: binding?.lastConnectedAt || null,
+        lastSeenAt: binding?.lastSeenAt || null,
         lastVerifiedAt: binding?.lastVerifiedAt || null,
         workerReady: Boolean(workerSession?.ready),
         workerStatus: workerSession?.status || managedSession?.status || null,

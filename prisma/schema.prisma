@@ -4160,6 +4160,13 @@ model DeviceTunnelBinding {
   lastProofMessageHash String?
   lastProofBytesToDevice BigInt?
   lastProofBytesFromDevice BigInt?
+  reconnectGeneration Int @default(0)
+  lastReconnectRequestId String?
+  lastReconnectRequestedAt DateTime?
+  lastReconnectAttemptedAt DateTime?
+  lastReconnectErrorCode String?
+  lastDeviceRuntimeState String?
+  batteryOptimizationIgnored Boolean?
   lastError          String?  @db.Text
 
   location Location                    @relation(fields: [locationId], references: [id], onDelete: Cascade)

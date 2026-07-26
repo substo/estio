@@ -52,3 +52,20 @@ internal class DeviceTunnelLivenessPolicy(
     fun isStale(lastGatewayFrameAtMs: Long, nowMs: Long): Boolean =
         nowMs - lastGatewayFrameAtMs > maximumSilenceMs
 }
+
+internal object DeviceTunnelDiagnostics {
+    fun classify(error: Throwable): String {
+        val message = error.message.orEmpty().lowercase()
+        return when {
+            "401" in message || "403" in message || "unauthorized" in message || "forbidden" in message -> "AUTH_REJECTED"
+            "challenge" in message || "token" in message -> "TUNNEL_TOKEN_REJECTED"
+            "no active android network" in message -> "NO_ANDROID_NETWORK"
+            "invalid tunnel gateway" in message -> "TUNNEL_CONFIG_REJECTED"
+            error is java.io.IOException -> "ESTIO_UNREACHABLE"
+            else -> "UNKNOWN"
+        }
+    }
+
+    fun shouldApplyReconnect(remoteGeneration: Long, appliedGeneration: Long): Boolean =
+        remoteGeneration > appliedGeneration
+}

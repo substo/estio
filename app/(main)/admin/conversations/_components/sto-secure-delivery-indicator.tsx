@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Loader2, ShieldAlert, ShieldCheck, Smartphone, Wifi } from "lucide-react";
+import { ChevronRight, Clock3, Loader2, ShieldAlert, ShieldCheck, Smartphone, Wifi } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { StoSecureDeliveryStatus } from "@/lib/device-tunnel/sto-secure-delivery";
@@ -58,6 +58,9 @@ export function StoSecureDeliveryIndicator({ active }: { active: boolean }) {
         : status.networkType === "cellular"
             ? "mobile data"
             : status.networkType || "Connection checking";
+    const lastHeartbeat = status.lastSeenAt
+        ? new Date(status.lastSeenAt).toLocaleString()
+        : "Not yet recorded";
 
     return (
         <Popover>
@@ -144,6 +147,13 @@ export function StoSecureDeliveryIndicator({ active }: { active: boolean }) {
                             <span className="text-slate-500">WhatsApp session</span>
                             <span className="ml-auto font-medium text-slate-800">
                                 {status.protectedSession ? "Protected" : "Being verified"}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                            <span className="text-slate-500">Last relay heartbeat</span>
+                            <span className="ml-auto max-w-[180px] truncate font-medium text-slate-800">
+                                {lastHeartbeat}
                             </span>
                         </div>
                     </div>

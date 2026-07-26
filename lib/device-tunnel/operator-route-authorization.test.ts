@@ -10,6 +10,7 @@ test("WhatsApp device-egress admin routes retain Clerk and database tenant autho
     for (const path of [
         "app/api/admin/whatsapp-egress/bind/route.ts",
         "app/api/admin/whatsapp-egress/status/route.ts",
+        "app/api/admin/whatsapp-egress/reconnect/route.ts",
     ]) {
         const value = await source(path);
         assert.match(value, /await auth\(\)/, path);

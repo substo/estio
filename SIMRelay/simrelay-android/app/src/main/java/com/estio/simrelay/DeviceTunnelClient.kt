@@ -29,7 +29,7 @@ import kotlin.coroutines.resume
 class DeviceTunnelClient(
     context: Context,
     private val scope: CoroutineScope,
-    private val onConnectionStateChanged: (Boolean) -> Unit = {},
+    private val onConnectionStateChanged: (Boolean, String?) -> Unit = { _, _ -> },
 ) {
     private val appContext = context.applicationContext
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
@@ -62,7 +62,8 @@ class DeviceTunnelClient(
                     delay(reconnectPolicy.fullJitterDelay(backoffCapMs))
                     backoffCapMs = reconnectPolicy.nextCap(backoffCapMs)
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                onConnectionStateChanged(false, DeviceTunnelDiagnostics.classify(error))
                 closeStreams()
                 delay(reconnectPolicy.fullJitterDelay(backoffCapMs))
                 backoffCapMs = reconnectPolicy.nextCap(backoffCapMs)
@@ -71,13 +72,13 @@ class DeviceTunnelClient(
     }
 
     fun networkChanged() {
-        onConnectionStateChanged(false)
+        onConnectionStateChanged(false, "NETWORK_CHANGED")
         webSocket?.cancel()
         closeStreams()
     }
 
     fun close() {
-        onConnectionStateChanged(false)
+        onConnectionStateChanged(false, null)
         webSocket?.close(1000, "Relay stopped")
         webSocket = null
         closeStreams()
@@ -101,7 +102,7 @@ class DeviceTunnelClient(
             }
         }
 
-        fun finish() {
+        fun finish(errorCode: String? = null) {
             val result = synchronized(stateLock) {
                 if (completed) null else {
                     completed = true
@@ -109,7 +110,7 @@ class DeviceTunnelClient(
                 }
             } ?: return
             watchdogJob?.cancel()
-            onConnectionStateChanged(false)
+            onConnectionStateChanged(false, errorCode)
             closeStreams()
             if (continuation.isActive) continuation.resume(result)
         }
@@ -125,7 +126,7 @@ class DeviceTunnelClient(
                     if (stale) {
                         if (webSocket === ws) webSocket = null
                         ws.cancel()
-                        finish()
+                        finish("GATEWAY_SILENT")
                         break
                     }
                 }
@@ -139,7 +140,7 @@ class DeviceTunnelClient(
                 }
                 webSocket = ws
                 ws.send(JSONObject().put("type", "hello").put("networkType", networkType()).toString())
-                onConnectionStateChanged(true)
+                onConnectionStateChanged(true, null)
                 startLivenessWatchdog(ws)
             }
 
@@ -150,12 +151,12 @@ class DeviceTunnelClient(
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 if (webSocket === ws) webSocket = null
-                finish()
+                finish("GATEWAY_CONNECTION_FAILED")
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 if (webSocket === ws) webSocket = null
-                finish()
+                finish(DeviceTunnelDiagnostics.classify(t))
             }
         }
         val ws = client.newWebSocket(request, listener)

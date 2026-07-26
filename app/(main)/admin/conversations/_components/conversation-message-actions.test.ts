@@ -307,7 +307,7 @@ test('deriveOutboundWhatsAppUiState exposes the STO secure-delivery lifecycle', 
         ...stoMessage,
         status: 'blocked_egress',
         outboxState: { ...stoMessage.outboxState, status: 'blocked_egress' },
-    })?.detail, 'STO Device Offline · Retrying automatically');
+    })?.detail, 'STO relay offline · Retrying automatically');
 });
 
 test('manual resend requires an explicit failed or unconfirmed terminal state', () => {

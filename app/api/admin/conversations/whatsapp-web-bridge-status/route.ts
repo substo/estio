@@ -36,6 +36,7 @@ export async function GET() {
                 deviceAlias: null,
                 networkType: null,
                 lastConnectedAt: null,
+                lastSeenAt: null,
                 lastVerifiedAt: null,
                 protectedSession: false,
             },

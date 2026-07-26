@@ -71,6 +71,13 @@ export async function GET() {
         networkType: binding.networkType,
         lastConnectedAt: binding.lastConnectedAt,
         lastVerifiedAt: binding.lastVerifiedAt,
+        lastSeenAt: binding.lastSeenAt,
+        reconnectGeneration: binding.reconnectGeneration,
+        lastReconnectRequestedAt: binding.lastReconnectRequestedAt,
+        lastReconnectAttemptedAt: binding.lastReconnectAttemptedAt,
+        lastReconnectErrorCode: binding.lastReconnectErrorCode,
+        lastDeviceRuntimeState: binding.lastDeviceRuntimeState,
+        batteryOptimizationIgnored: binding.batteryOptimizationIgnored,
     } : null;
     return NextResponse.json({
         egressMode: session?.egressMode || "server",

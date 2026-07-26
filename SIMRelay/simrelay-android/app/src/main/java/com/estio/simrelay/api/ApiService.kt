@@ -23,7 +23,7 @@ interface ApiService {
     suspend fun reportManualOutboundSms(@Body request: ManualOutboundSmsRequest): Response<Void>
 
     @PATCH("/api/sms-relay/gateway/heartbeat")
-    suspend fun heartbeat(): Response<Void>
+    suspend fun heartbeat(@Body request: HeartbeatRequest): Response<HeartbeatResponse>
 
     @POST("/api/device-relay/v1/tunnel-token")
     suspend fun getTunnelChallenge(@Body request: TunnelTokenRequest): Response<TunnelChallengeResponse>

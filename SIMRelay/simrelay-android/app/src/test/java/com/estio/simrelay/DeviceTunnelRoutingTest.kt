@@ -62,4 +62,18 @@ class DeviceTunnelRoutingTest {
         assertTrue(!policy.isStale(lastGatewayFrameAtMs = 10_000, nowMs = 85_000))
         assertTrue(policy.isStale(lastGatewayFrameAtMs = 10_000, nowMs = 85_001))
     }
+
+    @Test
+    fun reconnectGenerationIsAppliedExactlyOnce() {
+        assertTrue(DeviceTunnelDiagnostics.shouldApplyReconnect(remoteGeneration = 3, appliedGeneration = 2))
+        assertTrue(!DeviceTunnelDiagnostics.shouldApplyReconnect(remoteGeneration = 3, appliedGeneration = 3))
+        assertTrue(!DeviceTunnelDiagnostics.shouldApplyReconnect(remoteGeneration = 2, appliedGeneration = 3))
+    }
+
+    @Test
+    fun diagnosticsReduceFailuresToSafeCodes() {
+        assertEquals("AUTH_REJECTED", DeviceTunnelDiagnostics.classify(IllegalStateException("Tunnel token unavailable (403)")))
+        assertEquals("NO_ANDROID_NETWORK", DeviceTunnelDiagnostics.classify(IllegalStateException("No active Android network")))
+        assertEquals("ESTIO_UNREACHABLE", DeviceTunnelDiagnostics.classify(java.io.IOException("connection reset")))
+    }
 }

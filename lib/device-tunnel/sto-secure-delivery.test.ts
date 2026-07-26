@@ -61,7 +61,8 @@ test("STO reports the live device outage instead of masking it as session restor
         recoveryStatus: "restoring_previous",
     });
     assert.equal(result.state, "device_offline");
-    assert.equal(result.label, "STO Device Offline");
+    assert.equal(result.label, "STO Relay Offline");
+    assert.match(result.detail, /phone may still be powered on/i);
 });
 
 test("STO never claims ready for a local or unfenced browser profile", () => {

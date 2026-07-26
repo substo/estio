@@ -42,7 +42,7 @@ type FailureFallbackUiState = {
 };
 
 export type OutboundWhatsAppUiState = {
-    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "STO Device Offline" | "Send not confirmed" | "Failed" | "SMS fallback available";
+    label: "Queued" | "Scheduled" | "Rate limited" | "Sending" | "Sent" | "Delivered" | "Read" | "Retrying" | "STO Relay Offline" | "Send not confirmed" | "Failed" | "SMS fallback available";
     tone: OutboundWhatsAppUiTone;
     icon: OutboundWhatsAppUiIcon;
     detail: string | null;
@@ -190,11 +190,11 @@ export function deriveOutboundWhatsAppUiState(message: {
 
     if (status === "blocked_egress" || outboxStatus === "blocked_egress") {
         return {
-            label: stoSecureDelivery ? "STO Device Offline" : "Retrying",
+            label: stoSecureDelivery ? "STO Relay Offline" : "Retrying",
             tone: "warning",
             icon: "clock",
             detail: stoSecureDelivery
-                ? "STO Device Offline · Retrying automatically"
+                ? "STO relay offline · Retrying automatically"
                 : "Waiting for the required device route",
             showSpinner: true,
             canResend: false,

@@ -91,7 +91,14 @@ type WhatsAppEgressStatus = {
         };
         networkType?: string | null;
         lastConnectedAt?: string | null;
+        lastSeenAt?: string | null;
         lastVerifiedAt?: string | null;
+        reconnectGeneration?: number;
+        lastReconnectRequestedAt?: string | null;
+        lastReconnectAttemptedAt?: string | null;
+        lastReconnectErrorCode?: string | null;
+        lastDeviceRuntimeState?: string | null;
+        batteryOptimizationIgnored?: boolean | null;
     };
     proof: null | {
         verifiedAt: string;
@@ -633,6 +640,7 @@ export default function SmsRelaySettingsPage() {
     const [tick, setTick] = useState(0);
     const [egressStatus, setEgressStatus] = useState<WhatsAppEgressStatus | null>(null);
     const [egressBusy, setEgressBusy] = useState(false);
+    const [reconnectFeedback, setReconnectFeedback] = useState<string | null>(null);
 
     const reload = useCallback(() => {
         startTransition(async () => {
@@ -702,6 +710,31 @@ export default function SmsRelaySettingsPage() {
         try {
             await fetch("/api/admin/whatsapp-egress/bind", { method: "DELETE" });
             reload();
+        } finally {
+            setEgressBusy(false);
+        }
+    };
+
+    const reconnectWhatsAppEgress = async () => {
+        setEgressBusy(true);
+        setReconnectFeedback(null);
+        try {
+            const response = await fetch("/api/admin/whatsapp-egress/reconnect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ requestId: crypto.randomUUID() }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result?.error || "Unable to request an STO reconnect.");
+            setReconnectFeedback(
+                egressStatus?.binding?.lastSeenAt
+                    && Date.now() - new Date(egressStatus.binding.lastSeenAt).getTime() < 120_000
+                    ? "Reconnect requested. The phone should receive it within a few seconds."
+                    : "Reconnect queued. The phone will apply it when its Estio control service checks in."
+            );
+            reload();
+        } catch (error: any) {
+            setReconnectFeedback(error?.message || "Unable to request an STO reconnect.");
         } finally {
             setEgressBusy(false);
         }
@@ -811,7 +844,7 @@ export default function SmsRelaySettingsPage() {
                         {egressStatus?.egressMode === "device_tunnel" && (
                             <span style={egressStatus.tunnelStatus === "online" ? styles.badge.online : styles.badge.offline}>
                                 <span style={egressStatus.tunnelStatus === "online" ? styles.dot.online : styles.dot.offline} />
-                                {egressStatus.tunnelStatus === "online" ? "STO device online" : "STO device offline"}
+                                {egressStatus.tunnelStatus === "online" ? "STO relay online" : "STO relay offline"}
                             </span>
                         )}
                         {egressStatus?.egressMode === "device_tunnel" && (
@@ -832,6 +865,15 @@ export default function SmsRelaySettingsPage() {
                                 <option key={device.id} value={device.id}>{device.label}</option>
                             ))}
                         </select>
+                        {egressStatus?.egressMode === "device_tunnel" && (
+                            <button
+                                style={styles.btnSm.primary}
+                                disabled={egressBusy}
+                                onClick={() => void reconnectWhatsAppEgress()}
+                            >
+                                {egressBusy ? "Requesting…" : "Reconnect STO"}
+                            </button>
+                        )}
                         {egressStatus?.egressMode === "device_tunnel" && (
                             <button style={styles.btnSm.ghost} disabled={egressBusy} onClick={() => void unbindWhatsAppEgress()}>
                                 Disable
@@ -863,9 +905,16 @@ export default function SmsRelaySettingsPage() {
                                     : "STO not ready"}
                             </span>
                             <span style={{ color: "#475569" }}>
-                                Messages use your connected STO device&apos;s network and protected WhatsApp session. There is no server-internet fallback.
+                                {egressStatus.tunnelStatus === "online"
+                                    ? "Messages use your connected STO device's network and protected WhatsApp session. There is no server-internet fallback."
+                                    : `Estio cannot currently reach the STO relay. The phone may still be powered on. Last relay heartbeat: ${formatLastSeen(egressStatus.binding?.lastSeenAt || null)}.`}
                             </span>
                         </div>
+                        {reconnectFeedback && (
+                            <div role="status" style={{ fontSize: 13, color: "#475569" }}>
+                                {reconnectFeedback}
+                            </div>
+                        )}
                         <div style={styles.proofGrid}>
                             <div style={styles.proofItem}>
                                 <span style={styles.proofLabel}>STO device</span>
@@ -898,6 +947,18 @@ export default function SmsRelaySettingsPage() {
                                     {egressStatus.proof ? formatLastSeen(egressStatus.proof.verifiedAt) : "No verified send yet"}
                                 </span>
                                 <span style={styles.proofHint}>Confirmed traffic through the connected device</span>
+                            </div>
+                            <div style={styles.proofItem}>
+                                <span style={styles.proofLabel}>Android background access</span>
+                                <span style={{
+                                    ...styles.proofValue,
+                                    color: egressStatus.binding?.batteryOptimizationIgnored ? "#15803d" : "#b45309",
+                                }}>
+                                    {egressStatus.binding?.batteryOptimizationIgnored ? "Unrestricted" : "Not confirmed"}
+                                </span>
+                                <span style={styles.proofHint}>
+                                    Unrestricted battery access helps the STO relay recover while the phone is unattended
+                                </span>
                             </div>
                         </div>
                     </div>

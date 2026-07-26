@@ -12,6 +12,7 @@ test("STO indicator provides progressive disclosure and a connected-device actio
     assert.match(source, /Click to learn about STO Secure Delivery/);
     assert.match(source, /Your WhatsApp message is sent through your connected STO device/);
     assert.match(source, /If the device disconnects, messages wait safely/);
+    assert.match(source, /Last relay heartbeat/);
     assert.match(source, /View STO settings and device/);
     assert.match(source, /\/admin\/settings\/integrations\/sms-relay#sto-secure-delivery/);
 });
