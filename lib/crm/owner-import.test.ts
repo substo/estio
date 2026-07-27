@@ -1,12 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+    buildImportedOwnerContactSyncRequest,
     chooseCompanyBackedContactName,
     classifyImportedOwnerEntity,
     hasMeaningfulCompanyName,
     inferOwnerBusinessSubtype,
     isLikelyAutomatedOwnerName,
 } from "./owner-import";
+
+test("buildImportedOwnerContactSyncRequest mirrors normal contact provider sync", () => {
+    assert.deepEqual(buildImportedOwnerContactSyncRequest({
+        resolution: {
+            ownerContactId: "contact_new",
+            ownerContactSyncOperation: "create",
+        },
+        locationId: "location_1",
+        preferredUserId: "user_1",
+    }), {
+        contactId: "contact_new",
+        locationId: "location_1",
+        operation: "create",
+        payload: { preferredUserId: "user_1" },
+    });
+    assert.equal(buildImportedOwnerContactSyncRequest({
+        resolution: {
+            ownerContactId: null,
+            ownerContactSyncOperation: null,
+        },
+        locationId: "location_1",
+    }), null);
+});
 
 test("classifyImportedOwnerEntity treats automated XML owners as organizations", () => {
     assert.equal(

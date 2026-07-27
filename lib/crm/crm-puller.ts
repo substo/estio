@@ -7,10 +7,14 @@ import db from '@/lib/db';
 import { uploadUrlToCloudflare, uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
 import { normalizeInternationalPhone } from '@/lib/utils/phone';
 import { buildStructuredLeadDisplayName } from '@/lib/contacts/name-builder';
-import { resolveImportedOwner } from '@/lib/crm/owner-import';
+import {
+    buildImportedOwnerContactSyncRequest,
+    resolveImportedOwner,
+} from '@/lib/crm/owner-import';
 import { registerTemporaryMediaAssets } from '@/lib/media/media-assets';
 import { ensureConversationForImportedContact } from '@/lib/conversations/imported-contact-bootstrap';
 import { buildLegacyPublicListingUrl } from '@/lib/properties/public-url';
+import { enqueueContactSync } from '@/lib/contacts/sync-engine';
 
 function getLocationLabels(areaKey: string | null | undefined, districtKey: string | null | undefined) {
     const district = PROPERTY_LOCATIONS.find((item) => item.district_key === districtKey) || null;
@@ -42,6 +46,7 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
         crmUsername,
         crmPassword,
         crmEditUrlPattern,
+        actorUserId,
     } = context;
 
     try {
@@ -477,6 +482,16 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
             extractedData.ownerBusinessSubtype = resolvedOwner.ownerBusinessSubtype;
             extractedData.ownerMatchSource = resolvedOwner.ownerMatchSource;
             if (resolvedOwner.ownerContactId) {
+                const syncRequest = buildImportedOwnerContactSyncRequest({
+                    resolution: resolvedOwner,
+                    locationId,
+                    preferredUserId: actorUserId,
+                });
+                if (syncRequest) {
+                    await db.$transaction(async (tx) => {
+                        await enqueueContactSync(tx, syncRequest);
+                    });
+                }
                 try {
                     await ensureConversationForImportedContact({
                         contactId: resolvedOwner.ownerContactId,

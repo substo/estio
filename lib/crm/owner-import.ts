@@ -46,6 +46,7 @@ export type ImportedOwnerInput = {
 
 export type ImportedOwnerResolution = {
     ownerContactId: string | null;
+    ownerContactSyncOperation: "create" | "update" | null;
     ownerCompanyId: string | null;
     ownerEntityType: ImportedOwnerEntityType;
     ownerEntityPath: ImportedOwnerEntityPath;
@@ -54,6 +55,21 @@ export type ImportedOwnerResolution = {
     ownerDisplayName: string | null;
     ownerCompanyName: string | null;
 };
+
+export function buildImportedOwnerContactSyncRequest(args: {
+    resolution: Pick<ImportedOwnerResolution, "ownerContactId" | "ownerContactSyncOperation">;
+    locationId: string;
+    preferredUserId?: string | null;
+}) {
+    if (!args.resolution.ownerContactId) return null;
+
+    return {
+        contactId: args.resolution.ownerContactId,
+        locationId: args.locationId,
+        operation: args.resolution.ownerContactSyncOperation || "update",
+        payload: { preferredUserId: args.preferredUserId || null },
+    } as const;
+}
 
 type CompanyLike = {
     id: string;
@@ -716,10 +732,11 @@ async function upsertResolvedContact(args: {
         };
         updateData.payload = nextPayload;
 
-        return db.contact.update({
+        const contact = await db.contact.update({
             where: { id: existing.id },
             data: updateData,
         });
+        return { contact, syncOperation: "update" as const };
     }
 
     const [phoneOk, emailOk, legacyIdOk] = await Promise.all([
@@ -728,7 +745,7 @@ async function upsertResolvedContact(args: {
         isContactFieldAvailable(input.locationId, "legacyCrmOwnerId", legacyOwnerId),
     ]);
 
-    return db.contact.create({
+    const contact = await db.contact.create({
         data: {
             locationId: input.locationId,
             name: contactDisplayName,
@@ -757,6 +774,7 @@ async function upsertResolvedContact(args: {
             },
         },
     });
+    return { contact, syncOperation: "create" as const };
 }
 
 async function upsertResolvedCompany(args: {
@@ -840,13 +858,14 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
     else if ((entityPath === "private_person" && ownerName) || (entityPath === "company_backed" && companyName)) initialMatchSource = "name_fallback";
 
     let ownerContactId: string | null = null;
+    let ownerContactSyncOperation: "create" | "update" | null = null;
     let ownerCompanyId: string | null = null;
     let ownerMatchSource = initialMatchSource;
     let ownerDisplayName = normalizeText(input.ownerDisplayName) || ownerName;
     let ownerBusinessSubtype: ImportedOwnerBusinessSubtype | null = null;
 
     if (entityPath === "private_person") {
-        const contact = await upsertResolvedContact({
+        const { contact, syncOperation } = await upsertResolvedContact({
             input,
             entityPath,
             matchSource: ownerMatchSource,
@@ -854,6 +873,7 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
             genericCompanyContact: false,
         });
         ownerContactId = contact.id;
+        ownerContactSyncOperation = syncOperation;
 
         if (companyName) {
             const businessSubtype = inferOwnerBusinessSubtype(input, null);
@@ -886,7 +906,7 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
                 ownerName,
                 canonicalCompanyName,
             });
-            const contact = await upsertResolvedContact({
+            const { contact, syncOperation } = await upsertResolvedContact({
                 input: {
                     ...input,
                     ownerName: desiredContactName,
@@ -899,6 +919,7 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
                 genericCompanyContact,
             });
             ownerContactId = contact.id;
+            ownerContactSyncOperation = syncOperation;
             ownerDisplayName = desiredContactName;
 
             await db.contact.update({
@@ -934,6 +955,7 @@ export async function resolveImportedOwner(input: ImportedOwnerInput): Promise<I
 
     return {
         ownerContactId,
+        ownerContactSyncOperation,
         ownerCompanyId,
         ownerEntityType: entityType,
         ownerEntityPath: entityPath,
