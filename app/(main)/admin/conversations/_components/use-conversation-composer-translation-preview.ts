@@ -6,7 +6,8 @@ export type ComposerChannel = "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
 type PreviewTranslatedReply = (
     sourceText: string,
     channel: ComposerChannel,
-    targetLanguage?: string | null
+    targetLanguage?: string | null,
+    model?: string | null
 ) => Promise<{
     success: boolean;
     error?: string;
@@ -22,6 +23,7 @@ interface UseConversationComposerTranslationPreviewArgs {
     selectedChannel: ComposerChannel;
     selectedReplyLanguage: string;
     autoReplyLanguageValue: string;
+    selectedModel: string;
     onPreviewTranslatedReply?: PreviewTranslatedReply;
 }
 
@@ -31,6 +33,7 @@ export function useConversationComposerTranslationPreview({
     selectedChannel,
     selectedReplyLanguage,
     autoReplyLanguageValue,
+    selectedModel,
     onPreviewTranslatedReply,
 }: UseConversationComposerTranslationPreviewArgs) {
     const [previewingTranslation, setPreviewingTranslation] = useState(false);
@@ -62,7 +65,7 @@ export function useConversationComposerTranslationPreview({
         setPreviewingTranslation(true);
         try {
             const targetLanguage = selectedReplyLanguage === autoReplyLanguageValue ? null : selectedReplyLanguage;
-            const result = await onPreviewTranslatedReply(sourceText, selectedChannel, targetLanguage);
+            const result = await onPreviewTranslatedReply(sourceText, selectedChannel, targetLanguage, selectedModel);
             if (!result?.success || !result.translatedText) {
                 toast.error(result?.error || "Failed to preview translation.");
                 return;
@@ -81,6 +84,7 @@ export function useConversationComposerTranslationPreview({
         onPreviewTranslatedReply,
         previewingTranslation,
         selectedChannel,
+        selectedModel,
         selectedReplyLanguage,
     ]);
 

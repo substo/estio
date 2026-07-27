@@ -2149,7 +2149,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const handlePreviewTranslatedReply = useCallback(async (
         sourceText: string,
         channel: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
-        targetLanguage?: string | null
+        targetLanguage?: string | null,
+        model?: string | null
     ) => {
         const conversationId = String(activeIdRef.current || "").trim();
         if (!conversationId) {
@@ -2158,7 +2159,13 @@ export function ConversationInterface({ locationId, initialConversations, initia
         const response = await fetch("/api/conversations/preview-reply-translation", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ conversationId, sourceText, channel, targetLanguage: targetLanguage || null }),
+            body: JSON.stringify({
+                conversationId,
+                sourceText,
+                channel,
+                targetLanguage: targetLanguage || null,
+                model: model || null,
+            }),
         });
         const result = await response.json().catch(() => null);
         if (!result) {
@@ -3003,7 +3010,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const handleDealPreviewTranslatedReply = useCallback(async (
         sourceText: string,
         channel: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
-        targetLanguage?: string | null
+        targetLanguage?: string | null,
+        model?: string | null
     ) => {
         if (!selectedDealConversation) {
             return { success: false as const, error: "No conversation selected." };
@@ -3016,6 +3024,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 sourceText,
                 channel,
                 targetLanguage: targetLanguage || null,
+                model: model || null,
             }),
         });
         const result = await response.json().catch(() => null);

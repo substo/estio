@@ -64,7 +64,8 @@ interface UnifiedTimelineProps {
     onPreviewTranslatedReply?: (
         sourceText: string,
         channel: ComposerChannel,
-        targetLanguage?: string | null
+        targetLanguage?: string | null,
+        model?: string | null
     ) => Promise<{
         success: boolean;
         error?: string;

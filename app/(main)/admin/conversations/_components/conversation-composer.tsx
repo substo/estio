@@ -79,7 +79,8 @@ interface ConversationComposerProps {
     onPreviewTranslatedReply?: (
         sourceText: string,
         channel: ComposerChannel,
-        targetLanguage?: string | null
+        targetLanguage?: string | null,
+        model?: string | null
     ) => Promise<{
         success: boolean;
         error?: string;
@@ -419,6 +420,7 @@ export function ConversationComposer({
         isUnavailable: isSendUnavailable,
         selectedChannel,
         selectedReplyLanguage,
+        selectedModel,
         autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
         onPreviewTranslatedReply,
     });
@@ -433,6 +435,7 @@ export function ConversationComposer({
         isRecording: isRecordingRef,
         selectedChannel,
         selectedReplyLanguage,
+        selectedModel,
         autoReplyLanguageValue: REPLY_LANGUAGE_AUTO_VALUE,
         resolvedSendLanguage,
         agentWorkingLanguage,

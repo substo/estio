@@ -6,7 +6,8 @@ import type { ComposerAiDraftFeedback } from "./conversation-draft-generation";
 type PreviewTranslatedReply = (
     sourceText: string,
     channel: ComposerChannel,
-    targetLanguage?: string | null
+    targetLanguage?: string | null,
+    model?: string | null
 ) => Promise<{
     success: boolean;
     error?: string;
@@ -38,6 +39,7 @@ export function resolveComposerPreviewSendPayload(args: {
     translationPreviewLanguage?: string | null;
     translationPreviewDetectedSource?: string | null;
     selectedReplyLanguage: string;
+    selectedModel: string;
     autoReplyLanguageValue: string;
 }): ComposerSendPayload {
     const sourceText = String(args.sourceText || "").trim();
@@ -92,6 +94,7 @@ export function useConversationComposerSend({
     isRecording,
     selectedChannel,
     selectedReplyLanguage,
+    selectedModel,
     autoReplyLanguageValue,
     resolvedSendLanguage,
     agentWorkingLanguage,
@@ -144,7 +147,12 @@ export function useConversationComposerSend({
                 const requestedTargetLanguage = selectedReplyLanguage === autoReplyLanguageValue
                     ? null
                     : (resolvedSendLanguage || selectedReplyLanguage);
-                const result = await onPreviewTranslatedReply(sourceText, selectedChannel, requestedTargetLanguage);
+                const result = await onPreviewTranslatedReply(
+                    sourceText,
+                    selectedChannel,
+                    requestedTargetLanguage,
+                    selectedModel
+                );
                 if (result?.success && result.translatedText?.trim()) {
                     const translated = result.translatedText.trim();
                     if (translated !== sourceText) {

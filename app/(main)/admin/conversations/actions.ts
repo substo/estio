@@ -18,6 +18,7 @@ import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-languag
 import { z } from "zod";
 import { getModelForTask } from "@/lib/ai/model-router";
 import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveReplyTranslationModel } from "@/lib/conversations/reply-translation-model";
 import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
@@ -516,7 +517,7 @@ function queueGhlConversationStatusSync(args: {
 const DEFAULT_TRANSLATION_TARGET_LANGUAGE = "en";
 const MESSAGE_TRANSLATION_MODEL = GEMINI_DRAFT_FAST_DEFAULT;
 const MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS = 2048;
-const REPLY_TRANSLATION_MAX_OUTPUT_TOKENS = 65536;
+const REPLY_TRANSLATION_MAX_OUTPUT_TOKENS = 2048;
 const MESSAGE_TRANSLATION_STATUS = {
     completed: "completed",
     failed: "failed",
@@ -693,7 +694,7 @@ async function runMessageTranslationLLM(args: {
         modelId,
         systemPrompt,
         userPrompt,
-        { jsonMode: false, temperature: 0, maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS, thinkingBudget: 0 }
+        { jsonMode: false, temperature: 0, maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS }
     );
     const detectedSourceLanguage = normalizeReplyLanguage(detectLanguageFromText(args.sourceText));
 
@@ -719,6 +720,7 @@ async function runReplyTranslationLLM(args: {
     sourceText: string;
     targetLanguage: string;
     modelOverride?: string;
+    locationId: string;
 }) {
     const modelId = String(args.modelOverride || "").trim() || GEMINI_FLASH_LITE_LATEST_ALIAS;
     const systemPrompt = [
@@ -737,7 +739,12 @@ async function runReplyTranslationLLM(args: {
         modelId,
         systemPrompt,
         userPrompt,
-        { jsonMode: false, temperature: 0, maxOutputTokens: REPLY_TRANSLATION_MAX_OUTPUT_TOKENS, thinkingBudget: 0 }
+        {
+            jsonMode: false,
+            temperature: 0,
+            maxOutputTokens: REPLY_TRANSLATION_MAX_OUTPUT_TOKENS,
+            locationId: args.locationId,
+        }
     );
 
     return {
@@ -5891,7 +5898,8 @@ export async function previewTranslatedReply(
     conversationId: string,
     sourceText: string,
     channel: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY",
-    targetLanguage?: string | null
+    targetLanguage?: string | null,
+    requestedModelId?: string | null
 ) {
     const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
@@ -5932,11 +5940,16 @@ export async function previewTranslatedReply(
     const sourceHash = buildTranslationSourceHash(normalizedSourceText);
 
     try {
-        const translationModel = await resolveConversationTranslationModel(location.id);
+        const configuredTranslationModel = await resolveConversationTranslationModel(location.id);
+        const translationModel = resolveReplyTranslationModel({
+            requestedModel: requestedModelId,
+            configuredModel: configuredTranslationModel,
+        });
         const translation = await runReplyTranslationLLM({
             sourceText: normalizedSourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
+            locationId: location.id,
         });
         const completeness = validateReplyTranslationCompleteness({
             sourceText: normalizedSourceText,
@@ -5976,6 +5989,8 @@ export async function previewTranslatedReply(
                 cached: false,
                 elapsedMs,
                 mode: "fast_reply_translation",
+                requestedModel: String(requestedModelId || "").trim() || null,
+                configuredModel: configuredTranslationModel,
             },
         });
         console.info("[Conversation Translation Timing]", JSON.stringify({
