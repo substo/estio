@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Conversation } from "@/lib/ghl/conversations";
 
-const SEARCH_DEBOUNCE_MS = 350;
-
 type UseConversationListControlsArgs = {
     conversations: Conversation[];
     searchQuery: string;
@@ -26,74 +24,28 @@ export function useConversationListControls({
 }: UseConversationListControlsArgs) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSearchExpanded, setIsSearchExpanded] = useState(!!searchQuery);
-    const [localQuery, setLocalQuery] = useState(searchQuery || "");
-    const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [localQuery, setLocalQueryState] = useState(searchQuery || "");
     const listScrollRef = useRef<HTMLDivElement | null>(null);
     const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
-    const cancelPendingSearch = useCallback(() => {
-        if (searchDebounceRef.current) {
-            clearTimeout(searchDebounceRef.current);
-            searchDebounceRef.current = null;
-        }
-    }, []);
-
     const commitSearch = useCallback((query: string) => {
-        cancelPendingSearch();
         onSearchChange?.(query);
-    }, [cancelPendingSearch, onSearchChange]);
+    }, [onSearchChange]);
+
+    const setLocalQuery = useCallback((query: string) => {
+        setLocalQueryState(query);
+        onSearchChange?.(query);
+    }, [onSearchChange]);
 
     const clearSearch = useCallback(() => {
-        setLocalQuery("");
+        setLocalQueryState("");
         commitSearch("");
     }, [commitSearch]);
 
     useEffect(() => {
-        setLocalQuery(searchQuery || "");
+        setLocalQueryState(searchQuery || "");
         if (searchQuery) setIsSearchExpanded(true);
     }, [searchQuery]);
-
-    useEffect(() => {
-        if (!onSearchChange) return;
-
-        const trimmedLocalQuery = localQuery.trim();
-        const trimmedSearchQuery = searchQuery.trim();
-
-        if (!trimmedLocalQuery) {
-            cancelPendingSearch();
-            if (trimmedSearchQuery) {
-                onSearchChange("");
-            }
-            return;
-        }
-
-        if (trimmedLocalQuery === trimmedSearchQuery) {
-            cancelPendingSearch();
-            return;
-        }
-
-        searchDebounceRef.current = setTimeout(() => {
-            commitSearch(localQuery);
-        }, SEARCH_DEBOUNCE_MS);
-
-        return cancelPendingSearch;
-    }, [cancelPendingSearch, commitSearch, localQuery, onSearchChange, searchQuery]);
-
-    const handleMouseEnter = () => {
-        if (closeTimeoutRef.current) {
-            clearTimeout(closeTimeoutRef.current);
-            closeTimeoutRef.current = null;
-        }
-        setIsMenuOpen(true);
-    };
-
-    const handleMouseLeave = () => {
-        closeTimeoutRef.current = setTimeout(() => {
-            setIsMenuOpen(false);
-            closeTimeoutRef.current = null;
-        }, 150);
-    };
 
     useEffect(() => {
         if (effectiveViewMode !== 'chats') return;
@@ -126,8 +78,6 @@ export function useConversationListControls({
         setLocalQuery,
         commitSearch,
         clearSearch,
-        handleMouseEnter,
-        handleMouseLeave,
         listScrollRef,
         loadMoreSentinelRef,
     };

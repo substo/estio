@@ -23,8 +23,6 @@ interface ConversationListHeaderProps {
     clearSearch: () => void;
     isMenuOpen: boolean;
     setIsMenuOpen: (open: boolean) => void;
-    handleMouseEnter: () => void;
-    handleMouseLeave: () => void;
     onSelectAll?: (select: boolean, ids?: string[]) => void;
     onToggleSelectionMode?: (enabled: boolean) => void;
     onBind?: (ids: string[]) => void;
@@ -56,8 +54,6 @@ export function ConversationListHeader({
     clearSearch,
     isMenuOpen,
     setIsMenuOpen,
-    handleMouseEnter,
-    handleMouseLeave,
     onSelectAll,
     onToggleSelectionMode,
     onBind,
@@ -316,41 +312,85 @@ export function ConversationListHeader({
                     </Tabs>
                 )}
 
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                    <div className="flex items-center gap-1 min-w-0">
-                        {showSearch && !isSearchExpanded && (
+                <div className="flex min-w-0 items-center gap-1">
+                    <div className="flex min-w-0 flex-1 items-center gap-1">
+                        {showSearch && isSearchExpanded ? (
+                            <div className="relative min-w-0 flex-1 animate-in fade-in duration-150">
+                                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2">
+                                    {isSearching ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />
+                                    ) : (
+                                        <Search className="h-3.5 w-3.5 text-slate-400" />
+                                    )}
+                                </div>
+                                <input
+                                    type="text"
+                                    inputMode="search"
+                                    role="searchbox"
+                                    placeholder="Search contacts"
+                                    autoFocus
+                                    aria-label="Search contacts"
+                                    className="block h-8 w-full rounded-md border border-indigo-200 bg-white py-1 pl-7 pr-8 text-xs leading-5 text-slate-900 placeholder-slate-400 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-indigo-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500"
+                                    value={localQuery}
+                                    onChange={(event) => setLocalQuery(event.target.value)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter') {
+                                            commitSearch(localQuery);
+                                        } else if (event.key === 'Escape') {
+                                            clearSearch();
+                                            setIsSearchExpanded(false);
+                                        }
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    className="absolute inset-y-0 right-0 inline-flex w-8 items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                    onClick={() => {
+                                        if (localQuery || searchQuery) {
+                                            clearSearch();
+                                        } else {
+                                            setIsSearchExpanded(false);
+                                        }
+                                    }}
+                                    aria-label={localQuery || searchQuery ? "Clear contact search" : "Close contact search"}
+                                >
+                                    <X className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        ) : showSearch ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-8 w-8 text-slate-600 hover:text-slate-900 shrink-0 dark:text-slate-300 dark:hover:text-white"
+                                        className="h-8 w-8 shrink-0 p-0 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
                                         onClick={() => setIsSearchExpanded(true)}
+                                        aria-label="Search contacts"
                                     >
-                                        <Search className="w-4 h-4" />
+                                        <Search className="h-4 w-4" />
                                     </Button>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom">Search Contacts</TooltipContent>
                             </Tooltip>
-                        )}
+                        ) : null}
 
                         {showChatMailboxControls && (
-                            <div
-                                onMouseEnter={handleMouseEnter}
-                                onMouseLeave={handleMouseLeave}
-                                className="flex items-center min-w-0"
-                            >
+                            <div className="flex min-w-0 items-center">
                                 <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
                                     <DropdownMenuTrigger asChild>
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            className="h-8 min-w-0 max-w-[8rem] justify-start gap-1.5 px-2 text-xs text-slate-700 dark:text-slate-200"
+                                            className={isSearchExpanded
+                                                ? "h-8 w-8 shrink-0 justify-center p-0 text-slate-700 dark:text-slate-200"
+                                                : "h-8 min-w-0 max-w-[8rem] justify-start gap-1.5 px-2 text-xs text-slate-700 dark:text-slate-200"
+                                            }
+                                            aria-label={`${viewFilter === 'active' ? 'Inbox' : viewFilter === 'archived' ? 'Archived' : 'Trash'} mailbox`}
                                         >
-                                            {viewFilter === 'active' && <Inbox className="w-4 h-4 shrink-0" />}
-                                            {viewFilter === 'archived' && <Archive className="w-4 h-4 shrink-0" />}
-                                            {viewFilter === 'trash' && <Trash2 className="w-4 h-4 shrink-0" />}
-                                            <span className="truncate">
+                                            {viewFilter === 'active' && <Inbox className="h-4 w-4 shrink-0" />}
+                                            {viewFilter === 'archived' && <Archive className="h-4 w-4 shrink-0" />}
+                                            {viewFilter === 'trash' && <Trash2 className="h-4 w-4 shrink-0" />}
+                                            <span className={isSearchExpanded ? "sr-only" : "truncate"}>
                                                 {viewFilter === 'active' && 'Inbox'}
                                                 {viewFilter === 'archived' && 'Archived'}
                                                 {viewFilter === 'trash' && 'Trash'}
@@ -360,8 +400,6 @@ export function ConversationListHeader({
                                     <DropdownMenuContent
                                         align="start"
                                         className="w-32"
-                                        onMouseEnter={handleMouseEnter}
-                                        onMouseLeave={handleMouseLeave}
                                     >
                                         <DropdownMenuItem onClick={() => { onViewFilterChange('active'); setIsMenuOpen(false); }} className="gap-2">
                                             <Inbox className="w-4 h-4" /> Inbox
@@ -379,7 +417,7 @@ export function ConversationListHeader({
                         )}
                     </div>
 
-                    {showChatActions && (
+                    {showChatActions && !isSearchExpanded && (
                         <div className="flex items-center gap-1 shrink-0">
                             {viewFilter === 'trash' && onEmptyTrash && conversations.length > 0 && (
                                 <Tooltip>
@@ -477,41 +515,6 @@ export function ConversationListHeader({
                 </div>
             </TooltipProvider>
 
-            {showSearch && isSearchExpanded && (
-                <div className="relative animate-in slide-in-from-top-1 fade-in duration-200">
-                    <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-                        <Search className="h-3 w-3 text-slate-400" />
-                    </div>
-                    <input
-                        type="text"
-                        placeholder="Search contacts..."
-                        autoFocus
-                        className="block w-full pl-7 pr-8 py-1.5 text-xs border border-indigo-200 rounded-md leading-5 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors dark:border-indigo-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500"
-                        value={localQuery}
-                        onChange={(e) => setLocalQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                commitSearch(localQuery);
-                            } else if (e.key === 'Escape') {
-                                clearSearch();
-                                setIsSearchExpanded(false);
-                            }
-                        }}
-                    />
-                    <button
-                        className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
-                        onClick={() => {
-                            if (localQuery || searchQuery) {
-                                clearSearch();
-                            } else {
-                                setIsSearchExpanded(false);
-                            }
-                        }}
-                    >
-                        <X className="h-3 w-3" />
-                    </button>
-                </div>
-            )}
         </div>
     );
 }

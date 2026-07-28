@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Conversation, Message } from '@/lib/ghl/conversations';
 import type { ContactIdentityPatch } from '../../contacts/_components/contact-form';
@@ -63,6 +63,7 @@ import {
     type WorkspaceHydrationStatus,
 } from '@/lib/conversations/workspace-state';
 import { ConversationList } from './conversation-list';
+import { filterLoadedConversations } from './conversation-list-search';
 import { ChatWorkspacePane } from './chat-workspace-pane';
 import { DealWorkspacePane } from './deal-workspace-pane';
 import { UndoToast } from './undo-toast';
@@ -437,6 +438,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<Conversation[]>([]);
+    const [resolvedSearchQuery, setResolvedSearchQuery] = useState('');
     const searchRequestIdRef = useRef(0);
 
     const [deals, setDeals] = useState<any[]>(initialDeals || []);
@@ -462,6 +464,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
 
         if (!normalizedSearchQuery) {
             setSearchResults([]);
+            setResolvedSearchQuery('');
             setIsSearching(false);
             return;
         }
@@ -475,29 +478,45 @@ export function ConversationInterface({ locationId, initialConversations, initia
             return;
         }
 
-        searchConversations(normalizedSearchQuery, { limit: 50, status: viewFilter })
-            .then(res => {
-                if (isCancelled || searchRequestIdRef.current !== requestId) return;
-                if (res.success) {
-                    setSearchResults(res.conversations || []);
-                } else {
-                    toast({ title: "Search Failed", description: String(res.error), variant: "destructive" });
-                    setSearchResults([]);
-                }
+        const searchTimer = setTimeout(() => {
+            searchConversations(normalizedSearchQuery, {
+                limit: 50,
+                status: viewFilter,
+                mode: 'contact',
             })
-            .catch(err => {
-                if (isCancelled || searchRequestIdRef.current !== requestId) return;
-                console.error("Search failed:", err);
-                toast({ title: "Error", description: "Search failed.", variant: "destructive" });
-            })
-            .finally(() => {
-                if (!isCancelled && searchRequestIdRef.current === requestId) setIsSearching(false);
-            });
+                .then(res => {
+                    if (isCancelled || searchRequestIdRef.current !== requestId) return;
+                    if (res.success) {
+                        setSearchResults(res.conversations || []);
+                        setResolvedSearchQuery(normalizedSearchQuery);
+                    } else {
+                        toast({ title: "Search Failed", description: String(res.error), variant: "destructive" });
+                    }
+                })
+                .catch(err => {
+                    if (isCancelled || searchRequestIdRef.current !== requestId) return;
+                    console.error("Search failed:", err);
+                    toast({ title: "Error", description: "Search failed.", variant: "destructive" });
+                })
+                .finally(() => {
+                    if (!isCancelled && searchRequestIdRef.current === requestId) setIsSearching(false);
+                });
+        }, 150);
 
         return () => {
             isCancelled = true;
+            clearTimeout(searchTimer);
         };
     }, [searchQuery, viewFilter, viewMode]);
+
+    const normalizedSearchQuery = searchQuery.trim();
+    const instantSearchResults = useMemo(
+        () => filterLoadedConversations(conversations, normalizedSearchQuery),
+        [conversations, normalizedSearchQuery],
+    );
+    const visibleConversationSearchResults = resolvedSearchQuery === normalizedSearchQuery && !isSearching
+        ? searchResults
+        : instantSearchResults;
 
     const initialDealId = getSearchParam('dealId');
     const initialUrlConversationId = getSearchParam('id') || initialSelectedConversationId || null;
@@ -3093,7 +3112,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             isSearching={isSearching}
-            conversations={searchQuery.trim() ? searchResults : conversations}
+            conversations={normalizedSearchQuery ? visibleConversationSearchResults : conversations}
             selectedId={viewMode === 'chats' ? activeId : activeDealId}
             onSelect={handleSelect}
             onHoverConversation={viewMode === 'chats' ? (conversationId) => {

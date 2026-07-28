@@ -98,8 +98,6 @@ export function ConversationList({
         setLocalQuery,
         commitSearch,
         clearSearch,
-        handleMouseEnter,
-        handleMouseLeave,
         listScrollRef,
         loadMoreSentinelRef,
     } = useConversationListControls({
@@ -129,8 +127,6 @@ export function ConversationList({
             clearSearch={clearSearch}
             isMenuOpen={isMenuOpen}
             setIsMenuOpen={setIsMenuOpen}
-            handleMouseEnter={handleMouseEnter}
-            handleMouseLeave={handleMouseLeave}
             onSelectAll={onSelectAll}
             onToggleSelectionMode={onToggleSelectionMode}
             onBind={onBind}
@@ -192,19 +188,6 @@ export function ConversationList({
 
 
 
-    if (isSearching) {
-        return (
-            <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
-                <WhatsAppStatus />
-                {header}
-                <div className="p-8 flex flex-col items-center justify-center text-slate-500">
-                    <Loader2 className="w-6 h-6 animate-spin mb-2" />
-                    <p className="text-sm">Searching...</p>
-                </div>
-            </div>
-        );
-    }
-
     if (viewFilter === 'tasks') {
         return (
             <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
@@ -225,7 +208,9 @@ export function ConversationList({
             <div className="h-full min-h-0 flex flex-col border-r min-w-0 w-full max-w-full overflow-x-hidden dark:border-slate-800 dark:bg-slate-950">
                 <WhatsAppStatus />
                 {header}
-                <div className="p-4 text-center text-gray-500 dark:text-slate-400">No conversations found.</div>
+                <div className="p-4 text-center text-gray-500 dark:text-slate-400">
+                    {isSearching ? "Searching all contacts…" : "No conversations found."}
+                </div>
             </div>
         );
     }
