@@ -33,7 +33,8 @@ import {
 import { getConversationChannelInfo } from "./conversation-channel-info";
 import { getConversationLifecycleUi } from "@/lib/conversations/conversation-status-ui";
 import type { ComposerChannel } from "./use-conversation-composer-translation-preview";
-import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
+import type { ComposerAiDraftFeedback, DraftChunkHandler, GenerateDraftResult } from "./conversation-draft-generation";
+import type { DraftOutputLength } from "@/lib/ai/draft-output-length";
 import type { WhatsAppHistorySyncUiState } from "./whatsapp-history-sync-ui";
 import {
     isMobileAiSuggestionDefaultCollapsed,
@@ -82,7 +83,8 @@ interface ChatWindowProps {
         draftLanguage?: string | null,
         baseDraft?: string | null,
         channel?: ComposerChannel | null,
-        onChunk?: (chunk: string) => void
+        onChunk?: DraftChunkHandler,
+        outputLength?: DraftOutputLength
     ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onTranslateMessage?: (messageId: string, targetLanguage?: string | null) => Promise<{

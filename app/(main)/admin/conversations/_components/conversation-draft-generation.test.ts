@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { appendAiStreamText, selectAiStreamFinalText } from '@/lib/ai/stream-text';
+import {
+    getDraftOutputLengthInstruction,
+    normalizeDraftOutputLength,
+    resolveDraftOutputTokenBudget,
+} from '@/lib/ai/draft-output-length';
 import { generateDraftWithStreamingFallback, resolveDraftStreamTimeoutMs, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
 import { resolveComposerDraftModelOverride } from './use-conversation-composer-ai-draft';
 
@@ -38,8 +43,44 @@ test('generate draft results preserve the backend truncation signal for composer
     assert.equal(result.truncated, true);
 });
 
+test('draft output length preferences are normalized and bounded server-side', () => {
+    assert.equal(normalizeDraftOutputLength('LONG'), 'long');
+    assert.equal(normalizeDraftOutputLength('untrusted-value'), 'auto');
+    assert.equal(resolveDraftOutputTokenBudget({
+        preference: 'auto',
+        isEmail: false,
+        modelMaxOutputTokens: 65_536,
+    }), 4_096);
+    assert.equal(resolveDraftOutputTokenBudget({
+        preference: 'long',
+        isEmail: true,
+        modelMaxOutputTokens: 8_000,
+    }), 8_000);
+    assert.equal(resolveDraftOutputTokenBudget({
+        preference: 'auto',
+        isEmail: false,
+        modelMaxOutputTokens: Number.NaN,
+    }), 4_096);
+});
+
+test('draft output budgets preserve send-ready text without allowing unbounded requests', () => {
+    assert.equal(resolveDraftOutputTokenBudget({
+        preference: 'short',
+        isEmail: false,
+        modelMaxOutputTokens: 65_536,
+        preservedText: 'x'.repeat(30_000),
+    }), 10_512);
+    assert.equal(resolveDraftOutputTokenBudget({
+        preference: 'long',
+        isEmail: true,
+        modelMaxOutputTokens: 65_536,
+        preservedText: 'x'.repeat(60_000),
+    }), 16_384);
+    assert.match(getDraftOutputLengthInstruction('short', false), /brief and direct/i);
+});
+
 test('resolveDraftStreamTimeoutMs gives completion-chunk providers enough time', () => {
-    assert.equal(resolveDraftStreamTimeoutMs('gemini-flash-latest'), 12_000);
+    assert.equal(resolveDraftStreamTimeoutMs('gemini-flash-latest'), 35_000);
     assert.equal(resolveDraftStreamTimeoutMs('chatgpt_subscription:gpt-5.5'), 45_000);
     assert.equal(resolveDraftStreamTimeoutMs('openai:gpt-4o-mini'), 45_000);
 });
@@ -192,7 +233,7 @@ test('generateDraftWithStreamingFallback passes selected channel through stream 
     assert.deepEqual(result, { draft: 'WhatsApp draft' });
 });
 
-test('streamDraftViaApi includes selected channel in request options', async () => {
+test('streamDraftViaApi includes selected channel and output length in request options', async () => {
     let requestBody: any = null;
     const response = new Response(
         `${JSON.stringify({ type: 'complete', result: { draft: 'stream draft' } })}\n`,
@@ -208,9 +249,11 @@ test('streamDraftViaApi includes selected channel in request options', async () 
         contactId: 'contact-1',
         mode: 'chat',
         channel: 'WhatsApp',
+        outputLength: 'long',
     }, fetchImpl);
 
     assert.equal(requestBody.options.channel, 'WhatsApp');
+    assert.equal(requestBody.options.outputLength, 'long');
     assert.deepEqual(result, { draft: 'stream draft' });
 });
 
@@ -327,6 +370,34 @@ test('streamDraftViaApi parses chunk lines and complete result', async () => {
 
     assert.deepEqual(chunks, ['Hel', 'lo']);
     assert.deepEqual(result, { draft: 'Hello', reasoning: 'ok' });
+});
+
+test('streamDraftViaApi resets partial text before a transparent truncation retry', async () => {
+    const encoder = new TextEncoder();
+    const events: Array<{ chunk: string; reset: boolean }> = [];
+    const body = new ReadableStream({
+        start(controller) {
+            controller.enqueue(encoder.encode('{"type":"chunk","text":"Partial"}\n'));
+            controller.enqueue(encoder.encode('{"type":"reset","reason":"truncation_retry"}\n'));
+            controller.enqueue(encoder.encode('{"type":"chunk","text":"Complete"}\n'));
+            controller.enqueue(encoder.encode('{"type":"complete","result":{"draft":"Complete"}}\n'));
+            controller.close();
+        },
+    });
+
+    const result = await streamDraftViaApi({
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        mode: 'chat',
+        onChunk: (chunk, event) => events.push({ chunk, reset: event?.reset === true }),
+    }, async () => new Response(body, { status: 200 }));
+
+    assert.deepEqual(events, [
+        { chunk: 'Partial', reset: false },
+        { chunk: '', reset: true },
+        { chunk: 'Complete', reset: false },
+    ]);
+    assert.deepEqual(result, { draft: 'Complete' });
 });
 
 test('streamDraftViaApi maps a pending property import response to a typed result', async () => {

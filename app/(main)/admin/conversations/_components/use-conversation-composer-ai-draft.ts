@@ -11,10 +11,21 @@ import {
 } from "@/lib/ai/reply-language-options";
 import { appendAiStreamText } from "@/lib/ai/stream-text";
 import {
+    DEFAULT_DRAFT_OUTPUT_LENGTH,
+    DRAFT_OUTPUT_LENGTH_STORAGE_KEY,
+    normalizeDraftOutputLength,
+    type DraftOutputLength,
+} from "@/lib/ai/draft-output-length";
+import {
     getConversationLanguageSourceLabel,
     resolveConversationLanguageContext,
 } from "@/lib/conversations/language-context";
-import { selectComposerFinalDraftText, type ComposerAiDraftFeedback, type GenerateDraftResult } from "./conversation-draft-generation";
+import {
+    selectComposerFinalDraftText,
+    type ComposerAiDraftFeedback,
+    type DraftChunkHandler,
+    type GenerateDraftResult,
+} from "./conversation-draft-generation";
 
 type GenerateDraft = (
     instruction?: string,
@@ -22,7 +33,8 @@ type GenerateDraft = (
     draftLanguage?: string | null,
     baseDraft?: string | null,
     channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null,
-    onChunk?: (chunk: string) => void
+    onChunk?: DraftChunkHandler,
+    outputLength?: DraftOutputLength
 ) => Promise<GenerateDraftResult | null>;
 
 type SetReplyLanguageOverride = (
@@ -83,6 +95,8 @@ export function useConversationComposerAiDraft({
     selectedModel: string;
     handleModelChange: (model: string) => void;
     availableModels: ReturnType<typeof useAiModelCatalog>["models"];
+    outputLength: DraftOutputLength;
+    handleOutputLengthChange: (value: string) => void;
     selectedReplyLanguage: string;
     setSelectedReplyLanguage: Dispatch<SetStateAction<string>>;
     replyLanguageOpen: boolean;
@@ -120,6 +134,7 @@ export function useConversationComposerAiDraft({
     const [replyLanguageOpen, setReplyLanguageOpen] = useState(false);
     const [savingReplyLanguage, setSavingReplyLanguage] = useState(false);
     const [agentDraftLanguage, setAgentDraftLanguage] = useState<string>(DEFAULT_REPLY_LANGUAGE);
+    const [outputLength, setOutputLength] = useState<DraftOutputLength>(DEFAULT_DRAFT_OUTPUT_LENGTH);
     const [aiDraftRestorePoint, setAiDraftRestorePoint] = useState<{ conversationId: string; draft: string } | null>(null);
 
     const appliedInsertDraftSeedKeyRef = useRef<string | null>(null);
@@ -135,7 +150,24 @@ export function useConversationComposerAiDraft({
 
     useEffect(() => {
         setAgentDraftLanguage(getAgentDraftLanguage());
+        try {
+            setOutputLength(normalizeDraftOutputLength(
+                window.localStorage.getItem(DRAFT_OUTPUT_LENGTH_STORAGE_KEY)
+            ));
+        } catch {
+            setOutputLength(DEFAULT_DRAFT_OUTPUT_LENGTH);
+        }
     }, []);
+
+    const handleOutputLengthChange = (value: string) => {
+        const nextValue = normalizeDraftOutputLength(value);
+        setOutputLength(nextValue);
+        try {
+            window.localStorage.setItem(DRAFT_OUTPUT_LENGTH_STORAGE_KEY, nextValue);
+        } catch {
+            // The preference remains active for this session when storage is unavailable.
+        }
+    };
 
     useEffect(() => {
         if (!insertDraftSeed?.key) return;
@@ -180,7 +212,16 @@ export function useConversationComposerAiDraft({
                 agentDraftLanguage,
                 baseDraft,
                 selectedChannel || null,
-                (chunk) => {
+                (chunk, event) => {
+                    if (event?.reset) {
+                        streamedBuffer = "";
+                        onDraftChange("");
+                        logComposerDraftTiming("client_stream_reset", {
+                            conversationId: conversation?.id || null,
+                            reason: "truncation_retry",
+                        });
+                        return;
+                    }
                     if (!chunk) return;
                     if (firstChunkMs === null) {
                         firstChunkMs = Date.now() - startedAt;
@@ -191,7 +232,8 @@ export function useConversationComposerAiDraft({
                     }
                     streamedBuffer = appendAiStreamText(streamedBuffer, chunk);
                     onDraftChange(streamedBuffer);
-                }
+                },
+                outputLength
             );
             if (result?.truncated) {
                 onDraftChange(previousComposerDraft);
@@ -231,6 +273,7 @@ export function useConversationComposerAiDraft({
                         hasInstruction: !!instruction,
                         hasBaseDraft: !!baseDraft,
                         draftLanguage: agentDraftLanguage,
+                        outputLength,
                         selectedSkillId: result?.selectedSkillId || null,
                         routeReason: result?.routeReason || null,
                         requiresHumanApproval: result?.requiresHumanApproval ?? null,
@@ -316,6 +359,8 @@ export function useConversationComposerAiDraft({
         selectedModel,
         handleModelChange,
         availableModels,
+        outputLength,
+        handleOutputLengthChange,
         selectedReplyLanguage,
         setSelectedReplyLanguage,
         replyLanguageOpen,

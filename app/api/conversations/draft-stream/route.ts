@@ -7,6 +7,11 @@ import { ensureLocalContactSynced } from "@/lib/crm/contact-sync";
 import { generateDraft } from "@/lib/ai/coordinator";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import { getPendingPasteLeadPropertyImports } from "@/lib/queue/paste-lead-property-import";
+import {
+    MAX_DRAFT_OUTPUT_TOKENS,
+    normalizeDraftOutputLength,
+    type DraftOutputLength,
+} from "@/lib/ai/draft-output-length";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +27,7 @@ type DraftStreamBody = {
         dealId?: string;
         draftLanguage?: string | null;
         channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
+        outputLength?: DraftOutputLength;
         ignorePendingPropertyImport?: boolean;
     };
 };
@@ -87,6 +93,7 @@ export async function POST(req: NextRequest) {
         ? body.options.channel
         : null;
     const ignorePendingPropertyImport = body?.options?.ignorePendingPropertyImport === true;
+    const outputLength = normalizeDraftOutputLength(body?.options?.outputLength);
 
     if (!conversationId || !contactId) {
         return NextResponse.json({ success: false, error: "conversationId and contactId are required" }, { status: 400 });
@@ -174,7 +181,7 @@ export async function POST(req: NextRequest) {
                     ts: new Date().toISOString(),
                 });
 
-                const result = await generateDraft({
+                const generateWithBudget = (minimumOutputTokens?: number) => generateDraft({
                     conversationId,
                     contactId,
                     locationId: location.id,
@@ -188,6 +195,8 @@ export async function POST(req: NextRequest) {
                     dealId,
                     draftLanguage,
                     channel,
+                    outputLength,
+                    minimumOutputTokens,
                     stream: true,
                     latencyMode: "fast",
                     onToken: (chunk) => {
@@ -203,6 +212,30 @@ export async function POST(req: NextRequest) {
                         push({ type: "chunk", text: chunk });
                     },
                 });
+
+                let result = await generateWithBudget();
+                const initialOutputTokens = Number(result?.telemetry?.model?.maxOutputTokens || 0);
+                if (
+                    result?.truncated === true
+                    && initialOutputTokens > 0
+                    && initialOutputTokens < MAX_DRAFT_OUTPUT_TOKENS
+                ) {
+                    const retryOutputTokens = Math.min(
+                        MAX_DRAFT_OUTPUT_TOKENS,
+                        initialOutputTokens * 2
+                    );
+                    logDraftStreamTiming("route_stream_truncation_retry", {
+                        conversationId,
+                        initialOutputTokens,
+                        retryOutputTokens,
+                        outputLength,
+                    });
+                    push({
+                        type: "reset",
+                        reason: "truncation_retry",
+                    });
+                    result = await generateWithBudget(retryOutputTokens);
+                }
 
                 logDraftStreamTiming("route_stream_complete", {
                     conversationId,

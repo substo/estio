@@ -1,5 +1,11 @@
+import type { DraftOutputLength } from "@/lib/ai/draft-output-length";
+
 type DraftMode = "chat" | "deal";
 export type DraftComposerChannel = "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
+export type DraftChunkHandler = (
+    chunk: string,
+    event?: { reset?: boolean }
+) => void;
 
 export type GenerateDraftResult = {
     draft?: string | null;
@@ -63,7 +69,8 @@ type DraftStreamArgs = {
     dealId?: string | null;
     draftLanguage?: string | null;
     channel?: DraftComposerChannel | null;
-    onChunk?: (chunk: string) => void;
+    outputLength?: DraftOutputLength;
+    onChunk?: DraftChunkHandler;
     timeoutMs?: number;
     ignorePendingPropertyImport?: boolean;
 };
@@ -79,11 +86,12 @@ type DraftFallbackArgs = {
         dealId?: string;
         draftLanguage?: string | null;
         channel?: DraftComposerChannel | null;
+        outputLength?: DraftOutputLength;
         ignorePendingPropertyImport?: boolean;
     };
 };
 
-const DEFAULT_DRAFT_STREAM_TIMEOUT_MS = 12_000;
+const DEFAULT_DRAFT_STREAM_TIMEOUT_MS = 35_000;
 const COMPLETION_CHUNK_DRAFT_STREAM_TIMEOUT_MS = 45_000;
 
 export function resolveDraftStreamTimeoutMs(model?: string | null) {
@@ -159,6 +167,7 @@ export async function streamDraftViaApi(
                     dealId: args.dealId,
                     draftLanguage: args.draftLanguage ?? null,
                     channel: args.channel ?? undefined,
+                    outputLength: args.outputLength,
                     ignorePendingPropertyImport: args.ignorePendingPropertyImport === true,
                 },
             }),
@@ -232,6 +241,11 @@ export async function streamDraftViaApi(
             return;
         }
 
+        if (payload?.type === "reset") {
+            args.onChunk?.("", { reset: true });
+            return;
+        }
+
         if (payload?.type === "error") {
             throw new Error(String(payload?.message || "Draft stream failed."));
         }
@@ -292,8 +306,9 @@ export async function generateDraftWithStreamingFallback(args: {
     dealId?: string;
     draftLanguage?: string | null;
     channel?: DraftComposerChannel | null;
+    outputLength?: DraftOutputLength;
     ignorePendingPropertyImport?: boolean;
-    onChunk?: (chunk: string) => void;
+    onChunk?: DraftChunkHandler;
     streamTimeoutMs?: number;
     streamDraft?: (args: DraftStreamArgs) => Promise<GenerateDraftResult | null>;
     generateDraft: (
@@ -322,6 +337,7 @@ export async function generateDraftWithStreamingFallback(args: {
                 dealId: args.dealId ?? undefined,
                 draftLanguage: args.draftLanguage,
                 channel: args.channel ?? null,
+                outputLength: args.outputLength,
                 onChunk: args.onChunk,
                 timeoutMs,
                 ignorePendingPropertyImport: args.ignorePendingPropertyImport,
@@ -359,6 +375,7 @@ export async function generateDraftWithStreamingFallback(args: {
             dealId: args.dealId || undefined,
             draftLanguage: args.draftLanguage,
             ...(args.channel ? { channel: args.channel } : {}),
+            ...(args.outputLength ? { outputLength: args.outputLength } : {}),
             ...(args.baseDraft ? { baseDraft: args.baseDraft } : {}),
             ...(args.ignorePendingPropertyImport ? { ignorePendingPropertyImport: true } : {}),
         }

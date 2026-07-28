@@ -30,7 +30,11 @@ import {
     type ConversationSurfaceTheme,
 } from "./message-bubble-theme";
 import { PropertyMessageAssist } from "./property-message-assist";
-import type { ComposerAiDraftFeedback, GenerateDraftResult } from "./conversation-draft-generation";
+import type {
+    ComposerAiDraftFeedback,
+    DraftChunkHandler,
+    GenerateDraftResult,
+} from "./conversation-draft-generation";
 import { buildComposerSuggestionBubbles } from "./conversation-composer-suggestions";
 import { useChatWindowActivityNote } from "./use-chat-window-activity-note";
 import {
@@ -43,6 +47,10 @@ import {
 } from "./scheduled-message-time";
 import { LinkifiedText } from "./linkified-text";
 import { StoSecureDeliveryIndicator } from "./sto-secure-delivery-indicator";
+import {
+    DRAFT_OUTPUT_LENGTH_OPTIONS,
+    type DraftOutputLength,
+} from "@/lib/ai/draft-output-length";
 
 interface ConversationComposerProps {
     conversation: Conversation | null;
@@ -73,7 +81,8 @@ interface ConversationComposerProps {
         draftLanguage?: string | null,
         baseDraft?: string | null,
         channel?: ComposerChannel | null,
-        onChunk?: (chunk: string) => void
+        onChunk?: DraftChunkHandler,
+        outputLength?: DraftOutputLength
     ) => Promise<GenerateDraftResult | null>;
     onSetReplyLanguageOverride?: (replyLanguage: string | null) => Promise<{ success: boolean; error?: string; replyLanguageOverride?: string | null }>;
     onPreviewTranslatedReply?: (
@@ -355,6 +364,8 @@ export function ConversationComposer({
         selectedModel,
         handleModelChange,
         availableModels,
+        outputLength,
+        handleOutputLengthChange,
         selectedReplyLanguage,
         replyLanguageOpen,
         setReplyLanguageOpen,
@@ -1014,6 +1025,31 @@ export function ConversationComposer({
                                         itemClassName="text-xs"
                                         models={availableModels}
                                     />
+                                    <Select
+                                        value={outputLength}
+                                        onValueChange={handleOutputLengthChange}
+                                        disabled={isUnavailable}
+                                    >
+                                        <SelectTrigger
+                                            className={cn("h-7 w-[96px] border-0 px-2 text-[11px]", resolvedSurfaceTheme.composerControlClassName)}
+                                            title="Choose how detailed the AI draft should be"
+                                            aria-label="AI draft output length"
+                                        >
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {DRAFT_OUTPUT_LENGTH_OPTIONS.map((option) => (
+                                                <SelectItem
+                                                    key={option.value}
+                                                    value={option.value}
+                                                    className="text-xs"
+                                                    title={option.description}
+                                                >
+                                                    {option.shortLabel}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
                                     <Popover open={replyLanguageOpen} onOpenChange={setReplyLanguageOpen}>
                                         <PopoverTrigger asChild>
                                             <Button

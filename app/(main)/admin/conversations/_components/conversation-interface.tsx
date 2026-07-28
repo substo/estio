@@ -92,7 +92,13 @@ import {
     normalizeConversationContactIdentityPatch,
     type DealContactOption,
 } from './conversation-contact-identity-actions';
-import { generateDraftWithStreamingFallback, type ComposerAiDraftFeedback, type GenerateDraftResult } from './conversation-draft-generation';
+import {
+    generateDraftWithStreamingFallback,
+    type ComposerAiDraftFeedback,
+    type DraftChunkHandler,
+    type GenerateDraftResult,
+} from './conversation-draft-generation';
+import type { DraftOutputLength } from '@/lib/ai/draft-output-length';
 import {
     getMessageSignature,
     getTranscriptActionModeLabel,
@@ -2959,7 +2965,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
         draftLanguage?: string | null,
         baseDraft?: string | null,
         channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null,
-        onChunk?: (chunk: string) => void
+        onChunk?: DraftChunkHandler,
+        outputLength?: DraftOutputLength
     ) => {
         if (!activeConversation) return null;
 
@@ -2973,6 +2980,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 mode: "chat",
                 draftLanguage,
                 channel: channel || null,
+                outputLength,
                 ignorePendingPropertyImport,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
@@ -3059,7 +3067,8 @@ export function ConversationInterface({ locationId, initialConversations, initia
         draftLanguage?: string | null,
         baseDraft?: string | null,
         channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null,
-        onChunk?: (chunk: string) => void
+        onChunk?: DraftChunkHandler,
+        outputLength?: DraftOutputLength
     ) => {
         if (!selectedDealConversation) return null;
         try {
@@ -3073,6 +3082,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 dealId: activeDealId || undefined,
                 draftLanguage,
                 channel: channel || null,
+                outputLength,
                 ignorePendingPropertyImport,
                 onChunk,
                 generateDraft: generateComposerAIDraft,

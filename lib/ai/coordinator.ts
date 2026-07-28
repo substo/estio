@@ -30,6 +30,12 @@ import {
     inferCommunicationEvidenceFromText,
     resolveCommunicationLanguage
 } from "@/lib/ai/prompts/communication-policy";
+import {
+    getDraftOutputLengthInstruction,
+    normalizeDraftOutputLength,
+    resolveDraftOutputTokenBudget,
+    type DraftOutputLength,
+} from "@/lib/ai/draft-output-length";
 
 interface CoordinationContext {
     conversationId: string;
@@ -49,6 +55,8 @@ interface CoordinationContext {
     stream?: boolean;
     onToken?: (chunk: string) => void;
     latencyMode?: "fast" | "full";
+    outputLength?: DraftOutputLength;
+    minimumOutputTokens?: number;
 }
 
 import { buildUnavailableProviderCostEstimate, calculateRunCost } from "@/lib/ai/pricing";
@@ -80,11 +88,6 @@ const TIMELINE_LINE_MAX_CHARS = 220;
 const TIMELINE_FAST_LINE_MAX_CHARS = 160;
 const TIMELINE_FETCH_TAKE = 96;
 const TIMELINE_FAST_FETCH_TAKE = 32;
-const FAST_CHAT_MAX_OUTPUT_TOKENS = 1200;
-const FAST_EMAIL_MAX_OUTPUT_TOKENS = 2200;
-const FAST_DRAFT_PRESERVATION_MAX_OUTPUT_TOKENS = 8192;
-const FAST_DRAFT_PRESERVATION_TOKEN_HEADROOM = 256;
-const FAST_DRAFT_PRESERVATION_CHARS_PER_TOKEN = 3;
 const MODEL_OUTPUT_TOKEN_LIMITS: Record<string, number> = {
     "gemini-2.5-flash-lite": 65536,
     "gemini-2.5-flash": 65536,
@@ -110,20 +113,16 @@ export function resolveFastDraftMaxOutputTokens(args: {
     isEmail: boolean;
     modelName: string;
     preservedText?: string | null;
+    outputLength?: DraftOutputLength;
+    minimumOutputTokens?: number;
 }) {
-    const baseline = args.isEmail ? FAST_EMAIL_MAX_OUTPUT_TOKENS : FAST_CHAT_MAX_OUTPUT_TOKENS;
-    const preservedChars = String(args.preservedText || "").length;
-    if (!preservedChars) return baseline;
-
-    const preservationBudget = Math.ceil(
-        preservedChars / FAST_DRAFT_PRESERVATION_CHARS_PER_TOKEN
-    ) + FAST_DRAFT_PRESERVATION_TOKEN_HEADROOM;
-    const safeLimit = Math.min(
-        getModelMaxOutputTokens(args.modelName),
-        FAST_DRAFT_PRESERVATION_MAX_OUTPUT_TOKENS
-    );
-
-    return Math.min(safeLimit, Math.max(baseline, preservationBudget));
+    return resolveDraftOutputTokenBudget({
+        preference: args.outputLength,
+        isEmail: args.isEmail,
+        modelMaxOutputTokens: getModelMaxOutputTokens(args.modelName),
+        preservedText: args.preservedText,
+        minimumOutputTokens: args.minimumOutputTokens,
+    });
 }
 
 export function isOpenAiDraftModel(modelName: string): boolean {
@@ -1076,11 +1075,15 @@ export async function generateDraft(context: CoordinationContext) {
             telemetry.model.requested = requestedModelName;
         }
 
-        const maxOutputTokens = isFastDraft
+        const outputLength = normalizeDraftOutputLength(context.outputLength);
+        const useControlledOutputBudget = isFastDraft || context.outputLength !== undefined;
+        const maxOutputTokens = useControlledOutputBudget
             ? resolveFastDraftMaxOutputTokens({
                 isEmail,
                 modelName: actualModelName,
                 preservedText: normalizedBaseDraft || (instructionLooksSendReady ? normalizedInstruction : null),
+                outputLength,
+                minimumOutputTokens: context.minimumOutputTokens,
             })
             : getModelMaxOutputTokens(actualModelName);
         const thinkingBudget = isFastDraft
@@ -1103,6 +1106,8 @@ export async function generateDraft(context: CoordinationContext) {
         - Role: Intermediary connecting leads, owners, and agents.
         - Tone: ${isEmail ? "Professional, clear, polite, human." : "Natural, concise, friendly, human."}
         - Channel: ${channelName}
+        - Requested output length: ${outputLength}
+        - Length guidance: ${getDraftOutputLengthInstruction(outputLength, isEmail)}
         - Agent review draft language: ${expectedDraftLanguage}
         - Customer send language after preview/send translation: ${customerLanguageResolution.expectedLanguage || "auto"}
         ${requestedDraftLanguage ? "- IMPORTANT: Generate this draft in the agent review draft language, not the customer send language. The app will prepare the customer-language send version separately." : ""}
@@ -1233,6 +1238,7 @@ export async function generateDraft(context: CoordinationContext) {
             timelineOmittedEvents: telemetry.prompt.timelineOmittedEvents,
             isComplexDraft,
             latencyMode: isFastDraft ? "fast" : "full",
+            outputLength,
             maxOutputTokens,
             thinkingBudget: telemetry.model.thinkingBudget,
             instruction: normalizedInstruction

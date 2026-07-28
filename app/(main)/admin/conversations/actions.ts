@@ -46,6 +46,11 @@ import {
 } from "@/lib/conversations/language-context";
 import { recordConversationLanguageEvidence } from "@/lib/conversations/language-profile";
 import {
+    getDraftOutputLengthInstruction,
+    normalizeDraftOutputLength,
+    type DraftOutputLength,
+} from "@/lib/ai/draft-output-length";
+import {
     deleteManualActivityEntry as deleteManualActivityEntryRow,
     updateManualActivityEntry as updateManualActivityEntryRow,
 } from "@/lib/contacts/manual-activity-entries";
@@ -5485,6 +5490,7 @@ type GenerateAIDraftOptions = {
     draftLanguage?: string | null;
     baseDraft?: string | null;
     channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY" | null;
+    outputLength?: DraftOutputLength;
     ignorePendingPropertyImport?: boolean;
 };
 
@@ -5631,6 +5637,7 @@ export async function generateAIDraft(
                     options?.dealId ? `Deal: ${options.dealId}` : null,
                     options?.draftLanguage ? `Draft language for agent review: ${options.draftLanguage}` : null,
                     options?.baseDraft ? "Mode: revise current composer draft" : null,
+                    `Requested output length: ${normalizeDraftOutputLength(options?.outputLength)}`,
                     `Manual draft skill route: ${skillRouting.forceSkillId} (${skillRouting.reason})`,
                 ].filter(Boolean).join("\n"),
                 extraInstruction: [
@@ -5639,6 +5646,7 @@ export async function generateAIDraft(
                         ? `Current composer draft to revise:\n${options.baseDraft}`
                         : null,
                     instruction || "Draft the best next response based on current conversation context.",
+                    getDraftOutputLengthInstruction(options?.outputLength, options?.channel === "Email"),
                     options?.draftLanguage
                         ? `Write the draft in ${options.draftLanguage} for internal agent review. Do not translate it to the client's send language yet.`
                         : null,
@@ -5699,6 +5707,7 @@ export async function generateAIDraft(
         dealId: options?.dealId || undefined,
         draftLanguage: options?.draftLanguage || undefined,
         channel: options?.channel || undefined,
+        outputLength: normalizeDraftOutputLength(options?.outputLength),
     });
     logAIDraftTiming("generateAIDraft_legacy_end", {
         conversationId,
@@ -5769,6 +5778,7 @@ export async function generateComposerAIDraft(
                     options?.dealId ? `Deal: ${options.dealId}` : null,
                     options?.draftLanguage ? `Draft language for agent review: ${options.draftLanguage}` : null,
                     options?.baseDraft ? "Mode: revise current composer draft" : null,
+                    `Requested output length: ${normalizeDraftOutputLength(options?.outputLength)}`,
                     "Entry point: composer AI draft",
                     `Manual draft skill route: ${skillRouting.forceSkillId} (${skillRouting.reason})`,
                 ].filter(Boolean).join("\n"),
@@ -5778,6 +5788,7 @@ export async function generateComposerAIDraft(
                         ? `Current composer draft to revise:\n${options.baseDraft}`
                         : null,
                     instruction || "Draft the best next response based on current conversation context.",
+                    getDraftOutputLengthInstruction(options?.outputLength, options?.channel === "Email"),
                     options?.draftLanguage
                         ? `Write the draft in ${options.draftLanguage} for internal agent review. Do not translate it to the client's send language yet.`
                         : null,
@@ -5837,6 +5848,7 @@ export async function generateComposerAIDraft(
         dealId: options?.dealId || undefined,
         draftLanguage: options?.draftLanguage || undefined,
         channel: options?.channel || undefined,
+        outputLength: normalizeDraftOutputLength(options?.outputLength),
     });
     logAIDraftTiming("generateComposerAIDraft_legacy_end", {
         conversationId,
