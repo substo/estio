@@ -1,9 +1,17 @@
 export {
     DEVICE_TUNNEL_CANARY_SCOPES_ENV,
+    DEVICE_TUNNEL_PRODUCTION_SCOPES_ENV,
     parseDeviceTunnelCanaryScopes,
+    parseDeviceTunnelProductionScopes,
 } from "./canary-scope";
-export type { DeviceTunnelCanaryScope } from "./canary-scope";
-import { parseDeviceTunnelCanaryScopes } from "./canary-scope";
+export type {
+    DeviceTunnelCanaryScope,
+    DeviceTunnelProductionScope,
+} from "./canary-scope";
+import {
+    parseDeviceTunnelCanaryScopes,
+    parseDeviceTunnelProductionScopes,
+} from "./canary-scope";
 import {
     WhatsAppDeviceEgressConfigurationError,
     validateWhatsAppDeviceEgressStartupConfiguration,
@@ -29,12 +37,48 @@ export function resolveDeviceTunnelCanary(args: {
     now?: Date;
 }) {
     const env = args.env || process.env;
-    const matches = parseDeviceTunnelCanaryScopes(env).filter((scope) => (
+    const exactMatch = (scope: { locationId: string; sessionId: string; bindingId: string }) => (
         scope.locationId === args.locationId
         && scope.sessionId === args.sessionId
         && scope.bindingId === args.bindingId
-    ));
-    if (!matches.length) return { selected: false as const, active: false as const, scope: null, errors: [] as string[] };
+    );
+    const productionMatches = parseDeviceTunnelProductionScopes(env).filter(exactMatch);
+    const canaryMatches = parseDeviceTunnelCanaryScopes(env).filter(exactMatch);
+    if (productionMatches.length && canaryMatches.length) {
+        return {
+            selected: true as const,
+            active: false as const,
+            scope: productionMatches[0],
+            scopeType: "production" as const,
+            authorizationExpiresAt: null,
+            errors: ["scope_overlap"],
+        };
+    }
+    if (productionMatches.length) {
+        const scope = productionMatches[0];
+        const errors = activationErrors(env, args.now || new Date());
+        if (scope.gatewayNodeId !== args.gatewayNodeId && args.gatewayNodeId) errors.push("wrong_gateway_node");
+        const uniqueErrors = Array.from(new Set(errors));
+        return {
+            selected: true as const,
+            active: uniqueErrors.length === 0,
+            scope,
+            scopeType: "production" as const,
+            authorizationExpiresAt: null,
+            errors: uniqueErrors,
+        };
+    }
+    const matches = canaryMatches;
+    if (!matches.length) {
+        return {
+            selected: false as const,
+            active: false as const,
+            scope: null,
+            scopeType: null,
+            authorizationExpiresAt: null,
+            errors: [] as string[],
+        };
+    }
     const scope = matches[0];
     const now = args.now || new Date();
     const errors = activationErrors(env, now);
@@ -43,7 +87,14 @@ export function resolveDeviceTunnelCanary(args: {
     if (expiry <= now) errors.push("canary_scope_expired");
     if (expiry.getTime() - now.getTime() > 7 * 86_400_000) errors.push("canary_scope_expiry_too_distant");
     const uniqueErrors = Array.from(new Set(errors));
-    return { selected: true as const, active: uniqueErrors.length === 0, scope, errors: uniqueErrors };
+    return {
+        selected: true as const,
+        active: uniqueErrors.length === 0,
+        scope,
+        scopeType: "canary" as const,
+        authorizationExpiresAt: expiry,
+        errors: uniqueErrors,
+    };
 }
 
 export function requireAuthoritativeDeviceTunnelTokenMode(args: {

@@ -15,6 +15,14 @@ const scope = {
     changeRef: "change-123",
     expiresAt: "2026-07-22T00:00:00.000Z",
 };
+const productionScope = {
+    locationId: scope.locationId,
+    sessionId: scope.sessionId,
+    bindingId: scope.bindingId,
+    gatewayNodeId: scope.gatewayNodeId,
+    gatewayUrl: scope.gatewayUrl,
+    changeRef: "production-change-456",
+};
 
 function env(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     return {
@@ -43,6 +51,8 @@ test("canary selection is exact, reviewable, expiring, and activation-ready", ()
     });
     assert.equal(resolved.selected, true);
     assert.equal(resolved.active, true);
+    assert.equal(resolved.scopeType, "canary");
+    assert.equal(resolved.authorizationExpiresAt?.toISOString(), scope.expiresAt);
     assert.equal(resolved.scope?.changeRef, "change-123");
     assert.equal(resolveDeviceTunnelCanary({
         locationId: "another-location",
@@ -50,6 +60,25 @@ test("canary selection is exact, reviewable, expiring, and activation-ready", ()
         bindingId: scope.bindingId,
         env: env(),
     }).selected, false);
+});
+
+test("graduated production selection remains exact and has no expiry fence", () => {
+    const resolved = resolveDeviceTunnelCanary({
+        locationId: scope.locationId,
+        sessionId: scope.sessionId,
+        bindingId: scope.bindingId,
+        gatewayNodeId: scope.gatewayNodeId,
+        env: env({
+            DEVICE_TUNNEL_CANARY_SCOPES: "[]",
+            DEVICE_TUNNEL_PRODUCTION_SCOPES: JSON.stringify([productionScope]),
+        }),
+        now: new Date("2036-07-20T12:00:00.000Z"),
+    });
+    assert.equal(resolved.selected, true);
+    assert.equal(resolved.active, true);
+    assert.equal(resolved.scopeType, "production");
+    assert.equal(resolved.authorizationExpiresAt, null);
+    assert.equal(resolved.scope?.changeRef, productionScope.changeRef);
 });
 
 test("a selected scope rejects compatibility and an unselected scope rejects distributed tokens", () => {

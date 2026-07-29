@@ -131,7 +131,7 @@ function StatusPill({ status, paired, isServiceActive }: { status: string; paire
             ) : (
                 <span style={isOnline ? styles.dot.online : styles.dot.offline} />
             )}
-            {isOnline ? "Connected" : "Disconnected"}
+            {isOnline ? "Control online" : "Control offline"}
         </span>
     );
 }
@@ -381,11 +381,13 @@ function PairingModal({
 function DeviceCard({
     device,
     tick,
+    stoTunnelStatus,
     onUnlink,
     onUpdated,
 }: {
     device: SmsRelayDevice;
     tick: number;
+    stoTunnelStatus: WhatsAppEgressStatus["tunnelStatus"] | null;
     onUnlink: (id: string) => void;
     onUpdated: () => void;
 }) {
@@ -492,11 +494,22 @@ function DeviceCard({
                             <span style={styles.healthStatValue}>Paired {formatDate(device.createdAt)}</span>
                         </div>
                         <div style={styles.healthStatItem}>
-                            <span style={styles.healthStatLabel}>Service</span>
+                            <span style={styles.healthStatLabel}>Control service</span>
                             <span style={{ ...styles.healthStatValue, color: isOnline ? (isServiceActive ? "#16a34a" : isUnreachable ? "#ef4444" : "#d97706") : "#94a3b8" }}>
                                 {serviceState}
                             </span>
                         </div>
+                        {stoTunnelStatus && (
+                            <div style={styles.healthStatItem}>
+                                <span style={styles.healthStatLabel}>STO relay</span>
+                                <span style={{
+                                    ...styles.healthStatValue,
+                                    color: stoTunnelStatus === "online" ? "#16a34a" : "#ef4444",
+                                }}>
+                                    {stoTunnelStatus === "online" ? "Connected" : "Offline"}
+                                </span>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -994,6 +1007,11 @@ export default function SmsRelaySettingsPage() {
                                 key={d.id}
                                 device={d}
                                 tick={tick}
+                                stoTunnelStatus={
+                                    egressStatus?.binding?.device.id === d.id
+                                        ? egressStatus.tunnelStatus
+                                        : null
+                                }
                                 onUnlink={handleUnlink}
                                 onUpdated={reload}
                             />

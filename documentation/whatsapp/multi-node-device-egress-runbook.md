@@ -105,6 +105,27 @@ Canary selection is a JSON array in `DEVICE_TUNNEL_CANARY_SCOPES`. Every entry m
 ]
 ```
 
+After a canary has passed the acceptance harness, move the same exact
+tenant/session/binding tuple to `DEVICE_TUNNEL_PRODUCTION_SCOPES` and remove it
+from `DEVICE_TUNNEL_CANARY_SCOPES`. Production scopes retain the exact gateway
+and reviewed change reference but intentionally have no `expiresAt`. A tuple
+present in both lists fails startup validation. This graduation step keeps
+distributed placement, runtime lease fencing, KMS, and R2 protection active
+without making a live production route depend on a temporary canary deadline.
+
+```json
+[
+  {
+    "locationId": "<exact-location-id>",
+    "sessionId": "<exact-database-session-id>",
+    "bindingId": "<exact-binding-id>",
+    "gatewayNodeId": "cyprus-egress-2",
+    "gatewayUrl": "wss://cyprus-egress-2.egress.estio.co/device-tunnel",
+    "changeRef": "approved-production-change-reference"
+  }
+]
+```
+
 An exact selected scope becomes active only when distributed placement, runtime lease enforcement, durable auth, KMS, and R2 are all configured. An incomplete selected scope returns unavailable; it never falls back to compatibility routing. Non-selected bindings retain compatibility tokens even while the control plane is canary-capable. Tokens carry `placementMode=distributed_canary` or `compatibility`; gateways acquire leases only for the former. Rate-limit mode is independent and remains disabled.
 
 ## Drain, resume, reassignment, and release replacement

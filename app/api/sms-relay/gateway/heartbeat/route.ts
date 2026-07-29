@@ -8,6 +8,7 @@
  * Auth: Bearer <device_api_token>
  */
 
+import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { extractDeviceFromAuthHeader, hashDeviceToken } from "@/lib/sms-relay/auth";
@@ -15,6 +16,7 @@ import {
     normalizeStoReconnectGeneration,
     sanitizeStoReconnectErrorCode,
     sanitizeStoRuntimeState,
+    shouldAutoRequestStoReconnect,
     shouldRecordStoReconnectAttempt,
 } from "@/lib/device-tunnel/reconnect-control";
 
@@ -50,6 +52,8 @@ export async function PATCH(req: NextRequest) {
                     select: {
                         id: true,
                         desiredState: true,
+                        status: true,
+                        lastSeenAt: true,
                         reconnectGeneration: true,
                         lastReconnectRequestedAt: true,
                     },
@@ -67,7 +71,17 @@ export async function PATCH(req: NextRequest) {
             requestedGeneration: binding.reconnectGeneration,
             appliedGeneration,
         });
-        await (db as any).$transaction([
+        const autoReconnect = binding && shouldAutoRequestStoReconnect({
+            bindingStatus: binding.status,
+            bindingLastSeenAt: binding.lastSeenAt,
+            lastReconnectRequestedAt: binding.lastReconnectRequestedAt,
+            requestedGeneration: binding.reconnectGeneration,
+            appliedGeneration,
+            runtimeState,
+            diagnosticCode,
+            now,
+        });
+        const results = await (db as any).$transaction([
             (db as any).smsRelayDevice.update({
                 where: { id: device.id },
                 data: {
@@ -82,23 +96,38 @@ export async function PATCH(req: NextRequest) {
                 (db as any).deviceTunnelBinding.update({
                     where: { id: binding.id },
                     data: {
-                        ...(recordAttempt ? { lastReconnectAttemptedAt: now } : {}),
+                        ...(autoReconnect ? {
+                            reconnectGeneration: { increment: 1 },
+                            lastReconnectRequestId: `auto:${crypto.randomUUID()}`,
+                            lastReconnectRequestedAt: now,
+                            lastReconnectAttemptedAt: null,
+                        } : recordAttempt ? { lastReconnectAttemptedAt: now } : {}),
                         lastReconnectErrorCode: diagnosticCode,
                         lastDeviceRuntimeState: runtimeState,
                         ...(typeof body?.battery_optimization_ignored === "boolean"
                             ? { batteryOptimizationIgnored: body.battery_optimization_ignored }
                             : {}),
                     },
+                    select: {
+                        reconnectGeneration: true,
+                        lastReconnectRequestedAt: true,
+                    },
                 }),
             ] : []),
         ]);
+        const updatedBinding = binding ? results[1] : null;
 
         return NextResponse.json({
             status: "ok",
             ts: now.toISOString(),
             sto_should_run: binding?.desiredState !== "disabled",
-            sto_reconnect_generation: normalizeStoReconnectGeneration(binding?.reconnectGeneration),
-            sto_reconnect_requested_at: binding?.lastReconnectRequestedAt?.toISOString?.() || null,
+            sto_reconnect_generation: normalizeStoReconnectGeneration(
+                updatedBinding?.reconnectGeneration ?? binding?.reconnectGeneration,
+            ),
+            sto_reconnect_requested_at:
+                updatedBinding?.lastReconnectRequestedAt?.toISOString?.()
+                || binding?.lastReconnectRequestedAt?.toISOString?.()
+                || null,
         });
     } catch (error: any) {
         console.error("[SmsRelay] Heartbeat error:", error);

@@ -15,6 +15,14 @@ const scope = {
     changeRef: "change-123",
     expiresAt: "2026-07-22T00:00:00.000Z",
 };
+const productionScope = {
+    locationId: scope.locationId,
+    sessionId: scope.sessionId,
+    bindingId: scope.bindingId,
+    gatewayNodeId: scope.gatewayNodeId,
+    gatewayUrl: scope.gatewayUrl,
+    changeRef: "production-change-456",
+};
 
 function canaryEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     return {
@@ -46,6 +54,7 @@ test("unset and explicit-off controls preserve narrow local compatibility", () =
         sessionAuthMode: "local",
         rateLimitMode: "disabled",
         canaryScopeCount: 0,
+        productionScopeCount: 0,
         distributedCanaryCapable: false,
     });
     for (const rateLimitMode of ["disabled", "shadow", "enforce"] as const) {
@@ -64,7 +73,18 @@ test("an exact durable canary configuration is valid without global session acti
     const config = validateWhatsAppDeviceEgressStartupConfiguration(canaryEnv(), now);
     assert.equal(config.distributedCanaryCapable, true);
     assert.equal(config.canaryScopeCount, 1);
+    assert.equal(config.productionScopeCount, 0);
     assert.equal(config.rateLimitMode, "disabled");
+});
+
+test("an exact graduated production scope stays distributed without a canary expiry", () => {
+    const config = validateWhatsAppDeviceEgressStartupConfiguration(canaryEnv({
+        DEVICE_TUNNEL_CANARY_SCOPES: "[]",
+        DEVICE_TUNNEL_PRODUCTION_SCOPES: JSON.stringify([productionScope]),
+    }), new Date("2036-07-20T12:00:00.000Z"));
+    assert.equal(config.distributedCanaryCapable, true);
+    assert.equal(config.canaryScopeCount, 0);
+    assert.equal(config.productionScopeCount, 1);
 });
 
 test("every partial or contradictory four-control configuration fails closed", () => {
@@ -101,4 +121,11 @@ test("scopes cannot be staged ambiguously or outlive their review window", () =>
     expectCode(canaryEnv({
         DEVICE_TUNNEL_CANARY_SCOPES: JSON.stringify([{ ...scope, expiresAt: "2026-08-20T00:00:00.000Z" }]),
     }), "canary_scope_expiry_too_distant");
+    expectCode(canaryEnv({
+        DEVICE_TUNNEL_PRODUCTION_SCOPES: JSON.stringify([productionScope]),
+    }), "placement_scope_overlap");
+    expectCode(canaryEnv({
+        DEVICE_TUNNEL_CANARY_SCOPES: "[]",
+        DEVICE_TUNNEL_PRODUCTION_SCOPES: "not-json",
+    }), "production_scope_invalid");
 });

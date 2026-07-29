@@ -1,4 +1,7 @@
-import { parseDeviceTunnelCanaryScopes } from "./canary-scope";
+import {
+    parseDeviceTunnelCanaryScopes,
+    parseDeviceTunnelProductionScopes,
+} from "./canary-scope";
 import { validateSessionAuthKmsKeyName } from "../whatsapp/session-auth-kms";
 import { getSessionAuthObjectStoreConfig } from "../whatsapp/session-auth-object-store";
 
@@ -8,6 +11,7 @@ export type WhatsAppDeviceEgressStartupConfiguration = {
     sessionAuthMode: "local" | "encrypted_snapshot";
     rateLimitMode: "disabled" | "shadow" | "enforce";
     canaryScopeCount: number;
+    productionScopeCount: number;
     distributedCanaryCapable: boolean;
 };
 
@@ -22,6 +26,8 @@ export type WhatsAppDeviceEgressConfigurationErrorCode =
     | "canary_scope_invalid"
     | "canary_scope_expired"
     | "canary_scope_expiry_too_distant"
+    | "production_scope_invalid"
+    | "placement_scope_overlap"
     | "kms_configuration_invalid"
     | "r2_configuration_invalid";
 
@@ -84,17 +90,29 @@ export function validateWhatsAppDeviceEgressStartupConfiguration(
     }
 
     let scopes;
+    let productionScopes;
     try {
         scopes = parseDeviceTunnelCanaryScopes(env);
     } catch {
         throw new WhatsAppDeviceEgressConfigurationError("canary_scope_invalid");
     }
+    try {
+        productionScopes = parseDeviceTunnelProductionScopes(env);
+    } catch {
+        throw new WhatsAppDeviceEgressConfigurationError("production_scope_invalid");
+    }
 
-    if (!distributedPlacement && scopes.length > 0) {
+    if (!distributedPlacement && (scopes.length > 0 || productionScopes.length > 0)) {
         throw new WhatsAppDeviceEgressConfigurationError("durable_auth_control_mismatch");
     }
-    if (distributedPlacement && scopes.length === 0) {
+    if (distributedPlacement && scopes.length === 0 && productionScopes.length === 0) {
         throw new WhatsAppDeviceEgressConfigurationError("canary_scope_missing");
+    }
+    const productionKeys = new Set(productionScopes.map((scope) =>
+        `${scope.locationId}\0${scope.sessionId}\0${scope.bindingId}`));
+    if (scopes.some((scope) =>
+        productionKeys.has(`${scope.locationId}\0${scope.sessionId}\0${scope.bindingId}`))) {
+        throw new WhatsAppDeviceEgressConfigurationError("placement_scope_overlap");
     }
     if (distributedPlacement) {
         for (const scope of scopes) {
@@ -124,6 +142,7 @@ export function validateWhatsAppDeviceEgressStartupConfiguration(
         sessionAuthMode: rawSessionAuthMode,
         rateLimitMode,
         canaryScopeCount: scopes.length,
+        productionScopeCount: productionScopes.length,
         distributedCanaryCapable: distributedPlacement,
     };
 }

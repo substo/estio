@@ -130,7 +130,7 @@ type ConnectedDevice = {
     renewalInFlight: boolean;
     distributedPlacement: boolean;
     runtimeLeaseEnforcement: boolean;
-    canaryExpiresAt: Date | null;
+    authorizationExpiresAt: Date | null;
 };
 
 const devicesByBridgeSession = new Map<string, ConnectedDevice>();
@@ -178,8 +178,7 @@ function sendFrame(device: ConnectedDevice, frame: TunnelFrame) {
             !device.renewalFence.canAcceptWork
             || !device.leaseExpiresAt
             || device.leaseExpiresAt <= new Date()
-            || !device.canaryExpiresAt
-            || device.canaryExpiresAt <= new Date()
+            || (device.authorizationExpiresAt !== null && device.authorizationExpiresAt <= new Date())
         )
     ) {
         throw new Error("Device tunnel runtime ownership was fenced");
@@ -197,8 +196,7 @@ async function hasCurrentRuntimeOwnership(device: ConnectedDevice) {
         || !device.renewalFence.canAcceptWork
         || !device.leaseExpiresAt
         || device.leaseExpiresAt <= new Date()
-        || !device.canaryExpiresAt
-        || device.canaryExpiresAt <= new Date()
+        || (device.authorizationExpiresAt !== null && device.authorizationExpiresAt <= new Date())
     ) {
         return false;
     }
@@ -463,7 +461,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         renewalInFlight: false,
         distributedPlacement,
         runtimeLeaseEnforcement,
-        canaryExpiresAt: distributedPlacement && canary.scope ? new Date(canary.scope.expiresAt) : null,
+        authorizationExpiresAt: distributedPlacement ? canary.authorizationExpiresAt : null,
         proxyGeneration: randomUUID(),
         streamHealth: new DeviceTunnelStreamHealth(3),
     };
@@ -530,8 +528,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
                 !device.renewalFence.canAcceptWork
                 || !device.leaseExpiresAt
                 || device.leaseExpiresAt <= new Date()
-                || !device.canaryExpiresAt
-                || device.canaryExpiresAt <= new Date()
+                || (device.authorizationExpiresAt !== null && device.authorizationExpiresAt <= new Date())
             )
         ) {
             void disconnectDevice(device, "Runtime lease expired or was fenced");
@@ -804,8 +801,8 @@ void startGateway().catch((error) => {
 setInterval(() => {
     for (const device of devicesByBridgeSession.values()) {
         if (!device.runtimeLeaseEnforcement) continue;
-        if (!device.canaryExpiresAt || device.canaryExpiresAt <= new Date()) {
-            void disconnectDevice(device, "Distributed canary scope expired");
+        if (device.authorizationExpiresAt !== null && device.authorizationExpiresAt <= new Date()) {
+            void disconnectDevice(device, "Distributed authorization scope expired");
             continue;
         }
         if (!device.ownership || device.renewalInFlight || !device.renewalFence.canAcceptWork) continue;
