@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import { calculateAiCost } from "./pricing-engine";
+import { resolveAiUsageAttribution } from "./usage-attribution-policy";
 
 export interface RecordAiUsageInput {
     locationId: string;
@@ -43,6 +44,14 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
         const inputTokens = Math.max(0, input.inputTokens || 0);
         const outputTokens = Math.max(0, input.outputTokens || 0);
         const totalTokens = inputTokens + outputTokens;
+        const attributedUserId = await resolveAiUsageAttribution({
+            locationId: input.locationId,
+            requestedDbUserId: input.userId,
+            findUserInLocation: (dbUserId, locationId) => db.user.findFirst({
+                where: { id: dbUserId, locations: { some: { id: locationId } } },
+                select: { id: true },
+            }),
+        });
 
         const estimatedCostUsd = await calculateAiCost({
             provider: input.provider,
@@ -57,7 +66,7 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
         await db.aiUsage.create({
             data: {
                 locationId: input.locationId,
-                userId: input.userId || null,
+                userId: attributedUserId,
                 resourceType: input.resourceType,
                 resourceId: input.resourceId || null,
                 featureArea: input.featureArea,

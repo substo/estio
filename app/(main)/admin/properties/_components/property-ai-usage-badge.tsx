@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { getPropertyAiUsageSummary, type AiUsageSummary } from "@/app/(main)/admin/_actions/ai-usage";
 import { Sparkles } from "lucide-react";
 
@@ -69,6 +69,7 @@ export function PropertyAiUsageBadge({
 }: PropertyAiUsageBadgeProps) {
     const [data, setData] = useState<AiUsageSummary | null>(null);
     const [expanded, setExpanded] = useState(defaultExpanded);
+    const detailsId = useId();
 
     useEffect(() => {
         getPropertyAiUsageSummary(propertyId).then(setData).catch(() => { });
@@ -78,7 +79,13 @@ export function PropertyAiUsageBadge({
     if (data.totalCalls === 0 && hideWhenEmpty) return null;
 
     const details = (
-        <div className={`${showSummaryHeader ? "border-t" : ""} px-4 py-3 space-y-4`}>
+        <div
+            id={showSummaryHeader ? detailsId : undefined}
+            className={`${showSummaryHeader ? "border-t" : ""} px-4 py-3 space-y-4`}
+            role={showSummaryHeader ? "region" : undefined}
+            aria-label={showSummaryHeader ? `${title} details` : undefined}
+            hidden={showSummaryHeader && !expanded}
+        >
             {data.totalCalls === 0 ? (
                 <p className="text-xs text-muted-foreground">
                     Classification, analysis, generation, and precision remove usage will appear here after AI runs.
@@ -127,11 +134,14 @@ export function PropertyAiUsageBadge({
         <div className={`border rounded-lg bg-card overflow-hidden ${className}`}>
             {showSummaryHeader ? (
             <button
+                type="button"
                 onClick={() => setExpanded((prev) => !prev)}
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+                aria-expanded={expanded}
+                aria-controls={detailsId}
             >
                 <div className="flex items-center gap-2 text-sm font-medium">
-                    <Sparkles className="h-4 w-4 text-amber-500" />
+                    <Sparkles className="h-4 w-4 text-amber-500" aria-hidden="true" />
                     <span>{title}</span>
                 </div>
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -151,13 +161,14 @@ export function PropertyAiUsageBadge({
                         viewBox="0 0 24 24"
                         strokeWidth={2}
                         stroke="currentColor"
+                        aria-hidden="true"
                     >
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                     </svg>
                 </div>
             </button>
             ) : null}
-            {showSummaryHeader ? (expanded ? details : null) : details}
+            {details}
         </div>
     );
 }

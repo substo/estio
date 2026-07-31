@@ -1,21 +1,23 @@
 "use server";
 
-import { currentUser } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { puppeteerService } from "@/lib/crm/puppeteer-service";
-import { uploadToCloudflare, getImageDeliveryUrl } from "@/lib/cloudflareImages";
+import {
+    requireAuthenticatedLocationContext,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
 
-async function getCrmCredentials() {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
+type ActiveLocationContext = Awaited<ReturnType<typeof requireAuthenticatedLocationContext>>;
 
+async function getCrmCredentials(context?: ActiveLocationContext) {
+    const access = context || await requireAuthenticatedLocationContext();
     const dbUser = await db.user.findUnique({
-        where: { clerkId: user.id },
-        include: { locations: true }
+        where: { clerkId: access.clerkUserId },
+        select: { crmUsername: true, crmPassword: true },
     });
 
-    const location = dbUser?.locations?.[0];
-    if (!location || !location.crmUrl || !dbUser.crmUsername || !dbUser.crmPassword) {
+    const location = access.location;
+    if (!location?.crmUrl || !dbUser?.crmUsername || !dbUser.crmPassword) {
         return null;
     }
 
@@ -91,11 +93,25 @@ import { downloadAndResetImage, cleanupTempImage } from "@/lib/crm/image-process
 // Step 2: Confirm & Upload
 export async function uploadToCrm(propertyId: string, notionImages: string[]) {
     try {
-        const creds = await getCrmCredentials();
+        const access = await requirePropertyInActiveLocation(propertyId);
+        const property = await db.property.findFirst({
+            where: { id: propertyId, locationId: access.locationId },
+            include: {
+                media: {
+                    where: { kind: "IMAGE" },
+                    orderBy: { sortOrder: "asc" },
+                    select: { url: true },
+                },
+            },
+        });
+        if (!property) return { success: false, error: "PROPERTY_ACCESS_DENIED" };
+
+        const creds = await getCrmCredentials(access);
         if (!creds) return { success: false, error: "MISSING_CREDENTIALS" };
 
-        const property = await db.property.findUnique({ where: { id: propertyId } });
-        if (!property) return { success: false, error: "PROPERTY_NOT_FOUND" };
+        // Image URLs come from the authorized property record, not the client.
+        void notionImages;
+        const authorizedImageUrls = property.media.map(({ url }) => url).filter(Boolean);
 
         // Initialize Puppeteer
         await puppeteerService.init();
@@ -136,13 +152,13 @@ export async function uploadToCrm(propertyId: string, notionImages: string[]) {
         }, property);
 
         // Handle Images
-        if (notionImages && notionImages.length > 0) {
-            console.log(`Processing ${notionImages.length} images...`);
+        if (authorizedImageUrls.length > 0) {
+            console.log(`Processing ${authorizedImageUrls.length} images...`);
             const processedImages: string[] = [];
 
-            for (let i = 0; i < notionImages.length; i++) {
-                const url = notionImages[i];
-                console.log(`Processing image ${i + 1}/${notionImages.length}...`);
+            for (let i = 0; i < authorizedImageUrls.length; i++) {
+                const url = authorizedImageUrls[i];
+                console.log(`Processing image ${i + 1}/${authorizedImageUrls.length}...`);
                 const filePath = await downloadAndResetImage(url, i);
                 if (filePath) processedImages.push(filePath);
             }
@@ -182,16 +198,7 @@ export async function uploadToCrm(propertyId: string, notionImages: string[]) {
 
 export async function saveCrmSchema(schema: any) {
     try {
-        const user = await currentUser();
-        if (!user) throw new Error("Unauthorized");
-
-        const dbUser = await db.user.findUnique({
-            where: { clerkId: user.id },
-            include: { locations: true }
-        });
-
-        const location = dbUser?.locations?.[0];
-        if (!location) throw new Error("No location found for user");
+        const { location } = await requireAuthenticatedLocationContext();
 
         await db.location.update({
             where: { id: location.id },
@@ -207,13 +214,5 @@ export async function saveCrmSchema(schema: any) {
 
 
 export async function getUserLocation() {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
-    const dbUser = await db.user.findUnique({
-        where: { clerkId: user.id },
-        include: { locations: true }
-    });
-
-    return dbUser?.locations[0]?.id || null;
+    return (await requireAuthenticatedLocationContext()).locationId;
 }

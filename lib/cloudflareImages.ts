@@ -80,7 +80,10 @@ export async function createDirectUploadUrl(
  * Uploads a file buffer directly to Cloudflare Images from the server.
  * Useful when the file is already on the server (e.g. Server Actions).
  */
-export async function uploadToCloudflare(file: File | Blob): Promise<{ uploadURL: string; imageId: string }> {
+export async function uploadToCloudflare(
+    file: File | Blob,
+    options: { metadata?: Record<string, unknown> } = {},
+): Promise<{ uploadURL: string; imageId: string }> {
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const token = process.env.CLOUDFLARE_IMAGES_API_TOKEN;
 
@@ -90,6 +93,9 @@ export async function uploadToCloudflare(file: File | Blob): Promise<{ uploadURL
 
     const formData = new FormData();
     formData.append("file", file);
+    if (options.metadata) {
+        formData.append("metadata", JSON.stringify(options.metadata));
+    }
 
     try {
         const response = await fetch(
@@ -130,7 +136,10 @@ export async function uploadToCloudflare(file: File | Blob): Promise<{ uploadURL
  * @param url The URL of the image to upload
  * @returns Object containing the imageId
  */
-export async function uploadUrlToCloudflare(url: string): Promise<{ uploadURL: string; imageId: string }> {
+export async function uploadUrlToCloudflare(
+    url: string,
+    options: { metadata?: Record<string, unknown> } = {},
+): Promise<{ uploadURL: string; imageId: string }> {
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const token = process.env.CLOUDFLARE_IMAGES_API_TOKEN;
 
@@ -141,6 +150,9 @@ export async function uploadUrlToCloudflare(url: string): Promise<{ uploadURL: s
     try {
         const formData = new FormData();
         formData.append("url", url);
+        if (options.metadata) {
+            formData.append("metadata", JSON.stringify(options.metadata));
+        }
 
         const response = await fetch(
             `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
@@ -191,6 +203,24 @@ export function getImageDeliveryUrl(imageId: string, variant: string = "public")
     }
 
     return `https://imagedelivery.net/${accountHash}/${imageId}/${variant}`;
+}
+
+/** Returns image metadata used to enforce tenant ownership before reuse. */
+export async function getCloudflareImageMetadata(imageId: string): Promise<Record<string, unknown> | null> {
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const token = process.env.CLOUDFLARE_IMAGES_API_TOKEN;
+
+    if (!accountId || !token) {
+        throw new CloudflareImageError("Missing Cloudflare configuration");
+    }
+
+    const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${encodeURIComponent(imageId)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const data = await response.json();
+    if (!response.ok || !data.success) return null;
+    return data.result?.meta || null;
 }
 
 /**
@@ -248,6 +278,7 @@ export async function listImages(options: ListImagesOptions = {}): Promise<{
         filename: string;
         uploaded: string;
         variants: string[];
+        meta?: Record<string, unknown>;
     }>;
     success: boolean;
 }> {

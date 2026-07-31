@@ -1,12 +1,58 @@
 
-import { currentUser } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { scrapeNotionProperty, resolveGoogleMapsLocation, scrapeAddressFromMaps, convertMapUrl, getShortMapLink } from "@/lib/crm/notion-scraper";
 import { scrapePropertyWithCrawl4AI } from "@/lib/crm/crawl4ai-service";
-import { uploadToCloudflare, getImageDeliveryUrl } from "@/lib/cloudflareImages";
+import { deleteImage, uploadToCloudflare, getImageDeliveryUrl } from "@/lib/cloudflareImages";
 import { extractPropertyDataWithAI } from '@/app/(main)/admin/properties/import/ai-property-extraction';
 import { PROPERTY_LOCATIONS } from "@/lib/properties/locations";
 import { RENTAL_PERIODS } from "@/lib/properties/constants";
+import { requireAuthenticatedLocationContext } from "@/lib/properties/active-location-access";
+import {
+    resolveOwnedPropertyImageSource,
+    validateSubmittedPropertyMedia,
+} from "@/lib/properties/property-media-access";
+import {
+    createPropertyAfterImportMediaValidation,
+    createUrlImportMediaIngestion,
+} from "@/lib/properties/url-import-media";
+import type { SubmittedPropertyMedia } from "@/lib/properties/property-media-ownership-policy";
+import { downloadSafeRemoteImage } from "@/lib/properties/safe-remote-image.server";
+
+function logUrlImportCleanupFailure(imageId: string, error: unknown) {
+    console.error("[Property URL Import] Failed to clean up newly uploaded image", {
+        imageId,
+        error: error instanceof Error ? error.message : "Unknown cleanup error",
+    });
+}
+
+const ingestUrlImportMedia = createUrlImportMediaIngestion({
+    resolveOwnedImage: resolveOwnedPropertyImageSource,
+    downloadExternalImage: downloadSafeRemoteImage,
+    uploadExternalImage: (blob, metadata) => uploadToCloudflare(blob, { metadata }),
+    getDeliveryUrl: (imageId) => getImageDeliveryUrl(imageId, "public"),
+    deleteUploadedImage: deleteImage,
+    logCleanupFailure: logUrlImportCleanupFailure,
+});
+
+async function getImportContext() {
+    const access = await requireAuthenticatedLocationContext();
+    const [dbUser, siteConfig] = await Promise.all([
+        db.user.findUnique({
+            where: { clerkId: access.clerkUserId },
+            select: { firstName: true, lastName: true, crmUsername: true, crmPassword: true },
+        }),
+        db.siteConfig.findUnique({ where: { locationId: access.locationId } }),
+    ]);
+
+    return { access, dbUser, siteConfig };
+}
+
+async function requireLocationImageIds(imageIds: string[], locationId: string) {
+    const uniqueIds = Array.from(new Set(imageIds.filter(Boolean)));
+    return Promise.all(uniqueIds.map(async (imageId) => (
+        await resolveOwnedPropertyImageSource({ locationId, cloudflareImageId: imageId })
+    ).cloudflareImageId));
+}
 
 function normalizeLocation(district: string | undefined, area: string | undefined) {
     if (!district && !area) return { district: "", area: "" };
@@ -54,23 +100,12 @@ export type ImportStatus =
     | { type: 'status'; step: 'MAP_RESOLUTION'; message: string }
     | { type: 'status'; step: 'IMAGE_PROCESSING'; message: string }
     | { type: 'status'; step: 'SAVING'; message: string }
-    | { type: 'result'; data: any; propertyId: string }
+    | { type: 'result'; data: any; propertyId: string; warnings?: string[] }
     | { type: 'error'; message: string; code?: string };
 
-async function getCrmCredentials(clerkId: string) {
-    const dbUser = await db.user.findUnique({
-        where: { clerkId: clerkId },
-        select: {
-            crmUsername: true,
-            crmPassword: true,
-            locations: {
-                take: 1,
-                select: { crmUrl: true }
-            }
-        }
-    });
-
-    const crmUrl = dbUser?.locations[0]?.crmUrl;
+async function getCrmCredentials(context: Awaited<ReturnType<typeof getImportContext>>) {
+    const { access, dbUser } = context;
+    const crmUrl = access.location.crmUrl;
 
     if (!crmUrl || !dbUser?.crmUsername || !dbUser?.crmPassword) {
         return null;
@@ -89,7 +124,10 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
     try {
         yield { type: 'status', step: 'INIT', message: 'Checking permissions and credentials...' };
 
-        const creds = await getCrmCredentials(clerkId);
+        const context = await getImportContext();
+        // Kept in the public signature for compatibility; never trusted for access.
+        void clerkId;
+        const creds = await getCrmCredentials(context);
         if (!creds) {
             yield { type: 'error', message: "Missing CRM Credentials. Please configure them in Settings.", code: "MISSING_CREDENTIALS" };
             return;
@@ -105,11 +143,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
         let notionData;
         try {
             // Fetch API Key for AI services
-            const userWithLoc = await db.user.findUnique({
-                where: { clerkId: clerkId },
-                include: { locations: { include: { siteConfig: true } } }
-            });
-            const apiKey = userWithLoc?.locations[0]?.siteConfig?.googleAiApiKey;
+            const apiKey = context.siteConfig?.googleAiApiKey;
 
             if (notionUrl.includes("notion.site")) {
                 notionData = await scrapeNotionProperty(notionUrl, aiModel);
@@ -176,11 +210,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
                 // Must fetch API key again or pass it down?
                 // We fetched user and config in ai-property-extraction but we are in workflow now.
                 // Re-fetch config for API Key.
-                const userWithLoc = await db.user.findUnique({
-                    where: { clerkId: clerkId },
-                    include: { locations: { include: { siteConfig: true } } }
-                });
-                const apiKey = userWithLoc?.locations[0]?.siteConfig?.googleAiApiKey;
+                const apiKey = context.siteConfig?.googleAiApiKey;
 
                 if (apiKey) {
                     const { scrapeAddressFromMaps } = await import("@/lib/crm/notion-scraper");
@@ -213,11 +243,6 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
         yield { type: 'status', step: 'SAVING', message: 'Preparing database record...' };
 
 
-        const userLocation = await db.user.findUnique({
-            where: { clerkId: clerkId },
-            include: { locations: true }
-        });
-
         // 1d. Normalize Location & Area
         // AI often returns "Paphos" (Label) instead of "paphos" (Key), causing dropdowns to fail.
         const { district: normDist, area: normArea } = normalizeLocation(notionData.propertyLocation, notionData.propertyArea);
@@ -228,64 +253,25 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
             yield { type: 'status', step: 'AI_ANALYSIS', message: 'Location data normalized to system keys.' };
         }
 
-        const locationId = userLocation?.locations[0]?.id;
-        // Fix: Explicitly access name from userLocation (it includes all scalar fields by default with include)
-        // But TS might complain if types are generated weirdly. Let's cast or check.
-        // Actually, userLocation IS the user record extended with locations. 
-        // We will assume firstName/lastName exist on the user record.
-
-        if (!locationId) {
-            yield { type: 'error', message: "No default location found for user.", code: "USER_NO_LOCATION" };
-            return;
-        }
-
+        const locationId = context.access.locationId;
         // 2. Upload Images to Cloudflare (Persistence)
         const imageCount = notionData.images?.length || 0;
         yield { type: 'status', step: 'IMAGE_PROCESSING', message: `Processing ${imageCount} images for permanent storage...` };
 
-        const validImages: { url: string; cloudflareImageId?: string }[] = [];
-        // Limit to first N images to avoid timeouts
-        const imagesToProcess = (notionData.images || []).slice(0, maxImages);
-
-        let processedCount = 0;
-        for (const imageUrl of imagesToProcess) {
-            processedCount++;
-            yield { type: 'status', step: 'IMAGE_PROCESSING', message: `Uploading image ${processedCount}/${imagesToProcess.length}...` };
-
-            try {
-                // Skip if already a Cloudflare URL (sanity check)
-                if (imageUrl.includes("imagedelivery.net")) {
-                    validImages.push({ url: imageUrl });
-                    continue;
-                }
-
-                // Fetch the image with User-Agent to avoid blocking
-                const response = await fetch(imageUrl, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    }
-                });
-
-                if (!response.ok) {
-                    // Fallback to original URL if download fails (e.g. 403)
-                    console.warn(`Failed to download image: ${imageUrl} (${response.status})`);
-                    validImages.push({ url: imageUrl });
-                    continue;
-                }
-
-                const blob = await response.blob();
-
-                // Upload to Cloudflare
-                const { imageId } = await uploadToCloudflare(blob);
-                const publicUrl = getImageDeliveryUrl(imageId, "public");
-
-                validImages.push({ url: publicUrl, cloudflareImageId: imageId });
-
-            } catch (err) {
-                console.error(`Image processing failed for ${imageUrl}:`, err);
-                // Keep original if failed
-                validImages.push({ url: imageUrl });
-            }
+        const ingestion = await ingestUrlImportMedia({
+            locationId,
+            dbUserId: context.access.dbUserId,
+            images: Array.isArray(notionData.images) ? notionData.images : [],
+            maxImages,
+        });
+        const validImages = ingestion.mediaItems;
+        if (ingestion.warnings.length > 0) {
+            console.warn(`[Import] Skipped ${ingestion.warnings.length} unauthorized or failed image(s).`);
+            yield {
+                type: 'status',
+                step: 'IMAGE_PROCESSING',
+                message: `Skipped ${ingestion.warnings.length} image(s) that could not be authorized or imported.`,
+            };
         }
 
         // Update notionData with Cloudflare URLs
@@ -294,14 +280,22 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
         // We'll keep notionData.images as just URLs for the result object to match generic type,
         // but use validImages for the DB creation.
         notionData.images = validImages.map(img => img.url);
+        notionData.importWarnings = ingestion.warnings;
 
         // 3. Create Draft Property in DB
         yield { type: 'status', step: 'SAVING', message: 'Saving property to database...' };
 
-        const draftProperty = await createDraftProperty(notionData, userLocation, validImages, notionUrl, clerkId);
+        const draftProperty = await createDraftProperty(
+            notionData,
+            context.dbUser,
+            locationId,
+            validImages,
+            notionUrl,
+            ingestion.newlyUploadedImageIds,
+        );
 
         yield { type: 'status', step: 'SAVING', message: 'Done! Property draft created.' };
-        yield { type: 'result', data: notionData, propertyId: draftProperty.id };
+        yield { type: 'result', data: notionData, propertyId: draftProperty.id, warnings: ingestion.warnings };
 
     } catch (error: any) {
         yield { type: 'error', message: error.message || "Unknown error occurred" };
@@ -312,7 +306,10 @@ export async function* runPasteImportWorkflow(text: string, analysisImageIds: st
     try {
         yield { type: 'status', step: 'INIT', message: 'Verifying credentials...' };
 
-        const creds = await getCrmCredentials(clerkId);
+        const context = await getImportContext();
+        // Kept in the public signature for compatibility; never trusted for access.
+        void clerkId;
+        const creds = await getCrmCredentials(context);
         if (!creds) {
             yield { type: 'error', message: "Missing CRM Credentials.", code: "MISSING_CREDENTIALS" };
             return;
@@ -321,14 +318,15 @@ export async function* runPasteImportWorkflow(text: string, analysisImageIds: st
         // 1. AI Analysis (Use "Analysis" images only)
         yield { type: 'status', step: 'AI_ANALYSIS', message: 'Analyzing text and analysis documents with AI...' };
 
-        const userWithLoc = await db.user.findUnique({
-            where: { clerkId: clerkId },
-            include: { locations: { include: { siteConfig: true } } }
-        });
-        const locationId = userWithLoc?.locations[0]?.id;
+        const locationId = context.access.locationId;
 
-        // Construct analysis URLs for AI
-        const analysisUrls = analysisImageIds.map(id => getImageDeliveryUrl(id, "public"));
+        // Client-provided Cloudflare IDs must belong to the active location before
+        // they can be analyzed or attached to the new property.
+        const [authorizedAnalysisIds, authorizedGalleryIds] = await Promise.all([
+            requireLocationImageIds(analysisImageIds, locationId),
+            requireLocationImageIds(galleryImageIds, locationId),
+        ]);
+        const analysisUrls = authorizedAnalysisIds.map(id => getImageDeliveryUrl(id, "public"));
 
         const extractionResult = await extractPropertyDataWithAI(
             text, // htmlContent
@@ -362,13 +360,15 @@ export async function* runPasteImportWorkflow(text: string, analysisImageIds: st
         yield { type: 'status', step: 'SAVING', message: 'Creating property draft...' };
 
         // Prepare gallery images for DB
-        const galleryImages = galleryImageIds.map(id => ({
+        const galleryImages: SubmittedPropertyMedia[] = authorizedGalleryIds.map((id, index) => ({
             url: getImageDeliveryUrl(id, "public"),
-            cloudflareImageId: id
+            cloudflareImageId: id,
+            kind: "IMAGE",
+            sortOrder: index,
         }));
 
         // We assume "notionUrl" is just "Pasted Text" for source ref
-        const draftProperty = await createDraftProperty(notionData, userWithLoc, galleryImages, "Manual Paste Import", clerkId);
+        const draftProperty = await createDraftProperty(notionData, context.dbUser, locationId, galleryImages, "Manual Paste Import");
 
         yield { type: 'status', step: 'SAVING', message: 'Draft created successfully!' };
         yield { type: 'result', data: notionData, propertyId: draftProperty.id };
@@ -379,9 +379,14 @@ export async function* runPasteImportWorkflow(text: string, analysisImageIds: st
     }
 }
 
-async function createDraftProperty(notionData: any, userLocation: any, validImages: any[], sourceUrl: string, clerkId: string) {
-    const locationId = userLocation?.locations[0]?.id;
-    if (!locationId) throw new Error("No default location found for user.");
+async function createDraftProperty(
+    notionData: any,
+    dbUser: any,
+    locationId: string,
+    validImages: SubmittedPropertyMedia[],
+    sourceUrl: string,
+    newlyUploadedImageIds: string[] = [],
+) {
 
     const noteTitle = `Imported from Source: ${sourceUrl}`;
     let richNote = `Imported from Source: ${sourceUrl}`;
@@ -391,8 +396,8 @@ async function createDraftProperty(notionData: any, userLocation: any, validImag
     // Duplicating for safety as we don't want to break original logic if we missed vars.
 
     // Re-calculating rich note vars based on notionData
-    const firstName = userLocation ? (userLocation as any).firstName : "";
-    const lastName = userLocation ? (userLocation as any).lastName : "";
+    const firstName = dbUser?.firstName || "";
+    const lastName = dbUser?.lastName || "";
     const creatorsName = `${firstName || ''} ${lastName || ''}`.trim() || "Unknown User";
 
     const fullAddress = [notionData.addressLine1, notionData.city, notionData.postalCode].filter(Boolean).join(", ");
@@ -413,9 +418,16 @@ ${notionData.viewingNotes || ""}`;
         .replace(/^-+|-+$/g, '');
     const slug = `${slugBase}-${Date.now()}`;
 
-    return await db.property.create({
-        data: {
-            locationId: locationId,
+    return createPropertyAfterImportMediaValidation({
+        locationId,
+        mediaItems: validImages,
+        validateSubmittedMedia: validateSubmittedPropertyMedia,
+        newlyUploadedImageIds,
+        deleteUploadedImage: deleteImage,
+        logCleanupFailure: logUrlImportCleanupFailure,
+        createProperty: (validatedImages) => db.property.create({
+            data: {
+                locationId: locationId,
             title: notionData.title || "Untitled Import",
             slug: slug,
             description: notionData.description || "",
@@ -461,14 +473,15 @@ ${notionData.viewingNotes || ""}`;
             metaTitle: notionData.metaTitle,
             metaDescription: notionData.metaDescription,
             metaKeywords: notionData.metaKeywords,
-            media: {
-                create: validImages.map((img, index) => ({
-                    url: img.url,
-                    kind: "IMAGE",
-                    sortOrder: index,
-                    cloudflareImageId: img.cloudflareImageId
-                }))
-            }
-        }
+                media: {
+                    create: validatedImages.map((img, index) => ({
+                        url: img.url,
+                        kind: "IMAGE",
+                        sortOrder: index,
+                        cloudflareImageId: img.cloudflareImageId,
+                    })),
+                },
+            },
+        }),
     });
 }

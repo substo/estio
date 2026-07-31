@@ -42,9 +42,20 @@ function mapListingGoal(listingType: string | null | undefined): 'SALE' | 'RENT'
  * Upload a single image URL to Cloudflare. Returns cloudflareImageId + delivery URL,
  * or null if the upload fails (caller should fall back to the raw URL).
  */
-async function tryUploadImageToCloudflare(url: string): Promise<{ cloudflareImageId: string; deliveryUrl: string } | null> {
+async function tryUploadImageToCloudflare(
+  url: string,
+  locationId: string,
+  userId: string,
+): Promise<{ cloudflareImageId: string; deliveryUrl: string } | null> {
   try {
-    const result = await uploadUrlToCloudflare(url);
+    const result = await uploadUrlToCloudflare(url, {
+      metadata: {
+        locationId,
+        uploadedBy: userId,
+        purpose: 'property_media',
+        workflow: 'prospecting_property_import',
+      },
+    });
     const deliveryUrl = getImageDeliveryUrl(result.imageId, 'public');
     return { cloudflareImageId: result.imageId, deliveryUrl };
   } catch (error: any) {
@@ -112,12 +123,14 @@ export async function importScrapedListingAsProperty(
   const mediaEntries: { url: string; cloudflareImageId: string | null; sortOrder: number }[] = [];
   for (let i = 0; i < listing.images.length; i++) {
     const externalUrl = listing.images[i];
-    const uploaded = await tryUploadImageToCloudflare(externalUrl);
-    mediaEntries.push({
-      url: uploaded ? uploaded.deliveryUrl : externalUrl,
-      cloudflareImageId: uploaded ? uploaded.cloudflareImageId : null,
-      sortOrder: i,
-    });
+    const uploaded = await tryUploadImageToCloudflare(externalUrl, locationId, userId);
+    if (uploaded) {
+      mediaEntries.push({
+        url: uploaded.deliveryUrl,
+        cloudflareImageId: uploaded.cloudflareImageId,
+        sortOrder: i,
+      });
+    }
     // Small delay between uploads to avoid Cloudflare rate limits
     if (i < listing.images.length - 1) {
       await new Promise(r => setTimeout(r, 200));

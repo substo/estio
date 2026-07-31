@@ -2,6 +2,17 @@
 
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
+import {
+    buildAiUsageSummaryScope,
+    canAccessAiUsageView,
+} from "@/lib/ai/usage-summary-scope";
+import { auth } from "@clerk/nextjs/server";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import {
+    PropertyAccessDeniedError,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
 
 export interface AiUsageSummary {
     totalCalls: number;
@@ -24,9 +35,19 @@ export interface AiUsageSummary {
     }>;
 }
 
-export async function getPropertyAiUsageSummary(propertyId: string): Promise<AiUsageSummary> {
+/** Property-level token and cost data is restricted to location admins. */
+export async function getPropertyAiUsageSummary(propertyId: string): Promise<AiUsageSummary | null> {
+    let locationId: string;
+    try {
+        ({ locationId } = await requirePropertyInActiveLocation(propertyId, { adminOnly: true }));
+    } catch (error) {
+        if (error instanceof PropertyAccessDeniedError) return null;
+        throw error;
+    }
+
     const records = await db.aiUsage.findMany({
         where: {
+            locationId,
             resourceType: "property",
             resourceId: propertyId,
         },
@@ -115,9 +136,11 @@ export interface LocationAiUsageSummary {
     allTimeEstimatedCostUsd: number;
 }
 
-export async function getLocationAiUsageSummary(locationId?: string): Promise<LocationAiUsageSummary | null> {
-    const resolvedLocationId = locationId || (await getLocationContext())?.id;
-    if (!resolvedLocationId) return null;
+async function getAiUsageSummary(
+    resolvedLocationId: string,
+    userId?: string,
+): Promise<LocationAiUsageSummary> {
+    const usageScope = buildAiUsageSummaryScope(resolvedLocationId, userId);
 
     // Aggregate for the current calendar month
     const now = new Date();
@@ -126,18 +149,18 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
 
     const [todayAgg, allTimeAgg, records] = await Promise.all([
         db.aiUsage.aggregate({
-            where: { locationId: resolvedLocationId, recordedAt: { gte: startOfToday } },
+            where: { ...usageScope, recordedAt: { gte: startOfToday } },
             _count: { id: true },
             _sum: { totalTokens: true, estimatedCostUsd: true }
         }),
         db.aiUsage.aggregate({
-            where: { locationId: resolvedLocationId },
+            where: usageScope,
             _count: { id: true },
             _sum: { totalTokens: true, estimatedCostUsd: true }
         }),
         db.aiUsage.findMany({
             where: {
-                locationId: resolvedLocationId,
+                ...usageScope,
                 recordedAt: { gte: startOfMonth },
             },
             select: {
@@ -212,4 +235,34 @@ export async function getLocationAiUsageSummary(locationId?: string): Promise<Lo
             .sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens || b.count - a.count),
         byModel: Array.from(modelMap.values()),
     };
+}
+
+export async function getLocationAiUsageSummary(): Promise<LocationAiUsageSummary | null> {
+    const [{ userId }, location] = await Promise.all([
+        auth(),
+        getLocationContext(),
+    ]);
+
+    if (!userId || !location?.id) return null;
+
+    const isLocationAdmin = await verifyUserIsLocationAdmin(userId, location.id);
+    if (!canAccessAiUsageView("location", isLocationAdmin)) return null;
+
+    return getAiUsageSummary(location.id);
+}
+
+/**
+ * Returns only AI usage attributed to the signed-in user within their current
+ * location. The user id is resolved server-side so callers cannot request
+ * another team member's usage.
+ */
+export async function getCurrentUserAiUsageSummary(): Promise<LocationAiUsageSummary | null> {
+    const [location, userId] = await Promise.all([
+        getLocationContext(),
+        resolveAuthenticatedDbUserId(),
+    ]);
+
+    if (!location?.id || !userId) return null;
+
+    return getAiUsageSummary(location.id, userId);
 }

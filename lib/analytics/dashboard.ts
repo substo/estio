@@ -1,7 +1,9 @@
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { auth } from "@clerk/nextjs/server";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 
-type CountRow = Record<string, bigint | number | string | null>;
+type CountRow = Record<string, bigint | number | string | Date | null>;
 
 function toNumber(value: unknown) {
   if (typeof value === "bigint") return Number(value);
@@ -54,8 +56,14 @@ export function parseAnalyticsRange(value: string | string[] | undefined): Analy
 }
 
 export async function getAnalyticsDashboard(rangeDays: AnalyticsDashboardRange): Promise<AnalyticsDashboard | null> {
-  const location = await getLocationContext();
-  if (!location?.id) return null;
+  const [{ userId }, location] = await Promise.all([
+    auth(),
+    getLocationContext(),
+  ]);
+  if (!userId || !location?.id) return null;
+
+  const isLocationAdmin = await verifyUserIsLocationAdmin(userId, location.id);
+  if (!isLocationAdmin) return null;
 
   const startDate = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
   const locationId = location.id;
@@ -73,7 +81,7 @@ export async function getAnalyticsDashboard(rangeDays: AnalyticsDashboardRange):
       SELECT
         COUNT(DISTINCT "visitorId") FILTER (WHERE "visitorId" IS NOT NULL) AS visitors,
         COUNT(DISTINCT "sessionId") FILTER (WHERE "sessionId" IS NOT NULL) AS sessions,
-        COUNT(*) FILTER (WHERE "eventName" IN ('page_view', 'admin_page_view')) AS "pageViews",
+        COUNT(*) FILTER (WHERE "eventName" = 'page_view') AS "pageViews",
         COUNT(*) FILTER (WHERE "eventName" = 'property_view') AS "propertyViews",
         COUNT(*) FILTER (WHERE "eventName" IN ('search_view', 'search_apply')) AS searches,
         COUNT(*) FILTER (WHERE "eventName" IN ('favorite_add', 'favorite_remove')) AS favorites,
@@ -89,7 +97,7 @@ export async function getAnalyticsDashboard(rangeDays: AnalyticsDashboardRange):
         DATE_TRUNC('day', "occurredAt") AS date,
         COUNT(DISTINCT "visitorId") FILTER (WHERE "visitorId" IS NOT NULL) AS visitors,
         COUNT(DISTINCT "sessionId") FILTER (WHERE "sessionId" IS NOT NULL) AS sessions,
-        COUNT(*) FILTER (WHERE "eventName" IN ('page_view', 'admin_page_view')) AS "pageViews",
+        COUNT(*) FILTER (WHERE "eventName" = 'page_view') AS "pageViews",
         COUNT(*) FILTER (WHERE "eventName" = 'property_view') AS "propertyViews",
         COUNT(*) FILTER (WHERE "eventName" = 'lead_inquiry_success') AS inquiries
       FROM "AnalyticsEvent"
@@ -116,7 +124,9 @@ export async function getAnalyticsDashboard(rangeDays: AnalyticsDashboardRange):
         COUNT(*) FILTER (WHERE e."eventName" = 'property_view') AS views,
         COUNT(*) FILTER (WHERE e."eventName" = 'lead_inquiry_success') AS inquiries
       FROM "AnalyticsEvent" e
-      LEFT JOIN "Property" p ON p."id" = e."propertyId"
+      LEFT JOIN "Property" p
+        ON p."id" = e."propertyId"
+       AND p."locationId" = e."locationId"
       WHERE e."locationId" = ${locationId}
         AND e."occurredAt" >= ${startDate}
         AND e."propertyId" IS NOT NULL
@@ -155,9 +165,14 @@ export async function getAnalyticsDashboard(rangeDays: AnalyticsDashboardRange):
         p."title" AS "propertyTitle",
         c."name" AS "contactName"
       FROM "AnalyticsEvent" e
-      LEFT JOIN "Property" p ON p."id" = e."propertyId"
-      LEFT JOIN "Contact" c ON c."id" = e."contactId"
+      LEFT JOIN "Property" p
+        ON p."id" = e."propertyId"
+       AND p."locationId" = e."locationId"
+      LEFT JOIN "Contact" c
+        ON c."id" = e."contactId"
+       AND c."locationId" = e."locationId"
       WHERE e."locationId" = ${locationId}
+        AND e."occurredAt" >= ${startDate}
         AND e."eventName" IN ('lead_inquiry_success', 'saved_search_create')
       ORDER BY e."occurredAt" DESC
       LIMIT 12

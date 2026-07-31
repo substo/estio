@@ -8,6 +8,8 @@ import {
     softDeleteOrphanedAssets,
     computeRemovedCloudflareIds,
 } from "@/lib/media/media-assets";
+import { findIdsOutsideLocation } from "@/lib/properties/location-boundary";
+import { validateSubmittedPropertyMedia } from "@/lib/properties/property-media-access";
 
 export type PropertyMediaInput = {
     url: string;
@@ -66,6 +68,44 @@ export class DuplicatePropertyReferenceError extends Error {
         this.name = "DuplicatePropertyReferenceError";
         this.reference = reference;
         this.propertyId = propertyId;
+    }
+}
+
+async function validateStakeholderLocationBoundary(
+    locationId: string,
+    stakeholders: NonNullable<SavePropertyRecordInput["stakeholders"]>,
+) {
+    const contactIds = [
+        stakeholders.ownerId,
+        stakeholders.agentId,
+        ...(stakeholders.maintenanceIds || []),
+    ].filter((id): id is string => Boolean(id));
+    const companyIds = [
+        stakeholders.ownerCompanyId,
+        stakeholders.developerId,
+        stakeholders.managementCompanyId,
+    ].filter((id): id is string => Boolean(id));
+
+    const [contacts, companies] = await Promise.all([
+        contactIds.length
+            ? db.contact.findMany({
+                where: { id: { in: contactIds }, locationId },
+                select: { id: true },
+            })
+            : [],
+        companyIds.length
+            ? db.company.findMany({
+                where: { id: { in: companyIds }, locationId },
+                select: { id: true },
+            })
+            : [],
+    ]);
+
+    if (
+        findIdsOutsideLocation(contactIds, contacts.map(({ id }) => id)).length > 0 ||
+        findIdsOutsideLocation(companyIds, companies.map(({ id }) => id)).length > 0
+    ) {
+        throw new Error("One or more selected property relationships are outside the active location");
     }
 }
 
@@ -231,6 +271,17 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     const promptProfileUpserts = input.promptProfileUpserts || [];
     const shouldSyncToGhl = input.shouldSyncToGhl !== false;
 
+    // All client-submitted media ownership is proven before the property or its
+    // existing media rows are mutated.
+    const [validatedMediaItems] = await Promise.all([
+        validateSubmittedPropertyMedia({
+            locationId: input.location.id,
+            propertyId: normalizedId,
+            mediaItems: input.mediaItems,
+        }),
+        validateStakeholderLocationBoundary(input.location.id, stakeholders),
+    ]);
+
     const normalizedReference = typeof propertyData.reference === "string"
         ? propertyData.reference.trim()
         : propertyData.reference;
@@ -243,6 +294,7 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                     equals: propertyData.reference,
                     mode: "insensitive",
                 },
+                locationId: input.location.id,
                 ...(normalizedId ? { id: { not: normalizedId } } : {}),
             },
             select: { id: true },
@@ -254,8 +306,8 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     }
 
     if (stakeholders.managementCompanyId) {
-        const mgmtCo = await db.company.findUnique({
-            where: { id: stakeholders.managementCompanyId },
+        const mgmtCo = await db.company.findFirst({
+            where: { id: stakeholders.managementCompanyId, locationId: input.location.id },
             select: { name: true },
         });
         if (mgmtCo) {
@@ -264,13 +316,12 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     }
 
     if (propertyData.projectId) {
-        const project = await db.project.findUnique({
-            where: { id: propertyData.projectId },
+        const project = await db.project.findFirst({
+            where: { id: propertyData.projectId, locationId: input.location.id },
             select: { name: true },
         });
-        if (project) {
-            propertyData.projectName = project.name;
-        }
+        if (!project) throw new Error("Selected project is outside the active location");
+        propertyData.projectName = project.name;
     }
 
     const slug = propertyData.slug || propertyData.title?.toLowerCase().replace(/ /g, "-") + "-" + Date.now();
@@ -346,9 +397,9 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
         });
 
         await db.propertyMedia.deleteMany({ where: { propertyId: normalizedId } });
-        if (input.mediaItems.length > 0) {
+        if (validatedMediaItems.length > 0) {
             await db.propertyMedia.createMany({
-                data: input.mediaItems.map((item) => ({
+                data: validatedMediaItems.map((item) => ({
                     propertyId: normalizedId,
                     url: item.url,
                     kind: item.kind,
@@ -358,14 +409,14 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                 })),
             });
         }
-        await ensureMediaAssets(input.mediaItems);
-        const removedCfIds = computeRemovedCloudflareIds(oldMedia, input.mediaItems);
+        await ensureMediaAssets(validatedMediaItems);
+        const removedCfIds = computeRemovedCloudflareIds(oldMedia, validatedMediaItems);
         if (removedCfIds.length > 0) {
             await softDeleteOrphanedAssets(removedCfIds);
         }
     } else {
-        const existing = await db.property.findUnique({
-            where: { slug: propertyPayload.slug },
+        const existing = await db.property.findFirst({
+            where: { slug: propertyPayload.slug, locationId: input.location.id },
         });
 
         if (existing) {
@@ -387,9 +438,9 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
             });
 
             await db.propertyMedia.deleteMany({ where: { propertyId: existing.id } });
-            if (input.mediaItems.length > 0) {
+            if (validatedMediaItems.length > 0) {
                 await db.propertyMedia.createMany({
-                    data: input.mediaItems.map((item) => ({
+                    data: validatedMediaItems.map((item) => ({
                         propertyId: existing.id,
                         url: item.url,
                         kind: item.kind,
@@ -400,8 +451,8 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                 });
             }
 
-            await ensureMediaAssets(input.mediaItems);
-            const removedOverwriteCfIds = computeRemovedCloudflareIds(oldOverwriteMedia, input.mediaItems);
+            await ensureMediaAssets(validatedMediaItems);
+            const removedOverwriteCfIds = computeRemovedCloudflareIds(oldOverwriteMedia, validatedMediaItems);
             if (removedOverwriteCfIds.length > 0) {
                 await softDeleteOrphanedAssets(removedOverwriteCfIds);
             }
@@ -411,7 +462,7 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                     ...propertyPayload,
                     locationId: input.location.id,
                     media: {
-                        create: input.mediaItems.map((item) => ({
+                        create: validatedMediaItems.map((item) => ({
                             url: item.url,
                             kind: item.kind,
                             sortOrder: item.sortOrder,
@@ -422,7 +473,7 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                 } as any,
             });
 
-            await ensureMediaAssets(input.mediaItems);
+            await ensureMediaAssets(validatedMediaItems);
         }
     }
 

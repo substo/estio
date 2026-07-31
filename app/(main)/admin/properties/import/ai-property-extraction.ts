@@ -1,7 +1,6 @@
 "use server";
 
 import db from "@/lib/db";
-import { auth } from "@clerk/nextjs/server";
 import fs from "fs";
 import path from "path";
 import { FEATURE_CATEGORIES } from "@/lib/properties/filter-constants";
@@ -9,6 +8,7 @@ import { PROPERTY_TYPES, RENTAL_PERIODS } from "@/lib/properties/constants";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
+import { requireAuthenticatedLocationContext } from "@/lib/properties/active-location-access";
 
 
 // --- INTERFACES ---
@@ -101,17 +101,11 @@ export async function extractPropertyDataWithAI(
     scrapedLat?: number,
     scrapedLng?: number
 ): Promise<{ success: boolean; data?: AIPropertyData; error?: string }> {
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Unauthorized" };
+    // The optional location ID is only a mismatch assertion. The active location
+    // is always resolved from the authenticated server context.
+    const { locationId: targetLocationId } = await requireAuthenticatedLocationContext(locationId);
 
     // 1. Get API Key & Config
-    let targetLocationId = locationId;
-    if (!targetLocationId) {
-        const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-        targetLocationId = user?.locations[0]?.id;
-    }
-    if (!targetLocationId) return { success: false, error: "No Location found." };
-
     const siteConfig = await db.siteConfig.findUnique({ where: { locationId: targetLocationId } });
     const configAny = siteConfig as any;
 

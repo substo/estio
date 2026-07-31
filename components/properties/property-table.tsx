@@ -11,8 +11,9 @@ import {
 } from '../ui/table';
 import { Button } from '@/components/ui/button';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Edit, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit, Eye, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import Link from 'next/link';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -168,8 +169,9 @@ export function PropertyTable({
     return (
         <>
             <div className="space-y-4">
-                <div className="rounded-md border bg-white">
+                <div className="overflow-x-auto rounded-md border bg-white">
                     <Table>
+                        <caption className="sr-only">Shared property inventory for the current location</caption>
                         <TableHeader>
                             <TableRow>
                                 <TableHead className="hidden xl:table-cell">Reference</TableHead>
@@ -186,19 +188,19 @@ export function PropertyTable({
                         </TableHeader>
                         <TableBody>
                             {data.map((item) => (
-                                <TableRow
-                                    key={item.id}
-                                    className="cursor-pointer hover:bg-muted/50"
-                                    onClick={() => router.push(`/admin/properties/${item.id}/view`)}
-                                >
+                                <TableRow key={item.id}>
                                     <TableCell className="font-medium hidden xl:table-cell">
                                         {item.properties.reference_number || item.properties.property_reference}
                                     </TableCell>
                                     <TableCell>
                                         <div className="space-y-1">
-                                            <div className="max-w-[150px] sm:max-w-[200px] truncate" title={item.properties.title}>
+                                            <Link
+                                                href={`/admin/properties/${item.id}/view`}
+                                                className="block max-w-[150px] truncate font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:max-w-[200px]"
+                                                title={item.properties.title}
+                                            >
                                                 {item.properties.title}
-                                            </div>
+                                            </Link>
                                             <Badge
                                                 variant="secondary"
                                                 className={`xl:hidden ${getSourceMeta(item.properties.source).className}`}
@@ -240,37 +242,37 @@ export function PropertyTable({
                                                     variant="ghost"
                                                     size="icon"
                                                     title="View on Public Site"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
+                                                    aria-label={`View ${item.properties.title} on public site`}
+                                                    className="h-10 w-10"
+                                                    onClick={() => {
                                                         const tokenParam = previewToken ? `?previewToken=${previewToken}` : '';
                                                         window.open(`http://${domain}/properties/${item.properties.property_reference}${tokenParam}`, '_blank');
                                                     }}
                                                 >
-                                                    <Trash2 className="h-4 w-4 hidden" /> {/* Hack to keep layout same if needed or just use icon */}
-                                                    {/* Actually let's use a Globe or Eye icon */}
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="12" cy="12" r="10" /><line x1="2" x2="22" y1="12" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+                                                    <Eye className="h-4 w-4" aria-hidden="true" />
                                                 </Button>
                                             )}
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
+                                                aria-label={`Edit ${item.properties.title}`}
+                                                className="h-10 w-10"
+                                                onClick={() => {
                                                     handleEdit(item.id);
                                                 }}
                                             >
-                                                <Edit className="h-4 w-4" />
+                                                <Edit className="h-4 w-4" aria-hidden="true" />
                                             </Button>
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
+                                                aria-label={`Delete ${item.properties.title}`}
+                                                className="h-10 w-10 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                onClick={() => {
                                                     handleDeleteClick(item.id);
                                                 }}
                                             >
-                                                <Trash2 className="h-4 w-4" />
+                                                <Trash2 className="h-4 w-4" aria-hidden="true" />
                                             </Button>
                                         </div>
                                     </TableCell>
@@ -282,21 +284,21 @@ export function PropertyTable({
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                    <div className="flex items-center justify-between px-2">
+                    <nav className="flex flex-col gap-3 px-2 sm:flex-row sm:items-center sm:justify-between" aria-label="Property pagination">
                         <div className="text-sm text-gray-500">
                             Showing {skip + 1} to {Math.min(skip + limit, total)} of {total} results
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handlePageChange(currentPage - 1)}
                                 disabled={currentPage <= 1}
                             >
-                                <ChevronLeft className="h-4 w-4" />
+                                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                                 Previous
                             </Button>
-                            <div className="text-sm font-medium">
+                            <div className="text-sm font-medium" aria-current="page">
                                 Page {currentPage} of {totalPages}
                             </div>
                             <Button
@@ -306,10 +308,10 @@ export function PropertyTable({
                                 disabled={currentPage >= totalPages}
                             >
                                 Next
-                                <ChevronRight className="h-4 w-4" />
+                                <ChevronRight className="h-4 w-4" aria-hidden="true" />
                             </Button>
                         </div>
-                    </div>
+                    </nav>
                 )}
             </div>
 

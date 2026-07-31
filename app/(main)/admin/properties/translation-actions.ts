@@ -1,9 +1,8 @@
 "use server";
 
 import db from "@/lib/db";
-import { currentUser } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { generatePropertyLanguageTranslation, PropertyTranslationInput } from "@/lib/ai/property-translation";
+import { requirePropertyInActiveLocation } from "@/lib/properties/active-location-access";
 
 export async function translatePropertyFields(
     locationId: string,
@@ -11,20 +10,14 @@ export async function translatePropertyFields(
     targetLanguage: string,
     sourceData: PropertyTranslationInput
 ) {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-    if (!hasAccess) {
-        throw new Error("Unauthorized: Access Denied");
-    }
+    const access = await requirePropertyInActiveLocation(propertyId, { requestedLocationId: locationId });
 
     return await generatePropertyLanguageTranslation({
-        locationId,
+        locationId: access.locationId,
         propertyId,
         targetLanguage,
         sourceData,
-        userId: user.id
+        userId: access.dbUserId,
     });
 }
 
@@ -40,19 +33,7 @@ export async function savePropertyTranslation(
         isAiGenerated?: boolean;
     }
 ) {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-    if (!hasAccess) {
-        throw new Error("Unauthorized: Access Denied");
-    }
-
-    // Verify property exists in this location to ensure safety
-    const property = await db.property.findFirst({
-        where: { id: propertyId, locationId }
-    });
-    if (!property) throw new Error("Property not found");
+    await requirePropertyInActiveLocation(propertyId, { requestedLocationId: locationId });
 
     return await (db as any).propertyTranslation.upsert({
         where: {
@@ -81,15 +62,12 @@ export async function savePropertyTranslation(
 }
 
 export async function getPropertyTranslations(locationId: string, propertyId: string) {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-    if (!hasAccess) {
-        throw new Error("Unauthorized: Access Denied");
-    }
+    await requirePropertyInActiveLocation(propertyId, { requestedLocationId: locationId });
 
     return await (db as any).propertyTranslation.findMany({
-        where: { propertyId }
+        where: {
+            propertyId,
+            property: { locationId },
+        }
     });
 }

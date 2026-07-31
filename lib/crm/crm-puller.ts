@@ -547,7 +547,7 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
         });
 
         // Process images: Transform URL, Upload to Cloudflare
-        const processedImages = [];
+        const processedImages: Array<{ url: string; cloudflareImageId: string; kind: "IMAGE"; sortOrder: number }> = [];
         const CONCURRENCY = 5;
         const cleanUrls = (imageUrls || []).map((url: string) => url.replace('_thumb', '_full'));
 
@@ -556,15 +556,6 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
             const results = await Promise.all(chunk.map(async (url: string, idx: number) => {
                 try {
                     console.log(`[CRM PULL] Processing image ${i + idx + 1}/${cleanUrls.length}: ${url}`);
-
-                    // Skip if already a Cloudflare URL
-                    if (url.includes("imagedelivery.net")) {
-                        return {
-                            url: url,
-                            kind: 'IMAGE',
-                            sortOrder: i + idx
-                        };
-                    }
 
                     // 1. Download image locally with User-Agent
                     const response = await fetch(url, {
@@ -580,7 +571,14 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                     const blob = await response.blob();
 
                     // 2. Upload blob to Cloudflare
-                    const { imageId } = await uploadToCloudflare(blob);
+                    const { imageId } = await uploadToCloudflare(blob, {
+                        metadata: {
+                            locationId,
+                            uploadedBy: actorUserId || null,
+                            purpose: "property_media",
+                            workflow: "old_crm_property_pull",
+                        },
+                    });
 
                     // 3. Return object with ID and Public URL
                     // We use the Public Delivery URL as the main 'url' for display, 
@@ -590,21 +588,18 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
                     return {
                         url: publicUrl,
                         cloudflareImageId: imageId,
-                        kind: 'IMAGE',
+                        kind: 'IMAGE' as const,
                         sortOrder: i + idx
                     };
                 } catch (err: any) {
                     console.error(`[CRM PULL] Failed to upload image ${url} to Cloudflare:`, err);
                     warnings.push(`Image ${i + idx + 1} failed: ${err.message || 'Unknown error'}`);
-                    // Fallback to original URL if upload fails
-                    return {
-                        url: url,
-                        kind: 'IMAGE',
-                        sortOrder: i + idx
-                    };
+                    // Fail closed: do not attach an external image without
+                    // authoritative location metadata.
+                    return null;
                 }
             }));
-            processedImages.push(...results);
+            processedImages.push(...results.filter((item): item is NonNullable<(typeof results)[number]> => Boolean(item)));
         }
 
         extractedData.images = processedImages;

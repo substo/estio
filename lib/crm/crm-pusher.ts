@@ -6,27 +6,31 @@ import fs from 'fs';
 import https from 'https';
 import os from 'os'; // Import os here
 import { finished } from 'stream/promises';
+import { filterPropertyRelationshipsToLocation } from '@/lib/properties/property-relationship-boundary';
 
-export async function pushPropertyToCrm(propertyId: string, userId: string) {
-    console.log(`[CRM PUSH] Starting for property ${propertyId} by user ${userId}`);
+export async function pushPropertyToCrm(input: {
+    propertyId: string;
+    clerkUserId: string;
+    location: { id: string; crmUrl?: string | null };
+}) {
+    const { propertyId, clerkUserId, location } = input;
+    console.log(`[CRM PUSH] Starting for property ${propertyId} by user ${clerkUserId}`);
 
     // 1. Fetch Data
-    const property = await db.property.findUnique({
-        where: { id: propertyId },
+    const property = await db.property.findFirst({
+        where: { id: propertyId, locationId: location.id },
         include: { media: true }
     });
 
     const user = await db.user.findUnique({
-        where: { clerkId: userId },
-        include: { locations: true }
+        where: { clerkId: clerkUserId },
+        select: { crmUsername: true, crmPassword: true },
     });
 
     if (!property) throw new Error("Property not found");
     if (!user) throw new Error("User not found");
 
-    // Get location config
-    const location = user.locations[0];
-    const crmUrl = location?.crmUrl;
+    const crmUrl = location.crmUrl;
 
     if (!crmUrl || !user.crmUsername || !user.crmPassword) {
         throw new Error("Missing CRM configuration. Check location URL and user credentials.");
@@ -68,16 +72,23 @@ export async function pushPropertyToCrm(propertyId: string, userId: string) {
         // 4. Fill Fields
         console.log(`[CRM PUSH] Filling fields...`);
 
-        const fullProperty = await db.property.findUnique({
-            where: { id: propertyId },
+        const fullPropertyRecord = await db.property.findFirst({
+            where: { id: propertyId, locationId: location.id },
             include: {
                 media: true,
-                companyRoles: { include: { company: true } },
-                contactRoles: { include: { contact: true } }
+                companyRoles: {
+                    where: { company: { locationId: location.id } },
+                    include: { company: true },
+                },
+                contactRoles: {
+                    where: { contact: { locationId: location.id } },
+                    include: { contact: true },
+                }
             }
         });
 
-        if (!fullProperty) throw new Error("Property not found (refetch)");
+        if (!fullPropertyRecord) throw new Error("Property not found (refetch)");
+        const fullProperty = filterPropertyRelationshipsToLocation(fullPropertyRecord, location.id);
         const flatData: any = { ...fullProperty };
 
         // Flatten Data logic

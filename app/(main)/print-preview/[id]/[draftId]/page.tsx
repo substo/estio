@@ -1,8 +1,11 @@
-import { currentUser } from "@clerk/nextjs/server";
+import { notFound } from "next/navigation";
 import db from "@/lib/db";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { getLocationPrintBranding, buildPropertyPrintPreviewData } from "@/lib/properties/print-preview";
 import { PrintPreviewViewer } from "@/app/(main)/admin/properties/_components/print-preview-viewer";
+import {
+    PropertyAccessDeniedError,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
 
 export const dynamic = "force-dynamic";
 
@@ -12,14 +15,16 @@ export default async function PropertyPrintPreviewPage({
     params: Promise<{ id: string; draftId: string }>;
 }) {
     const { id, draftId } = await params;
-    const user = await currentUser();
-
-    if (!user) {
-        return <div className="p-6">Unauthorized.</div>;
+    let locationId: string;
+    try {
+        locationId = (await requirePropertyInActiveLocation(id)).locationId;
+    } catch (error) {
+        if (error instanceof PropertyAccessDeniedError) notFound();
+        throw error;
     }
 
     const property = await db.property.findFirst({
-        where: { id },
+        where: { id, locationId },
         include: {
             media: {
                 orderBy: { sortOrder: "asc" },
@@ -27,24 +32,17 @@ export default async function PropertyPrintPreviewPage({
         },
     });
 
-    if (!property) {
-        return <div className="p-6">Property not found.</div>;
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, property.locationId);
-    if (!hasAccess) {
-        return <div className="p-6">Unauthorized.</div>;
-    }
+    if (!property) notFound();
 
     const draft = await db.propertyPrintDraft.findFirst({
         where: { id: draftId, propertyId: property.id },
     });
 
     if (!draft) {
-        return <div className="p-6">Print draft not found.</div>;
+        notFound();
     }
 
-    const branding = await getLocationPrintBranding(property.locationId);
+    const branding = await getLocationPrintBranding(locationId);
     const data = buildPropertyPrintPreviewData({ property, draft, branding });
 
     return (

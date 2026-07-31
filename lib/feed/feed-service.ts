@@ -139,11 +139,13 @@ export class FeedService {
                 for (let i = 0; i < (item.images || []).length; i++) {
                     const rawUrl = item.images[i];
                     try {
-                        if (rawUrl.includes("imagedelivery.net")) {
-                            mediaItems.push({ url: rawUrl, kind: 'IMAGE' as const, sortOrder: i });
-                            continue;
-                        }
-                        const result = await uploadUrlToCloudflare(rawUrl);
+                        const result = await uploadUrlToCloudflare(rawUrl, {
+                            metadata: {
+                                locationId,
+                                purpose: "property_media",
+                                workflow: "property_feed_sync",
+                            },
+                        });
                         const cdnUrl = getImageDeliveryUrl(result.imageId, "public");
                         mediaItems.push({
                             url: cdnUrl,
@@ -153,12 +155,8 @@ export class FeedService {
                         });
                     } catch (error: any) {
                         console.warn(`[FeedService] Failed to upload image to CF for feed ${feed.id}: ${rawUrl} - ${error.message}`);
-                        // Graceful fallback to raw hotlink if Cloudflare ingestion fails
-                        mediaItems.push({
-                            url: rawUrl,
-                            kind: 'IMAGE' as const,
-                            sortOrder: i
-                        });
+                        // Fail closed for property images; external image hotlinks do
+                        // not carry authoritative tenant ownership.
                     }
                 }
 

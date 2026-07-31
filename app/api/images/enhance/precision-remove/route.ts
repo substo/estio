@@ -1,7 +1,6 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { PropertyAccessDeniedError, requirePropertyInActiveLocation } from "@/lib/properties/active-location-access";
 import { getImageDeliveryUrl, uploadToCloudflare } from "@/lib/cloudflareImages";
 import { fetchImageBuffer } from "@/lib/ai/property-image-enhancement";
 import {
@@ -15,7 +14,7 @@ import { assertPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image
 import { removeImageContentWithPrecisionMask } from "@/lib/ai/property-image-precision-remove";
 import { resolvePropertyImageGenerationModel } from "@/lib/ai/property-image-model-routing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { resolveOwnedPropertyImageSource } from "../_helpers";
+import { PropertyMediaOwnershipError, resolveOwnedPropertyImageSource } from "../_helpers";
 
 const ratioPattern = /^\d{1,2}(?:\.\d{1,2})?:\d{1,2}(?:\.\d{1,2})?$/;
 
@@ -77,12 +76,6 @@ const precisionRemoveRequestSchema = z.object({
 
 export async function POST(req: Request) {
     try {
-        const session = await auth();
-        const userId = session.userId;
-        if (!userId) {
-            return new NextResponse("Unauthorized", { status: 401 });
-        }
-
         const parsed = precisionRemoveRequestSchema.safeParse(await req.json().catch(() => null));
         if (!parsed.success) {
             return NextResponse.json(
@@ -91,17 +84,17 @@ export async function POST(req: Request) {
             );
         }
 
-        const hasAccess = await verifyUserHasAccessToLocation(userId, parsed.data.locationId);
-        if (!hasAccess) {
-            return new NextResponse("Forbidden", { status: 403 });
-        }
+        const { locationId, dbUserId } = await requirePropertyInActiveLocation(
+            parsed.data.propertyId,
+            { requestedLocationId: parsed.data.locationId },
+        );
 
-        await assertPrecisionRemoveEnabledForLocation(parsed.data.locationId);
+        await assertPrecisionRemoveEnabledForLocation(locationId);
 
-        const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
+        const modelCatalog = await getPropertyImageEnhancementModelCatalog(locationId);
         const requestedGenerationModel = String(parsed.data.generationModel || "").trim();
         const modelResolution = await resolvePropertyImageGenerationModel({
-            locationId: parsed.data.locationId,
+            locationId,
             requestedModel: requestedGenerationModel || modelCatalog.defaults.generation,
             fallbackModels: modelCatalog.generationModels,
         });
@@ -119,7 +112,7 @@ export async function POST(req: Request) {
         }
 
         const ownedMedia = await resolveOwnedPropertyImageSource({
-            locationId: parsed.data.locationId,
+            locationId,
             propertyId: parsed.data.propertyId,
             cloudflareImageId: parsed.data.cloudflareImageId,
             sourceUrl: parsed.data.sourceUrl,
@@ -127,7 +120,7 @@ export async function POST(req: Request) {
 
         const sourceImage = await fetchImageBuffer(ownedMedia.sourceUrl);
         const result = await removeImageContentWithPrecisionMask({
-            locationId: parsed.data.locationId,
+            locationId,
             sourceImageBuffer: sourceImage.buffer,
             sourceImageMimeType: sourceImage.mimeType,
             maskPngBase64: parsed.data.maskPngBase64,
@@ -142,13 +135,21 @@ export async function POST(req: Request) {
 
         const bytes = new Uint8Array(result.imageBuffer);
         const blob = new Blob([bytes], { type: result.mimeType });
-        const upload = await uploadToCloudflare(blob);
+        const upload = await uploadToCloudflare(blob, {
+            metadata: {
+                locationId,
+                uploadedBy: dbUserId,
+                purpose: "property_media",
+                workflow: "property_precision_remove",
+                propertyId: parsed.data.propertyId,
+            },
+        });
         const generatedImageUrl = getImageDeliveryUrl(upload.imageId, "public");
 
         // Blocking AI usage telemetry to ensure it is not cancelled by the Next.js runtime.
         await securelyRecordAiUsage({
-            locationId: parsed.data.locationId,
-            userId: null,
+            locationId,
+            userId: dbUserId,
             resourceType: "property",
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",
@@ -178,6 +179,9 @@ export async function POST(req: Request) {
             maskCoverage: result.maskCoverage,
         });
     } catch (error) {
+        if (error instanceof PropertyAccessDeniedError || error instanceof PropertyMediaOwnershipError) {
+            return new NextResponse("Not found", { status: 404 });
+        }
         console.error("[/api/images/enhance/precision-remove] Error:", error);
         const message = error instanceof Error ? error.message : "Internal server error.";
         const status = /disabled in ai settings/i.test(message)

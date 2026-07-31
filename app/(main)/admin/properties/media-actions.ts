@@ -1,24 +1,29 @@
 'use server';
 
 import { uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
+import { requireAuthenticatedLocationContext } from '@/lib/properties/active-location-access';
 
 export async function uploadFile(formData: FormData) {
     const file = formData.get('file') as File;
-    // locationId might still be passed but we might not strictly need it for Cloudflare global storage
-    // unless we want to tag metadata. For now, we ignore it or validte it exists.
-    const locationId = formData.get('locationId') as string;
+    const requestedLocationId = formData.get('locationId');
 
     if (!file) {
         throw new Error('No file provided');
     }
 
-    // We keep the locationId check to ensure auth/context consistency if needed by caller
-    if (!locationId) {
-        throw new Error('Location ID is required');
-    }
+    const access = await requireAuthenticatedLocationContext(
+        typeof requestedLocationId === 'string' ? requestedLocationId : null,
+    );
 
     try {
-        const { imageId } = await uploadToCloudflare(file);
+        const { imageId } = await uploadToCloudflare(file, {
+            metadata: {
+                locationId: access.locationId,
+                uploadedBy: access.dbUserId,
+                purpose: "property_media",
+                workflow: "property_editor",
+            },
+        });
         const url = getImageDeliveryUrl(imageId, 'public');
 
         return {

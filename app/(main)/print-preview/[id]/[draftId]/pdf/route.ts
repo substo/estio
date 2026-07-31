@@ -1,23 +1,32 @@
-import { currentUser } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 import db from "@/lib/db";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { generatePdfViaPuppeteer } from "@/lib/properties/print-puppeteer";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import {
+    PropertyAccessDeniedError,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
 
 export async function GET(
     _request: Request,
     { params }: { params: Promise<{ id: string; draftId: string }> }
 ) {
     const { id, draftId } = await params;
-    const user = await currentUser();
-
-    if (!user) {
-        return new Response("Unauthorized", { status: 401 });
+    let locationId: string;
+    let dbUserId: string;
+    try {
+        const access = await requirePropertyInActiveLocation(id);
+        locationId = access.locationId;
+        dbUserId = access.dbUserId;
+    } catch (error) {
+        if (error instanceof PropertyAccessDeniedError) {
+            return new Response("Not found", { status: 404 });
+        }
+        throw error;
     }
 
     const property = await db.property.findFirst({
-        where: { id },
+        where: { id, locationId },
         include: {
             media: {
                 orderBy: { sortOrder: "asc" },
@@ -27,11 +36,6 @@ export async function GET(
 
     if (!property) {
         return new Response("Property not found", { status: 404 });
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, property.locationId);
-    if (!hasAccess) {
-        return new Response("Unauthorized", { status: 403 });
     }
 
     const draft = await db.propertyPrintDraft.findFirst({
@@ -62,7 +66,8 @@ export async function GET(
         const pdfBytes = await generatePdfViaPuppeteer(targetUrl, requestCookies);
 
         void securelyRecordAiUsage({
-            locationId: property.locationId,
+            locationId,
+            userId: dbUserId,
             resourceType: "property",
             resourceId: property.id,
             featureArea: "property_printing",

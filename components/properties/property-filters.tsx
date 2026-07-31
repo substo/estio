@@ -283,8 +283,8 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
             <CardContent className="pt-6">
                 <div className="space-y-4">
                     <div className="flex flex-col gap-2">
-                        <div className="text-sm font-medium">Views</div>
-                        <Tabs value={currentView} onValueChange={handleViewChange}>
+                        <div className="text-sm font-medium" id="property-views-label">Views</div>
+                        <Tabs value={currentView} onValueChange={handleViewChange} aria-labelledby="property-views-label">
                             <TabsList className="h-auto w-full justify-start flex-wrap">
                                 <TabsTrigger value="inventory">Inventory</TabsTrigger>
                                 <TabsTrigger value="feed-inbox">Feed Inbox</TabsTrigger>
@@ -295,7 +295,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                     </div>
 
                     {/* Primary Filters (Row 1) */}
-                    <div className="flex gap-4 items-start w-full">
+                    <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
                         {/* Left Column: Filters & Search */}
                         <div className="flex-1 flex flex-wrap gap-2 items-center">
                             {/* All Properties (Publication Status) */}
@@ -304,7 +304,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={searchParams.get('publicationStatus') || ''}
                                     onValueChange={(val) => handleFilterChange('publicationStatus', val === 'all' ? '' : val)}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Publication status">
                                         <SelectValue placeholder="All Properties" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -323,7 +323,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={searchParams.get('status') || ''}
                                     onValueChange={(val) => handleFilterChange('status', val === 'all' ? '' : val)}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Property status">
                                         <SelectValue placeholder="Status" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -343,7 +343,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={searchParams.get('goal') || ''}
                                     onValueChange={(val) => handleFilterChange('goal', val === 'all' ? '' : val)}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Listing goal">
                                         <SelectValue placeholder="Goal" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -378,7 +378,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={searchParams.get('condition') || ''}
                                     onValueChange={(val) => handleFilterChange('condition', val === 'all' ? '' : val)}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Property condition">
                                         <SelectValue placeholder="Condition" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -406,7 +406,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={currentPriceRange === 'all' ? '' : currentPriceRange}
                                     onValueChange={handlePriceRangeChange}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Price range">
                                         <SelectValue placeholder="Price" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -423,6 +423,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                             {/* Search */}
                             <div className="flex-1 min-w-[200px]">
                                 <Input
+                                    aria-label="Search properties by reference or title"
                                     placeholder="Search by reference..."
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
@@ -440,19 +441,21 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                 onClick={() => setIsExpanded(!isExpanded)}
                                 className="gap-2"
                                 title="More Filters"
+                                aria-expanded={isExpanded}
+                                aria-controls="property-secondary-filters"
                             >
-                                <SlidersHorizontal className="h-4 w-4" />
+                                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
                                 {activeFilterCount > 0 && (
                                     <Badge variant="default" className="h-5 w-5 p-0 flex items-center justify-center rounded-full text-xs">
                                         {activeFilterCount}
                                     </Badge>
                                 )}
-                                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                {isExpanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
                             </Button>
 
                             {(activeFilterCount > 0 || search || currentPriceRange !== 'all') && (
-                                <Button onClick={handleReset} variant="ghost" size="icon" title="Reset Filters">
-                                    <X className="h-4 w-4" />
+                                <Button onClick={handleReset} variant="ghost" size="icon" title="Reset Filters" aria-label="Reset property filters">
+                                    <X className="h-4 w-4" aria-hidden="true" />
                                 </Button>
                             )}
                         </div>
@@ -460,7 +463,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
 
                     {/* Expandable Secondary Filters */}
                     {isExpanded && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t animate-in fade-in slide-in-from-top-2">
+                        <div id="property-secondary-filters" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t animate-in fade-in slide-in-from-top-2">
 
                             {/* Features Filter */}
                             <div className="space-y-2">
@@ -489,12 +492,13 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                             variant="outline"
                                             role="combobox"
                                             aria-expanded={ownerOpen}
+                                            aria-label="Property owner"
                                             className="w-full justify-between"
                                         >
                                             {selectedOwner
                                                 ? owners.find((owner) => owner === selectedOwner) || selectedOwner
                                                 : "Select owner..."}
-                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
                                         </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-full p-0">
@@ -550,7 +554,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={searchParams.get('filterBy') || 'all'}
                                     onValueChange={(val) => handleFilterChange('filterBy', val === 'all' ? '' : val)}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Additional property filter">
                                         <SelectValue placeholder="Filter by" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -571,7 +575,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                                     value={searchParams.get('source') || 'all'}
                                     onValueChange={(val) => handleFilterChange('source', val === 'all' ? '' : val)}
                                 >
-                                    <SelectTrigger>
+                                    <SelectTrigger aria-label="Property source">
                                         <SelectValue placeholder="Any Source" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -589,6 +593,7 @@ export function PropertyFilters({ owners = [] }: PropertyFiltersProps) {
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">Ref. No.</label>
                                 <Input
+                                    aria-label="Property reference number"
                                     placeholder="e.g. REF-001"
                                     value={reference}
                                     onChange={(e) => setReference(e.target.value)}

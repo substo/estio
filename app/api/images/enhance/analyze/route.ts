@@ -1,7 +1,6 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { PropertyAccessDeniedError, requirePropertyInActiveLocation } from "@/lib/properties/active-location-access";
 import { getPropertyImageEnhancementModelCatalog } from "@/lib/ai/fetch-models";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import {
@@ -10,7 +9,7 @@ import {
     fetchImageAsInlineData,
 } from "@/lib/ai/property-image-enhancement";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { resolveOwnedPropertyImageSource } from "../_helpers";
+import { PropertyMediaOwnershipError, resolveOwnedPropertyImageSource } from "../_helpers";
 
 const analyzeRequestSchema = z.object({
     locationId: z.string().trim().min(1),
@@ -32,12 +31,6 @@ const analyzeRequestSchema = z.object({
 
 export async function POST(req: Request) {
     try {
-        const session = await auth();
-        const userId = session.userId;
-        if (!userId) {
-            return new NextResponse("Unauthorized", { status: 401 });
-        }
-
         const parsed = analyzeRequestSchema.safeParse(await req.json().catch(() => null));
         if (!parsed.success) {
             return NextResponse.json(
@@ -46,19 +39,19 @@ export async function POST(req: Request) {
             );
         }
 
-        const hasAccess = await verifyUserHasAccessToLocation(userId, parsed.data.locationId);
-        if (!hasAccess) {
-            return new NextResponse("Forbidden", { status: 403 });
-        }
+        const { locationId, dbUserId } = await requirePropertyInActiveLocation(
+            parsed.data.propertyId,
+            { requestedLocationId: parsed.data.locationId },
+        );
 
         const ownedMedia = await resolveOwnedPropertyImageSource({
-            locationId: parsed.data.locationId,
+            locationId,
             propertyId: parsed.data.propertyId,
             cloudflareImageId: parsed.data.cloudflareImageId,
             sourceUrl: parsed.data.sourceUrl,
         });
 
-        const modelCatalog = await getPropertyImageEnhancementModelCatalog(parsed.data.locationId);
+        const modelCatalog = await getPropertyImageEnhancementModelCatalog(locationId);
         const availableAnalysisModels = new Set(modelCatalog.analysisModels.map((model) => model.value));
         const requestedAnalysisModel = String(parsed.data.analysisModel || "").trim();
 
@@ -90,7 +83,7 @@ export async function POST(req: Request) {
                 userInstructions: parsed.data.userInstructions,
             })
             : await analyzeImageForEnhancement({
-                apiKey: await resolveLocationGoogleAiApiKey(parsed.data.locationId).then((key) => {
+                apiKey: await resolveLocationGoogleAiApiKey(locationId).then((key) => {
                     if (!key) throw new Error("Google AI API key is not configured for this location.");
                     return key;
                 }),
@@ -103,8 +96,8 @@ export async function POST(req: Request) {
 
         // Blocking AI usage telemetry to ensure it is not cancelled by the Next.js runtime.
         await securelyRecordAiUsage({
-            locationId: parsed.data.locationId,
-            userId: null,
+            locationId,
+            userId: dbUserId,
             resourceType: "property",
             resourceId: parsed.data.propertyId,
             featureArea: "property_image_enhancement",
@@ -124,6 +117,9 @@ export async function POST(req: Request) {
             model: result.model,
         });
     } catch (error) {
+        if (error instanceof PropertyAccessDeniedError || error instanceof PropertyMediaOwnershipError) {
+            return new NextResponse("Not found", { status: 404 });
+        }
         console.error("[/api/images/enhance/analyze] Error:", error);
         const message = error instanceof Error ? error.message : "Internal server error.";
         return NextResponse.json(

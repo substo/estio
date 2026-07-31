@@ -1,26 +1,29 @@
 import db from "@/lib/db";
-import { getLocationById } from "@/lib/location";
 import PropertyForm from "../_components/property-form";
-import { getLocationContext } from "@/lib/auth/location-context";
 import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
+import {
+    PropertyAccessDeniedError,
+    requireAuthenticatedLocationContext,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
+import { notFound } from "next/navigation";
+import { filterPropertyRelationshipsToLocation } from "@/lib/properties/property-relationship-boundary";
 
 
 
-export default async function PropertyEditorPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ locationId?: string }> }) {
+export default async function PropertyEditorPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
-    const { locationId: searchLocationId } = await searchParams;
 
-    const locationCtx = await getLocationContext();
-    const locationId = searchLocationId || locationCtx?.id;
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
+    let access: Awaited<ReturnType<typeof requireAuthenticatedLocationContext>>;
+    try {
+        access = id === "new"
+            ? await requireAuthenticatedLocationContext()
+            : await requirePropertyInActiveLocation(id);
+    } catch (error) {
+        if (error instanceof PropertyAccessDeniedError) notFound();
+        throw error;
     }
-
-    const location = await getLocationById(locationId);
-    if (!location) {
-        return <div>Location not found.</div>;
-    }
+    const locationId = access.locationId;
 
     let property = null;
     if (id !== "new") {
@@ -33,11 +36,13 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
                     orderBy: { updatedAt: "desc" },
                 },
                 contactRoles: {
+                    where: { contact: { locationId } },
                     include: {
                         contact: true
                     }
                 },
                 companyRoles: {
+                    where: { company: { locationId } },
                     include: {
                         company: true
                     }
@@ -48,8 +53,9 @@ export default async function PropertyEditorPage({ params, searchParams }: { par
         });
 
         if (!property) {
-            return <div>Property not found.</div>;
+            notFound();
         }
+        property = filterPropertyRelationshipsToLocation(property, locationId);
     }
 
     // Fetch data for the Form Dropdowns

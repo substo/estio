@@ -3,13 +3,15 @@
 import db from "@/lib/db";
 import { MediaKind, PropertyStatus, PublicationStatus } from "@prisma/client";
 import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
-import { getLocationById } from "@/lib/location";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser } from "@clerk/nextjs/server";
 import { ensureUserExists } from "@/lib/auth/sync-user";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import {
+    requireAuthenticatedLocationContext,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
 import { parsePropertyImagePromptProfileUpsertsJson } from "@/lib/ai/property-image-prompt-profiles";
 import { softDeleteOrphanedAssets } from "@/lib/media/media-assets";
 import { DuplicatePropertyReferenceError, savePropertyRecord } from "@/lib/properties/save-property-record";
@@ -150,25 +152,17 @@ const emptyToNull = (val: FormDataEntryValue | null) => {
 
 export async function upsertProperty(formData: FormData, options?: { redirectOnCreate?: boolean }) {
     try {
-        const locationId = formData.get("locationId") as string;
+        const requestedLocationId = formData.get("locationId");
         const id = formData.get("id") as string;
+        const requestedLocation = typeof requestedLocationId === "string" ? requestedLocationId : null;
+        const { location, locationId } = await (id && id !== "new"
+            ? requirePropertyInActiveLocation(id, { requestedLocationId: requestedLocation })
+            : requireAuthenticatedLocationContext(requestedLocation));
 
         console.log('Upserting property:', { id, locationId });
 
-        if (!locationId) throw new Error("Location ID required");
-
-        const location = await getLocationById(locationId);
-        if (!location) throw new Error("Location not found");
-
         const user = await currentUser();
         if (!user) throw new Error("Unauthorized");
-
-        // Security Check: Verify user has access to this location
-        console.log('[UPSERT_DEBUG] Checking access for user', user.id, 'location', locationId);
-        const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-        if (!hasAccess) {
-            throw new Error("Unauthorized: Access Denied");
-        }
 
         let dbUser = null;
         if (user) {
@@ -305,9 +299,10 @@ export async function upsertProperty(formData: FormData, options?: { redirectOnC
         if (mediaJsonData.length > 0) {
             mediaJsonData.forEach((item, index) => {
                 // item: { url: string, cloudflareImageId?: string, kind?: MediaKind }
+                const kind = Object.values(MediaKind).includes(item.kind) ? item.kind : MediaKind.IMAGE;
                 mediaItems.push({
                     url: item.url,
-                    kind: item.kind || MediaKind.IMAGE,
+                    kind,
                     sortOrder: index,
                     cloudflareImageId: item.cloudflareImageId,
                     metadata: item.metadata,
@@ -406,18 +401,10 @@ export async function upsertProperty(formData: FormData, options?: { redirectOnC
     }
 }
 
-export async function deletePropertyAction(propertyId: string, locationId: string) {
+export async function deletePropertyAction(propertyId: string, requestedLocationId?: string) {
     try {
+        const { locationId } = await requirePropertyInActiveLocation(propertyId, { requestedLocationId });
         console.log(`Attempting to delete property ${propertyId} for location ${locationId}`);
-
-        const user = await currentUser();
-        if (!user) throw new Error("Unauthorized");
-
-        // params locationId is passed from client, verifying access
-        const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-        if (!hasAccess) {
-            throw new Error("Unauthorized: Access Denied");
-        }
 
         // ── Capture media before deletion for orphan detection ──
         const deletingMedia = await db.propertyMedia.findMany({
@@ -484,23 +471,12 @@ export async function bulkUpdateFeedInboxPropertiesAction(
         action: FeedInboxBulkAction;
     }
 ) {
-    const { propertyIds, locationId, action } = params;
-
-    if (!locationId) {
-        throw new Error("Location ID required");
-    }
+    const { propertyIds, locationId: requestedLocationId, action } = params;
+    const { locationId } = await requireAuthenticatedLocationContext(requestedLocationId);
 
     const uniqueIds = Array.from(new Set((propertyIds || []).filter(Boolean)));
     if (uniqueIds.length === 0) {
         return { success: true, updatedCount: 0 };
-    }
-
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-    if (!hasAccess) {
-        throw new Error("Unauthorized: Access Denied");
     }
 
     const feedProps = await db.property.findMany({
@@ -560,11 +536,12 @@ import { buildOldCrmManualPullFailure } from "@/lib/crm/old-crm-property-pull-se
 import { pullOldCrmPropertyForManualClient } from "@/lib/crm/manual-old-crm-property-pull";
 
 export async function pushToOldCrm(propertyId: string) {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
-    // We pass the user ID so the service can look up CRM credentials from the DB User record
-    return await pushPropertyToCrm(propertyId, user.id);
+    const { clerkUserId, location, locationId } = await requirePropertyInActiveLocation(propertyId);
+    return await pushPropertyToCrm({
+        propertyId,
+        clerkUserId,
+        location: { id: locationId, crmUrl: location.crmUrl },
+    });
 }
 
 export async function pullFromOldCrm(oldPropertyId: string) {
@@ -588,12 +565,16 @@ export async function pullFromOldCrm(oldPropertyId: string) {
 }
 
 export async function linkPropertyCreator(propertyId: string, email: string) {
-    const user = await currentUser();
-    if (!user) throw new Error("Unauthorized");
-
     if (!propertyId || !email) {
         throw new Error("Property ID and Email are required");
     }
+
+    const { locationId } = await requirePropertyInActiveLocation(propertyId, { adminOnly: true });
+    const property = await db.property.findFirst({
+        where: { id: propertyId, locationId },
+        select: { originalCreatorName: true },
+    });
+    if (!property) throw new Error("Property access denied");
 
     const dbUser = await db.user.findUnique({ where: { email } });
 
@@ -607,15 +588,10 @@ export async function linkPropertyCreator(propertyId: string, email: string) {
         // We need to fetch the name from the property if we don't have it, 
         // but it's not passed here. Ideally we should pass it or fetch property.
         // For efficiency, let's fetch property first or just use email as name fallback.
-        const prop = await db.property.findUnique({
-            where: { id: propertyId },
-            select: { originalCreatorName: true }
-        });
-
         const newUser = await db.user.create({
             data: {
                 email,
-                name: prop?.originalCreatorName || email.split('@')[0],
+                name: property.originalCreatorName || email.split('@')[0],
                 // No clerkId yet. 
             }
         });
@@ -624,7 +600,7 @@ export async function linkPropertyCreator(propertyId: string, email: string) {
 
     // Update property with both metadata and the actual relation
     await db.property.update({
-        where: { id: propertyId },
+        where: { id: propertyId, locationId },
         data: {
             originalCreatorEmail: email,
             createdById: targetUserId

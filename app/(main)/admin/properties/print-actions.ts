@@ -1,11 +1,10 @@
 "use server";
 
-import { currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import db from "@/lib/db";
-import { ensureUserExists } from "@/lib/auth/sync-user";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { requirePropertyInActiveLocation } from "@/lib/properties/active-location-access";
+import { assertPropertyPrintDraftWriteBoundary } from "@/lib/properties/print-draft-boundary";
 import { generatePropertyPrintCopy } from "@/lib/properties/print-ai";
 import {
     createDefaultPropertyPrintDraftInput,
@@ -34,21 +33,6 @@ const saveDraftSchema = z.object({
     generationMetadata: z.unknown().optional(),
 });
 
-async function requirePropertyAccess(locationId: string) {
-    const user = await currentUser();
-    if (!user) {
-        throw new Error("Unauthorized");
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-    if (!hasAccess) {
-        throw new Error("Unauthorized");
-    }
-
-    const dbUser = await ensureUserExists(user);
-    return { user, dbUser };
-}
-
 function revalidatePropertyPrintPaths(propertyId: string, draftId?: string | null) {
     revalidatePath(`/admin/properties/${propertyId}/view`);
     if (draftId) {
@@ -61,11 +45,11 @@ export async function createPropertyPrintDraft(input: {
     locationId: string;
 }) {
     const normalizedPropertyId = String(input.propertyId || "").trim();
-    const normalizedLocationId = String(input.locationId || "").trim();
-    await requirePropertyAccess(normalizedLocationId);
+    const requestedLocationId = String(input.locationId || "").trim();
+    const { locationId } = await requirePropertyInActiveLocation(normalizedPropertyId, { requestedLocationId });
 
     const property = await db.property.findFirst({
-        where: { id: normalizedPropertyId, locationId: normalizedLocationId },
+        where: { id: normalizedPropertyId, locationId },
         include: {
             media: {
                 where: { kind: "IMAGE" },
@@ -119,15 +103,39 @@ export async function createPropertyPrintDraft(input: {
 
 export async function savePropertyPrintDraft(input: z.infer<typeof saveDraftSchema>) {
     const parsed = saveDraftSchema.parse(input);
-    await requirePropertyAccess(parsed.locationId);
+    const { locationId } = await requirePropertyInActiveLocation(parsed.propertyId, {
+        requestedLocationId: parsed.locationId,
+    });
 
     const property = await db.property.findFirst({
-        where: { id: parsed.propertyId, locationId: parsed.locationId },
-        select: { id: true },
+        where: { id: parsed.propertyId, locationId },
+        select: {
+            id: true,
+            media: { select: { id: true } },
+        },
     });
     if (!property) {
-        throw new Error("Property not found.");
+        throw new Error("Property access denied");
     }
+
+    const existingDraft = parsed.draftId
+        ? await db.propertyPrintDraft.findFirst({
+            where: {
+                id: parsed.draftId,
+                propertyId: property.id,
+                property: { locationId },
+            },
+            select: { id: true, propertyId: true },
+        })
+        : null;
+
+    assertPropertyPrintDraftWriteBoundary({
+        propertyId: property.id,
+        draftPropertyId: parsed.draftId ? existingDraft?.propertyId : null,
+        selectedMediaIds: parsed.selectedMediaIds,
+        propertyMediaIds: property.media.map(({ id }) => id),
+    });
+    if (parsed.draftId && !existingDraft) throw new Error("Print draft access denied");
 
     const template = getPropertyPrintTemplate(parsed.templateId);
     if (!template.paperSizes.includes(parsed.paperSize as "A4" | "A3")) {
@@ -158,7 +166,7 @@ export async function savePropertyPrintDraft(input: z.infer<typeof saveDraftSche
 
         if (parsed.draftId) {
             return tx.propertyPrintDraft.update({
-                where: { id: parsed.draftId },
+                where: { id: existingDraft!.id },
                 data: nextData,
             });
         }
@@ -182,8 +190,8 @@ export async function duplicatePropertyPrintDraft(input: {
 }) {
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
-    const locationId = String(input.locationId || "").trim();
-    await requirePropertyAccess(locationId);
+    const requestedLocationId = String(input.locationId || "").trim();
+    const { locationId } = await requirePropertyInActiveLocation(propertyId, { requestedLocationId });
 
     const draft = await db.propertyPrintDraft.findFirst({
         where: {
@@ -218,8 +226,8 @@ export async function deletePropertyPrintDraft(input: {
 }) {
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
-    const locationId = String(input.locationId || "").trim();
-    await requirePropertyAccess(locationId);
+    const requestedLocationId = String(input.locationId || "").trim();
+    const { locationId } = await requirePropertyInActiveLocation(propertyId, { requestedLocationId });
 
     const draft = await db.propertyPrintDraft.findFirst({
         where: {
@@ -262,8 +270,8 @@ export async function setDefaultPropertyPrintDraft(input: {
 }) {
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
-    const locationId = String(input.locationId || "").trim();
-    await requirePropertyAccess(locationId);
+    const requestedLocationId = String(input.locationId || "").trim();
+    const { locationId } = await requirePropertyInActiveLocation(propertyId, { requestedLocationId });
 
     const draft = await db.propertyPrintDraft.findFirst({
         where: {
@@ -299,17 +307,16 @@ export async function generatePropertyPrintDraftCopy(input: {
 }) {
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
-    const locationId = String(input.locationId || "").trim();
-    const { dbUser } = await requirePropertyAccess(locationId);
-    if (!dbUser?.id) {
-        throw new Error("Unable to resolve the current user for AI usage tracking.");
-    }
+    const requestedLocationId = String(input.locationId || "").trim();
+    const { locationId, dbUserId } = await requirePropertyInActiveLocation(propertyId, { requestedLocationId });
 
     // Resolve model: explicit input > draft promptSettings > location defaults
     const draft = await db.propertyPrintDraft.findFirst({
-        where: { id: draftId, propertyId },
+        where: { id: draftId, propertyId, property: { locationId } },
         select: { promptSettings: true, generatedContent: true },
     });
+    if (!draft) throw new Error("Print draft access denied");
+
     const savedModelOverride = (draft?.promptSettings && typeof draft.promptSettings === "object")
         ? String((draft.promptSettings as any).modelOverride || "").trim()
         : "";
@@ -319,7 +326,7 @@ export async function generatePropertyPrintDraftCopy(input: {
         propertyId,
         draftId,
         locationId,
-        userId: dbUser.id,
+        userId: dbUserId,
         modelOverride: effectiveModel,
     });
 

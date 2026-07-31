@@ -3,6 +3,11 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import net from "node:net";
+import {
+    isPrivateOrReservedIpAddress,
+    normalizeHostname,
+    selectPinnedPublicAddress,
+} from "@/lib/security/public-network";
 
 export type PropertyMessageUrlContextResult = {
     success: boolean;
@@ -28,71 +33,7 @@ const BLOCKED_HOSTS = new Set([
     "localhost.localdomain",
 ]);
 
-function isPrivateIpAddress(address: string): boolean {
-    if (net.isIPv4(address)) {
-        const parts = address.split(".").map((part) => Number.parseInt(part, 10));
-        const [a, b, c] = parts;
-        return (
-            a === 10
-            || a === 127
-            || (a === 100 && b >= 64 && b <= 127)
-            || (a === 172 && b >= 16 && b <= 31)
-            || (a === 192 && b === 168)
-            || (a === 192 && b === 0 && (c === 0 || c === 2))
-            || (a === 198 && b >= 18 && b <= 19)
-            || (a === 198 && b === 51 && c === 100)
-            || (a === 203 && b === 0 && c === 113)
-            || (a === 169 && b === 254)
-            || a === 0
-            || a >= 224
-        );
-    }
-
-    if (net.isIPv6(address)) {
-        const normalized = address.toLowerCase();
-        if (normalized.startsWith("::ffff:")) {
-            const mapped = normalized.slice("::ffff:".length);
-            if (net.isIPv4(mapped)) return isPrivateIpAddress(mapped);
-            const words = mapped.split(":");
-            if (words.length === 2 && words.every((word) => /^[0-9a-f]{1,4}$/.test(word))) {
-                const high = Number.parseInt(words[0], 16);
-                const low = Number.parseInt(words[1], 16);
-                return isPrivateIpAddress([
-                    high >> 8,
-                    high & 0xff,
-                    low >> 8,
-                    low & 0xff,
-                ].join("."));
-            }
-            return true;
-        }
-        return (
-            normalized === "::1"
-            || normalized.startsWith("fc")
-            || normalized.startsWith("fd")
-            || /^fe[89ab]/.test(normalized)
-            || normalized.startsWith("ff")
-            || normalized.startsWith("64:ff9b:")
-            || normalized.startsWith("100:")
-            || normalized.startsWith("2001:db8:")
-            || normalized === "::"
-        );
-    }
-
-    return false;
-}
-
-export function selectPinnedPublicAddress(
-    addresses: Array<{ address: string; family: number }>,
-) {
-    if (
-        addresses.length === 0
-        || addresses.some((item) => isPrivateIpAddress(item.address))
-    ) {
-        return null;
-    }
-    return addresses[0];
-}
+export { selectPinnedPublicAddress } from "@/lib/security/public-network";
 
 async function fetchPinnedPublicHttpResponse(
     url: URL,
@@ -180,12 +121,12 @@ export async function validatePublicHttpUrl(rawUrl: string): Promise<{ ok: true;
         return { ok: false, error: "URLs containing credentials are not supported." };
     }
 
-    const hostname = parsed.hostname.toLowerCase();
+    const hostname = normalizeHostname(parsed.hostname);
     if (!hostname || BLOCKED_HOSTS.has(hostname) || hostname.endsWith(".localhost")) {
         return { ok: false, error: "Local URLs are not supported." };
     }
 
-    if (net.isIP(hostname) && isPrivateIpAddress(hostname)) {
+    if (net.isIP(hostname) && isPrivateOrReservedIpAddress(hostname)) {
         return { ok: false, error: "Private network URLs are not supported." };
     }
     if (
@@ -200,7 +141,7 @@ export async function validatePublicHttpUrl(rawUrl: string): Promise<{ ok: true;
 
     try {
         const addresses = await lookup(hostname, { all: true, verbatim: false });
-        if (addresses.some((item) => isPrivateIpAddress(item.address))) {
+        if (addresses.some((item) => isPrivateOrReservedIpAddress(item.address))) {
             return { ok: false, error: "Private network URLs are not supported." };
         }
     } catch {

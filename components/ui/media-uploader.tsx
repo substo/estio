@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { UploadCloud, X, File as FileIcon, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useCallback, useId, useRef } from "react";
+import { UploadCloud, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { uploadFile } from "@/app/(main)/admin/properties/media-actions";
 
@@ -24,6 +23,8 @@ export function MediaUploader({
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const inputId = useId();
+    const inputRef = useRef<HTMLInputElement>(null);
 
     const handleDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -145,32 +146,41 @@ export function MediaUploader({
     };
 
     return (
-        <div className="w-full">
+        <div className="w-full" aria-busy={isUploading}>
             <div
                 className={cn(
-                    "relative cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors sm:p-8",
+                    "relative rounded-lg border-2 border-dashed text-center transition-colors",
                     isDragging ? "border-primary bg-primary/5" : "border-gray-300 hover:border-primary/50",
-                    isUploading ? "opacity-50 pointer-events-none" : ""
+                    isUploading ? "opacity-50" : ""
                 )}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                onClick={() => document.getElementById(`file-upload-${label}`)?.click()}
             >
                 <input
+                    ref={inputRef}
                     type="file"
-                    id={`file-upload-${label}`}
-                    className="hidden"
+                    id={inputId}
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-label={`${label}. Choose a file to upload.`}
                     accept={acceptedTypes}
                     onChange={handleFileSelect}
                     disabled={isUploading}
                 />
 
-                <div className="flex flex-col items-center justify-center gap-2">
+                <button
+                    type="button"
+                    className="flex min-h-28 w-full flex-col items-center justify-center gap-2 rounded-md p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 sm:min-h-40 sm:p-8"
+                    onClick={() => inputRef.current?.click()}
+                    disabled={isUploading}
+                    aria-label={isUploading ? "Uploading file" : `${label}. Choose a file to upload.`}
+                    aria-describedby={isUploading ? undefined : `${inputId}-help`}
+                >
                     {isUploading ? (
-                        <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                        <Loader2 className="h-10 w-10 text-primary animate-spin" aria-hidden="true" />
                     ) : (
-                        <UploadCloud className="h-10 w-10 text-gray-400" />
+                        <UploadCloud className="h-10 w-10 text-gray-400" aria-hidden="true" />
                     )}
 
                     <div className="text-base font-medium text-gray-700 sm:text-lg">
@@ -178,15 +188,16 @@ export function MediaUploader({
                     </div>
 
                     {!isUploading && (
-                        <div className="text-sm text-gray-500">
+                        <div id={`${inputId}-help`} className="text-sm text-gray-500">
                             or <span className="text-primary hover:underline">click here</span> to select
                         </div>
                     )}
-                </div>
+                </button>
             </div>
 
+            {isUploading && <div className="sr-only" role="status" aria-live="polite">Uploading file</div>}
             {error && (
-                <div className="mt-2 text-sm text-red-500">
+                <div className="mt-2 text-sm text-red-500" role="alert">
                     {error}
                 </div>
             )}

@@ -1,6 +1,4 @@
 import { Suspense } from 'react';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import db from '@/lib/db';
 import { listProperties, getUniqueOwners } from '@/lib/properties/repository';
 import { PropertyTable } from '@/components/properties/property-table';
@@ -11,6 +9,8 @@ import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { generatePreviewToken } from '@/lib/jwt-utils';
 import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
+import { Badge } from '@/components/ui/badge';
+import { filterPropertyRelationshipsToLocation } from '@/lib/properties/property-relationship-boundary';
 
 export const dynamic = 'force-dynamic';
 
@@ -179,11 +179,13 @@ export default async function PropertiesPage(props: PageProps) {
                     include: {
                         media: true,
                         contactRoles: {
+                            where: { contact: { locationId: location.id } },
                             include: {
                                 contact: true
                             }
                         },
                         companyRoles: {
+                            where: { company: { locationId: location.id } },
                             include: {
                                 company: true
                             }
@@ -192,6 +194,9 @@ export default async function PropertiesPage(props: PageProps) {
                         updater: true
                     },
                 });
+                if (editingProperty) {
+                    editingProperty = filterPropertyRelationshipsToLocation(editingProperty, location.id);
+                }
             } catch (e) {
                 console.error('Failed to fetch editing property:', e);
             }
@@ -200,42 +205,45 @@ export default async function PropertiesPage(props: PageProps) {
 
     return (
         <div className="container mx-auto py-8 px-4">
-            <div className="flex justify-between items-center mb-8">
+            <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Properties</h1>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <h1 className="text-3xl font-bold tracking-tight">Properties</h1>
+                        <Badge variant="outline">Location inventory</Badge>
+                    </div>
                     <p className="text-muted-foreground mt-1">
-                        Manage your real estate listings.
+                        Shared listings for your current location.
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Link href="/admin/properties/feed-inbox">
-                        <Button variant="outline">
+                <div className="flex flex-wrap items-center gap-2" aria-label="Property actions">
+                    <Button asChild variant="outline">
+                        <Link href="/admin/properties/feed-inbox">
                             Feed Inbox
-                        </Button>
-                    </Link>
-                    <Link href="/admin/properties/import">
-                        <Button variant="outline">
+                        </Link>
+                    </Button>
+                    <Button asChild variant="outline">
+                        <Link href="/admin/properties/import">
                             Import Property
-                        </Button>
-                    </Link>
-                    <Link href="/admin/properties?propertyId=new">
-                        <Button>
-                            <Plus className="mr-2 h-4 w-4" />
+                        </Link>
+                    </Button>
+                    <Button asChild>
+                        <Link href="/admin/properties?propertyId=new">
+                            <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
                             Add Property
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </div>
             </div>
 
             <PropertyFilters owners={owners} />
 
             {error ? (
-                <div className="p-4 mb-6 bg-red-50 border border-red-200 rounded-md text-red-700">
+                <div className="p-4 mb-6 bg-red-50 border border-red-200 rounded-md text-red-700" role="alert">
                     <p className="font-medium">Error loading properties</p>
                     <p className="text-sm">{error}</p>
                 </div>
             ) : (
-                <Suspense fallback={<div className="text-center py-10">Loading properties...</div>}>
+                <Suspense fallback={<div className="text-center py-10" role="status">Loading properties...</div>}>
                     <PropertyTable
                         data={data}
                         total={total}

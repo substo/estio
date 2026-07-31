@@ -1,8 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getLocationAiUsageSummary, type LocationAiUsageSummary } from "@/app/(main)/admin/_actions/ai-usage";
+import {
+    getCurrentUserAiUsageSummary,
+    getLocationAiUsageSummary,
+    type LocationAiUsageSummary,
+} from "@/app/(main)/admin/_actions/ai-usage";
 import { Sparkles, TrendingUp, Cpu, DollarSign } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import type { AiUsageViewScope } from "@/lib/ai/usage-summary-scope";
 
 const FEATURE_LABELS: Record<string, string> = {
     conversational_ai: "Conversations",
@@ -56,25 +62,83 @@ function formatTokens(tokens: number): string {
     return String(tokens);
 }
 
-export function GlobalAiUsageWidget() {
+export function GlobalAiUsageWidget({
+    canViewLocationUsage,
+}: {
+    canViewLocationUsage: boolean;
+}) {
     const [data, setData] = useState<LocationAiUsageSummary | null>(null);
     const [loading, setLoading] = useState(true);
+    const [scope, setScope] = useState<AiUsageViewScope>("user");
 
     useEffect(() => {
-        getLocationAiUsageSummary()
-            .then(setData)
-            .catch(() => { })
-            .finally(() => setLoading(false));
-    }, []);
+        let cancelled = false;
+        setLoading(true);
+
+        const request = scope === "location"
+            ? getLocationAiUsageSummary()
+            : getCurrentUserAiUsageSummary();
+
+        request
+            .then((summary) => {
+                if (!cancelled) setData(summary);
+            })
+            .catch(() => {
+                if (!cancelled) setData(null);
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [scope]);
+
+    const heading = scope === "location"
+        ? "Location AI Usage This Month"
+        : "Your AI Usage This Month";
+
+    const scopeSwitch = canViewLocationUsage ? (
+        <div className="flex items-center gap-1 rounded-md border bg-muted/30 p-1" role="group" aria-label="AI usage view">
+            <Button
+                type="button"
+                size="sm"
+                variant={scope === "user" ? "secondary" : "ghost"}
+                aria-pressed={scope === "user"}
+                onClick={() => setScope("user")}
+            >
+                My usage
+            </Button>
+            <Button
+                type="button"
+                size="sm"
+                variant={scope === "location" ? "secondary" : "ghost"}
+                aria-pressed={scope === "location"}
+                onClick={() => setScope("location")}
+            >
+                Location usage
+            </Button>
+        </div>
+    ) : null;
 
     if (loading) {
         return (
-            <div className="border rounded-lg bg-card p-6 animate-pulse">
-                <div className="h-5 w-40 bg-muted rounded mb-4" />
-                <div className="grid grid-cols-3 gap-4">
-                    <div className="h-16 bg-muted rounded" />
-                    <div className="h-16 bg-muted rounded" />
-                    <div className="h-16 bg-muted rounded" />
+            <div className="border rounded-lg bg-card p-6 space-y-4" aria-busy="true">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-amber-500" aria-hidden="true" />
+                        <h2 className="text-lg font-semibold">{heading}</h2>
+                    </div>
+                    {scopeSwitch}
+                </div>
+                <div className="animate-pulse" role="status" aria-live="polite">
+                    <span className="sr-only">Loading {scope === "location" ? "location" : "your"} AI usage</span>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                        <div className="h-16 bg-muted rounded" />
+                        <div className="h-16 bg-muted rounded" />
+                        <div className="h-16 bg-muted rounded" />
+                    </div>
                 </div>
             </div>
         );
@@ -82,10 +146,13 @@ export function GlobalAiUsageWidget() {
 
     if (!data || data.totalCalls === 0) {
         return (
-            <div className="border rounded-lg bg-card p-6">
-                <div className="flex items-center gap-2 mb-2">
-                    <Sparkles className="h-5 w-5 text-amber-500" />
-                    <h2 className="text-lg font-semibold">AI Usage This Month</h2>
+            <div className="border rounded-lg bg-card p-6 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-amber-500" aria-hidden="true" />
+                        <h2 className="text-lg font-semibold">{heading}</h2>
+                    </div>
+                    {scopeSwitch}
                 </div>
                 <p className="text-sm text-muted-foreground">No AI usage recorded yet this month.</p>
             </div>
@@ -95,21 +162,30 @@ export function GlobalAiUsageWidget() {
     return (
         <div className="border rounded-lg bg-card p-6 space-y-5">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-amber-500" />
-                    <h2 className="text-lg font-semibold">AI Usage This Month</h2>
+                    <Sparkles className="h-5 w-5 text-amber-500" aria-hidden="true" />
+                    <h2 className="text-lg font-semibold">{heading}</h2>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                    {new Date().toLocaleString("default", { month: "long", year: "numeric" })}
-                </span>
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                    {scopeSwitch}
+                    <span className="text-xs text-muted-foreground">
+                        {new Date().toLocaleString("default", { month: "long", year: "numeric" })}
+                    </span>
+                </div>
             </div>
+
+            {scope === "location" && (
+                <p className="text-sm text-muted-foreground">
+                    Includes usage from all team members and automated location workflows.
+                </p>
+            )}
 
             {/* Hero stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-muted/30 rounded-lg p-4 border border-border/50 flex items-start gap-3">
                     <div className="p-2 rounded-md bg-blue-500/10">
-                        <TrendingUp className="h-5 w-5 text-blue-500" />
+                        <TrendingUp className="h-5 w-5 text-blue-500" aria-hidden="true" />
                     </div>
                     <div>
                         <div className="text-2xl font-bold">{data.totalCalls.toLocaleString()}</div>
@@ -118,7 +194,7 @@ export function GlobalAiUsageWidget() {
                 </div>
                 <div className="bg-muted/30 rounded-lg p-4 border border-border/50 flex items-start gap-3">
                     <div className="p-2 rounded-md bg-purple-500/10">
-                        <Cpu className="h-5 w-5 text-purple-500" />
+                        <Cpu className="h-5 w-5 text-purple-500" aria-hidden="true" />
                     </div>
                     <div>
                         <div className="text-2xl font-bold">{formatTokens(data.totalTokens)}</div>
@@ -127,7 +203,7 @@ export function GlobalAiUsageWidget() {
                 </div>
                 <div className="bg-muted/30 rounded-lg p-4 border border-border/50 flex items-start gap-3">
                     <div className="p-2 rounded-md bg-emerald-500/10">
-                        <DollarSign className="h-5 w-5 text-emerald-500" />
+                        <DollarSign className="h-5 w-5 text-emerald-500" aria-hidden="true" />
                     </div>
                     <div>
                         <div className="text-2xl font-bold">{formatCost(data.totalEstimatedCostUsd)}</div>

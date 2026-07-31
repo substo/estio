@@ -1,33 +1,39 @@
 import db from "@/lib/db";
-import { getLocationContext } from "@/lib/auth/location-context";
 import PropertyView from "../../_components/property-view";
 import { generatePreviewToken } from "@/lib/jwt-utils";
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
 import { VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
 import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 import { getLocationPrintBranding } from "@/lib/properties/print-preview";
+import {
+    PropertyAccessDeniedError,
+    requirePropertyInActiveLocation,
+} from "@/lib/properties/active-location-access";
+import { notFound } from "next/navigation";
+import { filterPropertyRelationshipsToLocation } from "@/lib/properties/property-relationship-boundary";
 
 
 
 export const dynamic = "force-dynamic";
 
-export default async function PropertyViewPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams: Promise<{ locationId?: string }> }) {
+export default async function PropertyViewPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
-    const { locationId: searchLocationId } = await searchParams;
 
     // We can't view a "new" property, only existing ones.
     if (id === "new") {
-        return <div>Cannot view a new property. Please create it first.</div>;
+        notFound();
     }
 
-    const locationCtx = await getLocationContext();
-    const locationId = searchLocationId || locationCtx?.id;
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
+    let access: Awaited<ReturnType<typeof requirePropertyInActiveLocation>>;
+    try {
+        access = await requirePropertyInActiveLocation(id);
+    } catch (error) {
+        if (error instanceof PropertyAccessDeniedError) notFound();
+        throw error;
     }
+    const { location, locationId } = access;
 
-    const property = await db.property.findFirst({
+    const propertyRecord = await db.property.findFirst({
         where: { id: id, locationId },
         include: {
             media: true,
@@ -41,11 +47,13 @@ export default async function PropertyViewPage({ params, searchParams }: { param
                 orderBy: { updatedAt: "desc" },
             },
             contactRoles: {
+                where: { contact: { locationId } },
                 include: {
                     contact: true
                 }
             },
             companyRoles: {
+                where: { company: { locationId } },
                 include: {
                     company: true
                 }
@@ -55,9 +63,10 @@ export default async function PropertyViewPage({ params, searchParams }: { param
         },
     });
 
-    if (!property) {
-        return <div>Property not found.</div>;
+    if (!propertyRecord) {
+        notFound();
     }
+    const property = filterPropertyRelationshipsToLocation(propertyRecord, locationId);
 
     // Fetch data for the Edit Modal
     // Fetch data for the Edit Modal
@@ -104,7 +113,7 @@ export default async function PropertyViewPage({ params, searchParams }: { param
             </div>
             <PropertyView
                 property={property}
-                domain={locationCtx?.domain}
+                domain={location.domain}
                 locationId={locationId}
                 precisionRemoveEnabled={precisionRemoveEnabled}
                 contactsData={contactsData}

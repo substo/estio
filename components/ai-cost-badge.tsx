@@ -103,6 +103,12 @@ export function AICostBadge() {
         );
     }
 
+    // Location-wide cost information is admin-only. The server action returns
+    // null for members, so do not render a misleading zero-cost badge.
+    if (!unifiedUsage) {
+        return null;
+    }
+
     // Always show badge, even with zero usage
     const displayUsage = usage || {
         today: { totalTokens: 0, totalCost: 0 },

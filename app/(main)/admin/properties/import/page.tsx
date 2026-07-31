@@ -147,13 +147,13 @@ export default function ImportPropertyPage() {
             await startScrape(url, selectedModel, refineInstructions, maxImages);
         } else {
             // Re-run paste import
-            await startPasteImport(pasteText, analysisImages, galleryImages, selectedModel, maxImages, refineInstructions);
+            await startPasteImport(pasteText, analysisImages, galleryImages, selectedModel, refineInstructions);
         }
         setSaveAsRule(false);
     }
 
 
-    async function startPasteImport(text: string, analysisImages: string[], galleryImages: string[], model: string, maxImg: number = 50, hints?: string) {
+    async function startPasteImport(text: string, analysisImages: string[], galleryImages: string[], model: string, hints?: string) {
         setIsLoading(true);
         setPreviewData(null);
         setDraftId(null);
@@ -165,11 +165,11 @@ export default function ImportPropertyPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
+                    type: "paste",
                     text,
                     analysisImages,
                     galleryImages,
                     model,
-                    maxImages: maxImg,
                     hints
                 })
             });
@@ -191,10 +191,17 @@ export default function ImportPropertyPage() {
         setStatusMessage(hints ? "Refining with your instructions..." : "Initializing...");
 
         try {
-            let url = `/api/import-stream?notionUrl=${encodeURIComponent(notionUrl)}&model=${encodeURIComponent(model)}&maxImages=${maxImg}`;
-            if (hints) url += `&hints=${encodeURIComponent(hints)}`;
-
-            const response = await fetch(url);
+            const response = await fetch("/api/import-stream", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: "url",
+                    notionUrl,
+                    model,
+                    maxImages: maxImg,
+                    hints,
+                }),
+            });
             await handleStreamResponse(response);
 
         } catch (error: any) {
@@ -238,7 +245,13 @@ export default function ImportPropertyPage() {
                         setPreviewData(event.data);
                         setDraftId(event.propertyId);
                         setCurrentStep('DONE');
-                        setStatusMessage("Import Complete!");
+                        const skippedImages = Array.isArray(event.warnings) ? event.warnings.length : 0;
+                        setStatusMessage(skippedImages > 0
+                            ? `Import complete. ${skippedImages} image(s) were skipped because they could not be authorized or imported.`
+                            : "Import Complete!");
+                        if (skippedImages > 0) {
+                            toast.warning(`${skippedImages} image(s) were skipped during import.`);
+                        }
                     } else if (event.type === 'error') {
                         if (event.code === "MISSING_CREDENTIALS") {
                             setShowCredsAlert(true);
@@ -261,8 +274,7 @@ export default function ImportPropertyPage() {
         const formData = new FormData(event.currentTarget);
         const notionUrl = formData.get("notionUrl") as string;
         const model = formData.get("aiModel") as string || selectedModel;
-        const maxImg = parseInt(formData.get("maxImages") as string || "50", 10);
-        await startScrape(notionUrl, model, undefined, maxImg);
+        await startScrape(notionUrl, model, undefined, maxImages);
     }
 
     async function onPasteSubmit(e: React.FormEvent) {
@@ -276,7 +288,7 @@ export default function ImportPropertyPage() {
             finalText = finalText.replace(/^\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\] .*?: /gm, '');
         }
 
-        await startPasteImport(finalText, analysisImages, galleryImages, selectedModel, maxImages);
+        await startPasteImport(finalText, analysisImages, galleryImages, selectedModel);
     }
 
 
@@ -384,11 +396,12 @@ export default function ImportPropertyPage() {
                                     <div className="space-y-2">
                                         <Label htmlFor="maxImages">Max Images</Label>
                                         <Input
+                                            id="maxImages"
                                             type="number"
                                             min="1"
-                                            max="100"
+                                            max="50"
                                             value={maxImages}
-                                            onChange={(e) => setMaxImages(parseInt(e.target.value))}
+                                            onChange={(e) => setMaxImages(Math.min(50, Math.max(1, Number.parseInt(e.target.value, 10) || 50)))}
                                         />
                                     </div>
                                 </div>
@@ -555,7 +568,7 @@ export default function ImportPropertyPage() {
                         </div>
 
                         {/* Dynamic Status Message */}
-                        <div className="bg-muted/50 p-4 rounded-md border text-center">
+                        <div className="bg-muted/50 p-4 rounded-md border text-center" role="status" aria-live="polite">
                             <p className="text-sm font-medium animate-pulse">
                                 {statusMessage || "Ready to start..."}
                             </p>
