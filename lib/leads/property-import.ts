@@ -244,6 +244,8 @@ export async function importAllListingsForProspect(
   const listings = await db.scrapedListing.findMany({
     where: {
       prospectLeadId,
+      locationId,
+      prospectLead: { locationId },
       status: { in: ['NEW', 'REVIEWING'] }, // Only import un-triaged listings
     },
   });

@@ -6,7 +6,7 @@ import { type ScrapedListingRow } from '@/lib/leads/scraped-listing-repository';
 import { type ProspectInboxRow } from '@/lib/leads/prospect-repository';
 import {
   acceptScrapedListing, rejectScrapedListing, bulkAcceptListings, bulkRejectListings,
-  rejectProspectWithListings, acceptProspectWithListings,
+  rejectProspectWithListings, acceptProspectWithListings, bulkReject,
   type ProspectCompanyLinkApplyInput,
   type ProspectCompanyLinkOptionsResponse,
 } from '../actions';
@@ -242,16 +242,18 @@ export function ProspectingTriageView({
   const handleBulkReject = useCallback(() => {
     if (selectedBulkIds.length === 0) return;
     startTransition(async () => {
-      const res = await bulkRejectListings(selectedBulkIds);
+      const res = currentView === 'properties'
+        ? await bulkRejectListings(selectedBulkIds)
+        : await bulkReject(selectedBulkIds);
       if (res.success) {
-        toast.success(`Rejected ${res.count} listings`);
+        toast.success(`Rejected ${res.count} ${currentView === 'properties' ? 'listings' : 'prospects'}`);
         setSelectedBulkIds([]);
         router.refresh();
       } else {
         toast.error(res.message);
       }
     });
-  }, [selectedBulkIds, router]);
+  }, [currentView, selectedBulkIds, router]);
 
   const toggleBulkSelect = (id: string, checked: boolean) => {
     if (checked) {
@@ -385,9 +387,18 @@ export function ProspectingTriageView({
 
   const feedItems = currentView === 'properties' ? listings : prospects;
   const feedTotal = currentView === 'properties' ? listingsTotal : prospectsTotal;
+  const bulkItemLabel = currentView === 'properties' ? 'listings' : 'prospects';
+  const allRenderedSelected = feedItems.length > 0 && feedItems.every((item) => selectedBulkIds.includes(item.id));
+  const selectAllLabel = allRenderedSelected
+    ? `Deselect all ${bulkItemLabel}`
+    : `Select all rendered ${bulkItemLabel}`;
 
   return (
     <>
+      <h1 className="sr-only">Prospecting intake</h1>
+      <div className="sr-only" role="status" aria-live="polite">
+        {isPending ? 'Updating prospecting records' : ''}
+      </div>
       <CompanyLinkDialog
         prospectId={companySelectionFlow?.prospectId || null}
         open={Boolean(companySelectionFlow)}
@@ -398,13 +409,15 @@ export function ProspectingTriageView({
         onSubmitSelection={handleConfirmCompanySelection}
         submitLabel="Continue Accept"
       />
-      <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden md:flex-row">
       {/* Left Pane — Feed */}
-      <div className="w-[clamp(320px,24vw,360px)] shrink-0 flex flex-col h-full min-h-0 border-r bg-background">
+      <div className="flex h-[45%] min-h-0 w-full shrink-0 flex-col border-b bg-background md:h-full md:w-[clamp(320px,24vw,360px)] md:border-b-0 md:border-r">
 
         {/* View Toggle Tabs */}
-        <div className="flex border-b shrink-0">
+        <div className="flex border-b shrink-0" role="group" aria-label="Prospecting view">
           <button
+            type="button"
+            aria-pressed={currentView === 'properties'}
             onClick={() => switchView('properties')}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors border-b-2",
@@ -416,6 +429,8 @@ export function ProspectingTriageView({
             <Home className="w-3.5 h-3.5" /> Properties
           </button>
           <button
+            type="button"
+            aria-pressed={currentView === 'contacts'}
             onClick={() => switchView('contacts')}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors border-b-2",
@@ -434,6 +449,7 @@ export function ProspectingTriageView({
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
+                aria-label={currentView === 'properties' ? 'Search listings' : 'Search contacts'}
                 placeholder={currentView === 'properties' ? 'Search listings...' : 'Search contacts...'}
                 className="h-8 pl-8 text-sm"
                 defaultValue={currentSearch}
@@ -446,7 +462,7 @@ export function ProspectingTriageView({
               />
             </div>
             <Select value={currentScope} onValueChange={handleScopeFilter}>
-              <SelectTrigger className="w-[110px] h-8 text-xs">
+              <SelectTrigger className="w-[110px] h-8 text-xs" aria-label="Review scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -460,7 +476,7 @@ export function ProspectingTriageView({
 
           <div className={cn('grid gap-2', currentView === 'properties' ? 'grid-cols-2' : 'grid-cols-1')}>
             <Select value={currentSellerType} onValueChange={handleSellerTypeFilter}>
-              <SelectTrigger className="w-full h-8 text-xs">
+              <SelectTrigger className="w-full h-8 text-xs" aria-label="Seller type">
                 <Filter className="w-3 h-3 mr-1.5 text-muted-foreground" />
                 <SelectValue placeholder="All Types" />
               </SelectTrigger>
@@ -473,7 +489,7 @@ export function ProspectingTriageView({
 
             {currentView === 'properties' && (
               <Select value={selectedProspectId || 'all'} onValueChange={handleSellerFilter}>
-                <SelectTrigger className="w-full h-8 text-xs">
+                <SelectTrigger className="w-full h-8 text-xs" aria-label="Seller">
                   <Filter className="w-3 h-3 mr-1.5 text-muted-foreground" />
                   <SelectValue placeholder="All Sellers" />
                 </SelectTrigger>
@@ -493,23 +509,24 @@ export function ProspectingTriageView({
           {selectedBulkIds.length > 0 ? (
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
-                <Checkbox 
-                  checked={selectedBulkIds.length === feedItems.length && feedItems.length > 0} 
-                  onCheckedChange={selectAllRendered} 
-                  title="Deselect All"
+                <Checkbox
+                  checked={allRenderedSelected}
+                  onCheckedChange={selectAllRendered}
+                  aria-label={selectAllLabel}
+                  title={selectAllLabel}
                 />
                 <span className="text-xs font-medium text-primary">{selectedBulkIds.length} selected</span>
               </div>
-              {currentView === 'properties' && (
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleBulkReject} disabled={isPending}>
-                     <XCircle className="w-4 h-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={handleBulkAccept} disabled={isPending}>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="icon" aria-label={`Reject selected ${currentView === 'properties' ? 'listings' : 'prospects'}`} className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleBulkReject} disabled={isPending}>
+                   <XCircle className="w-4 h-4" />
+                </Button>
+                {currentView === 'properties' && (
+                  <Button variant="ghost" size="icon" aria-label="Accept selected listings" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={handleBulkAccept} disabled={isPending}>
                      <CheckCircle2 className="w-4 h-4" />
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ) : (
             <>
@@ -522,14 +539,13 @@ export function ProspectingTriageView({
                   <Badge variant="outline" className="text-[10px]">
                     {selectedIndex !== null ? selectedIndex + 1 : 0} / {feedItems.length}
                   </Badge>
-                  {currentView === 'properties' && (
-                    <Checkbox 
-                      checked={false} 
-                      onCheckedChange={selectAllRendered} 
-                      className="opacity-50 hover:opacity-100 transition-opacity w-3.5 h-3.5"
-                      title="Select All for Bulk Actions"
-                    />
-                  )}
+                  <Checkbox
+                    checked={false}
+                    onCheckedChange={selectAllRendered}
+                    aria-label={`Select all rendered ${currentView === 'properties' ? 'listings' : 'prospects'}`}
+                    className="opacity-50 hover:opacity-100 transition-opacity w-3.5 h-3.5"
+                    title="Select All for Bulk Actions"
+                  />
                 </div>
               )}
             </>
@@ -575,7 +591,7 @@ export function ProspectingTriageView({
       </div>
 
       {/* Right Pane — Detail Panel */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full bg-background">
+      <div className="flex h-[55%] min-h-0 min-w-0 flex-1 flex-col bg-background md:h-full">
         {currentView === 'properties' ? (
           <ProspectDetailPanel
             listing={selectedListing}

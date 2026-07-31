@@ -2,8 +2,8 @@
 
 import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import { auth } from '@clerk/nextjs/server';
 import { eventBus } from '@/lib/ai/events/event-bus';
+import { getActiveProspectingAccess, requireAllRequestedIds } from '@/lib/leads/prospecting-access';
 import { importAllListingsForProspect } from '@/lib/leads/property-import';
 import { buildProspectImportContactName } from '@/lib/leads/prospect-contact-import';
 import { ensureConversationForImportedContact } from '@/lib/conversations/imported-contact-bootstrap';
@@ -23,13 +23,6 @@ import {
     resolveEffectiveSellerType,
     sellerTypeToLegacyAgencyFlag,
 } from '@/lib/leads/seller-type';
-
-async function getInternalUserId() {
-    const { userId } = await auth();
-    if (!userId) return null;
-    const user = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
-    return user?.id || null;
-}
 
 const resolveProspectEffectiveSellerType = (prospect: {
     sellerType?: string | null;
@@ -113,7 +106,13 @@ async function createOrReactivateContactForProspect(prospect: any) {
     });
 
     if (prospect.createdContactId) {
-        const existing = await db.contact.findUnique({ where: { id: prospect.createdContactId }, select: { id: true } });
+        const existing = await db.contact.findFirst({
+            where: { id: prospect.createdContactId, locationId: prospect.locationId },
+            select: { id: true },
+        });
+        if (!existing) {
+            throw new Error('Linked contact is unavailable for this location');
+        }
         if (existing) {
             await db.contact.update({
                 where: { id: existing.id },
@@ -167,12 +166,20 @@ export async function rejectProspect(id: string) {
 
 export async function deleteProspect(id: string) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
 
-        // We delete the prospect entirely. Associated ScrapedListing records will have
-        // prospectLeadId set to NULL automatically thanks to Prisma's onDelete: SetNull
-        await db.prospectLead.delete({ where: { id } });
+        const prospect = await db.prospectLead.findFirst({ where: { id, locationId: access.locationId }, select: { id: true } });
+        if (!prospect) return { success: false, message: 'Prospect not found' };
+
+        // Preserve location-owned intake listings when removing only the prospect.
+        await db.$transaction([
+            db.scrapedListing.updateMany({
+                where: { prospectLeadId: id, locationId: access.locationId },
+                data: { prospectLeadId: null },
+            }),
+            db.prospectLead.deleteMany({ where: { id, locationId: access.locationId } }),
+        ]);
 
         revalidatePath('/admin/prospecting');
         return { success: true };
@@ -181,22 +188,17 @@ export async function deleteProspect(id: string) {
     }
 }
 
-export async function bulkAccept(ids: string[]) {
-    let count = 0;
-    for (const id of ids) {
-        const res = await acceptProspect(id);
-        if (res.success) count++;
-    }
-    return { success: true, count };
-}
-
 export async function bulkReject(ids: string[]) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
+
+        const found = await db.prospectLead.findMany({ where: { id: { in: ids }, locationId: access.locationId }, select: { id: true } });
+        const authorizedIds = requireAllRequestedIds(ids, found.map(({ id }) => id));
+        if (!authorizedIds) return { success: false, message: 'One or more prospects are unavailable' };
 
         let count = 0;
-        for (const id of ids) {
+        for (const id of authorizedIds) {
             const res = await rejectProspect(id);
             if (res.success) count++;
         }
@@ -215,12 +217,12 @@ export async function bulkReject(ids: string[]) {
  */
 export async function acceptScrapedListing(id: string) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
 
         // Find the listing and its parent prospect
-        const listing = await db.scrapedListing.findUnique({
-            where: { id },
+        const listing = await db.scrapedListing.findFirst({
+            where: { id, locationId: access.locationId },
             select: { prospectLeadId: true, status: true }
         });
         if (!listing) return { success: false, message: 'Listing not found' };
@@ -242,19 +244,19 @@ export async function acceptScrapedListing(id: string) {
  */
 export async function rejectScrapedListing(id: string) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
 
-        const listing = await db.scrapedListing.findUnique({
-            where: { id },
+        const listing = await db.scrapedListing.findFirst({
+            where: { id, locationId: access.locationId },
             select: { prospectLeadId: true, status: true }
         });
         if (!listing) return { success: false, message: 'Listing not found' };
 
         if (!listing.prospectLeadId) {
             // Orphan listing — just reject it directly
-            await db.scrapedListing.update({
-                where: { id },
+            await db.scrapedListing.updateMany({
+                where: { id, locationId: access.locationId },
                 data: { status: 'REJECTED' }
             });
             revalidatePath('/admin/prospecting');
@@ -270,11 +272,15 @@ export async function rejectScrapedListing(id: string) {
 
 export async function bulkAcceptListings(ids: string[]) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
+
+        const found = await db.scrapedListing.findMany({ where: { id: { in: ids }, locationId: access.locationId }, select: { id: true } });
+        const authorizedIds = requireAllRequestedIds(ids, found.map(({ id }) => id));
+        if (!authorizedIds) return { success: false, message: 'One or more listings are unavailable' };
 
         let successCount = 0;
-        for (const id of ids) {
+        for (const id of authorizedIds) {
             const res = await acceptScrapedListing(id);
             if (res.success) successCount++;
         }
@@ -288,11 +294,15 @@ export async function bulkAcceptListings(ids: string[]) {
 
 export async function bulkRejectListings(ids: string[]) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
+
+        const found = await db.scrapedListing.findMany({ where: { id: { in: ids }, locationId: access.locationId }, select: { id: true } });
+        const authorizedIds = requireAllRequestedIds(ids, found.map(({ id }) => id));
+        if (!authorizedIds) return { success: false, message: 'One or more listings are unavailable' };
 
         let successCount = 0;
-        for (const id of ids) {
+        for (const id of authorizedIds) {
             const res = await rejectScrapedListing(id);
             if (res.success) successCount++;
         }
@@ -308,13 +318,20 @@ export async function bulkRejectListings(ids: string[]) {
 
 export async function rejectProspectWithListings(prospectId: string) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
 
-        const prospect = await db.prospectLead.findUnique({ where: { id: prospectId } });
+        const prospect = await db.prospectLead.findFirst({ where: { id: prospectId, locationId: access.locationId } });
         if (!prospect) return { success: false, message: 'Prospect not found' };
         if (prospect.status === 'rejected') {
             return { success: true, listingsRejected: 0 };
+        }
+        if (prospect.createdContactId) {
+            const contact = await db.contact.findFirst({
+                where: { id: prospect.createdContactId, locationId: access.locationId },
+                select: { id: true },
+            });
+            if (!contact) return { success: false, message: 'Linked contact is unavailable for this location' };
         }
 
         // Reject prospect AND all still-open listings in a single transaction
@@ -324,12 +341,13 @@ export async function rejectProspectWithListings(prospectId: string) {
                 data: {
                     status: 'rejected',
                     reviewedAt: new Date(),
-                    reviewedBy: internalUserId
+                    reviewedBy: access.userId
                 }
             }),
             db.scrapedListing.updateMany({
                 where: {
                     prospectLeadId: prospectId,
+                    locationId: access.locationId,
                     status: { in: ['NEW', 'REVIEWING', 'new', 'reviewing'] }
                 },
                 data: { status: 'REJECTED' }
@@ -338,7 +356,7 @@ export async function rejectProspectWithListings(prospectId: string) {
 
         if (prospect.createdContactId) {
             await db.contact.updateMany({
-                where: { id: prospect.createdContactId },
+                where: { id: prospect.createdContactId, locationId: access.locationId },
                 data: { status: 'inactive' },
             });
 
@@ -346,7 +364,7 @@ export async function rejectProspectWithListings(prospectId: string) {
                 data: {
                     contactId: prospect.createdContactId,
                     action: 'PROSPECT_REJECTED',
-                    userId: internalUserId,
+                    userId: access.userId,
                     changes: JSON.stringify([
                         { field: 'prospectId', old: null, new: prospect.id },
                         { field: 'prospectStatus', old: 'accepted', new: 'rejected' },
@@ -383,11 +401,11 @@ export async function acceptProspectWithListings(
     options: AcceptProspectWithListingsOptions = {}
 ): Promise<AcceptProspectResponse> {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
 
-        const prospect = await db.prospectLead.findUnique({
-            where: { id: prospectId },
+        const prospect = await db.prospectLead.findFirst({
+            where: { id: prospectId, locationId: access.locationId },
             select: {
                 id: true,
                 locationId: true,
@@ -408,7 +426,7 @@ export async function acceptProspectWithListings(
                 sellerTypeManual: true,
                 aiScoreBreakdown: true,
                 scrapedListings: {
-                    where: { status: { in: ['NEW', 'REVIEWING', 'REJECTED'] } },
+                    where: { locationId: access.locationId, status: { in: ['NEW', 'REVIEWING', 'REJECTED'] } },
                     orderBy: { createdAt: 'asc' },
                     select: {
                         title: true,
@@ -426,6 +444,15 @@ export async function acceptProspectWithListings(
             },
         });
         if (!prospect) return { success: false, message: 'Prospect not found' };
+        if (prospect.createdContactId) {
+            const contact = await db.contact.findFirst({
+                where: { id: prospect.createdContactId, locationId: access.locationId },
+                select: { id: true },
+            });
+            if (!contact) {
+                return { success: false, message: 'Linked contact is unavailable for this location' };
+            }
+        }
 
         const effectiveSellerType = resolveProspectEffectiveSellerType(prospect);
         const requiresCompanyLink = isNonPrivateSellerType(effectiveSellerType);
@@ -476,7 +503,7 @@ export async function acceptProspectWithListings(
 
         if (prospect.status === 'rejected') {
             await db.scrapedListing.updateMany({
-                where: { prospectLeadId: prospectId, status: 'REJECTED' },
+                where: { prospectLeadId: prospectId, locationId: access.locationId, status: 'REJECTED' },
                 data: { status: 'NEW' },
             });
         }
@@ -539,7 +566,7 @@ export async function acceptProspectWithListings(
                 status: 'accepted',
                 createdContactId: contactId,
                 reviewedAt: new Date(),
-                reviewedBy: internalUserId
+                reviewedBy: access.userId
             }
         });
 
@@ -548,7 +575,7 @@ export async function acceptProspectWithListings(
             prospectId,
             contactId,
             prospect.locationId,
-            internalUserId,
+            access.userId,
             companyId
         );
 
@@ -557,7 +584,7 @@ export async function acceptProspectWithListings(
             data: {
                 contactId,
                 action: 'PROSPECT_ACCEPTED',
-                userId: internalUserId,
+                userId: access.userId,
                 changes: JSON.stringify([
                     { field: 'source', old: null, new: prospect.source },
                     { field: 'prospectId', old: null, new: prospect.id },
@@ -601,8 +628,8 @@ export async function acceptProspectWithListings(
  */
 export async function getProspectCompanyLinkOptions(prospectId: string): Promise<ProspectCompanyLinkOptionsResponse> {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) {
+        const access = await getActiveProspectingAccess();
+        if (!access) {
             return {
                 success: false,
                 message: 'Unauthorized',
@@ -615,8 +642,8 @@ export async function getProspectCompanyLinkOptions(prospectId: string): Promise
             };
         }
 
-        const prospect = await db.prospectLead.findUnique({
-            where: { id: prospectId },
+        const prospect = await db.prospectLead.findFirst({
+            where: { id: prospectId, locationId: access.locationId },
             select: {
                 id: true,
                 locationId: true,
@@ -684,11 +711,11 @@ export async function getProspectCompanyLinkOptions(prospectId: string): Promise
 
 export async function applyProspectCompanyLink(prospectId: string, selection: ProspectCompanyLinkApplyInput) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
 
-        const prospect = await db.prospectLead.findUnique({
-            where: { id: prospectId },
+        const prospect = await db.prospectLead.findFirst({
+            where: { id: prospectId, locationId: access.locationId },
             select: {
                 id: true,
                 locationId: true,
@@ -783,8 +810,14 @@ export async function toggleProspectAgencyStatus(id: string, isAgencyManual: boo
 
 export async function setProspectSellerTypeManual(id: string, sellerTypeManual: ProspectSellerType | null) {
     try {
-        const internalUserId = await getInternalUserId();
-        if (!internalUserId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess();
+        if (!access) return { success: false, message: 'Unauthorized' };
+
+        const prospect = await db.prospectLead.findFirst({
+            where: { id, locationId: access.locationId },
+            select: { id: true },
+        });
+        if (!prospect) return { success: false, message: 'Prospect not found' };
 
         const updateData: any = {
             sellerTypeManual,

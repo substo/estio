@@ -26,9 +26,8 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
 
   return (
     <div
-      onClick={onClick}
       className={cn(
-        "group flex items-start gap-2.5 p-2.5 cursor-pointer transition-all border-l-[3px] hover:bg-muted/50",
+        "group flex items-start gap-2.5 p-2.5 transition-all border-l-[3px] hover:bg-muted/50",
         isSelected
           ? "bg-primary/5 border-l-primary shadow-sm"
           : "border-l-transparent",
@@ -40,9 +39,18 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
         <Checkbox 
           checked={isBulkSelected}
           onCheckedChange={onBulkSelect}
-          className={cn("transition-opacity", isBulkSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
+          aria-label={`Select listing ${listing.title || 'Untitled Listing'}`}
+          className={cn("transition-opacity focus-visible:opacity-100", isBulkSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
         />
       </div>
+
+      <button
+        type="button"
+        onClick={onClick}
+        aria-current={isSelected ? 'true' : undefined}
+        aria-label={`Review listing ${listing.title || 'Untitled Listing'}`}
+        className="flex min-w-0 flex-1 items-start gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
 
       {/* Thumbnail */}
       {thumb ? (
@@ -99,6 +107,7 @@ export function ListingFeedCard({ listing, isSelected, onClick, isBulkSelected, 
           </div>
         </div>
       </div>
+      </button>
     </div>
   );
 }

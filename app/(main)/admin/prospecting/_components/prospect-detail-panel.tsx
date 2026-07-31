@@ -251,7 +251,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                       <Badge variant="destructive" className="bg-slate-800 hover:bg-slate-800 text-white uppercase translate-y-px">Expired Listing</Badge>
                     )}
                   </div>
-                  <Button variant="ghost" size="icon" className="shrink-0 -mt-1 text-muted-foreground hover:text-foreground" onClick={() => setIsScrapeOpen(true)} title="Re-scrape Listing">
+                  <Button variant="ghost" size="icon" aria-label="Re-scrape listing" className="shrink-0 -mt-1 text-muted-foreground hover:text-foreground" onClick={() => setIsScrapeOpen(true)} title="Re-scrape Listing">
                     <RefreshCw className="w-4 h-4" />
                   </Button>
                 </div>
@@ -305,8 +305,9 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-[10px] uppercase tracking-wider hidden xl:inline-block">Seller:</span>
                   {listing.prospectLeadId ? (
-                    <h3
-                      className="font-semibold text-sm xl:text-base text-primary cursor-pointer hover:underline"
+                    <button
+                      type="button"
+                      className="font-semibold text-left text-sm xl:text-base text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                       onClick={() => {
                         const params = new URLSearchParams(window.location.search);
                         params.set('view', 'contacts');
@@ -319,7 +320,7 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                       }}
                     >
                       {listing.prospectName || 'Unknown Owner'}
-                    </h3>
+                    </button>
                   ) : (
                     <h3 className="font-semibold text-sm xl:text-base">{listing.prospectName || 'Unknown Owner'}</h3>
                   )}
@@ -446,14 +447,14 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                 {listing.prospectLeadId && (
                   <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 ml-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10" disabled={isDeleting}>
+                      <Button variant="ghost" size="icon" aria-label="Delete prospect" className="h-8 w-8 ml-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10" disabled={isDeleting}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogTitle>Delete Prospect</DialogTitle>
                       <DialogDescription>
-                        Are you sure you want to permanently delete this prospect? Any currently associated listings will be unlinked and return to the New properties queue.
+                        Are you sure you want to permanently delete this prospect? Associated listings will be unlinked and retain their current review state.
                       </DialogDescription>
                       <div className="flex justify-end gap-2 mt-4">
                         <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>Cancel</Button>
@@ -477,6 +478,8 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                     <Dialog>
                       <DialogTrigger asChild>
                         <button
+                          type="button"
+                          aria-label="Open full-size listing image"
                           title="View Full Image"
                           className={cn(
                             "w-full h-full flex justify-center p-2 outline-none cursor-zoom-in",
@@ -536,10 +539,10 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                           </div>
                           {listing.images.length > 1 && (
                             <>
-                              <Button variant="ghost" size="icon" className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
+                              <Button variant="ghost" size="icon" aria-label="Previous listing image" className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
                                 <ChevronLeft className="w-8 h-8" />
                               </Button>
-                              <Button variant="ghost" size="icon" className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
+                              <Button variant="ghost" size="icon" aria-label="Next listing image" className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-black/50 hover:bg-black/80 text-white rounded-full z-10" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
                                 <ChevronRight className="w-8 h-8" />
                               </Button>
                               <div className="absolute top-4 right-4 bg-black/60 text-white text-sm font-medium px-3 py-1 rounded-full z-10">
@@ -552,10 +555,10 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                     </Dialog>
                     {listing.images.length > 1 && (
                       <>
-                        <Button variant="secondary" size="icon" className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-50 bg-black/40 text-white hover:bg-black/70 hover:opacity-100 group-hover:opacity-100 transition-opacity z-10 shadow-lg border-none" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
+                        <Button variant="secondary" size="icon" aria-label="Previous listing image" className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-50 bg-black/40 text-white hover:bg-black/70 hover:opacity-100 group-hover:opacity-100 transition-opacity z-10 shadow-lg border-none" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === 0 ? listing.images.length - 1 : prev - 1); }}>
                           <ChevronLeft className="w-5 h-5" />
                         </Button>
-                        <Button variant="secondary" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-50 bg-black/40 text-white hover:bg-black/70 hover:opacity-100 group-hover:opacity-100 transition-opacity z-10 shadow-lg border-none" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
+                        <Button variant="secondary" size="icon" aria-label="Next listing image" className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 opacity-50 bg-black/40 text-white hover:bg-black/70 hover:opacity-100 group-hover:opacity-100 transition-opacity z-10 shadow-lg border-none" onClick={(e) => { e.preventDefault(); setCurrentImageIndex((prev) => prev === listing.images.length - 1 ? 0 : prev + 1); }}>
                           <ChevronRight className="w-5 h-5" />
                         </Button>
                         <div className="absolute top-3 right-3 bg-black/60 text-white text-[10px] font-medium px-2 py-0.5 rounded-full z-10">
@@ -579,6 +582,8 @@ export function ProspectDetailPanel({ listing: originalListing, onAccept, onReje
                 <div className="shrink-0 flex gap-1.5 overflow-x-auto p-2 scrollbar-thin border-t bg-muted/10">
                   {listing.images.map((img: string, idx: number) => (
                     <button
+                      type="button"
+                      aria-label={`Show listing image ${idx + 1}`}
                       key={idx}
                       onClick={() => setCurrentImageIndex(idx)}
                       className={`relative w-14 h-10 shrink-0 flex items-center justify-center rounded overflow-hidden border-2 transition-all ${activeImageIndex === idx ? 'border-primary ring-1 ring-primary/30' : 'border-transparent opacity-60 hover:opacity-100 bg-black/5'}`}

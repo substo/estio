@@ -2,18 +2,27 @@
 
 import db from '@/lib/db';
 import { ListingScraperService } from '@/lib/scraping/listing-scraper';
-import { auth } from '@clerk/nextjs/server';
+import { getActiveProspectingAccess } from '@/lib/leads/prospecting-access';
 
 export async function scrapeSellerProfile(locationId: string, sellerName: string, profileUrl: string, prospectId?: string) {
     try {
-        const { userId } = await auth();
-        if (!userId) return { success: false, message: 'Unauthorized' };
+        const access = await getActiveProspectingAccess(locationId);
+        if (!access) return { success: false, message: 'Unauthorized or active location mismatch' };
+
+        if (prospectId) {
+            const prospect = await db.prospectLead.findFirst({
+                where: { id: prospectId, locationId: access.locationId },
+                select: { id: true },
+            });
+            if (!prospect) return { success: false, message: 'Prospect not found' };
+        }
 
         // 1. Find an active connection for Bazaraki in this location
         const connection = await db.scrapingConnection.findFirst({
             where: {
-                locationId,
+                locationId: access.locationId,
                 platform: 'bazaraki',
+                enabled: true,
             }
         });
 
@@ -25,7 +34,7 @@ export async function scrapeSellerProfile(locationId: string, sellerName: string
         const taskName = `[Seller Profile] ${sellerName || 'Unknown'}`;
         const task = await db.scrapingTask.create({
             data: {
-                locationId,
+                locationId: access.locationId,
                 name: taskName,
                 connectionId: connection.id,
                 targetUrls: [profileUrl],
