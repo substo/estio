@@ -11,11 +11,13 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Crown, User as UserIcon } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronUp } from 'lucide-react';
 import { updateMemberContactAccess, updateUserCalendar, updateUserRole } from '../actions';
 import { CreateCalendarDialog } from './create-calendar-dialog';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { OffboardingPreview } from './offboarding-preview';
+import { AssignmentRecovery } from './assignment-recovery';
 
 interface Calendar {
     id: string;
@@ -53,12 +55,10 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [selectedCalendar, setSelectedCalendar] = useState(user.ghlCalendarId || "none");
+    const [showManagement, setShowManagement] = useState(false);
 
     const roleData = user.locationRoles?.[0];
     const role = roleData?.role || 'MEMBER';
-    // If invitedById is null, they are the creator/owner (came via OAuth)
-    const isOwner = roleData?.invitedById === null;
-
     const isProfileComplete = !!(user.firstName && user.lastName);
 
     const handleCalendarChange = async (value: string) => {
@@ -78,7 +78,6 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
     };
 
     const handleRoleChange = async (value: 'ADMIN' | 'MEMBER') => {
-        if (isOwner) return;
         setLoading(true);
         const result = await updateUserRole(user.id, value);
         if (result.success) {
@@ -101,12 +100,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                         <CardTitle className="text-base font-medium flex items-center gap-2">
                             {getDisplayName(user)}
                             {isCurrentUser && <Badge variant="outline" className="text-xs">You</Badge>}
-                            {isOwner && (
-                                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-none text-xs flex items-center gap-1">
-                                    <Crown className="w-3 h-3" /> Owner
-                                </Badge>
-                            )}
-                            {!isOwner && role === 'ADMIN' && <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-none text-xs">Admin</Badge>}
+                            {role === 'ADMIN' && <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-none text-xs">Admin</Badge>}
                             {!isProfileComplete && <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-none text-xs">Profile Incomplete</Badge>}
                         </CardTitle>
                         <div className="text-sm text-muted-foreground">{user.email}</div>
@@ -114,8 +108,18 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {/* Role Dropdown - Only for Admins editing OTHERS, and NOT editing the Owner */}
-                    {isAdmin && !isCurrentUser && !isOwner && (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-expanded={showManagement}
+                        aria-controls={`team-user-management-${user.id}`}
+                        onClick={() => setShowManagement((current) => !current)}
+                    >
+                        Manage user
+                        {showManagement ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+                    </Button>
+                    {showManagement && isAdmin && !isCurrentUser && (
                         <Select
                             value={role}
                             onValueChange={(val: 'ADMIN' | 'MEMBER') => handleRoleChange(val)}
@@ -133,7 +137,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
 
                 </div>
             </CardHeader>
-            <CardContent>
+            {showManagement && <CardContent id={`team-user-management-${user.id}`} className="space-y-4 border-t pt-4">
                 {isAdmin && role === 'MEMBER' && (
                     <form action={updateMemberContactAccess} className="mb-4 flex items-end gap-2 rounded-md border p-3">
                         <input type="hidden" name="userId" value={user.id} />
@@ -189,7 +193,9 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                         />
                     </div>
                 </div>
-            </CardContent>
+                {isAdmin && <AssignmentRecovery sourceEmail={user.email} />}
+                {isAdmin && !isCurrentUser && <OffboardingPreview sourceEmail={user.email} />}
+            </CardContent>}
         </Card>
     );
 }

@@ -33,6 +33,15 @@ import { enqueueViewingSyncJobs } from '@/lib/viewings/sync-engine';
 import { queueDefaultViewingLeadReminders } from '@/lib/viewings/reminders';
 import { canUpdateMemberContactAccess } from '@/lib/contacts/active-location-access';
 import { applyOffboardingResponsibilityMode, countOffboardingResponsibilities, shouldClearUserGlobalPrivateState } from '@/lib/team/offboarding-responsibilities';
+import {
+    applyAssignmentRecovery,
+    countAssignmentRecovery,
+    createAssignmentRecoveryFingerprint,
+    createAssignmentRecoveryToken,
+    requiredAssignmentRecoveryPhrase,
+    verifyAssignmentRecoveryToken,
+    type AssignmentRecoveryCounts,
+} from '@/lib/team/assignment-recovery';
 
 type OffboardingPreview = {
     asOf: string;
@@ -136,6 +145,189 @@ const previewIdentitySelect = {
     locations: { select: { id: true, name: true } },
     locationRoles: { select: { locationId: true, role: true, location: { select: { name: true } } } },
 } as const;
+
+type AssignmentRecoveryPreview = {
+    asOf: string;
+    activeLocation: { id: string; name: string | null };
+    target: PreviewIdentity & { clerkId: string };
+    counts: AssignmentRecoveryCounts;
+    confirmationToken: string | null;
+    confirmationPhrase: string;
+    fingerprint: string;
+};
+
+export type AssignmentRecoveryPreviewResult =
+    | { success: true; preview: AssignmentRecoveryPreview }
+    | { success: false; error: string };
+
+export async function previewAssignmentRecovery(input: { sourceEmail: string }): Promise<AssignmentRecoveryPreviewResult> {
+    try {
+        const { userId: actorClerkId } = await auth();
+        if (!actorClerkId) throw new Error('Unauthorized');
+        const actorRecord = await db.user.findUnique({ where: { clerkId: actorClerkId }, select: previewIdentitySelect });
+        const activeMembership = resolveStrictAdminLocation(actorRecord ? toPreviewIdentity(actorRecord) : null);
+        const locationId = activeMembership.locationId;
+        const targetEmail = normalizeOffboardingEmail(input.sourceEmail || '');
+        if (!targetEmail) throw new Error('Target email is required');
+
+        const [targetRecords, clerk] = await Promise.all([
+            db.user.findMany({ where: { email: { equals: targetEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
+            clerkClient(),
+        ]);
+        const clerkResult = await clerk.users.getUserList({ emailAddress: [targetEmail], limit: 10 });
+        const target = requireExactPreviewIdentity({
+            label: 'Target',
+            email: targetEmail,
+            localMatches: targetRecords.map(toPreviewIdentity),
+            clerkMatches: clerkResult.data.map((user) => ({ id: user.id, emails: user.emailAddresses.map((entry) => entry.emailAddress) })),
+            activeLocationId: locationId,
+        });
+        const cutoff = new Date();
+        const counts = await countAssignmentRecovery(db, { locationId, targetUserId: target.id, viewingCutoff: cutoff });
+        const fingerprint = createAssignmentRecoveryFingerprint({ locationId, targetUserId: target.id, counts });
+        const confirmationPhrase = requiredAssignmentRecoveryPhrase(target.email);
+        const confirmationToken = createAssignmentRecoveryToken({
+            confirmationId: randomUUID(),
+            actorUserId: actorRecord!.id,
+            locationId,
+            targetUserId: target.id,
+            targetClerkId: target.clerkId,
+            targetEmail,
+            previewFingerprint: fingerprint,
+            responsibilityCutoff: cutoff.toISOString(),
+            issuedAt: Date.now(),
+        });
+        return { success: true, preview: {
+            asOf: cutoff.toISOString(),
+            activeLocation: { id: locationId, name: activeMembership.locationName },
+            target,
+            counts,
+            confirmationToken,
+            confirmationPhrase,
+            fingerprint,
+        } };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unable to build assignment recovery preview' };
+    }
+}
+
+export type AssignmentRecoveryExecuteResult =
+    | { success: true; auditId: string; counts: Record<string, number>; externalErrors: string[] }
+    | { success: false; error: string };
+
+export async function executeAssignmentRecovery(input: {
+    confirmationToken: string;
+    confirmationPhrase: string;
+    acknowledgeHistoricalPreservation: boolean;
+}): Promise<AssignmentRecoveryExecuteResult> {
+    try {
+        if (!input.acknowledgeHistoricalPreservation) throw new Error('Historical-preservation acknowledgement is required');
+        const token = verifyAssignmentRecoveryToken(input.confirmationToken);
+        const { userId: actorClerkId } = await auth();
+        if (!actorClerkId) throw new Error('Unauthorized');
+        const actor = await db.user.findUnique({ where: { clerkId: actorClerkId }, select: { id: true } });
+        if (!actor || actor.id !== token.actorUserId) throw new Error('Confirmation actor does not match');
+        if (input.confirmationPhrase !== requiredAssignmentRecoveryPhrase(token.targetEmail)) throw new Error('Confirmation phrase does not match');
+
+        const fresh = await previewAssignmentRecovery({ sourceEmail: token.targetEmail });
+        if (!fresh.success) throw new Error(fresh.error);
+        if (fresh.preview.activeLocation.id !== token.locationId || fresh.preview.target.id !== token.targetUserId || fresh.preview.target.clerkId !== token.targetClerkId || fresh.preview.fingerprint !== token.previewFingerprint) {
+            throw new Error('Assignments changed since preview; create a fresh preview');
+        }
+
+        const result = await db.$transaction(async (tx) => {
+            const [actorRole, targetRole] = await Promise.all([
+                tx.userLocationRole.findFirst({ where: { userId: actor.id, locationId: token.locationId, role: 'ADMIN', user: { locations: { some: { id: token.locationId } } } }, select: { id: true } }),
+                tx.userLocationRole.findFirst({ where: { userId: token.targetUserId, locationId: token.locationId, user: { locations: { some: { id: token.locationId } } } }, select: { id: true } }),
+            ]);
+            if (!actorRole || !targetRole) throw new Error('Active location membership changed; create a fresh preview');
+            const cutoff = new Date(token.responsibilityCutoff);
+            const counts = await countAssignmentRecovery(tx, { locationId: token.locationId, targetUserId: token.targetUserId, viewingCutoff: cutoff });
+            if (createAssignmentRecoveryFingerprint({ locationId: token.locationId, targetUserId: token.targetUserId, counts }) !== token.previewFingerprint) {
+                throw new Error('Assignments changed during confirmation; create a fresh preview');
+            }
+            const [taskRows, viewingRows] = await Promise.all([
+                tx.contactTask.findMany({ where: {
+                    locationId: token.locationId, deletedAt: null, status: 'open',
+                    OR: [{ assignedUserId: null }, { assignedUserId: { not: token.targetUserId } }],
+                }, select: { id: true } }),
+                tx.viewing.findMany({ where: {
+                    userId: { not: token.targetUserId }, date: { gte: cutoff },
+                    status: { notIn: ['completed', 'cancelled', 'canceled', 'no_show'] },
+                    OR: [{ contact: { locationId: token.locationId } }, { property: { locationId: token.locationId } }],
+                }, select: { id: true } }),
+            ]);
+            const changes = await applyAssignmentRecovery(tx, {
+                locationId: token.locationId,
+                targetUserId: token.targetUserId,
+                taskIds: taskRows.map((row) => row.id),
+                viewingIds: viewingRows.map((row) => row.id),
+                viewingCutoff: cutoff,
+            });
+            if (
+                changes.contacts !== counts.contacts || changes.deals !== counts.deals
+                || changes.openTasks !== counts.openTasks
+                || changes.nonTerminalViewingSessions !== counts.nonTerminalViewingSessions
+                || changes.futureActionableViewings !== counts.futureActionableViewings
+            ) throw new Error('Assignment recovery count changed; transaction rolled back');
+
+            const canceledReminders = await tx.taskReminderJob.updateMany({
+                where: { locationId: token.locationId, taskId: { in: taskRows.map((row) => row.id) }, userId: { not: token.targetUserId }, status: { in: ['pending', 'processing', 'failed'] } },
+                data: { status: 'canceled', processedAt: new Date(), lockedAt: null, lockedBy: null, lastError: 'Canceled by assignment recovery' },
+            });
+            const audit = await tx.userOffboardingAudit.create({
+                data: {
+                    locationId: token.locationId,
+                    actorUserId: actor.id,
+                    sourceUserId: token.targetUserId,
+                    successorUserId: null,
+                    mode: 'RECOVERY',
+                    operation: 'Recover all location assignments',
+                    confirmationId: token.confirmationId,
+                    status: 'LOCAL_COMPLETE',
+                    globalSuspensionRequested: false,
+                    previewJson: { asOf: fresh.preview.asOf, fingerprint: token.previewFingerprint, counts },
+                    resultJson: { ...changes, inheritedConversations: counts.inheritedConversations, canceledReminderJobs: canceledReminders.count },
+                },
+                select: { id: true },
+            });
+            return {
+                auditId: audit.id,
+                counts: { ...changes, inheritedConversations: counts.inheritedConversations, canceledReminderJobs: canceledReminders.count },
+                taskIds: taskRows.map((row) => row.id),
+                viewingIds: viewingRows.map((row) => row.id),
+            };
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+        const externalErrors: string[] = [];
+        for (const taskId of result.taskIds) {
+            try { await enqueueTaskSyncJobs({ taskId, operation: 'update' }); }
+            catch (error) { console.error('[Assignment recovery] Task synchronization failed', error); externalErrors.push('Task synchronization requires attention'); }
+        }
+        try { await rebuildTaskReminderJobsForAssignee(token.targetUserId); }
+        catch (error) { console.error('[Assignment recovery] Reminder rebuilding failed', error); externalErrors.push('Task reminder rebuilding requires attention'); }
+        for (const viewingId of result.viewingIds) {
+            try { await enqueueViewingSyncJobs({ viewingId, operation: 'update' }); }
+            catch (error) { console.error('[Assignment recovery] Viewing synchronization failed', error); externalErrors.push('Viewing synchronization requires attention'); }
+            try { await queueDefaultViewingLeadReminders(viewingId); }
+            catch (error) { console.error('[Assignment recovery] Viewing reminder rebuilding failed', error); externalErrors.push('Viewing reminder rebuilding requires attention'); }
+        }
+        try {
+            revalidatePath('/admin/team'); revalidatePath('/admin/contacts'); revalidatePath('/admin/conversations'); revalidatePath('/admin/deals');
+        } catch (error) { console.error('[Assignment recovery] Cache refresh failed', error); externalErrors.push('UI cache refresh requires attention'); }
+        try {
+            await db.userOffboardingAudit.update({
+                where: { id: result.auditId },
+                data: { status: externalErrors.length ? 'COMPLETED_WITH_EXTERNAL_ERRORS' : 'COMPLETED', resultJson: { ...result.counts, externalErrors } },
+            });
+        } catch (error) { console.error('[Assignment recovery] Audit finalization failed', error); externalErrors.push('Audit finalization requires attention; LOCAL_COMPLETE remains authoritative'); }
+        return { success: true, auditId: result.auditId, counts: result.counts, externalErrors };
+    } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return { success: false, error: 'Assignments changed concurrently; create a fresh preview' };
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return { success: false, error: 'This confirmation was already used; create a fresh preview' };
+        return { success: false, error: error instanceof Error ? error.message : 'Assignment recovery failed' };
+    }
+}
 
 /** Read-only preview. Identity intent and all counts are resolved server-side. */
 export async function previewTransferResponsibilities(input: {

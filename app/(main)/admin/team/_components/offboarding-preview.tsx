@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { executeTransferResponsibilities, previewTransferResponsibilities, type ExecuteOffboardingResult, type OffboardingPreviewResult } from '../actions';
-export function OffboardingPreview() {
+export function OffboardingPreview({ sourceEmail }: { sourceEmail: string }) {
     const [mode, setMode] = useState<'TRANSFER' | 'KEEP_ASSIGNED'>('TRANSFER');
     const [result, setResult] = useState<OffboardingPreviewResult | null>(null);
     const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ export function OffboardingPreview() {
         setLoading(true);
         const form = new FormData(event.currentTarget);
         setResult(await previewTransferResponsibilities({
-            sourceEmail: String(form.get('sourceEmail') || ''),
+            sourceEmail,
             successorEmail: String(form.get('successorEmail') || ''),
             mode,
             suspendClerkGlobally: form.get('suspendClerkGlobally') === 'on',
@@ -40,10 +40,10 @@ export function OffboardingPreview() {
     }
     const preview = result?.success ? result.preview : null;
     return (
-        <Card className="mb-6 border-amber-200" aria-labelledby="offboarding-preview-title">
+        <Card className="border-amber-200" aria-label={`Access removal for ${sourceEmail}`}>
             <CardHeader>
-                <CardTitle id="offboarding-preview-title" className="flex items-center gap-2 text-lg">
-                    <ShieldCheck className="h-5 w-5" /> Remove location access
+                <CardTitle className="flex items-center gap-2 text-lg">
+                    <ShieldCheck className="h-5 w-5" /> Transfer responsibilities or remove access
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
                     Read-only preview. No records, memberships, credentials, or provider accounts will be changed.
@@ -62,9 +62,9 @@ export function OffboardingPreview() {
                             <span><strong>Keep assigned</strong> — retain assignments on the inactive User; do not rewrite responsibility records.</span>
                         </label>
                     </fieldset>
-                    <div className="space-y-2">
-                        <Label htmlFor="sourceEmail">User to retire</Label>
-                        <Input id="sourceEmail" name="sourceEmail" type="email" autoComplete="off" required />
+                    <div className="space-y-1 rounded-md bg-muted p-3 text-sm">
+                        <span className="font-medium">Selected user</span>
+                        <div>{sourceEmail}</div>
                     </div>
                     <div className="space-y-2" aria-hidden={mode !== 'TRANSFER'}>
                         <Label htmlFor="successorEmail">Successor</Label>

@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const actions = readFileSync(new URL('./actions.ts', import.meta.url), 'utf8');
 const component = readFileSync(new URL('./_components/offboarding-preview.tsx', import.meta.url), 'utf8');
+const teamPage = readFileSync(new URL('./page.tsx', import.meta.url), 'utf8');
+const memberCard = readFileSync(new URL('./_components/team-member-card.tsx', import.meta.url), 'utf8');
 const responsibilities = readFileSync(new URL('../../../../lib/team/offboarding-responsibilities.ts', import.meta.url), 'utf8');
 const preview = actions.slice(
   actions.indexOf('export async function previewTransferResponsibilities'),
@@ -63,7 +65,7 @@ test('private credentials are classified but never rendered or returned', () => 
 });
 
 test('confirmation UI is accessible and execution requires explicit phrase and acknowledgement', () => {
-  assert.match(component, /htmlFor="sourceEmail"/);
+  assert.match(component, /sourceEmail: string/);
   assert.match(component, /htmlFor="successorEmail"/);
   assert.match(component, /aria-live="polite"/);
   assert.match(component, /Explicit final confirmation/);
@@ -74,4 +76,13 @@ test('confirmation UI is accessible and execution requires explicit phrase and a
   assert.match(component, /Remove access to this location/);
   assert.match(component, /Globally retire identity/);
   assert.match(component, /Execution blocked until every condition above is resolved/);
+});
+
+test('offboarding is bound to the selected Team member instead of a standalone email form', () => {
+  assert.doesNotMatch(teamPage, /<OffboardingPreview/);
+  assert.match(memberCard, /Manage user/);
+  assert.match(memberCard, /<OffboardingPreview sourceEmail=\{user\.email\}/);
+  assert.match(component, /sourceEmail,\s*successorEmail/);
+  assert.doesNotMatch(component, /name="sourceEmail"/);
+  assert.doesNotMatch(memberCard, /invitedById === null/);
 });

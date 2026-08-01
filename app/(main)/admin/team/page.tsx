@@ -6,7 +6,6 @@ import { PendingInvitationsList } from "./_components/pending-invitations-list";
 import { getGHLCalendars } from "./actions";
 import { checkGHLSMTPStatus } from "@/lib/ghl/email";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
-import { OffboardingPreview } from "./_components/offboarding-preview";
 import { resolveStrictAdminLocation, type PreviewIdentity } from "@/lib/team/offboarding-preview-policy";
 
 export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string }> }) {
@@ -121,7 +120,6 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
                         {contactAccessResult === 'updated' ? 'Contact access updated.' : 'Contact access could not be updated.'}
                     </div>
                 )}
-                <OffboardingPreview />
                 {!smtpStatus.isConfigured && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
                         <div className="flex">
