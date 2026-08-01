@@ -19,6 +19,7 @@ export type ConversationRealtimeMode = 'disabled' | 'connecting' | 'connected' |
 type ViewMode = 'chats' | 'deals';
 
 type RealtimeEnvelopeRoutingArgs = {
+    expectedLocationId?: string;
     rawData: string;
     viewMode: ViewMode;
     activeIdRef: RefObject<string | null>;
@@ -43,6 +44,7 @@ type RealtimeEnvelopeRoutingArgs = {
 };
 
 type UseConversationRealtimeEventsArgs = Omit<RealtimeEnvelopeRoutingArgs, 'rawData' | 'mergeState'> & {
+    locationId: string;
     featureRealtimeSse: boolean;
     searchQuery: string;
     viewFilter: 'active' | 'archived' | 'trash' | 'tasks';
@@ -57,6 +59,7 @@ function parseRealtimePayload(event: any): Record<string, unknown> {
 }
 
 export function routeConversationRealtimeEnvelope({
+    expectedLocationId,
     rawData,
     viewMode,
     activeIdRef,
@@ -79,6 +82,8 @@ export function routeConversationRealtimeEnvelope({
     };
 
     const event = JSON.parse(rawData || "{}");
+    const normalizedExpectedLocationId = String(expectedLocationId || "").trim();
+    if (normalizedExpectedLocationId && String(event?.locationId || "").trim() !== normalizedExpectedLocationId) return;
     const conversationId = event?.conversationId ? String(event.conversationId) : null;
     const eventType = String(event?.type || "");
     const shouldApply = shouldApplyRealtimeEnvelope(
@@ -187,6 +192,7 @@ export function routeConversationRealtimeEnvelope({
 }
 
 export function useConversationRealtimeEvents({
+    locationId,
     featureRealtimeSse,
     searchQuery,
     viewFilter,
@@ -252,6 +258,7 @@ export function useConversationRealtimeEvents({
         const handleIncomingEnvelope = (rawData: string) => {
             try {
                 routeConversationRealtimeEnvelope({
+                    expectedLocationId: locationId,
                     rawData,
                     viewMode,
                     activeIdRef,
@@ -322,6 +329,7 @@ export function useConversationRealtimeEvents({
         activeDealIdRef,
         activeDealId,
         activeIdRef,
+        locationId,
         applyRealtimeMessagePatch,
         cacheWorkspaceCoreSnapshot,
         searchQuery,

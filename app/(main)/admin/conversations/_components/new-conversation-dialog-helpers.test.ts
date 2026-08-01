@@ -9,10 +9,13 @@ import {
     canStartGoogleContactConversation,
     getGoogleContactDisabledReason,
     getGoogleConnectionErrorMessage,
+    getNewConversationPhoneInputError,
     getPasteLeadRecoverableParsedLead,
     getGoogleConversationOutcomeLabel,
     getGoogleImportOutcomeLabel,
     mergePasteLeadResultStatuses,
+    matchesNewConversationContact,
+    matchesNewConversationRecord,
     normalizeNewConversationStartInput,
     resolveWhatsAppChatIdentity,
     shouldApplyGoogleSearchResult,
@@ -29,6 +32,47 @@ test('normalizes manual phone starts to E.164 like Paste Lead', () => {
 test('keeps non-phone manual conversation identities intact', () => {
     assert.equal(normalizeNewConversationStartInput('  lead@example.com  '), 'lead@example.com');
     assert.equal(normalizeNewConversationStartInput('  12345@lid  '), '12345@lid');
+});
+
+test('rejects empty, too-short, and invalid manual phone starts', () => {
+    assert.equal(getNewConversationPhoneInputError(''), 'Enter a phone number.');
+    assert.match(getNewConversationPhoneInputError('+357 99') || '', /too short/i);
+    assert.match(getNewConversationPhoneInputError('+1234567') || '', /valid international/i);
+    assert.equal(getNewConversationPhoneInputError('+357 99 045 511'), null);
+});
+
+test('reuses only a matching contact from the active location', () => {
+    const args = {
+        locationId: 'location-a',
+        rawDigits: '35799045511',
+        requestedIdentity: '+35799045511',
+        requestedLid: '',
+        isEmail: false,
+    };
+
+    assert.equal(matchesNewConversationContact({
+        locationId: 'location-a',
+        phone: '+357 99 045 511',
+    }, args), true);
+    assert.equal(matchesNewConversationContact({
+        locationId: 'location-b',
+        phone: '+357 99 045 511',
+    }, args), false);
+});
+
+test('opens only a conversation matching the active location and contact', () => {
+    const target = { locationId: 'location-a', contactId: 'contact-a' };
+
+    assert.equal(matchesNewConversationRecord(target, target), true);
+    assert.equal(matchesNewConversationRecord(
+        { locationId: 'location-b', contactId: 'contact-a' },
+        target
+    ), false);
+    assert.equal(matchesNewConversationRecord(
+        { locationId: 'location-a', contactId: 'contact-b' },
+        target
+    ), false);
+    assert.equal(matchesNewConversationRecord(null, target), false);
 });
 
 test('resolves WhatsApp chat identity using existing priority', () => {

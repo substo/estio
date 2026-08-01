@@ -93,6 +93,14 @@ export function selectConversationRealtimeReplayEvents(
     return envelopes.slice(lastEventIndex + 1, lastEventIndex + 1 + normalizedLimit);
 }
 
+export function isConversationRealtimeEnvelopeForLocation(
+    envelope: Pick<ConversationRealtimeEventEnvelope, "locationId"> | null | undefined,
+    locationId: string
+): boolean {
+    const expectedLocationId = String(locationId || "").trim();
+    return !!expectedLocationId && String(envelope?.locationId || "").trim() === expectedLocationId;
+}
+
 export async function getConversationRealtimeEventsSince(args: {
     locationId: string;
     lastEventId?: string | null;
@@ -116,7 +124,7 @@ export async function getConversationRealtimeEventsSince(args: {
         for (const raw of rows) {
             if (typeof raw !== "string") continue;
             const parsed = parseConversationRealtimeEventEnvelope(raw);
-            if (parsed) envelopes.push(parsed);
+            if (parsed && isConversationRealtimeEnvelopeForLocation(parsed, locationId)) envelopes.push(parsed);
         }
         if (envelopes.length === 0) return [];
 

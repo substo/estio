@@ -25,7 +25,6 @@ type DeleteCompanyDialogProps = {
     company: {
         id: string;
         name: string;
-        locationId: string;
         propertyRoleCount?: number;
         contactRoleCount?: number;
         feedCount?: number;
@@ -120,7 +119,7 @@ export function DeleteCompanyDialog({
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        className="h-10 w-10 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     >
                         <Trash2 className="h-4 w-4" />
                         <span className="sr-only">Delete {company.name}</span>
@@ -147,7 +146,6 @@ export function DeleteCompanyDialog({
 
                 <form action={formAction} className="space-y-4">
                     <input type="hidden" name="companyId" value={company.id} />
-                    <input type="hidden" name="locationId" value={company.locationId} />
 
                     <div className="space-y-2">
                         <Label htmlFor={`delete-company-${company.id}`}>Type the company name to confirm</Label>
@@ -160,7 +158,7 @@ export function DeleteCompanyDialog({
                             autoComplete="off"
                         />
                         {state.errors?.confirmationName ? (
-                            <p className="text-sm text-destructive">{state.errors.confirmationName.join(', ')}</p>
+                            <p role="alert" className="text-sm text-destructive">{state.errors.confirmationName.join(', ')}</p>
                         ) : null}
                     </div>
 

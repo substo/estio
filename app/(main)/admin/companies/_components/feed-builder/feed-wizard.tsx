@@ -1,13 +1,13 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ArrowRight, Check, AlertCircle, Play, Pause } from 'lucide-react';
+import { Check, Loader2, Play } from 'lucide-react';
 import { toast } from 'sonner';
-import { FeedMappingConfig } from '@/lib/feed/ai-mapper';
+import type { FeedMappingConfig } from '@/lib/feed/ai-mapper';
 import { addFeed } from '../../actions';
 
 interface FeedWizardProps {
@@ -16,35 +16,54 @@ interface FeedWizardProps {
     onCancel: () => void;
 }
 
+type WizardMessage = { kind: 'status' | 'error'; text: string } | null;
+
+function getResponseError(
+    response: Response,
+    data: { error?: string } | null,
+    fallback: string,
+) {
+    const message = data?.error || fallback;
+    const retryAfter = Number(response.headers.get('Retry-After'));
+    return Number.isFinite(retryAfter) && retryAfter > 0
+        ? `${message} Try again in ${Math.ceil(retryAfter)} seconds.`
+        : message;
+}
+
 export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) {
-    const [step, setStep] = useState<1 | 2 | 3>(1);
+    const [step, setStep] = useState<1 | 2>(1);
     const [url, setUrl] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [mapping, setMapping] = useState<FeedMappingConfig | null>(null);
-    const [snippet, setSnippet] = useState('');
     const [availablePaths, setAvailablePaths] = useState<string[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const [message, setMessage] = useState<WizardMessage>(null);
 
     // Preview
-    const [previewItems, setPreviewItems] = useState<any[]>([]);
+    const [previewItems, setPreviewItems] = useState<unknown[]>([]);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
     const handleAnalyze = async () => {
         if (!url) return toast.error("Please enter a URL");
 
         setIsAnalyzing(true);
+        setMessage({ kind: 'status', text: 'Analyzing feed structure…' });
         try {
             const res = await fetch('/api/feed/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url, companyId })
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => null) as {
+                success?: boolean;
+                error?: string;
+                mapping?: FeedMappingConfig;
+                paths?: string[];
+            } | null;
 
-            if (data.success) {
-                const aiMapping = data.mapping as FeedMappingConfig;
-                const paths = data.paths as string[];
-                setSnippet(data.snippet);
+            if (res.ok && data?.success && data.mapping && Array.isArray(data.paths)) {
+                const aiMapping = data.mapping;
+                const paths = data.paths;
                 setAvailablePaths(paths);
 
                 // Refine Mapping: AI guesses paths, but we have exact paths from discovery.
@@ -141,11 +160,15 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
 
                 setMapping(refinedMapping);
                 setStep(2);
+                setMessage({ kind: 'status', text: 'Feed analyzed. Review the suggested field mapping.' });
                 toast.success("Feed analyzed successfully!");
             } else {
-                toast.error(data.error || "Analysis failed");
+                const error = getResponseError(res, data, 'Analysis failed.');
+                setMessage({ kind: 'error', text: error });
+                toast.error(error);
             }
-        } catch (e) {
+        } catch {
+            setMessage({ kind: 'error', text: 'Failed to analyze feed. Try again.' });
             toast.error("Failed to analyze feed");
         } finally {
             setIsAnalyzing(false);
@@ -153,20 +176,30 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
     };
 
     const handlePreview = async () => {
+        if (!mapping) return;
         setIsPreviewLoading(true);
+        setMessage({ kind: 'status', text: 'Loading feed preview…' });
         try {
             const res = await fetch('/api/feed/preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url, mappingConfig: mapping })
+                body: JSON.stringify({ url, companyId, mappingConfig: mapping })
             });
-            const data = await res.json();
-            if (data.success) {
+            const data = await res.json().catch(() => null) as {
+                success?: boolean;
+                error?: string;
+                items?: unknown[];
+            } | null;
+            if (res.ok && data?.success && Array.isArray(data.items)) {
                 setPreviewItems(data.items);
+                setMessage({ kind: 'status', text: `Preview loaded with ${data.items.length} sample item${data.items.length === 1 ? '' : 's'}.` });
             } else {
-                toast.error(data.error);
+                const error = getResponseError(res, data, 'Preview failed.');
+                setMessage({ kind: 'error', text: error });
+                toast.error(error);
             }
-        } catch (e) {
+        } catch {
+            setMessage({ kind: 'error', text: 'Preview failed. Try again.' });
             toast.error("Preview failed");
         } finally {
             setIsPreviewLoading(false);
@@ -174,7 +207,9 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
     };
 
     const handleSave = async () => {
+        if (!mapping) return;
         setIsSaving(true);
+        setMessage({ kind: 'status', text: 'Saving feed…' });
         try {
             // We use the server action but pass the mapping as a hidden field or separate arg
             // Since addFeed expects FormData, we'll wrap it.
@@ -186,12 +221,15 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
 
             const res = await addFeed({ success: false, message: '' }, formData);
             if (res.success) {
+                setMessage({ kind: 'status', text: 'Feed saved.' });
                 toast.success("Feed saved!");
                 onSuccess();
             } else {
+                setMessage({ kind: 'error', text: res.message });
                 toast.error(res.message);
             }
-        } catch (e) {
+        } catch {
+            setMessage({ kind: 'error', text: 'Failed to save feed. Try again.' });
             toast.error("Failed to save feed");
         } finally {
             setIsSaving(false);
@@ -287,30 +325,43 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
     });
 
     return (
-        <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 rounded-lg">
+        <div className="flex h-full flex-col rounded-lg bg-slate-50 dark:bg-slate-900" aria-busy={isAnalyzing || isPreviewLoading || isSaving}>
+            {message ? (
+                <p
+                    role={message.kind === 'error' ? 'alert' : 'status'}
+                    aria-live={message.kind === 'error' ? 'assertive' : 'polite'}
+                    className={`mb-3 text-sm ${message.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+                >
+                    {message.text}
+                </p>
+            ) : null}
             {/* ... Step 1 ... */}
             {step === 1 && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
                     <div className="space-y-2">
-                        <Label>Feed URL</Label>
-                        <div className="flex gap-2">
+                        <Label htmlFor="company-feed-url">Feed URL</Label>
+                        <div className="flex flex-col gap-2 sm:flex-row">
                             <Input
+                                id="company-feed-url"
+                                type="url"
                                 value={url}
                                 onChange={(e) => setUrl(e.target.value)}
                                 placeholder="https://example.com/feed.xml"
                                 disabled={isAnalyzing}
+                                autoComplete="url"
+                                aria-describedby="company-feed-url-help"
                             />
-                            <Button onClick={handleAnalyze} disabled={isAnalyzing || !url}>
-                                {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
-                                Analyze
+                            <Button type="button" onClick={handleAnalyze} disabled={isAnalyzing || !url.trim()}>
+                                {isAnalyzing ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Play aria-hidden="true" className="mr-2 h-4 w-4" />}
+                                {isAnalyzing ? 'Analyzing…' : 'Analyze'}
                             </Button>
                         </div>
-                        <p className="text-xs text-muted-foreground">
+                        <p id="company-feed-url-help" className="text-xs text-muted-foreground">
                             We will use Gemini AI to analyze the XML structure and suggest a mapping.
                         </p>
                     </div>
                     <div className="flex justify-start">
-                        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
                     </div>
                 </div>
             )}
@@ -319,10 +370,10 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
             {step === 2 && mapping && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-right-4 h-full flex flex-col">
                     {/* Container with max height to prevent page overflow */}
-                    <div className="grid grid-cols-2 gap-4 flex-1 overflow-hidden">
+                    <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto lg:grid-cols-2 lg:overflow-hidden">
 
                         {/* Left Column: Form Fields - Scrollable */}
-                        <div className="flex flex-col border-r pr-4 h-full overflow-hidden">
+                        <div className="flex min-h-0 flex-col overflow-hidden lg:border-r lg:pr-4">
                             <h4 className="font-medium text-sm mb-2 shrink-0">Field Mapping</h4>
                             <div className="text-xs text-muted-foreground mb-4 shrink-0 bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
                                 <p className="font-semibold mb-1">Source-Driven Mapping</p>
@@ -332,8 +383,9 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
 
                             <div className="space-y-3 overflow-y-auto flex-1 pr-2">
                                 <div className="p-3 border rounded-md bg-white dark:bg-black mb-4">
-                                    <Label className="text-xs font-semibold mb-1 block">Root Path (Item Container)</Label>
+                                    <Label htmlFor="company-feed-root-path" className="mb-1 block text-xs font-semibold">Root Path (Item Container)</Label>
                                     <Input
+                                        id="company-feed-root-path"
                                         value={mapping.rootPath || ''}
                                         onChange={(e) => setMapping({ ...mapping, rootPath: e.target.value })}
                                         className="h-7 text-xs font-mono"
@@ -373,29 +425,32 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
                             <div className="bg-white dark:bg-black border rounded p-2 flex-1 overflow-auto text-xs font-mono mb-2">
                                 {isPreviewLoading ? (
                                     <div className="flex items-center justify-center h-full">
-                                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                                        <div role="status" className="flex items-center gap-2 text-muted-foreground">
+                                            <Loader2 aria-hidden="true" className="h-6 w-6 animate-spin" />
+                                            <span>Loading preview…</span>
+                                        </div>
                                     </div>
                                 ) : previewItems.length > 0 ? (
-                                    <pre>{JSON.stringify(previewItems[0], null, 2)}</pre>
+                                    <pre className="whitespace-pre-wrap break-words">{JSON.stringify(previewItems[0], null, 2)}</pre>
                                 ) : (
                                     <div className="text-muted-foreground p-4">
                                         Click Preview to test the mapping on real data.
                                     </div>
                                 )}
                             </div>
-                            <Button variant="outline" size="sm" onClick={handlePreview} disabled={isPreviewLoading} className="w-full shrink-0">
-                                Update Preview
+                            <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={isPreviewLoading} className="w-full shrink-0">
+                                {isPreviewLoading ? 'Loading preview…' : 'Update preview'}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="flex justify-between pt-4 border-t shrink-0">
-                        <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={onCancel}>Cancel</Button>
-                            <Button onClick={handleSave} disabled={isSaving}>
-                                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
-                                Save Feed
+                    <div className="flex flex-wrap justify-between gap-2 border-t pt-4 shrink-0">
+                        <Button type="button" variant="ghost" onClick={() => setStep(1)}>Back</Button>
+                        <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+                            <Button type="button" onClick={handleSave} disabled={isSaving}>
+                                {isSaving ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Check aria-hidden="true" className="mr-2 h-4 w-4" />}
+                                {isSaving ? 'Saving…' : 'Save feed'}
                             </Button>
                         </div>
                     </div>
@@ -408,17 +463,18 @@ export function FeedWizard({ companyId, onSuccess, onCancel }: FeedWizardProps) 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function FormRow({ label, value, onChange, options, customOptions }: { label: string, value: string, onChange: (v: string) => void, options?: string[], customOptions?: { label: string, value: string }[] }) {
+    const selectId = useId();
 
     // Logic for Rich Options (CRM Fields)
     if (customOptions) {
         return (
             <div className="space-y-1">
-                <Label className="text-xs break-all truncate block" title={label}>{label}</Label>
+                <Label htmlFor={selectId} className="block truncate break-all text-xs" title={label}>{label}</Label>
                 <Select
                     value={value || ''}
                     onValueChange={(newValue) => onChange(newValue === "_ignore_" ? "" : newValue)}
                 >
-                    <SelectTrigger className="h-7 text-xs font-mono w-full">
+                    <SelectTrigger id={selectId} aria-label={`Map ${label} to a CRM field`} className="h-7 w-full font-mono text-xs">
                         <SelectValue placeholder="Ignore" />
                     </SelectTrigger>
                     <SelectContent>
@@ -441,13 +497,13 @@ function FormRow({ label, value, onChange, options, customOptions }: { label: st
 
     return (
         <div className="space-y-1">
-            <Label className="text-xs">{label}</Label>
+            <Label htmlFor={selectId} className="text-xs">{label}</Label>
             <Select
                 value={value || ''}
                 onValueChange={onChange}
                 disabled={safeOptions.length === 0}
             >
-                <SelectTrigger className="h-7 text-xs font-mono w-full">
+                <SelectTrigger id={selectId} aria-label={`Select field for ${label}`} className="h-7 w-full font-mono text-xs">
                     <SelectValue placeholder={safeOptions.length === 0 ? "No fields found" : "Select field..."} />
                 </SelectTrigger>
                 <SelectContent>

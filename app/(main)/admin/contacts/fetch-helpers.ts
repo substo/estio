@@ -1,15 +1,13 @@
 'use server';
 
 import db from '@/lib/db';
-import { auth } from '@clerk/nextjs/server';
-import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { buildContactManageWhere, buildContactVisibilityWhere, getActiveContactsAccess } from '@/lib/contacts/active-location-access';
 
 export async function getPropertiesForSelect(locationId: string) {
     try {
-        const { userId } = await auth();
-        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
-            return [];
-        }
+        const access = await getActiveContactsAccess(locationId);
+        if (!access) return [];
+        locationId = access.locationId;
         const properties = await db.property.findMany({
             where: { locationId },
             select: { id: true, title: true, reference: true, unitNumber: true },
@@ -25,10 +23,9 @@ export async function getPropertiesForSelect(locationId: string) {
 
 export async function getCompaniesForSelect(locationId: string, type?: string) {
     try {
-        const { userId } = await auth();
-        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
-            return [];
-        }
+        const access = await getActiveContactsAccess(locationId);
+        if (!access) return [];
+        locationId = access.locationId;
         const whereClause: any = { locationId };
         if (type) {
             whereClause.type = type;
@@ -48,12 +45,11 @@ export async function getCompaniesForSelect(locationId: string, type?: string) {
 
 export async function getContactsForSelect(locationId: string) {
     try {
-        const { userId } = await auth();
-        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
-            return [];
-        }
+        const access = await getActiveContactsAccess(locationId);
+        if (!access) return [];
+        locationId = access.locationId;
         const contacts = await db.contact.findMany({
-            where: { locationId },
+            where: buildContactManageWhere(access),
             select: { id: true, name: true },
             orderBy: { name: 'asc' },
         });
@@ -67,13 +63,9 @@ export async function getContactsForSelect(locationId: string) {
 
 export async function getUsersForSelect(locationId: string) {
     try {
-        const { userId } = await auth();
-        // Just verify logged in, technically any user in the system could be an agent?
-        // Or restricted to location? The schema has LocationToUser.
-        // For now, let's return all users who have access to this location.
-        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
-            return [];
-        }
+        const access = await getActiveContactsAccess(locationId);
+        if (!access) return [];
+        locationId = access.locationId;
 
         const [location, users] = await Promise.all([
             db.location.findUnique({
@@ -81,11 +73,9 @@ export async function getUsersForSelect(locationId: string) {
                 select: { timeZone: true },
             }),
             db.user.findMany({
-                where: {
-                    locations: {
-                        some: { id: locationId }
-                    }
-                },
+                where: access.role === 'ADMIN'
+                    ? { locations: { some: { id: locationId } }, locationRoles: { some: { locationId } } }
+                    : { id: access.internalUserId },
                 select: { id: true, name: true, email: true, ghlCalendarId: true, timeZone: true },
                 orderBy: { name: 'asc' },
             }),
@@ -104,10 +94,9 @@ export async function getUsersForSelect(locationId: string) {
 
 export async function getViewingFormOptions(locationId: string) {
     try {
-        const { userId } = await auth();
-        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
-            return { properties: [], users: [], contacts: [] };
-        }
+        const access = await getActiveContactsAccess(locationId);
+        if (!access) return { properties: [], users: [], contacts: [] };
+        locationId = access.locationId;
 
         const [location, properties, users, contacts] = await Promise.all([
             db.location.findUnique({
@@ -129,7 +118,7 @@ export async function getViewingFormOptions(locationId: string) {
                 orderBy: { name: 'asc' },
             }),
             db.contact.findMany({
-                where: { locationId },
+                where: buildContactManageWhere(access),
                 select: { id: true, name: true },
                 orderBy: { name: 'asc' },
             }),
@@ -152,33 +141,20 @@ export async function getViewingFormOptions(locationId: string) {
 
 export async function getContactViewings(contactId: string) {
     try {
-        const { userId } = await auth();
-        if (!userId) return { viewings: [], currentUserId: null, interestedProperties: [] };
+        const access = await getActiveContactsAccess();
+        if (!access) return { viewings: [], currentUserId: null, interestedProperties: [] };
 
-        const [dbUser, contact] = await Promise.all([
-            db.user.findUnique({
-                where: { clerkId: userId },
-                select: {
-                    id: true,
-                    locations: { select: { id: true } },
-                },
-            }),
-            db.contact.findUnique({
-                where: { id: contactId },
-                select: { locationId: true, propertiesInterested: true }
-            }),
-        ]);
-        const internalUserId = dbUser?.id || null;
-        const hasLocationAccess = Boolean(
-            contact?.locationId && dbUser?.locations?.some((location) => location.id === contact.locationId)
-        );
-
-        if (!hasLocationAccess) {
+        const contact = await db.contact.findFirst({
+            where: { id: contactId, ...buildContactVisibilityWhere(access, 'location') },
+            select: { locationId: true, propertiesInterested: true }
+        });
+        const internalUserId = access.internalUserId;
+        if (!contact) {
             return { viewings: [], currentUserId: internalUserId, interestedProperties: [] };
         }
 
         const viewings = await db.viewing.findMany({
-            where: { contactId },
+            where: { contactId, contact: buildContactVisibilityWhere(access, 'location') },
             include: {
                 property: { select: { title: true, unitNumber: true, reference: true } },
                 user: { select: { name: true } },
@@ -200,13 +176,11 @@ export async function getContactViewings(contactId: string) {
 
 export async function getContactHistory(contactId: string) {
     try {
-        const { userId } = await auth();
-        if (!userId) {
-            return [];
-        }
+        const access = await getActiveContactsAccess();
+        if (!access) return [];
 
         const history = await db.contactHistory.findMany({
-            where: { contactId, deletedAt: null },
+            where: { contactId, deletedAt: null, contact: buildContactVisibilityWhere(access, 'location') },
             include: {
                 user: { select: { name: true, email: true } }
             },

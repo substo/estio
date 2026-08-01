@@ -58,6 +58,7 @@ export function SearchableSelect({
                         role="combobox"
                         type="button"
                         aria-expanded={open}
+                        aria-label={placeholder}
                         className={cn(
                             "w-full justify-between font-normal",
                             !value && "text-muted-foreground"

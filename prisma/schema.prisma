@@ -218,6 +218,7 @@ model User {
 
   locations     Location[]         @relation("LocationToUser")
   locationRoles UserLocationRole[]
+  assignedContacts Contact[] @relation("ContactAssignedUser")
 
   createdProperties            Property[]                  @relation("PropertyCreator")
   updatedProperties            Property[]                  @relation("PropertyUpdater")
@@ -666,6 +667,8 @@ model Contact {
   leadNextAction      String?
   leadFollowUpDate    DateTime?
   leadAssignedToAgent String?
+  assignedUserId      String?
+  assignedUser        User?    @relation("ContactAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   // Requirements
   requirementStatus            String   @default("For Sale") // "For Sale", "For Rent"
@@ -771,6 +774,7 @@ model Contact {
   @@index([locationId, profileVerifiedAt])
   @@index([locationId, requirementsAssessmentDueAt])
   @@index([locationId, requirementsLastAssessedAt])
+  @@index([locationId, assignedUserId])
 }
 
 model ContactLanguage {
@@ -1028,6 +1032,11 @@ enum UserRole {
   MEMBER // Standard access
 }
 
+enum ContactAccessScope {
+  ASSIGNED_ONLY
+  LOCATION_WIDE
+}
+
 enum SettingsScopeType {
   LOCATION
   USER
@@ -1134,7 +1143,8 @@ model UserLocationRole {
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  role UserRole @default(MEMBER)
+  role               UserRole          @default(MEMBER)
+  contactAccessScope ContactAccessScope @default(ASSIGNED_ONLY)
 
   invitedById String? // userId who invited this user
   invitedAt   DateTime?

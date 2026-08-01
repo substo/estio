@@ -1,7 +1,8 @@
 
 import db from "@/lib/db";
-import { getLocationContext } from "@/lib/auth/location-context";
 import { EditContactForm } from "../../_components/edit-contact-dialog";
+import ContactView from "../../_components/contact-view";
+import { buildContactVisibilityWhere, canManageContact, getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
 import { VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
 
@@ -15,15 +16,12 @@ export default async function ContactViewPage({ params, searchParams }: { params
         return <div>Cannot view a new contact. Please create it first.</div>;
     }
 
-    const locationCtx = await getLocationContext();
-    const locationId = searchLocationId || locationCtx?.id;
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
-    }
+    const access = await getActiveContactsAccess(searchLocationId);
+    if (!access) return <div>Unauthorized.</div>;
+    const locationId = access.locationId;
 
     const contact = await db.contact.findFirst({
-        where: { id: id, locationId },
+        where: { id, ...buildContactVisibilityWhere(access, 'location') },
         include: {
             propertyRoles: {
                 include: {
@@ -100,25 +98,33 @@ export default async function ContactViewPage({ params, searchParams }: { params
         select: { ghlAccessToken: true }
     });
     const isGhlConnected = !!locationObj?.ghlAccessToken;
+    const canManage = canManageContact(access, contact.assignedUserId);
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
-            <div className="mb-4 flex justify-end">
+            {canManage ? <div className="mb-4 flex justify-end">
                 <QuickAssistStartButton
                     label="Start Quick Assist"
                     locationId={locationId}
                     contactId={contact.id}
                     quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.contact}
                 />
-            </div>
-            <EditContactForm
+            </div> : null}
+            {canManage ? <EditContactForm
                 contact={{ ...contact, languageProfiles }}
                 leadSources={leadSources}
                 initialMode="view"
                 isOutlookConnected={isOutlookConnected}
                 isGoogleConnected={isGoogleConnected}
                 isGhlConnected={isGhlConnected}
-            />
+            /> : <ContactView
+                contact={{ ...contact, languageProfiles }}
+                leadSources={leadSources}
+                canManage={false}
+                isOutlookConnected={isOutlookConnected}
+                isGoogleConnected={isGoogleConnected}
+                isGhlConnected={isGhlConnected}
+            />}
         </div>
     );
 }

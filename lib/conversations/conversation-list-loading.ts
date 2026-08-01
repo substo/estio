@@ -41,6 +41,13 @@ export function buildConversationStatusWhere(status: ConversationListStatus, loc
     return where;
 }
 
+export function buildRankedConversationHydrationWhere(locationId: string, conversationIds: string[]) {
+    return {
+        locationId,
+        id: { in: conversationIds },
+    };
+}
+
 export function doesConversationMatchStatus(
     status: ConversationListStatus,
     row: { deletedAt: Date | null; archivedAt: Date | null }
@@ -334,9 +341,7 @@ export async function hydrateRankedConversationRows(args: {
     rankedConversationIds: string[];
 }) {
     const fetchedRows = await db.conversation.findMany({
-        where: {
-            id: { in: args.rankedConversationIds },
-        },
+        where: buildRankedConversationHydrationWhere(args.location.id, args.rankedConversationIds),
         include: {
             contact: { select: CONVERSATION_LIST_CONTACT_SELECT },
         },

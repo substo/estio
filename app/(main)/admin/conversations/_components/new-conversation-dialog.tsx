@@ -233,35 +233,45 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
 
                     {/* Tab 1: Enter Phone Number */}
                     <TabsContent value="phone" className="mt-4 min-h-0 overflow-y-auto pr-1">
-                        <div className="space-y-4">
+                        <form
+                            className="space-y-4"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                void startByPhone();
+                            }}
+                        >
                             <div>
-                                <label className="text-sm font-medium text-gray-700 mb-1.5 block">Phone Number</label>
+                                <label htmlFor="new-conversation-phone" className="text-sm font-medium text-gray-700 mb-1.5 block">Phone Number</label>
                                 <div className="flex flex-col gap-2 sm:flex-row">
                                     <Input
+                                        id="new-conversation-phone"
+                                        type="tel"
+                                        inputMode="tel"
+                                        autoComplete="tel"
+                                        aria-describedby="new-conversation-phone-hint"
                                         placeholder="+357 99 045 511"
                                         value={phoneInput}
                                         onChange={(e) => setPhoneInput(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && startByPhone()}
                                         className="flex-1"
                                         disabled={creating}
                                     />
                                     <Button
-                                        onClick={startByPhone}
+                                        type="submit"
                                         disabled={!phoneInput.trim() || creating}
                                         className="w-full bg-green-600 hover:bg-green-700 sm:w-auto sm:shrink-0"
                                     >
                                         {creating ? (
-                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            <><Loader2 className="w-4 h-4 animate-spin" /><span className="sr-only">Starting conversation</span></>
                                         ) : (
                                             <>Start Chat <ArrowRight className="w-4 h-4 ml-1" /></>
                                         )}
                                     </Button>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1.5">
+                                <p id="new-conversation-phone-hint" className="text-xs text-gray-500 mt-1.5">
                                     Include country code (e.g., +357 for Cyprus, +44 for UK)
                                 </p>
                             </div>
-                        </div>
+                        </form>
                     </TabsContent>
 
                     {/* Tab 2: Pick from WhatsApp */}
@@ -627,7 +637,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
 
                 {/* Error Display */}
                 {error && (
-                    <div className="max-h-24 shrink-0 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <div id="new-conversation-error" role="alert" aria-live="assertive" className="max-h-24 shrink-0 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                         {error}
                     </div>
                 )}

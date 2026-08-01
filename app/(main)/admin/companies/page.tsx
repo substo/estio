@@ -1,66 +1,19 @@
-import db from "@/lib/db";
-import { getLocationById } from "@/lib/location";
-import { cookies } from "next/headers";
-import { auth } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
-import { getLocationContext } from "@/lib/auth/location-context";
-import { redirect } from "next/navigation";
-
 import { AddCompanyDialog, AddDeveloperCompanyDialog } from "./_components/add-company-dialog";
 import { DeleteCompanyDialog } from "./_components/delete-company-dialog";
 import { EditCompanyDialog } from "./_components/edit-company-dialog";
 import { CompanyFilters } from "./_components/company-filters";
-import { listCompanies } from "@/lib/companies/repository";
+import { listCompanies, safeCompanyWebsite } from "@/lib/companies/repository";
+import { buildContactVisibilityWhere, getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 
-export default async function CompaniesPage(props: { searchParams: Promise<{ locationId?: string; q?: string; type?: string; hasRole?: string }> }) {
+export default async function CompaniesPage(props: { searchParams: Promise<{ q?: string; type?: string; hasRole?: string }> }) {
     const searchParams = await props.searchParams;
-    const cookieStore = await cookies();
-    let locationId = searchParams.locationId || cookieStore.get("crm_location_id")?.value;
-
-    if (!locationId) {
-        const locationContext = await getLocationContext();
-        if (locationContext) {
-            locationId = locationContext.id;
-        }
-    }
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
-    }
-
-    const { userId } = await auth();
-    if (!userId) {
-        return <div>Unauthorized</div>;
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
-    if (!hasAccess) {
-        // Fallback: Check if user has ANY valid location and redirect there
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
-        });
-
-        if (user?.locations?.[0]) {
-            const validLocationId = user.locations[0].id;
-            redirect(`/admin/companies?locationId=${validLocationId}`);
-        }
-
-        return (
-            <div className="p-6 text-center">
-                <h2 className="text-xl font-bold text-red-600">Unauthorized Access</h2>
-                <p className="mt-2 text-gray-600">You do not have access to the requested location ({locationId}).</p>
-            </div>
-        );
-    }
-
-    const location = await getLocationById(locationId);
-    if (!location) {
-        return <div>Location not found.</div>;
-    }
+    const access = await getActiveContactsAccess();
+    if (!access) return <div>Unauthorized</div>;
+    const locationId = access.locationId;
 
     const companies = await listCompanies({
         locationId,
+        contactVisibilityWhere: buildContactVisibilityWhere(access, 'location'),
         q: searchParams.q,
         type: searchParams.type,
         hasRole: searchParams.hasRole,
@@ -68,14 +21,14 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
 
     return (
         <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl font-bold">Companies</h1>
                     <p className="text-gray-500 text-sm">Manage companies and their roles</p>
                 </div>
-                <div className="flex gap-2">
-                    <AddDeveloperCompanyDialog locationId={locationId} />
-                    <AddCompanyDialog locationId={locationId} />
+                <div className="flex flex-wrap gap-2">
+                    <AddDeveloperCompanyDialog />
+                    <AddCompanyDialog />
                 </div>
             </div>
 
@@ -83,8 +36,9 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
                 <CompanyFilters />
             </div>
 
-            <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm text-left">
+            <div className="border rounded-lg overflow-x-auto">
+                <table className="w-full min-w-[900px] text-sm text-left">
+                    <caption className="sr-only">Companies in the active location, including contact details, types, linked roles, and actions.</caption>
                     <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
                             <th className="p-4">Date</th>
@@ -113,11 +67,11 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
                                     <div className="flex flex-col">
                                         {company.email && <span>{company.email}</span>}
                                         {company.phone && <span className="text-xs text-gray-500">{company.phone}</span>}
-                                        {company.website && (
-                                            <a href={company.website} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">
+                                        {company.website && (safeCompanyWebsite(company.website) ? (
+                                            <a href={safeCompanyWebsite(company.website)!} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">
                                                 {company.website.replace(/^https?:\/\//, '')}
                                             </a>
-                                        )}
+                                        ) : <span className="text-xs">{company.website}</span>)}
                                     </div>
                                 </td>
                                 <td className="p-4">
@@ -129,19 +83,21 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
                                 </td>
                                 <td className="p-4">
                                     <div className="flex flex-col gap-1">
-                                        {company.propertyRoles.length > 0 ? (
+                                        {company.propertyRoles.length > 0 && (
                                             company.propertyRoles.map((r, i) => (
                                                 <span key={r.id} className="text-xs">
                                                     <span className="font-semibold">{r.role}:</span> {r.property.title}
                                                 </span>
                                             ))
-                                        ) : company.contactRoles.length > 0 ? (
+                                        )}
+                                        {company.contactRoles.length > 0 && (
                                             company.contactRoles.map((r, i) => (
                                                 <span key={r.id} className="text-xs">
                                                     <span className="font-semibold">{r.role}:</span> {r.contact.name}
                                                 </span>
                                             ))
-                                        ) : (
+                                        )}
+                                        {company.propertyRoles.length === 0 && company.contactRoles.length === 0 && (
                                             <span className="text-gray-400 italic text-xs">No active roles</span>
                                         )}
                                     </div>
@@ -153,7 +109,6 @@ export default async function CompaniesPage(props: { searchParams: Promise<{ loc
                                             company={{
                                                 id: company.id,
                                                 name: company.name,
-                                                locationId: company.locationId,
                                                 propertyRoleCount: company.propertyRoles.length,
                                                 contactRoleCount: company.contactRoles.length,
                                                 feedCount: company.feeds.length,

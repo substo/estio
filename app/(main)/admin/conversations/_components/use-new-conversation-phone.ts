@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { useToast } from '@/components/ui/use-toast';
 
 import { startNewConversation } from '../actions';
 import {
     buildNewConversationResultError,
+    getNewConversationPhoneInputError,
     normalizeNewConversationStartInput,
     shouldShowHistoryBackfillQueuedToast,
     type NewConversationCreatedResult,
@@ -20,8 +21,10 @@ export function useNewConversationPhone(args: {
     const { toast } = useToast();
     const [phoneInput, setPhoneInput] = useState('');
     const [creatingPhone, setCreatingPhone] = useState(false);
+    const pendingRef = useRef(false);
 
     const updatePhoneInput = useCallback((value: string) => {
+        args.setError(null);
         const normalized = normalizeNewConversationStartInput(value);
         const digitCount = value.replace(/\D/g, '').length;
         setPhoneInput(
@@ -29,12 +32,20 @@ export function useNewConversationPhone(args: {
                 ? normalized
                 : value
         );
-    }, []);
+    }, [args]);
 
     const startByPhone = useCallback(async () => {
-        const input = normalizeNewConversationStartInput(phoneInput);
-        if (!input) return;
+        if (pendingRef.current) return;
 
+        const validationError = getNewConversationPhoneInputError(phoneInput);
+        if (validationError) {
+            args.setError(validationError);
+            return;
+        }
+
+        const input = normalizeNewConversationStartInput(phoneInput);
+
+        pendingRef.current = true;
         setCreatingPhone(true);
         args.setError(null);
 
@@ -55,11 +66,13 @@ export function useNewConversationPhone(args: {
         } catch (error: any) {
             args.setError(buildNewConversationResultError(error));
         } finally {
+            pendingRef.current = false;
             setCreatingPhone(false);
         }
     }, [args, phoneInput, toast]);
 
     const resetPhone = useCallback(() => {
+        pendingRef.current = false;
         setPhoneInput('');
         setCreatingPhone(false);
     }, []);

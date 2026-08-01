@@ -6,6 +6,7 @@ import { FeedParser } from "./parsers/base-parser";
 import { FeedMappingConfig } from "./ai-mapper";
 import { createHash } from "crypto";
 import { uploadUrlToCloudflare, getImageDeliveryUrl } from "@/lib/cloudflareImages";
+import { fetchSafeFeedText } from "./safe-feed-fetch";
 
 export class FeedService {
     private static buildFeedSyncMetadata(
@@ -56,9 +57,7 @@ export class FeedService {
         console.log(`Starting sync for feed: ${feed.url}`);
 
         // 1. Fetch
-        const response = await fetch(feed.url);
-        if (!response.ok) throw new Error(`Failed to fetch feed: ${response.statusText}`);
-        const xmlContent = await response.text();
+        const xmlContent = await fetchSafeFeedText(feed.url);
 
         // 2. Parse
         const mappingConfig = feed.mappingConfig as unknown as FeedMappingConfig | undefined;

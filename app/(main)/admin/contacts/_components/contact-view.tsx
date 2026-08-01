@@ -48,6 +48,7 @@ interface ContactViewProps {
     isOutlookConnected?: boolean;
     isGoogleConnected?: boolean;
     isGhlConnected?: boolean;
+    canManage?: boolean;
 }
 
 export default function ContactView({
@@ -58,7 +59,8 @@ export default function ContactView({
     variant = 'page',
     isOutlookConnected = false,
     isGoogleConnected = false,
-    isGhlConnected = false
+    isGhlConnected = false,
+    canManage = true
 }: ContactViewProps) {
     const router = useRouter();
     const [outlookOpen, setOutlookOpen] = useState(false);
@@ -112,7 +114,7 @@ export default function ContactView({
                                 Outlook Emails
                             </Button>
                         )}
-                        <EditContactDialog
+                        {canManage ? <EditContactDialog
                             contact={contact}
                             leadSources={leadSources}
                             isGoogleConnected={isGoogleConnected}
@@ -123,7 +125,7 @@ export default function ContactView({
                                     Edit Contact
                                 </Button>
                             }
-                        />
+                        /> : <Badge variant="secondary">Read-only</Badge>}
                     </div>
                 </div>
             )}
@@ -152,7 +154,7 @@ export default function ContactView({
                             <DisplayField label="Priority" value={contact.leadPriority} />
                             <DisplayField label="Stage" value={contact.leadStage} />
                             <DisplayField label="Source" value={contact.leadSource} />
-                            <DisplayField label="Assigned Agent" value={contact.leadAssignedToAgent ? (userMap[contact.leadAssignedToAgent] || contact.leadAssignedToAgent) : null} />
+                            <DisplayField label="Assigned Agent" value={contact.assignedUserId ? (userMap[contact.assignedUserId] || contact.assignedUserId) : null} />
                             <DisplayField label="Next Action" value={contact.leadNextAction} />
                             <DisplayField label="Follow Up Date" value={contact.leadFollowUpDate ? format(new Date(contact.leadFollowUpDate), 'dd/MM/yyyy') : null} />
                         </DisplaySection>
@@ -267,7 +269,7 @@ export default function ContactView({
             </div>
 
             {/* Modal Footer with Edit Action */}
-            {variant === 'modal' && (
+            {variant === 'modal' && canManage && (
                 <div className="pt-4 border-t bg-background mt-auto">
                     <DialogFooter>
                         <Button type="button" onClick={() => router.push(`/admin/contacts/${contact.id}/edit`)}>

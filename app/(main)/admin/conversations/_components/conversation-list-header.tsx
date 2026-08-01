@@ -27,6 +27,7 @@ interface ConversationListHeaderProps {
     onToggleSelectionMode?: (enabled: boolean) => void;
     onBind?: (ids: string[]) => void;
     onArchive?: (ids: string[]) => void;
+    onUnarchive?: (ids: string[]) => void;
     onRestore?: (ids: string[]) => void;
     onDelete?: (ids: string[]) => void;
     onViewModeChange?: (mode: 'chats' | 'deals') => void;
@@ -58,6 +59,7 @@ export function ConversationListHeader({
     onToggleSelectionMode,
     onBind,
     onArchive,
+    onUnarchive,
     onRestore,
     onDelete,
     onViewModeChange,
@@ -88,6 +90,7 @@ export function ConversationListHeader({
                     <div className="flex items-center gap-2 min-w-0">
                         <Checkbox
                             id="select-all"
+                            aria-label="Select all visible conversations"
                             checked={isAllSelected || (isPartiallySelected ? "indeterminate" : false)}
                             onCheckedChange={(checked) => onSelectAll?.(checked === true, visibleConversationIds)}
                         />
@@ -132,12 +135,32 @@ export function ConversationListHeader({
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-8 w-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                                                aria-label="Archive selected conversations"
                                                 onClick={() => onArchive(selectedIdsList)}
                                             >
                                                 <Archive className="w-4 h-4" />
                                             </Button>
                                         </TooltipTrigger>
                                         <TooltipContent>Archive Selected</TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            )}
+
+                            {viewFilter === 'archived' && onUnarchive && (
+                                <TooltipProvider delayDuration={200}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                                aria-label="Unarchive selected conversations"
+                                                onClick={() => onUnarchive(selectedIdsList)}
+                                            >
+                                                <RotateCcw className="w-4 h-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Unarchive Selected</TooltipContent>
                                     </Tooltip>
                                 </TooltipProvider>
                             )}
@@ -150,6 +173,7 @@ export function ConversationListHeader({
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                                aria-label="Restore selected conversations"
                                                 onClick={() => onRestore(selectedIdsList)}
                                             >
                                                 <RotateCcw className="w-4 h-4" />
@@ -167,6 +191,7 @@ export function ConversationListHeader({
                                             variant="ghost"
                                             size="icon"
                                             className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            aria-label={viewFilter === 'trash' ? "Delete selected conversations forever" : "Move selected conversations to trash"}
                                             onClick={() => onDelete?.(selectedIdsList)}
                                         >
                                             <Trash2 className="w-4 h-4" />
@@ -179,7 +204,7 @@ export function ConversationListHeader({
 
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden" aria-label="More selected conversation actions">
                                     <MoreHorizontal className="w-4 h-4" />
                                 </Button>
                             </DropdownMenuTrigger>
@@ -194,6 +219,12 @@ export function ConversationListHeader({
                                     <DropdownMenuItem onClick={() => onArchive(selectedIdsList)} className="gap-2">
                                         <Archive className="w-4 h-4" />
                                         Archive Selected
+                                    </DropdownMenuItem>
+                                )}
+                                {viewFilter === 'archived' && onUnarchive && (
+                                    <DropdownMenuItem onClick={() => onUnarchive(selectedIdsList)} className="gap-2">
+                                        <RotateCcw className="w-4 h-4" />
+                                        Unarchive Selected
                                     </DropdownMenuItem>
                                 )}
                                 {viewFilter === 'trash' && onRestore && (

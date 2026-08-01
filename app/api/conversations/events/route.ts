@@ -4,6 +4,7 @@ import { getConversationFeatureFlags } from "@/lib/feature-flags";
 import {
     getConversationEventsChannel,
     getConversationRealtimeEventsSince,
+    isConversationRealtimeEnvelopeForLocation,
 } from "@/lib/realtime/conversation-events";
 
 export const runtime = "nodejs";
@@ -95,6 +96,7 @@ export async function GET(req: NextRequest) {
 
                     try {
                         const parsed = JSON.parse(rawMessage);
+                        if (!isConversationRealtimeEnvelopeForLocation(parsed, location.id)) return;
                         const eventId = parsed?.id ? String(parsed.id) : undefined;
                         sendEvent("conversation", parsed, eventId);
                     } catch {

@@ -74,6 +74,44 @@ export function normalizeNewConversationStartInput(input: string) {
     return normalized.formatted || trimmed;
 }
 
+export function getNewConversationPhoneInputError(input: string) {
+    const trimmed = input.trim();
+    if (!trimmed) return 'Enter a phone number.';
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length < 7) {
+        return 'Phone number is too short. Please include the country code.';
+    }
+    const normalized = normalizeInternationalPhone(trimmed);
+    if (!normalized.isValid || !normalized.formatted) {
+        return 'Enter a valid international phone number with a country code.';
+    }
+    return null;
+}
+
+export function matchesNewConversationContact(
+    contact: { locationId: string; phone?: string | null; email?: string | null; lid?: string | null },
+    args: { locationId: string; rawDigits: string; requestedIdentity: string; requestedLid: string; isEmail: boolean }
+) {
+    if (contact.locationId !== args.locationId) return false;
+    if (args.requestedLid) return contact.lid === args.requestedLid;
+    if (args.isEmail) return contact.email?.toLowerCase() === args.requestedIdentity.toLowerCase();
+    if (!contact.phone) return false;
+
+    const contactDigits = contact.phone.replace(/\D/g, '');
+    return contactDigits === args.rawDigits ||
+        (contactDigits.endsWith(args.rawDigits) && args.rawDigits.length >= 7) ||
+        (args.rawDigits.endsWith(contactDigits) && contactDigits.length >= 7);
+}
+
+export function matchesNewConversationRecord(
+    conversation: { locationId: string; contactId: string } | null,
+    args: { locationId: string; contactId: string }
+) {
+    return Boolean(conversation &&
+        conversation.locationId === args.locationId &&
+        conversation.contactId === args.contactId);
+}
+
 export function buildNewConversationResultError(
     error: unknown,
     fallback = 'Failed to create conversation'

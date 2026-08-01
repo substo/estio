@@ -188,6 +188,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { ConversationFeatureFlags } from '@/lib/feature-flags';
+import { buildSendReplyApiPayload } from '@/lib/conversations/send-reply-contract';
 
 const CoordinatorPanel = dynamic(
     () => import('./coordinator-panel').then((mod) => mod.CoordinatorPanel),
@@ -266,17 +267,19 @@ async function sendReplyViaApi(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            conversationId,
-            contactId,
-            messageBody,
-            type,
-            clientMessageId: options?.clientMessageId || null,
-            clientSentAt: options?.clientSentAt || null,
-            translationSourceText: options?.translationSourceText || null,
-            translationTargetLanguage: options?.translationTargetLanguage || null,
-            translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
-            agentFeedback: options?.agentFeedback || null,
-            retryMessageId: options?.retryMessageId || null,
+            ...buildSendReplyApiPayload({
+                conversationId,
+                contactId,
+                messageBody,
+                type,
+                clientMessageId: options?.clientMessageId,
+                clientSentAt: options?.clientSentAt,
+                translationSourceText: options?.translationSourceText,
+                translationTargetLanguage: options?.translationTargetLanguage,
+                translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage,
+                agentFeedback: options?.agentFeedback || null,
+                retryMessageId: options?.retryMessageId,
+            }),
         }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -1555,6 +1558,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     ]);
 
     useConversationRealtimeEvents({
+        locationId,
         featureRealtimeSse: featureFlags.realtimeSse,
         searchQuery,
         viewFilter,
@@ -1861,6 +1865,29 @@ export function ConversationInterface({ locationId, initialConversations, initia
         }
     };
 
+    const handleUnarchive = async (ids: string[]) => {
+        if (ids.length === 0) return;
+
+        try {
+            const res = await unarchiveConversations(ids);
+            if (res.success) {
+                toast({ title: "Unarchived", description: `Returned ${res.count} conversation(s) to Inbox.` });
+                setConversations(prev => removeConversationsByIds(prev, ids));
+                setSelectedIds(new Set());
+                if (shouldExitSelectionModeAfterBulkAction(ids, conversations)) {
+                    setIsSelectionMode(false);
+                }
+                if (shouldClearActiveConversation(activeId, ids)) {
+                    setActiveId(null);
+                }
+            } else {
+                toast({ title: "Unarchive Failed", description: String(res.error), variant: "destructive" });
+            }
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message, variant: "destructive" });
+        }
+    };
+
     const handleEmptyTrash = () => {
         setEmptyTrashDialogOpen(true);
     };
@@ -1975,23 +2002,14 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     }
                     return payload;
                 })
-                : type === "WhatsApp"
-                    ? await sendReplyViaApi(capturedConversationId, capturedContactId, text, type, {
+                : await sendReplyViaApi(capturedConversationId, capturedContactId, text, type, {
                         clientMessageId: optimisticClientMessageId,
                         clientSentAt,
                         translationSourceText: options?.translationSourceText || null,
                         translationTargetLanguage: options?.translationTargetLanguage || null,
                         translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
                         agentFeedback: options?.agentFeedback || null,
-                    })
-                    : await sendReply(capturedConversationId, capturedContactId, text, type as 'SMS' | 'Email' | 'WhatsApp' | 'SMS_RELAY', {
-                    clientMessageId: optimisticClientMessageId,
-                    clientSentAt,
-                    translationSourceText: options?.translationSourceText || null,
-                    translationTargetLanguage: options?.translationTargetLanguage || null,
-                    translationDetectedSourceLanguage: options?.translationDetectedSourceLanguage || null,
-                    agentFeedback: options?.agentFeedback || null,
-                });
+                    });
 
             if (!res.success) {
                 markOptimisticMessageFailed();
@@ -2496,20 +2514,20 @@ export function ConversationInterface({ locationId, initialConversations, initia
               // Basic retry for text for now, media retry requires original file which we don't store on client.
               // We'll fallback to alerting for media if we can't reconstruct.
               ? { success: false, error: "Retrying media messages is not supported without re-uploading the file" }
-              : getConversationMessageType(originalMsg) === "WhatsApp"
-                  ? await sendReplyViaApi(
+              : String(originalMsg.source || "") === "sms_relay"
+                  ? await sendReply(
                       conversationTarget.id,
                       conversationTarget.contactId,
                       originalMsg.body,
-                      "WhatsApp",
-                      { clientMessageId: resendClientMessageId, retryMessageId: originalMsg.id }
-                  )
-                  : await sendReply(
-                      conversationTarget.id,
-                      conversationTarget.contactId,
-                      originalMsg.body,
-                      originalMsg.type as 'SMS'|'Email'|'WhatsApp'|'SMS_RELAY',
+                      "SMS_RELAY",
                       { clientMessageId: resendClientMessageId }
+                  )
+                  : await sendReplyViaApi(
+                      conversationTarget.id,
+                      conversationTarget.contactId,
+                      originalMsg.body,
+                      getConversationMessageType(originalMsg),
+                      { clientMessageId: resendClientMessageId, retryMessageId: originalMsg.id }
                   );
 
             if (!res.success) {
@@ -3157,6 +3175,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             onImportClick={() => setImportModalOpen(true)}
             onBind={handleBindClick}
             onArchive={viewFilter === 'active' ? handleArchive : undefined}
+            onUnarchive={viewFilter === 'archived' ? handleUnarchive : undefined}
             onRestore={viewFilter === 'trash' ? handleRestore : undefined}
             onEmptyTrash={viewFilter === 'trash' ? handleEmptyTrash : undefined}
             onNewConversationClick={() => setNewConversationOpen(true)}
@@ -3369,8 +3388,35 @@ export function ConversationInterface({ locationId, initialConversations, initia
         viewMode,
     ]);
 
+    useEffect(() => {
+        if (!isMobileViewport) return;
+        const frame = requestAnimationFrame(() => {
+            const root = mobilePaneHostRef.current;
+            if (!root) return;
+            if (currentMobilePane === 'window') {
+                root.querySelector<HTMLElement>('button[title="Back to conversations"]')?.focus();
+                return;
+            }
+            if (currentMobilePane === 'list' && activeIdRef.current) {
+                const selectedRow = Array.from(root.querySelectorAll<HTMLElement>('[data-conversation-id]'))
+                    .find((row) => row.dataset.conversationId === activeIdRef.current);
+                selectedRow?.focus();
+            }
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [currentMobilePane, isMobileViewport, mobilePaneHostRef]);
+
     return (
         <>
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                {realtimeMode === 'connected'
+                    ? 'Conversation updates connected.'
+                    : realtimeMode === 'fallback'
+                        ? 'Live updates unavailable. Conversations will refresh automatically.'
+                        : realtimeMode === 'connecting'
+                            ? 'Connecting conversation updates.'
+                            : ''}
+            </div>
             <ConversationWorkspaceLayout
                 isMobileViewport={isMobileViewport}
                 mobilePaneHostRef={mobilePaneHostRef}
@@ -3467,6 +3513,23 @@ export function ConversationInterface({ locationId, initialConversations, initia
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                         <AlertDialogAction onClick={executePermanentDelete} className="bg-red-600 hover:bg-red-700">
                             Delete Forever
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={emptyTrashDialogOpen} onOpenChange={setEmptyTrashDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Empty Trash?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This action cannot be undone. Every conversation currently in this location&apos;s Trash will be permanently deleted.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={executeEmptyTrash} className="bg-red-600 hover:bg-red-700">
+                            Empty Trash
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

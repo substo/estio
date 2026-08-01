@@ -44,21 +44,14 @@ interface ContactRowProps {
     currentIndex?: number;
     isGoogleConnected?: boolean;
     isGhlConnected?: boolean;
+    canManage?: boolean;
 }
 
-export function ContactRow({ contact, leadSources, allContacts, currentIndex, isGoogleConnected = false, isGhlConnected = false }: ContactRowProps) {
+export function ContactRow({ contact, leadSources, allContacts, currentIndex, isGoogleConnected = false, isGhlConnected = false, canManage = true }: ContactRowProps) {
     const router = useRouter();
     const [managerOpen, setManagerOpen] = useState(false);
     const [isOpeningConversation, startConversationTransition] = useTransition();
     const [conversationError, setConversationError] = useState<string | null>(null);
-
-    const handleRowClick = (e: React.MouseEvent) => {
-        // Prevent navigation if clicking buttons or interactions
-        if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a') || (e.target as HTMLElement).closest('[role="dialog"]')) {
-            return;
-        }
-        router.push(`/admin/contacts/${contact.id}/view`);
-    };
 
     const isLinked = !!contact.googleContactId;
     const hasError = !!contact.error;
@@ -108,7 +101,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
 
     return (
         <>
-            <tr onClick={handleRowClick} className="border-t hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors">
+            <tr className="border-t hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">
 
 
                 <td className="w-[144px] p-4 align-top">
@@ -120,9 +113,13 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                 </div>
             </td>
                 <td className="w-[180px] p-4 align-top font-medium">
-                    <div className="max-w-[180px] truncate" title={contact.name || "Unknown"}>
+                    <Link
+                        href={`/admin/contacts/${contact.id}/view`}
+                        className="block max-w-[180px] truncate underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title={contact.name || "Unknown"}
+                    >
                         {contact.name || "Unknown"}
-                    </div>
+                    </Link>
                 </td>
                 <td className="w-[220px] p-4 align-top">
                     <div className="flex max-w-[220px] flex-col">
@@ -172,10 +169,10 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                         </span>
 
                         {/* Google Sync Status Icon */}
-                        <Button
+                        {canManage ? <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-6 w-6 ${hasError
+                            className={`h-9 w-9 ${hasError
                                 ? "text-yellow-600 hover:text-yellow-700 hover:bg-yellow-50"
                                 : isOutOfSync
                                     ? "text-orange-500 hover:text-orange-600 hover:bg-orange-50"
@@ -185,6 +182,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                                 }`}
                             onClick={(e) => { e.stopPropagation(); setManagerOpen(true); }}
                             title={hasError ? contact.error! : isOutOfSync ? "Out of Sync (Local changes pending)" : isLinked ? "Linked to Google" : "Not Linked - Click to Add"}
+                            aria-label={hasError ? `Google sync error: ${contact.error}` : isOutOfSync ? "Google contact sync pending" : isLinked ? "Manage linked Google contact" : "Link contact to Google"}
                         >
                             {hasError ? (
                                 <AlertTriangle className="h-4 w-4" />
@@ -195,7 +193,7 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                             ) : (
                                 <Link2 className="h-4 w-4 opacity-50" />
                             )}
-                        </Button>
+                        </Button> : <Badge variant="secondary">Read-only</Badge>}
                     </div>
                 </td>
                 <td className="sticky right-16 z-10 w-[112px] bg-background p-4 align-top shadow-[-1px_0_0_0_rgba(0,0,0,0.08)]" onClick={(e) => e.stopPropagation()}>
@@ -255,16 +253,16 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
                 </td>
                 <td className="sticky right-0 z-10 w-16 bg-background p-4 align-top shadow-[-1px_0_0_0_rgba(0,0,0,0.08)]" onClick={(e) => e.stopPropagation()} >
                     {/* Explicit stop propagation for the action cell */}
-                    <EditContactDialog
+                    {canManage ? <EditContactDialog
                         contact={contact}
                         leadSources={leadSources}
                         isGoogleConnected={isGoogleConnected}
                         isGhlConnected={isGhlConnected}
-                    />
+                    /> : <span className="text-xs text-muted-foreground">Read-only</span>}
                 </td>
             </tr>
             {/* Render Manager outside of tr */}
-            {managerOpen && (
+            {canManage && managerOpen && (
                 <GoogleSyncManager
                     contact={allContacts ? undefined : contact}
                     contacts={allContacts as any}

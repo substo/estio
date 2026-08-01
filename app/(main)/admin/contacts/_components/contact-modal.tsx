@@ -14,6 +14,7 @@ import { EditContactForm } from './edit-contact-dialog';
 import { useEffect, useRef, useState } from 'react';
 import { getContactDetails } from '../actions';
 import { Loader2 } from 'lucide-react';
+import ContactView from './contact-view';
 
 interface ContactModalProps {
     contactId: string;
@@ -32,6 +33,7 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
         isOutlookConnected?: boolean,
         isGoogleConnected?: boolean,
         isGhlConnected?: boolean
+        canManage: boolean
     } | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -100,7 +102,7 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                     </div>
                 ) : data ? (
                     <div className="pt-4 flex-1 min-h-0 flex flex-col">
-                        <EditContactForm
+                        {data.canManage ? <EditContactForm
                             key={`${data.contact.id}:${data.contact.contactType || 'unknown'}:${mode}`}
                             contact={data.contact}
                             leadSources={data.leadSources}
@@ -113,7 +115,13 @@ export default function ContactModal({ contactId, mode }: ContactModalProps) {
                             isGoogleConnected={data.isGoogleConnected}
                             isGhlConnected={data.isGhlConnected}
                             onMergeSuccess={handleMergeSuccess}
-                        />
+                        /> : <ContactView
+                            contact={data.contact}
+                            propertyMap={data.propertyMap}
+                            userMap={data.userMap}
+                            variant="modal"
+                            canManage={false}
+                        />}
                     </div>
                 ) : (
                     <div className="text-center py-8 text-muted-foreground">

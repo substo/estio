@@ -84,6 +84,9 @@ import {
     resolveConversationReference,
 } from "@/lib/conversations/identity";
 import { mapConversationRowToUi } from "@/lib/conversations/conversation-row-mapper";
+import {
+    resolveConversationLifecycleTargets,
+} from "@/lib/conversations/conversation-lifecycle-access";
 import { LATEST_MESSAGE_METADATA_SELECT } from "@/lib/conversations/latest-message-metadata";
 import { buildVisibleMessageSourceWhere } from "@/lib/conversations/internal-message-visibility";
 import { collectDealConversationReferences, syncDealConversationLinks } from "@/lib/deals/conversation-links";
@@ -257,6 +260,11 @@ import {
     shiftIsoDate,
 } from "@/lib/viewings/suggestion-parsing";
 import { normalizeInternationalPhone } from "@/lib/utils/phone";
+import {
+    getNewConversationPhoneInputError,
+    matchesNewConversationContact,
+    matchesNewConversationRecord,
+} from "./_components/new-conversation-dialog-helpers";
 import { applyPropertyInterestToContact } from "@/lib/leads/contact-property-interest";
 import { enqueuePasteLeadPropertyImport, getPendingPasteLeadPropertyImports } from "@/lib/queue/paste-lead-property-import";
 import { mapToRequirementPriceOption } from "@/lib/contacts/requirement-price-options";
@@ -9857,19 +9865,17 @@ export async function deleteConversations(conversationIds: string[]) {
     }
 
     try {
-        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        const targetConversations = await db.conversation.findMany({
-            where: {
-                OR: [
-                    { id: { in: refs } },
-                    { ghlConversationId: { in: refs } },
-                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
-                ],
-                locationId: location.id,
-                deletedAt: null,
-            },
-            select: { id: true, contactId: true },
+        const resolved = await resolveConversationLifecycleTargets({
+            locationId: location.id,
+            conversationRefs: conversationIds,
+            state: "notDeleted",
+            findMany: (query) => db.conversation.findMany(query),
         });
+        if (!resolved.success) return resolved;
+
+        const { userId } = await auth();
+        if (!userId) return { success: false, error: "Unauthorized" };
+        const targetConversations = resolved.targets;
         // Soft Delete: Mark conversations as deleted instead of removing them
         // This allows users to restore them from the trash within 30 days
         const result = await db.conversation.updateMany({
@@ -9880,8 +9886,7 @@ export async function deleteConversations(conversationIds: string[]) {
             },
             data: {
                 deletedAt: new Date(),
-                // Note: deletedBy would require user context from auth
-                // For now, we'll track via deletedAt timestamp only
+                deletedBy: userId,
             }
         });
 
@@ -9896,10 +9901,10 @@ export async function deleteConversations(conversationIds: string[]) {
             },
         });
         invalidateConversationReadCaches();
-        conversationIds.forEach((conversationId) => {
+        targetConversations.forEach((conversation) => {
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "conversation.deleted_soft",
             });
         });
@@ -9919,19 +9924,14 @@ export async function restoreConversations(conversationIds: string[]) {
     }
 
     try {
-        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        const targetConversations = await db.conversation.findMany({
-            where: {
-                OR: [
-                    { id: { in: refs } },
-                    { ghlConversationId: { in: refs } },
-                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
-                ],
-                locationId: location.id,
-                deletedAt: { not: null },
-            },
-            select: { id: true, contactId: true },
+        const resolved = await resolveConversationLifecycleTargets({
+            locationId: location.id,
+            conversationRefs: conversationIds,
+            state: "trashed",
+            findMany: (query) => db.conversation.findMany(query),
         });
+        if (!resolved.success) return resolved;
+        const targetConversations = resolved.targets;
         // Restore: Remove deletedAt timestamp to bring back from trash
         const result = await db.conversation.updateMany({
             where: {
@@ -9941,6 +9941,7 @@ export async function restoreConversations(conversationIds: string[]) {
             },
             data: {
                 deletedAt: null,
+                archivedAt: null,
                 deletedBy: null
             }
         });
@@ -9953,13 +9954,14 @@ export async function restoreConversations(conversationIds: string[]) {
                 source: "restore_conversations",
                 estioStatus: "open",
                 deletedAt: null,
+                archivedAt: null,
             },
         });
         invalidateConversationReadCaches();
-        conversationIds.forEach((conversationId) => {
+        targetConversations.forEach((conversation) => {
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "conversation.restored",
             });
         });
@@ -9979,16 +9981,19 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
     }
 
     try {
-        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
+        const resolved = await resolveConversationLifecycleTargets({
+            locationId: location.id,
+            conversationRefs: conversationIds,
+            state: "trashed",
+            findMany: (query) => db.conversation.findMany(query),
+        });
+        if (!resolved.success) return resolved;
+        const targetConversations = resolved.targets;
         // Hard Delete: Permanently remove from database
         // Can only delete conversations that are already in trash (have deletedAt)
         const result = await db.conversation.deleteMany({
             where: {
-                OR: [
-                    { id: { in: refs } },
-                    { ghlConversationId: { in: refs } },
-                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
-                ],
+                id: { in: targetConversations.map((conversation) => conversation.id) },
                 locationId: location.id,
                 deletedAt: { not: null } // Security: Only allow permanent deletion of trashed items
             }
@@ -9996,10 +10001,10 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
 
         console.log(`[Permanent Delete] Permanently deleted ${result.count} conversations.`);
         invalidateConversationReadCaches();
-        conversationIds.forEach((conversationId) => {
+        targetConversations.forEach((conversation) => {
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "conversation.deleted_hard",
             });
         });
@@ -10019,20 +10024,14 @@ export async function archiveConversations(conversationIds: string[]) {
     }
 
     try {
-        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        const targetConversations = await db.conversation.findMany({
-            where: {
-                OR: [
-                    { id: { in: refs } },
-                    { ghlConversationId: { in: refs } },
-                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
-                ],
-                locationId: location.id,
-                archivedAt: null,
-                deletedAt: null,
-            },
-            select: { id: true, contactId: true },
+        const resolved = await resolveConversationLifecycleTargets({
+            locationId: location.id,
+            conversationRefs: conversationIds,
+            state: "active",
+            findMany: (query) => db.conversation.findMany(query),
         });
+        if (!resolved.success) return resolved;
+        const targetConversations = resolved.targets;
         // Archive: Hide from inbox without deleting
         const result = await db.conversation.updateMany({
             where: {
@@ -10057,10 +10056,10 @@ export async function archiveConversations(conversationIds: string[]) {
             },
         });
         invalidateConversationReadCaches();
-        conversationIds.forEach((conversationId) => {
+        targetConversations.forEach((conversation) => {
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "conversation.archived",
             });
         });
@@ -10080,19 +10079,14 @@ export async function unarchiveConversations(conversationIds: string[]) {
     }
 
     try {
-        const refs = conversationIds.map((id) => String(id || "").trim()).filter(Boolean);
-        const targetConversations = await db.conversation.findMany({
-            where: {
-                OR: [
-                    { id: { in: refs } },
-                    { ghlConversationId: { in: refs } },
-                    { syncRecords: { some: { providerConversationId: { in: refs } } } },
-                ],
-                locationId: location.id,
-                archivedAt: { not: null },
-            },
-            select: { id: true, contactId: true },
+        const resolved = await resolveConversationLifecycleTargets({
+            locationId: location.id,
+            conversationRefs: conversationIds,
+            state: "archived",
+            findMany: (query) => db.conversation.findMany(query),
         });
+        if (!resolved.success) return resolved;
+        const targetConversations = resolved.targets;
         // Unarchive: Return to inbox
         const result = await db.conversation.updateMany({
             where: {
@@ -10116,10 +10110,10 @@ export async function unarchiveConversations(conversationIds: string[]) {
             },
         });
         invalidateConversationReadCaches();
-        conversationIds.forEach((conversationId) => {
+        targetConversations.forEach((conversation) => {
             emitConversationRealtimeEvent({
                 locationId: location.id,
-                conversationId,
+                conversationId: conversation.id,
                 type: "conversation.unarchived",
             });
         });
@@ -10786,6 +10780,14 @@ export async function startNewConversation(phone: string) {
     const requestedLid = isRequestedLid ? requestedIdentity : "";
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedIdentity);
 
+    if (!isRequestedLid && !isEmail) {
+        const validationError = getNewConversationPhoneInputError(requestedIdentity);
+        if (validationError) {
+            timer.total();
+            return { success: false, error: validationError };
+        }
+    }
+
     // Normalize phone to E.164 using the same libphonenumber path as Paste Lead.
     const phoneNormalization = isRequestedLid || isEmail
         ? null
@@ -10798,10 +10800,6 @@ export async function startNewConversation(phone: string) {
     }
 
     const rawDigits = normalizedPhone.replace(/\D/g, '');
-    if (!isRequestedLid && !isEmail && rawDigits.length < 7) {
-        timer.total();
-        return { success: false, error: "Phone number is too short. Please include the country code." };
-    }
 
     const preferredChannelType = isEmail
         ? "TYPE_EMAIL"
@@ -10859,15 +10857,13 @@ export async function startNewConversation(phone: string) {
             } as any
         });
 
-        let contact = candidates.find(c => {
-            if (requestedLid && (c as any).lid === requestedLid) return true;
-            if (isEmail && c.email?.toLowerCase() === requestedIdentity.toLowerCase()) return true;
-            if (!c.phone || isEmail || requestedLid) return false;
-            const cp = c.phone.replace(/\D/g, '');
-            return cp === rawDigits ||
-                (cp.endsWith(rawDigits) && rawDigits.length >= 7) ||
-                (rawDigits.endsWith(cp) && cp.length >= 7);
-        });
+        let contact = candidates.find((candidate) => matchesNewConversationContact(candidate, {
+            locationId: location.id,
+            rawDigits,
+            requestedIdentity,
+            requestedLid,
+            isEmail,
+        }));
         let isNewContact = false;
 
         if (!contact) {
@@ -10917,12 +10913,16 @@ export async function startNewConversation(phone: string) {
         }
 
         // 2. Check if conversation already exists for this contact
-        const existingConv = await db.conversation.findFirst({
+        const existingConversationCandidate = await db.conversation.findFirst({
             where: {
                 locationId: location.id,
                 contactId: contact.id
             }
         });
+        const existingConv = matchesNewConversationRecord(existingConversationCandidate, {
+            locationId: location.id,
+            contactId: contact.id,
+        }) ? existingConversationCandidate : null;
         timer.mark("conversation lookup");
 
         if (existingConv) {

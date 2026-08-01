@@ -42,7 +42,7 @@ All cron endpoints are protected by a shared secret key.
 |:---------|:---------|:---------|:--------|
 | **Gmail Sync** | `*/15 * * * *` (15m) | `/api/cron/gmail-sync` | Sync emails from Gmail to CRM |
 | **Outlook Sync** | `0 * * * *` (Hourly) | `/api/cron/outlook-sync` | Sync emails from Outlook to CRM |
-| **Purge Trash** | `0 3 * * *` (Daily 3am) | `/api/cron/purge-trash` | Delete soft-deleted items > 30 days |
+| **Purge Trash** | `0 0 * * *` (Daily 00:00 UTC) | `/api/cron/purge-trash` | Delete soft-deleted conversations strictly older than 30 days in bounded batches |
 | **Sync Feeds** | `0 * * * *` (Hourly) | `/api/cron/sync-feeds` | Sync property XML feeds |
 | **Scheduled Tasks** | `*/30 * * * *` (30m) | `/api/cron/scheduled-tasks` | **Phase 6 AI**: Follow-ups, Alerts, Re-engagement |
 

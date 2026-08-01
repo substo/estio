@@ -40,6 +40,7 @@ async function fetchPinnedPublicHttpResponse(
     options: {
         accept: string;
         signal: AbortSignal;
+        maxResponseBytes?: number;
     },
 ) {
     const addresses = await lookup(url.hostname, { all: true, verbatim: false });
@@ -75,7 +76,7 @@ async function fetchPinnedPublicHttpResponse(
             response.on("data", (chunk: Buffer | Uint8Array) => {
                 const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
                 totalBytes += buffer.length;
-                if (totalBytes > MAX_PINNED_RESPONSE_BYTES) {
+                if (totalBytes > (options.maxResponseBytes ?? MAX_PINNED_RESPONSE_BYTES)) {
                     response.destroy(new PropertyUrlFetchError("The response exceeded the safe size limit.", "response_too_large"));
                     return;
                 }
@@ -273,6 +274,7 @@ export async function fetchPublicHttpResponse(
         skipPublicUrlValidation?: boolean;
         accept?: string;
         maxRedirects?: number;
+        maxResponseBytes?: number;
     } = {}
 ): Promise<{ response: Response; finalUrl: string }> {
     const fetchImpl = options.fetchImpl || fetch;
@@ -316,6 +318,7 @@ export async function fetchPublicHttpResponse(
                 : await fetchPinnedPublicHttpResponse(parsed, {
                     accept,
                     signal: controller.signal,
+                    maxResponseBytes: options.maxResponseBytes,
                 });
 
             if (![301, 302, 303, 307, 308].includes(response.status)) {

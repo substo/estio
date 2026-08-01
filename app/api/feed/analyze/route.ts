@@ -1,79 +1,108 @@
-import { NextResponse } from 'next/server';
-import { AiFeedMapper } from '@/lib/feed/ai-mapper';
-import { GenericXmlParser } from '@/lib/feed/parsers/generic-xml-parser';
-import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
-import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: Request) {
+import db from '@/lib/db';
+import { getLocationContext } from '@/lib/auth/location-context';
+import { AiFeedMapper } from '@/lib/feed/ai-mapper';
+import {
+    FeedAnalysisGuardUnavailableError,
+    FeedAnalysisInProgressError,
+    FeedAnalysisRateLimitError,
+    runFeedAnalysisGuarded,
+} from '@/lib/feed/feed-analysis-guard';
+import { analyzeFeedRequestSchema } from '@/lib/feed/feed-route-schemas';
+import { GenericXmlParser } from '@/lib/feed/parsers/generic-xml-parser';
+import { fetchSafeFeedText, SafeFeedFetchError } from '@/lib/feed/safe-feed-fetch';
+
+export async function POST(request: Request) {
+    const { userId } = await auth();
+    if (!userId) {
+        return NextResponse.json({ success: false, error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const location = await getLocationContext();
+    if (!location) {
+        return NextResponse.json({ success: false, error: 'Active location unavailable.' }, { status: 403 });
+    }
+
+    let body: unknown;
     try {
-        const { userId } = await auth();
-        if (!userId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 });
+    }
 
-        const { url, companyId } = await req.json();
+    const validated = analyzeFeedRequestSchema.safeParse(body);
+    if (!validated.success) {
+        return NextResponse.json({ success: false, error: 'Valid URL and company ID are required.' }, { status: 400 });
+    }
 
-        if (!url || !companyId) {
-            return NextResponse.json({ error: 'URL and CompanyId are required' }, { status: 400 });
-        }
-
-        // Fetch API Key from Company -> Location -> SiteConfig
-        const company = await db.company.findUnique({
-            where: { id: companyId },
-            include: { location: { include: { siteConfig: true } } }
+    try {
+        const company = await db.company.findFirst({
+            where: { id: validated.data.companyId, locationId: location.id },
+            select: {
+                location: {
+                    select: {
+                        siteConfig: {
+                            select: { googleAiApiKey: true, googleAiModel: true },
+                        },
+                    },
+                },
+            },
         });
 
-        if (!company?.locationId) {
-            return NextResponse.json({ error: 'Company not found' }, { status: 404 });
+        if (!company) {
+            return NextResponse.json({ success: false, error: 'Company not found or access denied.' }, { status: 404 });
         }
 
-        const hasAccess = await verifyUserHasAccessToLocation(userId, company.locationId);
-        if (!hasAccess) {
-            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
-
-        const apiKey = company?.location?.siteConfig?.googleAiApiKey;
-        // Cast to any to safely access potentially new field
-        const modelName = (company?.location?.siteConfig as any)?.googleAiModel;
-
+        const apiKey = company.location.siteConfig?.googleAiApiKey;
+        const modelName = company.location.siteConfig?.googleAiModel || undefined;
         if (!apiKey) {
-            return NextResponse.json({ error: 'Google AI API Key not configured for this location' }, { status: 400 });
+            return NextResponse.json({ success: false, error: 'Google AI API key is not configured.' }, { status: 400 });
         }
 
-        // Fetch a snippet of the XML
-        const response = await fetch(url);
-        if (!response.ok) {
-            return NextResponse.json({ error: `Failed to fetch URL: ${response.statusText}` }, { status: 400 });
+        const result = await runFeedAnalysisGuarded({
+            locationId: location.id,
+            companyId: validated.data.companyId,
+            url: validated.data.url,
+            execute: async () => {
+                const text = await fetchSafeFeedText(validated.data.url);
+                const snippet = text.slice(0, 50_000);
+                const mapping = await AiFeedMapper.analyzeFeedStructure(snippet, apiKey, modelName);
+
+                let discoverySnippet = text.slice(0, 500_000);
+                const lastTagClose = discoverySnippet.lastIndexOf('>');
+                if (lastTagClose > 0) discoverySnippet = discoverySnippet.slice(0, lastTagClose + 1);
+                const paths = new GenericXmlParser().discoverPaths(discoverySnippet);
+
+                return { mapping, snippet, paths };
+            },
+        });
+
+        return NextResponse.json({ success: true, ...result });
+    } catch (error) {
+        console.error('[analyzeFeed] Failed:', error);
+        if (error instanceof FeedAnalysisRateLimitError) {
+            return NextResponse.json(
+                { success: false, error: 'Too many feed analysis requests. Please try again later.' },
+                { status: 429, headers: { 'Retry-After': String(error.retryAfterSeconds) } },
+            );
         }
-
-        // Read text - limit to ~50KB to avoid excessive token usage
-        // Note: text() reads everything, so we might need a stream reader if file is huge.
-        // For simplicity, we read text and slice. 
-        const text = await response.text();
-        const snippet = text.slice(0, 50000);
-
-        const mapping = await AiFeedMapper.analyzeFeedStructure(snippet, apiKey, modelName);
-
-        // Discovery available paths for UI dropdowns
-        const parser = new GenericXmlParser();
-        // Use a larger snippet for discovery to avoid cutting CDATA in the first few items
-        // And trim to the last closing tag to avoid partial tags
-        let discoverySnippet = text.slice(0, 500000);
-        const lastTagClose = discoverySnippet.lastIndexOf('>');
-        if (lastTagClose > 0) {
-            discoverySnippet = discoverySnippet.substring(0, lastTagClose + 1);
+        if (error instanceof FeedAnalysisInProgressError) {
+            return NextResponse.json(
+                { success: false, error: 'This feed is already being analyzed. Please try again shortly.' },
+                { status: 409, headers: { 'Retry-After': String(error.retryAfterSeconds) } },
+            );
         }
-
-        // If we still suspect open CDATA (count of CDATA open vs close), we could try to append ']]>'
-        // But simply taking a larger chunk usually solves it for the first few items.
-
-        const paths = parser.discoverPaths(discoverySnippet);
-
-        return NextResponse.json({ success: true, mapping, snippet, paths }); // Send back small snippet for preview UI if needed
-
-    } catch (error: any) {
-        console.error('Analyze error:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        if (error instanceof FeedAnalysisGuardUnavailableError) {
+            return NextResponse.json(
+                { success: false, error: 'Feed analysis is temporarily unavailable.' },
+                { status: 503, headers: { 'Retry-After': '5' } },
+            );
+        }
+        if (error instanceof SafeFeedFetchError) {
+            return NextResponse.json({ success: false, error: 'Feed URL is unsafe or unavailable.' }, { status: 400 });
+        }
+        return NextResponse.json({ success: false, error: 'Failed to analyze feed.' }, { status: 500 });
     }
 }

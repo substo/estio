@@ -76,25 +76,38 @@ export function ConversationListRow({
     const scheduledSummary = conversation.scheduledMessages;
     const scheduledCount = Number(scheduledSummary?.count || 0);
     const scheduledTime = formatScheduledBadgeTime(scheduledSummary?.nextScheduledFor || null);
+    const isActive = selectedId === conversation.id && !isSelectionMode;
+    const accessibleName = `${conversation.contactName || conversation.contactId || "Unknown contact"}, ${channel.name}${conversation.unreadCount > 0 ? `, ${conversation.unreadCount} unread` : ""}`;
+
+    const activateRow = () => {
+        if (isSelectionMode && onToggleSelect) {
+            onToggleSelect(conversation.id, !isChecked);
+        } else {
+            onSelect(conversation.id);
+        }
+    };
 
     return (
         <div
             data-conversation-id={conversation.id}
+            role="option"
+            tabIndex={0}
+            aria-selected={isSelectionMode ? isChecked : isActive}
+            aria-label={accessibleName}
             className={cn(
-                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0 dark:border-slate-800",
-                selectedId === conversation.id && !isSelectionMode ? "bg-slate-100 border-l-blue-500 dark:bg-slate-900" : "border-l-transparent",
+                "border-b transition-colors flex items-start py-2 pl-2 pr-3 cursor-pointer w-full min-w-0 dark:border-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600",
+                isActive ? "bg-slate-100 border-l-blue-500 dark:bg-slate-900" : "border-l-transparent",
                 isSelectionMode && isChecked ? "bg-indigo-50 dark:bg-indigo-950/30" : "hover:bg-slate-50 dark:hover:bg-slate-900",
                 selectedId === conversation.id ? "border-l-4" : "border-l-4"
             )}
             // In Selection Mode, clicking the row toggles selection (UX choice)
             // OR clicking the row still selects it for view, but clicking Checkbox selects for action.
             // Usually Select Mode implies clicking row selects for action.
-            onClick={() => {
-                if (isSelectionMode && onToggleSelect) {
-                    onToggleSelect(conversation.id, !isChecked);
-                } else {
-                    onSelect(conversation.id);
-                }
+            onClick={activateRow}
+            onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                activateRow();
             }}
             onMouseEnter={() => onHoverConversation?.(conversation.id)}
         >
@@ -105,6 +118,7 @@ export function ConversationListRow({
                     onClick={(e) => e.stopPropagation()}
                 >
                     <Checkbox
+                        aria-label={`Select conversation with ${conversation.contactName || conversation.contactId || "Unknown contact"}`}
                         checked={isChecked}
                         onCheckedChange={(checked: boolean | string) => onToggleSelect(conversation.id, checked === true)}
                     />
@@ -165,6 +179,7 @@ export function ConversationListRow({
                     {conversation.propertyRecommendation && (
                         <button
                             type="button"
+                            aria-label={`Open recommended property ${conversation.propertyRecommendation.label}`}
                             title={`Recommended property: ${conversation.propertyRecommendation.label}`}
                             className="inline-flex h-4 max-w-[170px] shrink-0 items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[9px] font-semibold leading-none text-emerald-800 hover:bg-emerald-100"
                             onClick={(event) => {

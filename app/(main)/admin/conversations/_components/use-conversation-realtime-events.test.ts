@@ -21,7 +21,8 @@ function createHarness(overrides?: {
     };
 
     const route = (event: any) => routeConversationRealtimeEnvelope({
-        rawData: JSON.stringify(event),
+        expectedLocationId: 'loc-1',
+        rawData: JSON.stringify({ locationId: 'loc-1', ...event }),
         viewMode: overrides?.viewMode || 'chats',
         activeIdRef: { current: overrides?.activeId ?? 'conv-1' },
         activeDealIdRef: { current: overrides?.activeDealId ?? 'deal-1' },
@@ -71,6 +72,21 @@ function createHarness(overrides?: {
         route,
     };
 }
+
+test('foreign-location realtime envelopes are ignored before conversation routing', () => {
+    const harness = createHarness();
+    harness.route({
+        id: 'evt-foreign',
+        locationId: 'loc-2',
+        type: 'message.inbound',
+        conversationId: 'conv-1',
+        ts: '2026-05-24T10:00:00.000Z',
+        payload: { messageId: 'msg-foreign', body: 'foreign' },
+    });
+
+    assert.deepEqual(harness.calls, []);
+    assert.equal(harness.messages.length, 0);
+});
 
 test('pure envelope router ignores duplicate events and applies unique out-of-order events', () => {
     const harness = createHarness();

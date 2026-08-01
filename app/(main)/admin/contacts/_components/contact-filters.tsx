@@ -77,9 +77,11 @@ interface ContactFiltersProps {
     leadSources?: string[];
     agents?: { id: string; name: string | null; email: string }[];
     view?: string;
+    isAdmin?: boolean;
+    scope?: 'my' | 'location';
 }
 
-export function ContactFilters({ leadSources = [], agents = [], view = 'table' }: ContactFiltersProps) {
+export function ContactFilters({ leadSources = [], agents = [], view = 'table', isAdmin = false, scope = 'my' }: ContactFiltersProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [isPending, startTransition] = useTransition();
@@ -101,6 +103,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
         propertyRef: searchParams.get('propertyRef') || '',
         createdPreset: searchParams.get('createdPreset') || '',
         updatedPreset: searchParams.get('updatedPreset') || '',
+        scope: searchParams.get('scope') || '',
     }), [searchParams]);
 
     // Local state for controlled inputs
@@ -345,6 +348,25 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table' }
     // --- Render ---
     return (
         <div className="space-y-3 mb-6">
+            <div className="flex items-center gap-2" aria-label="Contact ownership scope">
+                <span className="text-sm font-medium">Scope</span>
+                {isAdmin ? (
+                    <Select
+                        value={scope}
+                        onValueChange={(value) => updateParams({ scope: value === 'location' ? 'location' : null, agent: null })}
+                    >
+                        <SelectTrigger className="h-9 w-[170px]" aria-label="Contact scope">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="my">My assignments</SelectItem>
+                            <SelectItem value="location">All location</SelectItem>
+                        </SelectContent>
+                    </Select>
+                ) : (
+                    <Badge variant="secondary">My assignments</Badge>
+                )}
+            </div>
 
             {/* --- PRIMARY ROW (One-Line) --- */}
             <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">

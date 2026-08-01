@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { sendReply } from "@/app/(main)/admin/conversations/actions";
+import { getLocationContext } from "@/lib/auth/location-context";
+import { parseSendReplyApiPayload } from "@/lib/conversations/send-reply-contract";
 
 function serializeSendError(error: unknown): string {
     if (error instanceof Error) return error.message;
@@ -13,38 +15,29 @@ function serializeSendError(error: unknown): string {
 
 export async function POST(request: Request) {
     try {
+        const location = await getLocationContext();
+        if (!location?.id) {
+            return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+        }
+
         const body = await request.json().catch(() => ({}));
-        const conversationId = String(body?.conversationId || "").trim();
-        const contactId = String(body?.contactId || "").trim();
-        const messageBody = String(body?.messageBody || "");
-        const type = String(body?.type || "") as "SMS" | "Email" | "WhatsApp" | "SMS_RELAY";
-
-        if (!conversationId || !contactId || !messageBody.trim() || !type) {
-            return NextResponse.json(
-                { success: false, error: "Missing required send fields." },
-                { status: 400 }
-            );
+        const parsed = parseSendReplyApiPayload(body);
+        if (!parsed.success) {
+            return NextResponse.json({ success: false, error: parsed.error }, { status: 400 });
+        }
+        const payload = parsed.payload;
+        if (payload.locationId && payload.locationId !== location.id) {
+            return NextResponse.json({ success: false, error: "Active location mismatch." }, { status: 403 });
         }
 
-        if (!["SMS", "Email", "WhatsApp", "SMS_RELAY"].includes(type)) {
-            return NextResponse.json(
-                { success: false, error: "Unsupported message channel." },
-                { status: 400 }
-            );
-        }
-
-        const result = await sendReply(conversationId, contactId, messageBody, type, {
-            clientMessageId: body?.clientMessageId ? String(body.clientMessageId) : undefined,
-            clientSentAt: body?.clientSentAt ? String(body.clientSentAt) : null,
-            translationSourceText: body?.translationSourceText ? String(body.translationSourceText) : null,
-            translationTargetLanguage: body?.translationTargetLanguage ? String(body.translationTargetLanguage) : null,
-            translationDetectedSourceLanguage: body?.translationDetectedSourceLanguage
-                ? String(body.translationDetectedSourceLanguage)
-                : null,
-            agentFeedback: body?.agentFeedback && typeof body.agentFeedback === "object"
-                ? body.agentFeedback
-                : null,
-            retryMessageId: body?.retryMessageId ? String(body.retryMessageId) : null,
+        const result = await sendReply(payload.conversationId, payload.contactId, payload.messageBody, payload.type, {
+            clientMessageId: payload.clientMessageId || undefined,
+            clientSentAt: payload.clientSentAt,
+            translationSourceText: payload.translationSourceText,
+            translationTargetLanguage: payload.translationTargetLanguage,
+            translationDetectedSourceLanguage: payload.translationDetectedSourceLanguage,
+            agentFeedback: payload.agentFeedback,
+            retryMessageId: payload.retryMessageId,
         });
 
         if (!result?.success) {

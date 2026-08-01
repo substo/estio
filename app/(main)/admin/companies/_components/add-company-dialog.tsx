@@ -35,11 +35,7 @@ function SubmitButton() {
     );
 }
 
-interface AddCompanyDialogProps {
-    locationId: string;
-}
-
-export function AddCompanyDialog({ locationId }: AddCompanyDialogProps) {
+export function AddCompanyDialog() {
     const [open, setOpen] = useState(false);
     const [type, setType] = useState('Management');
     const [state, formAction] = useActionState(createCompany, {
@@ -80,8 +76,7 @@ export function AddCompanyDialog({ locationId }: AddCompanyDialogProps) {
                     </DialogDescription>
                 </DialogHeader>
                 <form action={formAction} className="grid gap-4 py-4">
-                    <input type="hidden" name="locationId" value={locationId} />
-
+                    {state.message ? <p role={state.success ? 'status' : 'alert'} className="sr-only">{state.message}</p> : null}
                     <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="name" className="text-right">Name</Label>
                         <div className="col-span-3">
@@ -94,7 +89,7 @@ export function AddCompanyDialog({ locationId }: AddCompanyDialogProps) {
                         <Label htmlFor="type" className="text-right">Type</Label>
                         <div className="col-span-3">
                             <Select name="type" value={type} onValueChange={setType}>
-                                <SelectTrigger>
+                                <SelectTrigger id="company-type" aria-describedby={state.errors?.type ? 'company-type-error' : undefined}>
                                     <SelectValue placeholder="Select type" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -104,7 +99,7 @@ export function AddCompanyDialog({ locationId }: AddCompanyDialogProps) {
                                     <SelectItem value="Other">Other</SelectItem>
                                 </SelectContent>
                             </Select>
-                            {state.errors?.type && <p className="text-sm text-red-500 mt-1">{state.errors.type.join(', ')}</p>}
+                            {state.errors?.type && <p id="company-type-error" role="alert" className="text-sm text-red-500 mt-1">{state.errors.type.join(', ')}</p>}
                         </div>
                     </div>
 
@@ -141,7 +136,7 @@ export function AddCompanyDialog({ locationId }: AddCompanyDialogProps) {
     );
 }
 
-export function AddDeveloperCompanyDialog({ locationId }: { locationId: string }) {
+export function AddDeveloperCompanyDialog() {
     const [open, setOpen] = useState(false);
     // Pre-set type to Developer
     const type = 'Developer';
@@ -183,7 +178,7 @@ export function AddDeveloperCompanyDialog({ locationId }: { locationId: string }
                     </DialogDescription>
                 </DialogHeader>
                 <form action={formAction} className="grid gap-4 py-4">
-                    <input type="hidden" name="locationId" value={locationId} />
+                    {state.message ? <p role={state.success ? 'status' : 'alert'} className="sr-only">{state.message}</p> : null}
                     <input type="hidden" name="type" value={type} />
 
                     <div className="grid grid-cols-4 items-center gap-4">

@@ -38,6 +38,7 @@ interface ConversationListProps {
     onImportClick?: () => void;
     onBind?: (ids: string[]) => void;
     onArchive?: (ids: string[]) => void;
+    onUnarchive?: (ids: string[]) => void;
     onNewConversationClick?: () => void;
     onSyncAllClick?: () => void;
     onCampaignsClick?: () => void;
@@ -76,6 +77,7 @@ export function ConversationList({
     onImportClick,
     onBind,
     onArchive,
+    onUnarchive,
     onRestore,
     onEmptyTrash,
     onNewConversationClick,
@@ -131,6 +133,7 @@ export function ConversationList({
             onToggleSelectionMode={onToggleSelectionMode}
             onBind={onBind}
             onArchive={onArchive}
+            onUnarchive={onUnarchive}
             onRestore={onRestore}
             onDelete={onDelete}
             onViewModeChange={onViewModeChange}
@@ -223,7 +226,13 @@ export function ConversationList({
             {/* Unified Header with Mode Toggle + Action Buttons */}
             {header}
 
-            <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0">
+            <div
+                ref={listScrollRef}
+                role="listbox"
+                aria-label="Conversations"
+                aria-busy={isLoadingMore || isSearching}
+                className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden sm:pr-1 [scrollbar-gutter:stable] min-w-0"
+            >
                 {conversations.map((c) => {
                     const isChecked = selectedIds?.has(c.id) || false;
 
@@ -249,7 +258,7 @@ export function ConversationList({
                         <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden="true" />
                         <div className="mt-2 flex items-center justify-center">
                             {isLoadingMore ? (
-                                <div className="inline-flex items-center gap-2 text-xs text-slate-500">
+                                <div role="status" aria-live="polite" className="inline-flex items-center gap-2 text-xs text-slate-500">
                                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                     Loading more conversations...
                                 </div>

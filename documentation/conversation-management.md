@@ -183,17 +183,23 @@ Canary mode enables the flag only for location IDs listed in `CONVERSATIONS_CANA
   2. "Empty Trash" action.
   3. Auto-Purge Cron Job.
 - **Safety**: Requires explicit confirmation in UI.
+- **Manual Empty Trash**: Permanently deletes all conversations currently in the active location's Trash after confirmation; it does not wait for the retention cutoff.
 
 ## Automated Cleanup (Cron)
 To prevent the database from growing indefinitely, a background job automatically cleans up old trash.
 
 - **Frequency**: Daily (at 00:00 UTC).
-- **Rule**: Permanently deletes any conversation where `deletedAt` is older than **30 days**.
+- **Rule**: Permanently deletes conversations where `deletedAt` is strictly older than **30 days**, in bounded batches. Conversations exactly at or newer than the cutoff remain in Trash.
+- **Scope**: This is a globally authorized system-maintenance job across locations. It does not derive authority from a user-selected location.
+- **Continuation**: Each invocation is capped; if the cap is reached, remaining expired rows continue on the next scheduled run.
 - **Endpoint**: `/api/cron/purge-trash`
 - **Security**: Protected by `CRON_SECRET`.
+- **Concurrency**: Uses an atomic local lock plus a token-owned Redis lock. The purge fails closed when distributed locking is unavailable.
 
 ### Configuration
 Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
+The optional `CONVERSATION_TRASH_PURGE_BATCH_SIZE` and `CONVERSATION_TRASH_PURGE_MAX_BATCHES` settings control bounded work per invocation; values are clamped server-side.
+`REDIS_HOST` and `REDIS_PORT` must point to shared Redis for distributed exclusion. The route returns `503` and performs no deletion if that lock infrastructure is unavailable.
 
 ```json
 // vercel.json
@@ -221,7 +227,7 @@ Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
 | `permanentlyDeleteConversations(ids)` | Performs **Hard Delete** (removes record). |
 | `restoreConversations(ids)` | Resets `deletedAt` to NULL. |
 | `archiveConversations(ids)` | Sets `archivedAt`. |
-| `emptyTrash()` | Permanently deletes all soft-deleted items > 30 days old (manual trigger). |
+| `emptyTrash()` | Permanently deletes all conversations currently in the authenticated location's Trash (manual trigger with confirmation). |
 | `markConversationAsRead(conversationId)` | Resets `unreadCount` to `0` for the selected conversation (location-scoped security check). |
 | `getSmsChannelEligibility(conversationId)` | Returns SMS send eligibility (`eligible`/`ineligible`/`unknown`) based on contact phone validity + GHL location SMS/phone-system readiness. |
 | `getWhatsAppChannelEligibility(conversationId)` | Returns WhatsApp send eligibility based on contact phone validity + Web Bridge send-time checks. |

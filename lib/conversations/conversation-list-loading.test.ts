@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     buildConversationDeltaCursorFromRows,
     buildConversationStatusWhere,
+    buildRankedConversationHydrationWhere,
     decodeConversationCursor,
     decodeConversationDeltaCursor,
     doesConversationMatchStatus,
@@ -76,6 +77,13 @@ test("status helpers preserve list filter semantics", () => {
     assert.equal(doesConversationMatchStatus("trash", { deletedAt, archivedAt: null }), true);
     assert.equal(doesConversationMatchStatus("all", { deletedAt, archivedAt }), true);
     assert.equal(doesConversationMatchStatus("tasks", { deletedAt, archivedAt }), true);
+});
+
+test("ranked search hydration reapplies the active location boundary", () => {
+    assert.deepEqual(buildRankedConversationHydrationWhere("location_a", ["conversation_a", "conversation_b"]), {
+        locationId: "location_a",
+        id: { in: ["conversation_a", "conversation_b"] },
+    });
 });
 
 test("buildLatestMessageMetadataMap indexes latest message source by conversation id", () => {

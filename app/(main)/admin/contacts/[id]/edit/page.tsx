@@ -1,7 +1,7 @@
 
 import db from "@/lib/db";
-import { getLocationContext } from "@/lib/auth/location-context";
 import { EditContactForm } from "../../_components/edit-contact-dialog";
+import { buildContactManageWhere, getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +13,12 @@ export default async function ContactEditPage({ params, searchParams }: { params
         return <div>Cannot edit here. Please create first.</div>;
     }
 
-    const locationCtx = await getLocationContext();
-    const locationId = searchLocationId || locationCtx?.id;
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
-    }
+    const access = await getActiveContactsAccess(searchLocationId);
+    if (!access) return <div>Unauthorized.</div>;
+    const locationId = access.locationId;
 
     const contact = await db.contact.findFirst({
-        where: { id: id, locationId },
+        where: { id, ...buildContactManageWhere(access) },
         include: {
             propertyRoles: {
                 include: {

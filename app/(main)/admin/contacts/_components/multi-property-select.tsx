@@ -85,6 +85,7 @@ export function MultiPropertySelect({
                                 type="button"
                                 onClick={(e) => handleRemove(item.value, e)}
                                 className="hover:bg-muted rounded-sm p-0.5"
+                                aria-label={`Remove ${item.label}`}
                             >
                                 <X className="h-3 w-3" />
                             </button>
@@ -100,6 +101,7 @@ export function MultiPropertySelect({
                         role="combobox"
                         type="button"
                         aria-expanded={open}
+                        aria-label={placeholder}
                         className={cn(
                             "w-full justify-between font-normal",
                             value.length === 0 && "text-muted-foreground"

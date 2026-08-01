@@ -108,6 +108,7 @@ export type ContactData = {
     leadNextAction?: string | null;
     leadFollowUpDate?: Date | null;
     leadAssignedToAgent?: string | null;
+    assignedUserId?: string | null;
     leadOtherDetails?: string | null;
     notes?: string | null; // DB field alias for leadOtherDetails
     // Requirements
@@ -171,18 +172,20 @@ const RenderField = ({
     value,
     children,
     isEditing,
-    className = ""
+    className = "",
+    fieldId,
 }: {
     label: string,
     value?: React.ReactNode | string | number | null,
     children: React.ReactNode,
     isEditing: boolean,
-    className?: string
+    className?: string,
+    fieldId?: string,
 }) => {
     if (isEditing) {
         return (
             <div className={`space-y-2 ${className}`}>
-                <Label>{label}</Label>
+                <Label htmlFor={fieldId}>{label}</Label>
                 {children}
             </div>
         );
@@ -1007,7 +1010,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 <RenderField label="Contact Type" value={CONTACT_TYPE_CONFIG[effectiveContactType]?.label} isEditing={isEditing} className="mb-4">
                     <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
                         <Select value={contactType} onValueChange={(v) => setContactType(v as ContactType)}>
-                            <SelectTrigger className="w-full">
+                            <SelectTrigger className="w-full" aria-label="Contact type">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -1051,15 +1054,15 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         {/* Basic Info */}
                         {/* Basic Info */}
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <RenderField label="Full Name" value={contact?.name} isEditing={isEditing}>
+                            <RenderField label="Full Name" value={contact?.name} isEditing={isEditing} fieldId="name">
                                 <Input id="name" name="name" required placeholder="Full Name" defaultValue={contact?.name || ''} />
                                 {state.errors?.name && <p className="text-sm text-red-500">{state.errors.name.join(', ')}</p>}
                             </RenderField>
-                            <RenderField label="Email" value={contact?.email} isEditing={isEditing}>
+                            <RenderField label="Email" value={contact?.email} isEditing={isEditing} fieldId="email">
                                 <Input id="email" name="email" type="email" placeholder="email@example.com" defaultValue={contact?.email || ''} />
                                 {state.errors?.email && <p className="text-sm text-red-500">{state.errors.email.join(', ')}</p>}
                             </RenderField>
-                            <RenderField label="Phone" value={contact?.phone} isEditing={isEditing}>
+                            <RenderField label="Phone" value={contact?.phone} isEditing={isEditing} fieldId="phone">
                                 <Input id="phone" name="phone" type="tel" placeholder="+123..." defaultValue={contact?.phone || ''} />
                                 {state.errors?.phone && <p className="text-sm text-red-500">{state.errors.phone.join(', ')}</p>}
                                 {state.duplicateContact && state.errors?.phone && (
@@ -1084,22 +1087,22 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                     </div>
                                 )}
                             </RenderField>
-                            <RenderField label="Date of Birth" value={contact?.dateOfBirth ? formatDate(contact?.dateOfBirth) : null} isEditing={isEditing}>
+                            <RenderField label="Date of Birth" value={contact?.dateOfBirth ? formatDate(contact?.dateOfBirth) : null} isEditing={isEditing} fieldId="dateOfBirth">
                                 <Input id="dateOfBirth" name="dateOfBirth" type="date" defaultValue={formatDate(contact?.dateOfBirth)} />
                             </RenderField>
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <RenderField label="First Name" value={contact?.firstName} isEditing={isEditing}>
+                            <RenderField label="First Name" value={contact?.firstName} isEditing={isEditing} fieldId="firstName">
                                 <Input id="firstName" name="firstName" placeholder="First Name" defaultValue={contact?.firstName || ''} />
                             </RenderField>
-                            <RenderField label="Last Name" value={contact?.lastName} isEditing={isEditing}>
+                            <RenderField label="Last Name" value={contact?.lastName} isEditing={isEditing} fieldId="lastName">
                                 <Input id="lastName" name="lastName" placeholder="Last Name" defaultValue={contact?.lastName || ''} />
                             </RenderField>
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <RenderField label="Tags" value={contact?.tags?.join(', ')} isEditing={isEditing}>
+                            <RenderField label="Tags" value={contact?.tags?.join(', ')} isEditing={isEditing} fieldId="tags">
                                 <Input id="tags" name="tags" placeholder="Tag1, Tag2 (comma separated)" defaultValue={contact?.tags?.join(', ') || ''} />
                             </RenderField>
                             <RenderField
@@ -1137,19 +1140,19 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                         <div className="border-t pt-4 mt-2">
                             <Label className="mb-2 block font-semibold">Address</Label>
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <RenderField label="Address Line 1" value={contact?.address1} isEditing={isEditing}>
+                                <RenderField label="Address Line 1" value={contact?.address1} isEditing={isEditing} fieldId="address1">
                                     <Input id="address1" name="address1" placeholder="Street Address" defaultValue={contact?.address1 || ''} />
                                 </RenderField>
-                                <RenderField label="City" value={contact?.city} isEditing={isEditing}>
+                                <RenderField label="City" value={contact?.city} isEditing={isEditing} fieldId="city">
                                     <Input id="city" name="city" placeholder="City" defaultValue={contact?.city || ''} />
                                 </RenderField>
-                                <RenderField label="State / Region" value={contact?.state} isEditing={isEditing}>
+                                <RenderField label="State / Region" value={contact?.state} isEditing={isEditing} fieldId="state">
                                     <Input id="state" name="state" placeholder="State" defaultValue={contact?.state || ''} />
                                 </RenderField>
-                                <RenderField label="Postal Code" value={contact?.postalCode} isEditing={isEditing}>
+                                <RenderField label="Postal Code" value={contact?.postalCode} isEditing={isEditing} fieldId="postalCode">
                                     <Input id="postalCode" name="postalCode" placeholder="Postal Code" defaultValue={contact?.postalCode || ''} />
                                 </RenderField>
-                                <RenderField label="Country" value={contact?.country} isEditing={isEditing}>
+                                <RenderField label="Country" value={contact?.country} isEditing={isEditing} fieldId="country">
                                     <Input id="country" name="country" placeholder="Country" defaultValue={contact?.country || ''} />
                                 </RenderField>
                             </div>
@@ -1169,7 +1172,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Goal" value={contact?.leadGoal} isEditing={isEditing}>
                                     <Select name="leadGoal" defaultValue={contact?.leadGoal || undefined}>
-                                        <SelectTrigger>
+                                        <SelectTrigger aria-label="Goal">
                                             <SelectValue placeholder="Select Goal" />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1181,7 +1184,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Priority" value={contact?.leadPriority} isEditing={isEditing}>
                                     <Select name="leadPriority" defaultValue={contact?.leadPriority || "Medium"}>
-                                        <SelectTrigger>
+                                        <SelectTrigger aria-label="Priority">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1193,7 +1196,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Stage" value={contact?.leadStage} isEditing={isEditing}>
                                     <Select name="leadStage" defaultValue={contact?.leadStage || "Unassigned"}>
-                                        <SelectTrigger>
+                                        <SelectTrigger aria-label="Stage">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -1205,7 +1208,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Source" value={contact?.leadSource} isEditing={isEditing}>
                                     <Select name="leadSource" defaultValue={contact?.leadSource || undefined}>
-                                        <SelectTrigger>
+                                        <SelectTrigger aria-label="Source">
                                             <SelectValue placeholder="Select Source" />
                                         </SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
@@ -1215,9 +1218,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Assigned Agent" value={contact?.leadAssignedToAgent ? (users.find(u => u.id === contact?.leadAssignedToAgent)?.name || contact?.leadAssignedToAgent) : null} isEditing={isEditing}>
-                                    <Select name="leadAssignedToAgent" defaultValue={contact?.leadAssignedToAgent || undefined}>
-                                        <SelectTrigger><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                                <RenderField label="Assigned Agent" value={contact?.assignedUserId ? (users.find(u => u.id === contact.assignedUserId)?.name || contact.assignedUserId) : null} isEditing={isEditing}>
+                                    <Select name="leadAssignedToAgent" defaultValue={contact?.assignedUserId || undefined}>
+                                        <SelectTrigger aria-label="Assigned agent"><SelectValue placeholder="Select Agent" /></SelectTrigger>
                                         <SelectContent>
                                             {users.map(u => (
                                                 <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>
@@ -1225,15 +1228,16 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Next Action" value={contact?.leadNextAction} isEditing={isEditing}>
-                                    <Input name="leadNextAction" defaultValue={contact?.leadNextAction || ''} />
+                                <RenderField label="Next Action" value={contact?.leadNextAction} isEditing={isEditing} fieldId="leadNextAction">
+                                    <Input id="leadNextAction" name="leadNextAction" defaultValue={contact?.leadNextAction || ''} />
                                 </RenderField>
-                                <RenderField label="Follow Up Date" value={contact?.leadFollowUpDate ? formatDate(contact?.leadFollowUpDate) : null} isEditing={isEditing}>
-                                    <Input name="leadFollowUpDate" type="date" defaultValue={formatDate(contact?.leadFollowUpDate)} />
+                                <RenderField label="Follow Up Date" value={contact?.leadFollowUpDate ? formatDate(contact?.leadFollowUpDate) : null} isEditing={isEditing} fieldId="leadFollowUpDate">
+                                    <Input id="leadFollowUpDate" name="leadFollowUpDate" type="date" defaultValue={formatDate(contact?.leadFollowUpDate)} />
                                 </RenderField>
                                 <div className="sm:col-span-2">
-                                    <RenderField label="Lead Other Details" value={contact?.leadOtherDetails ?? contact?.notes} isEditing={isEditing}>
+                                    <RenderField label="Lead Other Details" value={contact?.leadOtherDetails ?? contact?.notes} isEditing={isEditing} fieldId="leadOtherDetails">
                                         <Textarea
+                                            id="leadOtherDetails"
                                             name="leadOtherDetails"
                                             placeholder="Add any other lead details..."
                                             defaultValue={contact?.leadOtherDetails ?? contact?.notes ?? ''}
@@ -1256,7 +1260,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                             <div key={role.id} className="text-sm flex justify-between items-center bg-gray-50 dark:bg-gray-900 p-2 rounded">
                                                 <span><span className="font-medium">{role.role}</span> at {role.property.reference || role.property.title}</span>
                                                 {isEditing && (
-                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'property')}>
+                                                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'property')} aria-label={`Remove ${role.role} property association`}>
                                                         <X className="h-4 w-4" />
                                                     </Button>
                                                 )}
@@ -1266,7 +1270,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                             <div key={role.id} className="text-sm flex justify-between items-center bg-gray-50 dark:bg-gray-900 p-2 rounded">
                                                 <span><span className="font-medium">{role.role}</span> at {role.company.name}</span>
                                                 {isEditing && (
-                                                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'company')}>
+                                                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 hover:text-destructive" onClick={() => handleDeleteRole(role.id, 'company')} aria-label={`Remove ${role.role} company association`}>
                                                         <X className="h-4 w-4" />
                                                     </Button>
                                                 )}
@@ -1367,7 +1371,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField label="Requirement Status" value={contact?.requirementStatus} isEditing={isEditing}>
                                     <Select name="requirementStatus" defaultValue={contact?.requirementStatus || "For Sale"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Requirement status"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {REQUIREMENT_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                         </SelectContent>
@@ -1375,7 +1379,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="District" value={contact?.requirementDistrict} isEditing={isEditing}>
                                     <Select name="requirementDistrict" defaultValue={contact?.requirementDistrict || "Any District"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="District"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {districts.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
                                         </SelectContent>
@@ -1383,7 +1387,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Bedrooms" value={contact?.requirementBedrooms} isEditing={isEditing}>
                                     <Select name="requirementBedrooms" defaultValue={contact?.requirementBedrooms || "Any Bedrooms"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Bedrooms"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["Any Bedrooms", "1+ Bedrooms", "2+ Bedrooms", "3+ Bedrooms", "4+ Bedrooms", "5+ Bedrooms"].map(b => (
                                                 <SelectItem key={b} value={b}>{b}</SelectItem>
@@ -1393,7 +1397,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Condition" value={contact?.requirementCondition} isEditing={isEditing}>
                                     <Select name="requirementCondition" defaultValue={contact?.requirementCondition || "Any Condition"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Condition"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {REQUIREMENT_CONDITIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                         </SelectContent>
@@ -1401,7 +1405,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Min Price" value={getRequirementPriceValue(contact?.requirementMinPrice)} isEditing={isEditing}>
                                     <Select name="requirementMinPrice" defaultValue={getRequirementPriceValue(contact?.requirementMinPrice)}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Minimum price"><SelectValue /></SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
                                             {REQUIREMENT_PRICE_SELECT_OPTIONS.map(p => (
                                                 <SelectItem key={p} value={p}>{p}</SelectItem>
@@ -1411,7 +1415,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Max Price" value={getRequirementPriceValue(contact?.requirementMaxPrice)} isEditing={isEditing}>
                                     <Select name="requirementMaxPrice" defaultValue={getRequirementPriceValue(contact?.requirementMaxPrice)}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Maximum price"><SelectValue /></SelectTrigger>
                                         <SelectContent className="max-h-[200px]">
                                             {REQUIREMENT_PRICE_SELECT_OPTIONS.map(p => (
                                                 <SelectItem key={p} value={p}>{p}</SelectItem>
@@ -1438,8 +1442,8 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 />
                             </RenderField>
                             <div className="sm:col-span-2">
-                                <RenderField label="Requirement Other Details" value={contact?.requirementOtherDetails} isEditing={isEditing}>
-                                    <Textarea name="requirementOtherDetails" placeholder="Add other specific requirements..." defaultValue={contact?.requirementOtherDetails || ''} />
+                                <RenderField label="Requirement Other Details" value={contact?.requirementOtherDetails} isEditing={isEditing} fieldId="requirementOtherDetails">
+                                    <Textarea id="requirementOtherDetails" name="requirementOtherDetails" placeholder="Add other specific requirements..." defaultValue={contact?.requirementOtherDetails || ''} />
                                 </RenderField>
                             </div>
                         </TabsContent>
@@ -1451,7 +1455,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <RenderField label="Properties To Match" value={contact?.matchingPropertiesToMatch} isEditing={isEditing}>
                                     <Select name="matchingPropertiesToMatch" defaultValue={contact?.matchingPropertiesToMatch || "Updated and New"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Properties to match"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["None", "New Only", "Updated and New"].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                                         </SelectContent>
@@ -1459,7 +1463,7 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Email Matched Properties" value={contact?.matchingEmailMatchedProperties} isEditing={isEditing}>
                                     <Select name="matchingEmailMatchedProperties" defaultValue={contact?.matchingEmailMatchedProperties || "Yes - Automatic"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Email matched properties"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["No - Manual", "Yes - Automatic", "No - Client Unsubscribed"].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                                         </SelectContent>
@@ -1467,14 +1471,14 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 </RenderField>
                                 <RenderField label="Frequency" value={contact?.matchingNotificationFrequency} isEditing={isEditing}>
                                     <Select name="matchingNotificationFrequency" defaultValue={contact?.matchingNotificationFrequency || "Weekly"}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectTrigger aria-label="Matching notification frequency"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {["Daily", "Weekly", "Bi Weekly", "Monthly"].map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Last Match Date" value={contact?.matchingLastMatchDate ? formatDate(contact?.matchingLastMatchDate) : null} isEditing={isEditing}>
-                                    <Input name="matchingLastMatchDate" type="date" defaultValue={formatDate(contact?.matchingLastMatchDate)} />
+                                <RenderField label="Last Match Date" value={contact?.matchingLastMatchDate ? formatDate(contact?.matchingLastMatchDate) : null} isEditing={isEditing} fieldId="matchingLastMatchDate">
+                                    <Input id="matchingLastMatchDate" name="matchingLastMatchDate" type="date" defaultValue={formatDate(contact?.matchingLastMatchDate)} />
                                 </RenderField>
                             </div>
                         </TabsContent>
@@ -1567,17 +1571,17 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                 <div className="border-t pt-4">
                                     <h3 className="font-semibold mb-2">Property Won</h3>
                                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                        <RenderField label="Property Won Reference" value={contact.propertyWonReference} isEditing={isEditing}>
-                                            <Input name="propertyWonReference" defaultValue={contact.propertyWonReference || ''} />
+                                        <RenderField label="Property Won Reference" value={contact.propertyWonReference} isEditing={isEditing} fieldId="propertyWonReference">
+                                            <Input id="propertyWonReference" name="propertyWonReference" defaultValue={contact.propertyWonReference || ''} />
                                         </RenderField>
-                                        <RenderField label="Won Date" value={contact.propertyWonDate ? formatDate(contact.propertyWonDate) : null} isEditing={isEditing}>
-                                            <Input name="propertyWonDate" type="date" defaultValue={formatDate(contact.propertyWonDate)} />
+                                        <RenderField label="Won Date" value={contact.propertyWonDate ? formatDate(contact.propertyWonDate) : null} isEditing={isEditing} fieldId="propertyWonDate">
+                                            <Input id="propertyWonDate" name="propertyWonDate" type="date" defaultValue={formatDate(contact.propertyWonDate)} />
                                         </RenderField>
-                                        <RenderField label="Won Value" value={contact.propertyWonValue} isEditing={isEditing}>
-                                            <Input name="propertyWonValue" type="number" defaultValue={contact.propertyWonValue || ''} />
+                                        <RenderField label="Won Value" value={contact.propertyWonValue} isEditing={isEditing} fieldId="propertyWonValue">
+                                            <Input id="propertyWonValue" name="propertyWonValue" type="number" defaultValue={contact.propertyWonValue || ''} />
                                         </RenderField>
-                                        <RenderField label="Commission" value={contact.wonCommission} isEditing={isEditing}>
-                                            <Input name="wonCommission" type="number" defaultValue={contact.wonCommission || ''} />
+                                        <RenderField label="Commission" value={contact.wonCommission} isEditing={isEditing} fieldId="wonCommission">
+                                            <Input id="wonCommission" name="wonCommission" type="number" defaultValue={contact.wonCommission || ''} />
                                         </RenderField>
                                     </div>
                                 </div>

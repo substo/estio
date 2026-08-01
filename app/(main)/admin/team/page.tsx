@@ -1,17 +1,19 @@
 import db from "@/lib/db";
 import { cookies } from "next/headers";
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { verifyUserHasAccessToLocation, verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { redirect } from "next/navigation";
 import { TeamMemberCard } from "./_components/team-member-card";
 import { InviteUserDialog } from "./_components/invite-user-dialog";
 import { PendingInvitationsList } from "./_components/pending-invitations-list";
-import { getGHLCalendars } from "./actions";
+import { getGHLCalendars, updateMemberContactAccess } from "./actions";
 import { checkGHLSMTPStatus } from "@/lib/ghl/email";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
+import { OffboardingPreview } from "./_components/offboarding-preview";
 
-export default async function TeamPage() {
+export default async function TeamPage(props: { searchParams: Promise<{ contactAccess?: string }> }) {
+    const { contactAccess } = await props.searchParams;
     const cookieStore = await cookies();
     let locationId = cookieStore.get("crm_location_id")?.value;
 
@@ -35,6 +37,7 @@ export default async function TeamPage() {
     if (!hasAccess) {
         redirect('/admin');
     }
+    const canPreviewOffboarding = await verifyUserIsLocationAdmin(clerkUserId, locationId);
 
     // Get location with users
     const location = await db.location.findUnique({
@@ -53,7 +56,7 @@ export default async function TeamPage() {
                     ghlUserId: true,
                     locationRoles: {
                         where: { locationId },
-                        select: { role: true, invitedById: true }
+                        select: { role: true, invitedById: true, contactAccessScope: true }
                     }
                 }
             }
@@ -114,6 +117,12 @@ export default async function TeamPage() {
             </div>
 
             <div className="grid gap-4">
+                {contactAccess === 'updated' ? (
+                    <p role="status" aria-live="polite" className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">Contact access updated.</p>
+                ) : contactAccess === 'error' ? (
+                    <p role="alert" aria-live="assertive" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">Contact access could not be updated.</p>
+                ) : null}
+                {canPreviewOffboarding && <OffboardingPreview />}
                 {!smtpStatus.isConfigured && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
                         <div className="flex">
@@ -138,15 +147,30 @@ export default async function TeamPage() {
                         No team members found. Invite users to give them access.
                     </div>
                 )}
-                {users.map((user) => (
-                    <TeamMemberCard
-                        key={user.id}
-                        user={user}
-                        calendars={calendars}
-                        isAdmin={isAdmin}
-                        isCurrentUser={user.clerkId === clerkUserId}
-                    />
-                ))}
+                {users.map((user) => {
+                    const membership = user.locationRoles[0];
+                    return <div key={user.id} className="space-y-2">
+                        <TeamMemberCard
+                            user={user}
+                            calendars={calendars}
+                            isAdmin={isAdmin}
+                            isCurrentUser={user.clerkId === clerkUserId}
+                        />
+                        {canPreviewOffboarding && membership?.role === 'MEMBER' ? (
+                            <form action={updateMemberContactAccess} className="flex flex-wrap items-end gap-2 rounded border bg-muted/20 p-3">
+                                <input type="hidden" name="userId" value={user.id} />
+                                <div className="space-y-1">
+                                    <label htmlFor={`contact-access-${user.id}`} className="text-sm font-medium">Contact access</label>
+                                    <select id={`contact-access-${user.id}`} name="contactAccessScope" defaultValue={membership.contactAccessScope} className="block h-9 rounded-md border bg-background px-3 text-sm">
+                                        <option value="ASSIGNED_ONLY">Assigned contacts only</option>
+                                        <option value="LOCATION_WIDE">All location contacts</option>
+                                    </select>
+                                </div>
+                                <button type="submit" className="h-9 rounded-md bg-primary px-3 text-sm text-primary-foreground">Save</button>
+                            </form>
+                        ) : null}
+                    </div>;
+                })}
             </div>
         </div>
     );

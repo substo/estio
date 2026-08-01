@@ -5,10 +5,45 @@ import { clerkClient } from '@clerk/nextjs/server';
 import { cookies } from 'next/headers';
 import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { getCalendars, createCalendarService } from '@/lib/ghl/calendars';
 import { updateGHLUser, searchGHLUsers, removeGHLUserFromLocation, createGHLUser } from '@/lib/ghl/users';
 import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
+import {
+    assertOffboardingPair,
+    normalizeOffboardingEmail,
+    requireExactPreviewIdentity,
+    resolveStrictAdminLocation,
+    type ClerkIdentity,
+    type PreviewIdentity,
+} from '@/lib/team/offboarding-preview-policy';
+import { canUpdateMemberContactAccess } from '@/lib/contacts/active-location-access';
+
+type OffboardingPreview = {
+    asOf: string;
+    operation: 'Transfer responsibilities and deactivate';
+    activeLocation: { id: string; name: string | null };
+    source: PreviewIdentity & { clerkId: string };
+    successor: PreviewIdentity & { clerkId: string };
+    counts: {
+        assignedContacts: number;
+        inheritedConversations: number;
+        activeLocationDealsWithoutAssignee: number;
+        openTasks: number;
+        nonTerminalViewingSessions: number;
+        futureViewingsWithAmbiguousUserId: number;
+    };
+    unchangedShared: { label: string; count: number }[];
+    preservedAttribution: { label: string; count: number }[];
+    privateState: { label: string; configured: boolean; disposition: string }[];
+    ambiguous: { label: string; count: number; reason: string }[];
+    blockingConditions: string[];
+};
+
+export type OffboardingPreviewResult =
+    | { success: true; preview: OffboardingPreview }
+    | { success: false; error: string };
 
 async function getCurrentLocationId(): Promise<string> {
     const cookieStore = await cookies();
@@ -55,7 +90,198 @@ async function requireAdminRole(locationId: string): Promise<string> {
     return user.id;
 }
 
+function toPreviewIdentity(user: any): PreviewIdentity {
+    const connectedIds = new Set<string>(user.locations.map((location: any) => location.id));
+    const memberships = user.locationRoles.map((entry: any) => ({
+        locationId: entry.locationId,
+        locationName: entry.location.name,
+        role: entry.role,
+        connected: connectedIds.has(entry.locationId),
+    }));
+    for (const location of user.locations) {
+        if (!memberships.some((entry: any) => entry.locationId === location.id)) {
+            memberships.push({ locationId: location.id, locationName: location.name, role: null, connected: true });
+        }
+    }
+    return {
+        id: user.id,
+        email: user.email,
+        clerkId: user.clerkId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        memberships,
+    };
+}
+
+const previewIdentitySelect = {
+    id: true,
+    email: true,
+    clerkId: true,
+    firstName: true,
+    lastName: true,
+    locations: { select: { id: true, name: true } },
+    locationRoles: { select: { locationId: true, role: true, location: { select: { name: true } } } },
+} as const;
+
+/** Read-only Slice 1. It deliberately has no paired execution action. */
+export async function previewTransferResponsibilities(input: {
+    sourceEmail: string;
+    successorEmail: string;
+}): Promise<OffboardingPreviewResult> {
+    try {
+        const { userId: actorClerkId } = await auth();
+        if (!actorClerkId) throw new Error('Unauthorized');
+
+        const actorRecord = await db.user.findUnique({
+            where: { clerkId: actorClerkId },
+            select: previewIdentitySelect,
+        });
+        const activeMembership = resolveStrictAdminLocation(actorRecord ? toPreviewIdentity(actorRecord) : null);
+        const locationId = activeMembership.locationId;
+        const sourceEmail = normalizeOffboardingEmail(input.sourceEmail || '');
+        const successorEmail = normalizeOffboardingEmail(input.successorEmail || '');
+        if (!sourceEmail || !successorEmail) throw new Error('Source and successor emails are required');
+
+        const [sourceRecords, successorRecords, clerk] = await Promise.all([
+            db.user.findMany({ where: { email: { equals: sourceEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
+            db.user.findMany({ where: { email: { equals: successorEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
+            clerkClient(),
+        ]);
+        const [sourceClerkResult, successorClerkResult] = await Promise.all([
+            clerk.users.getUserList({ emailAddress: [sourceEmail], limit: 10 }),
+            clerk.users.getUserList({ emailAddress: [successorEmail], limit: 10 }),
+        ]);
+        const mapClerk = (users: typeof sourceClerkResult.data): ClerkIdentity[] => users.map((user) => ({
+            id: user.id,
+            emails: user.emailAddresses.map((entry) => entry.emailAddress),
+        }));
+        const source = requireExactPreviewIdentity({
+            label: 'Source', email: sourceEmail, localMatches: sourceRecords.map(toPreviewIdentity),
+            clerkMatches: mapClerk(sourceClerkResult.data), activeLocationId: locationId,
+        });
+        const successor = requireExactPreviewIdentity({
+            label: 'Successor', email: successorEmail, localMatches: successorRecords.map(toPreviewIdentity),
+            clerkMatches: mapClerk(successorClerkResult.data), activeLocationId: locationId,
+        });
+        assertOffboardingPair(source, successor);
+
+        const now = new Date();
+        const [
+            adminCount, assignedContacts, inheritedConversations, activeDeals, openTasks, viewingSessions,
+            futureViewings, properties, companies, projects, prospects, contactHistory, messages,
+            propertyAttribution, legacyUnresolvedContacts, privateUser,
+        ] = await Promise.all([
+            db.userLocationRole.count({ where: { locationId, role: 'ADMIN', user: { locations: { some: { id: locationId } } } } }),
+            db.contact.count({ where: { locationId, assignedUserId: source.id } }),
+            db.conversation.count({ where: { locationId, contact: { locationId, assignedUserId: source.id } } }),
+            db.dealContext.count({ where: { locationId, stage: 'ACTIVE' } }),
+            db.contactTask.count({ where: { locationId, assignedUserId: source.id, deletedAt: null, status: 'open' } }),
+            db.viewingSession.count({ where: { locationId, agentId: source.id, status: { notIn: ['completed', 'expired'] } } }),
+            db.viewing.count({ where: { userId: source.id, date: { gte: now }, status: { notIn: ['completed', 'cancelled', 'canceled', 'no_show'] }, OR: [{ contact: { locationId } }, { property: { locationId } }] } }),
+            db.property.count({ where: { locationId } }),
+            db.company.count({ where: { locationId } }),
+            db.project.count({ where: { locationId } }),
+            db.prospectLead.count({ where: { locationId } }),
+            db.contactHistory.count({ where: { contact: { locationId }, OR: [{ userId: source.id }, { updatedById: source.id }, { deletedById: source.id }] } }),
+            db.message.count({ where: { userId: source.id, conversation: { locationId } } }),
+            db.property.count({ where: { locationId, OR: [{ createdById: source.id }, { updatedById: source.id }] } }),
+            db.contact.count({ where: { locationId, assignedUserId: null, leadAssignedToAgent: { not: null } } }),
+            db.user.findUnique({ where: { id: source.id }, select: {
+                googleAccessToken: true, googleRefreshToken: true, googleSyncToken: true, googleSyncEnabled: true,
+                outlookAccessToken: true, outlookRefreshToken: true, outlookSyncEnabled: true,
+                outlookPasswordEncrypted: true, outlookSessionCookies: true, crmUsername: true, crmPassword: true,
+                gmailSyncState: { select: { id: true } }, outlookSyncState: { select: { id: true } },
+                taskReminderPreference: { select: { userId: true } },
+                _count: { select: { webPushSubscriptions: true, userNotifications: true } },
+            } }),
+        ]);
+
+        const otherMemberships = source.memberships.filter(
+            (membership) => membership.locationId !== locationId && (membership.connected || membership.role),
+        );
+        const blockingConditions = [
+            ...(source.memberships.find((membership) => membership.locationId === locationId)?.role === 'ADMIN' && adminCount <= 1
+                ? ['Source is the final active ADMIN for this location'] : []),
+            ...(otherMemberships.length ? ['Source has other location memberships; global retirement requires a separate explicit decision'] : []),
+            'DealContext has no authoritative user assignment field; deal transfer is deferred to Slice 4',
+            'Viewing.userId is not confirmed as current responsibility; future viewings remain ambiguous',
+        ];
+
+        return { success: true, preview: {
+            asOf: now.toISOString(),
+            operation: 'Transfer responsibilities and deactivate',
+            activeLocation: { id: locationId, name: activeMembership.locationName },
+            source, successor,
+            counts: {
+                assignedContacts, inheritedConversations, activeLocationDealsWithoutAssignee: activeDeals,
+                openTasks, nonTerminalViewingSessions: viewingSessions, futureViewingsWithAmbiguousUserId: futureViewings,
+            },
+            unchangedShared: [
+                { label: 'Properties', count: properties }, { label: 'Companies', count: companies },
+                { label: 'Projects', count: projects }, { label: 'Prospecting records', count: prospects },
+            ],
+            preservedAttribution: [
+                { label: 'Contact history actor entries', count: contactHistory },
+                { label: 'Message sender entries', count: messages },
+                { label: 'Property creator/updater records', count: propertyAttribution },
+            ],
+            privateState: [
+                { label: 'Google OAuth and Gmail sync', configured: !!(privateUser?.googleAccessToken || privateUser?.googleRefreshToken || privateUser?.googleSyncToken || privateUser?.googleSyncEnabled || privateUser?.gmailSyncState), disposition: 'Disable/revoke; never transfer credentials or cursors' },
+                { label: 'Outlook OAuth and browser session', configured: !!(privateUser?.outlookAccessToken || privateUser?.outlookRefreshToken || privateUser?.outlookSyncEnabled || privateUser?.outlookPasswordEncrypted || privateUser?.outlookSessionCookies || privateUser?.outlookSyncState), disposition: 'Disable/revoke; never transfer credentials or cookies' },
+                { label: 'Personal CRM credentials', configured: !!(privateUser?.crmUsername || privateUser?.crmPassword), disposition: 'Disable; never transfer credentials' },
+                { label: 'Web push subscriptions', configured: !!privateUser?._count.webPushSubscriptions, disposition: 'Disable; never transfer subscriptions' },
+                { label: 'Notifications and reminder preferences', configured: !!(privateUser?._count.userNotifications || privateUser?.taskReminderPreference), disposition: 'Retain privately; never copy to successor' },
+                { label: 'Clerk sessions', configured: true, disposition: 'Location access removal is authoritative; global suspension requires scope confirmation' },
+            ],
+            ambiguous: [
+                { label: 'Active location deals', count: activeDeals, reason: 'No assignee field exists' },
+                { label: 'Future viewings', count: futureViewings, reason: 'Viewing.userId may be historical attribution' },
+                { label: 'Legacy contacts left unassigned', count: legacyUnresolvedContacts, reason: 'Legacy identifier was not guessed or backfilled; ADMIN must resolve it explicitly' },
+            ],
+            blockingConditions,
+        } };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unable to build preview' };
+    }
+}
+
 // ============ TEAM MEMBER MANAGEMENT ============
+
+export async function updateMemberContactAccess(formData: FormData): Promise<void> {
+    let outcome = 'error';
+    try {
+        const location = await getLocationContext();
+        const { userId: clerkUserId } = await auth();
+        const targetUserId = String(formData.get('userId') || '').trim();
+        const scope = String(formData.get('contactAccessScope') || '');
+        if (!location || !clerkUserId || !targetUserId || !['ASSIGNED_ONLY', 'LOCATION_WIDE'].includes(scope)) {
+            throw new Error('Invalid request');
+        }
+
+        const [actor, target] = await Promise.all([
+            db.userLocationRole.findFirst({
+                where: { locationId: location.id, role: 'ADMIN', user: { clerkId: clerkUserId, locations: { some: { id: location.id } } } },
+                select: { role: true },
+            }),
+            db.userLocationRole.findFirst({
+                where: { locationId: location.id, userId: targetUserId, role: 'MEMBER', user: { locations: { some: { id: location.id } } } },
+                select: { id: true, role: true },
+            }),
+        ]);
+        if (!actor || !target || !canUpdateMemberContactAccess(actor.role, target.role)) throw new Error('Forbidden');
+
+        await db.userLocationRole.update({
+            where: { id: target.id },
+            data: { contactAccessScope: scope as 'ASSIGNED_ONLY' | 'LOCATION_WIDE' },
+        });
+        revalidatePath('/admin/team');
+        revalidatePath('/admin/contacts');
+        outcome = 'updated';
+    } catch (error) {
+        console.error('[Team] Failed to update contact access:', error);
+    }
+    redirect(`/admin/team?contactAccess=${outcome}`);
+}
 
 export async function inviteUserToLocation(formData: FormData) {
     const locationId = await getCurrentLocationId();

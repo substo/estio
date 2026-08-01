@@ -1,19 +1,18 @@
 import db from "@/lib/db";
-import Link from "next/link";
-import { getLocationById } from "@/lib/location";
-import { cookies } from "next/headers";
-import { auth } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 
 import { AddContactDialog } from "./_components/add-contact-dialog";
 import { ContactRow } from "./_components/contact-row";
 import { ContactFilters } from "./_components/contact-filters";
 import { GoogleContactImportDialogTrigger } from "./_components/google-contact-import-dialog-trigger";
 import { PipelineBoard } from "./_components/pipeline-board";
-import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
 
-import { getLocationContext } from "@/lib/auth/location-context";
+import {
+    buildContactVisibilityWhere,
+    canManageContact,
+    canViewLocationContacts,
+    getActiveContactsAccess,
+    resolveContactScope,
+} from "@/lib/contacts/active-location-access";
 
 // --- Types for Search Params ---
 interface ContactSearchParams {
@@ -33,6 +32,7 @@ interface ContactSearchParams {
     propertyRef?: string;
     createdPreset?: string;
     updatedPreset?: string;
+    scope?: string;
 }
 
 // --- Helper: Calculate date from preset ---
@@ -119,7 +119,7 @@ function getQuickFilterCondition(filter: string): object | null {
             return { updatedAt: { lte: d } };
         }
         case 'not_assigned':
-            return { leadAssignedToAgent: null };
+            return { assignedUserId: null };
         case 'has_manual_matches':
             return {
                 matchingEmailMatchedProperties: 'No - Manual',
@@ -151,59 +151,18 @@ function getSortOrder(sort: string): { [key: string]: 'asc' | 'desc' } {
 
 export default async function LeadsPage(props: { searchParams: Promise<ContactSearchParams> }) {
     const searchParams = await props.searchParams;
-    const cookieStore = await cookies();
-    let locationId = searchParams.locationId || cookieStore.get("crm_location_id")?.value;
-
-    if (!locationId) {
-        const locationContext = await getLocationContext();
-        if (locationContext) {
-            locationId = locationContext.id;
-        }
-    }
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
-    }
-
-    const { userId } = await auth();
-    if (!userId) {
-        return <div>Unauthorized</div>;
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
-    if (!hasAccess) {
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
-        });
-
-        if (user?.locations?.[0]) {
-            const validLocationId = user.locations[0].id;
-            console.log(`[LeadsPage] Redirecting unauthorized user from ${locationId} to ${validLocationId}`);
-            const { redirect } = await import("next/navigation");
-            redirect(`/admin/contacts?locationId=${validLocationId}`);
-        }
-
-        return (
-            <div className="p-6 text-center">
-                <h2 className="text-xl font-bold text-red-600">Unauthorized Access</h2>
-                <p className="mt-2 text-gray-600">You do not have access to the requested location ({locationId}).</p>
-                <p className="text-sm text-gray-500">Please contact support if you believe this is an error.</p>
-            </div>
-        );
-    }
+    const access = await getActiveContactsAccess();
+    if (!access) return <div>Unauthorized</div>;
+    const locationId = access.locationId;
+    const location = await db.location.findUnique({ where: { id: locationId } });
+    if (!location) return <div>No location context found.</div>;
 
     // Fetch full user for integration status
     const dbUser = await db.user.findUnique({
-        where: { clerkId: userId },
+        where: { clerkId: access.userId },
         select: { googleAccessToken: true, googleSyncEnabled: true }
     });
     const isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
-
-    const location = await getLocationById(locationId);
-    if (!location) {
-        return <div>Location not found.</div>;
-    }
 
     // --- Parse Search Params ---
     const {
@@ -222,10 +181,13 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         propertyRef = '',
         createdPreset = '',
         updatedPreset = '',
+        scope = '',
     } = searchParams;
+    const effectiveScope = resolveContactScope(access, scope);
+    const effectiveView = access.role === 'MEMBER' && effectiveScope === 'location' ? 'table' : view;
 
     // --- Build Where Clause ---
-    const where: any = { locationId };
+    const where: any = buildContactVisibilityWhere(access, scope);
 
     // 1. Category -> Contact Type filter
     const realEstateTypes = ['Lead', 'Contact', 'Tenant'];
@@ -262,13 +224,13 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
     if (filter) {
         const quickCondition = getQuickFilterCondition(filter);
         if (quickCondition) {
-            Object.assign(where, quickCondition);
+            where.AND = [...(where.AND || []), quickCondition];
         }
     }
 
     // 5. Advanced Filters
     if (source) where.leadSource = source;
-    if (agent) where.leadAssignedToAgent = agent;
+    if (agent && effectiveScope === 'location') where.assignedUserId = agent;
     if (goal) where.leadGoal = goal;
     if (stage) where.leadStage = stage;
     if (district && district !== 'Any District') where.requirementDistrict = district;
@@ -281,10 +243,12 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
             select: { id: true }
         });
         if (property) {
-            where.OR = [
-                ...(where.OR || []),
-                { propertiesInterested: { has: property.id } },
-                { propertiesEmailed: { has: property.id } },
+            where.AND = [
+                ...(where.AND || []),
+                { OR: [
+                    { propertiesInterested: { has: property.id } },
+                    { propertiesEmailed: { has: property.id } },
+                ] },
             ];
         } else {
             // No matching property found, return empty results
@@ -316,8 +280,8 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         where,
         orderBy,
         include: {
-            propertyRoles: { include: { property: true } },
-            companyRoles: { include: { company: true } },
+            propertyRoles: { where: { property: { locationId } }, include: { property: true } },
+            companyRoles: { where: { company: { locationId } }, include: { company: true } },
             conversations: {
                 select: {
                     id: true,
@@ -333,7 +297,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         },
     });
 
-    const stageCounts = view === 'pipeline' ? await db.contact.groupBy({
+    const stageCounts = effectiveView === 'pipeline' ? await db.contact.groupBy({
         by: ['leadStage'],
         where,
         _count: true,
@@ -345,10 +309,13 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         orderBy: { name: 'asc' }
     });
     const leadSourceNames = leadSources.map(s => s.name);
+    const manageableContacts = contacts.filter((contact) => canManageContact(access, contact.assignedUserId));
 
     // Fetch agents (Users with access to this location)
     const agents = await db.user.findMany({
-        where: { locations: { some: { id: locationId } } },
+        where: effectiveScope === 'location'
+            ? { locations: { some: { id: locationId } }, locationRoles: { some: { locationId } } }
+            : { id: access.internalUserId },
         select: { id: true, name: true, email: true },
         orderBy: { name: 'asc' }
     });
@@ -379,9 +346,15 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                 </div>
             )}
 
-            <ContactFilters leadSources={leadSourceNames} agents={agents} view={view} />
+            <ContactFilters
+                leadSources={leadSourceNames}
+                agents={agents}
+                view={effectiveView}
+                isAdmin={canViewLocationContacts(access)}
+                scope={effectiveScope}
+            />
 
-            {view === 'pipeline' ? (
+            {effectiveView === 'pipeline' ? (
                 <PipelineBoard 
                     contacts={contacts}
                     stageCounts={stageCounts}
@@ -417,8 +390,9 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                                 <ContactRow
                                     key={contact.id}
                                     contact={contact as any}
+                                    canManage={canManageContact(access, contact.assignedUserId)}
                                     leadSources={leadSourceNames}
-                                    allContacts={contacts as any}
+                                    allContacts={manageableContacts as any}
                                     currentIndex={index}
                                     isGoogleConnected={isGoogleConnected}
                                     isGhlConnected={!!location.ghlAccessToken}

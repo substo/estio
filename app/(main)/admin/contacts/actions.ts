@@ -62,6 +62,43 @@ import {
   updateManualActivityEntry as updateManualActivityEntryRow,
 } from '@/lib/contacts/manual-activity-entries';
 import { publishConversationRealtimeEvent } from '@/lib/realtime/conversation-events';
+import {
+  buildContactVisibilityWhere,
+  buildContactManageWhere,
+  canAssignContactTo,
+  canManageContact,
+  getActiveContactsAccess,
+  validateContactRelationships,
+  type ContactRelationshipRepository,
+} from '@/lib/contacts/active-location-access';
+
+const contactRelationshipRepository: ContactRelationshipRepository = {
+  async findPropertyIds(locationId, ids) {
+    const rows = await db.property.findMany({
+      where: { id: { in: ids }, locationId },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  },
+  async findCompanyIds(locationId, ids) {
+    const rows = await db.company.findMany({
+      where: { id: { in: ids }, locationId },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  },
+  async findUserIds(locationId, ids) {
+    const rows = await db.user.findMany({
+      where: {
+        id: { in: ids },
+        locations: { some: { id: locationId } },
+        locationRoles: { some: { locationId } },
+      },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  },
+};
 
 async function resolvePreferredChannelTypeForPhone(
   _location: unknown,
@@ -430,23 +467,13 @@ function buildContactIdentityPatch(contact: {
 
 export async function openOrStartConversationForContact(contactId: string) {
   try {
-    const location = await getLocationContext();
-    if (!location?.id) {
-      return { success: false, error: 'Unauthorized' };
-    }
-
-    const { userId } = await auth();
-    if (!userId) {
-      return { success: false, error: 'Unauthorized' };
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(userId, location.id);
-    if (!hasAccess) {
-      return { success: false, error: 'Unauthorized' };
-    }
+    const access = await getActiveContactsAccess();
+    if (!access) return { success: false, error: 'Unauthorized' };
+    const location = await db.location.findUnique({ where: { id: access.locationId } });
+    if (!location) return { success: false, error: 'Unauthorized' };
 
     const contact = await db.contact.findFirst({
-      where: { id: contactId, locationId: location.id },
+      where: { id: contactId, ...buildContactManageWhere(access) },
       select: { id: true, phone: true, email: true, name: true, message: true }
     });
 
@@ -528,10 +555,10 @@ export async function openOrStartConversationForContact(contactId: string) {
   } catch (error: any) {
     // Prisma unique collision is possible on concurrent clicks; return the existing conversation.
     if (String(error?.code) === 'P2002') {
-      const location = await getLocationContext();
-      if (location?.id) {
+      const access = await getActiveContactsAccess();
+      if (access) {
         const existingConversation = await db.conversation.findFirst({
-          where: { locationId: location.id, contactId },
+          where: { locationId: access.locationId, contactId, contact: buildContactManageWhere(access) },
           select: { id: true, ghlConversationId: true }
         });
         if (existingConversation) {
@@ -576,6 +603,7 @@ function prepareContactInput(data: ValidatedContactData) {
     leadNextAction: data.leadNextAction,
     leadFollowUpDate: data.leadFollowUpDate,
     leadAssignedToAgent: data.leadAssignedToAgent,
+    assignedUserId: data.leadAssignedToAgent,
     notes: data.leadOtherDetails ?? undefined,
 
     requirementStatus: data.requirementStatus,
@@ -829,15 +857,15 @@ export async function createContact(
   }
 
   const data = validatedFields.data;
-  const { userId } = await auth();
-  if (!userId) {
-    return { success: false, message: 'Unauthorized' };
+  const access = await getActiveContactsAccess(data.locationId);
+  if (!access) return { success: false, message: 'Unauthorized: Invalid active location.' };
+  const { userId, locationId } = access;
+  data.locationId = locationId;
+  const assignedUserId = data.leadAssignedToAgent || (access.role === 'MEMBER' ? access.internalUserId : null);
+  if (!canAssignContactTo(access, assignedUserId)) {
+    return { errors: { leadAssignedToAgent: ['Members may assign contacts only to themselves.'] }, message: 'Invalid contact assignment.', success: false };
   }
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, data.locationId);
-  if (!hasAccess) {
-    return { success: false, message: 'Unauthorized: You do not have access to this location.' };
-  }
+  data.leadAssignedToAgent = assignedUserId || undefined;
 
   const entityError = getEntityRequirementError(data);
   if (entityError) {
@@ -846,6 +874,11 @@ export async function createContact(
       message: entityError.message,
       success: false,
     };
+  }
+
+  const relationshipErrors = await validateContactRelationships(contactRelationshipRepository, locationId, data);
+  if (relationshipErrors) {
+    return { errors: relationshipErrors, message: 'One or more selected relationships are unavailable.', success: false };
   }
 
   // Resolve internal user ID for history logging
@@ -871,6 +904,10 @@ export async function createContact(
     if (data.phone) {
       const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone);
       if (phoneDuplicate?.type === 'Exact') {
+        const allowed = await db.contact.findFirst({
+          where: { id: phoneDuplicate.contact.id, ...buildContactManageWhere(access) }, select: { id: true },
+        });
+        if (!allowed) return { message: 'A contact with this phone already exists in this location.', success: false };
         return buildDuplicatePhoneState(phoneDuplicate.contact);
       }
     }
@@ -926,6 +963,10 @@ export async function createContact(
       if (targets.includes('phone') && data.phone) {
         const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone);
         if (phoneDuplicate?.type === 'Exact') {
+          const allowed = await db.contact.findFirst({
+            where: { id: phoneDuplicate.contact.id, ...buildContactManageWhere(access) }, select: { id: true },
+          });
+          if (!allowed) return { message: 'A contact with this phone already exists in this location.', success: false };
           return buildDuplicatePhoneState(phoneDuplicate.contact);
         }
       }
@@ -961,20 +1002,29 @@ async function updateContactCore(
     }));
   };
 
+  const access = await getActiveContactsAccess(data.locationId);
+  if (!access || access.userId !== userId) {
+    return { success: false, message: 'Contact not found or access denied.' };
+  }
+  data.locationId = access.locationId;
+
   // Resolve internal user ID for history logging
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
   const internalUserId = dbUser?.id || null;
   mark('1_resolveUser');
 
   // Also verify the contact actually belongs to this location
-  const existingContactCheck = await db.contact.findUnique({
-    where: { id: data.contactId },
-    select: { locationId: true, contactType: true, ghlContactId: true, email: true, phone: true }
+  const existingContactCheck = await db.contact.findFirst({
+    where: { id: data.contactId, ...buildContactManageWhere(access) },
+    select: { locationId: true, contactType: true, ghlContactId: true, email: true, phone: true, assignedUserId: true }
   });
   mark('2_existingCheck');
 
   if (!existingContactCheck || existingContactCheck.locationId !== data.locationId) {
     return { success: false, message: 'Contact not found or access denied.' };
+  }
+  if (data.leadAssignedToAgent !== undefined && !canAssignContactTo(access, data.leadAssignedToAgent || null)) {
+    return { errors: { leadAssignedToAgent: ['Members may assign contacts only to themselves.'] }, message: 'Invalid contact assignment.', success: false };
   }
 
   const entityError = getEntityRequirementError(data, existingContactCheck.contactType);
@@ -984,6 +1034,11 @@ async function updateContactCore(
       message: entityError.message,
       success: false,
     };
+  }
+
+  const relationshipErrors = await validateContactRelationships(contactRelationshipRepository, data.locationId, data);
+  if (relationshipErrors) {
+    return { errors: relationshipErrors, message: 'One or more selected relationships are unavailable.', success: false };
   }
 
   try {
@@ -1108,6 +1163,10 @@ async function updateContactCore(
       if (targets.includes('phone') && data.phone) {
         const phoneDuplicate = await checkPhoneDuplicate(data.locationId, data.phone, data.contactId);
         if (phoneDuplicate?.type === 'Exact') {
+          const allowed = await db.contact.findFirst({
+            where: { id: phoneDuplicate.contact.id, ...buildContactManageWhere(access) }, select: { id: true },
+          });
+          if (!allowed) return { message: 'A contact with this phone already exists in this location.', success: false };
           return buildDuplicatePhoneState(phoneDuplicate.contact);
         }
       }
@@ -1123,8 +1182,9 @@ async function updateContactCore(
 }
 
 export async function updateContactAction(contactId: string, data: Partial<ValidatedContactData>) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, error: "Unauthorized" };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, error: "Unauthorized" };
+  const { userId, locationId } = access;
 
   // We already have clean data from the UI (mostly), but we need to ensure it fits ValidatedContactData
   // We can fetch the existing contact to fill in missing required fields if needed, 
@@ -1132,8 +1192,8 @@ export async function updateContactAction(contactId: string, data: Partial<Valid
   // However, updateContactCore requires ValidatedContactData.
 
   // Fetch existing validation requirements (locationId is required for core logic)
-  const existing = await db.contact.findUnique({
-    where: { id: contactId },
+  const existing = await db.contact.findFirst({
+    where: { id: contactId, ...buildContactManageWhere(access) },
     select: { locationId: true, name: true, contactType: true }
   });
 
@@ -1175,11 +1235,12 @@ export async function updateContactIdentityAction(contactId: string, data: Conta
   const requestedKeys = Object.keys(patch).filter((key) => patch[key as keyof typeof patch] !== undefined);
   if (requestedKeys.length === 0) return { success: false as const, error: 'No contact details changed.' };
 
-  const { userId } = await auth();
-  if (!userId) return { success: false as const, error: 'Unauthorized' };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false as const, error: 'Unauthorized' };
+  const { userId, locationId } = access;
 
-  const existing = await db.contact.findUnique({
-    where: { id: normalizedContactId },
+  const existing = await db.contact.findFirst({
+    where: { id: normalizedContactId, ...buildContactManageWhere(access) },
     select: {
       id: true,
       locationId: true,
@@ -1195,9 +1256,6 @@ export async function updateContactIdentityAction(contactId: string, data: Conta
   });
 
   if (!existing) return { success: false as const, error: 'Contact not found' };
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, existing.locationId);
-  if (!hasAccess) return { success: false as const, error: 'Unauthorized' };
 
   if (patch.contactType && shouldPreserveLeadTypeAgainstGenericContactDowngrade(existing, { contactType: patch.contactType })) {
     return {
@@ -1309,8 +1367,9 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
   if (!normalizedContactId) return { success: false as const, error: 'Missing contact ID' };
   if (!CONTACT_TYPES.includes(contactType)) return { success: false as const, error: 'Invalid contact type' };
 
-  const { userId } = await auth();
-  if (!userId) return { success: false as const, error: 'Unauthorized' };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false as const, error: 'Unauthorized' };
+  const { userId, locationId } = access;
 
   const dbUser = await db.user.findUnique({
     where: { clerkId: userId },
@@ -1318,8 +1377,8 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
   });
   const internalUserId = dbUser?.id || null;
 
-  const existing = await db.contact.findUnique({
-    where: { id: normalizedContactId },
+  const existing = await db.contact.findFirst({
+    where: { id: normalizedContactId, ...buildContactManageWhere(access) },
     select: {
       id: true,
       locationId: true,
@@ -1336,9 +1395,6 @@ export async function updateContactTypeAction(contactId: string, contactType: Co
   });
 
   if (!existing) return { success: false as const, error: 'Contact not found' };
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, existing.locationId);
-  if (!hasAccess) return { success: false as const, error: 'Unauthorized' };
 
   if (shouldPreserveLeadTypeAgainstGenericContactDowngrade(existing, { contactType })) {
     return {
@@ -1500,13 +1556,8 @@ export async function updateContact(
     return { success: false, message: 'Unauthorized' };
   }
 
-  const hasAccess = await verifyUserHasAccessToLocation(userId, data.locationId);
-  mark('auth');
-  if (!hasAccess) {
-    return { success: false, message: 'Unauthorized: You do not have access to this location.' };
-  }
-
   const result = await updateContactCore(data, userId);
+  mark('auth');
   mark('core_complete');
   console.log('[updateContact:outer:perf]', JSON.stringify({
     success: !!result.success,
@@ -1537,10 +1588,9 @@ export async function updateContact(
 
 
 export async function deleteContactRole(roleId: string, type: 'property' | 'company') {
-  const { userId } = await auth();
-  if (!userId) {
-    return { success: false, message: 'Unauthorized' };
-  }
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, message: 'Unauthorized' };
+  const { locationId } = access;
 
   try {
     let contactId: string | undefined;
@@ -1561,15 +1611,12 @@ export async function deleteContactRole(roleId: string, type: 'property' | 'comp
 
     if (!contactId) return { success: false, message: 'Role not found.' };
 
-    const contact = await db.contact.findUnique({
-      where: { id: contactId },
+    const contact = await db.contact.findFirst({
+      where: { id: contactId, ...buildContactManageWhere(access) },
       select: { locationId: true }
     });
 
     if (!contact) return { success: false, message: 'Contact not found.' };
-
-    const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
-    if (!hasAccess) return { success: false, message: 'Unauthorized' };
 
     if (type === 'property') {
       await db.contactPropertyRole.delete({ where: { id: roleId } });
@@ -1683,15 +1730,11 @@ export async function searchGoogleContactsAction(
 }
 
 export async function importNewGoogleContactAction(resourceName: string, expectedLocationId: string) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: 'Unauthorized' };
+  const access = await getActiveContactsAccess(expectedLocationId);
+  if (!access) return { success: false, message: 'Unauthorized: Invalid active location.' };
+  const { userId, locationId } = access;
 
   try {
-    const hasAccess = await verifyUserHasAccessToLocation(userId, expectedLocationId);
-    if (!hasAccess) {
-      return { success: false, message: 'Unauthorized: You do not have access to this location.' };
-    }
-
     // Check current user's Google connection
     const user = await db.user.findUnique({
       where: { clerkId: userId },
@@ -1715,8 +1758,15 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
     const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
     const internalUserId = dbUser?.id || null;
 
-    const existingContact = await findExistingContactForGoogleImport(expectedLocationId, googleData, resourceName);
+    const existingContact = await findExistingContactForGoogleImport(locationId, googleData, resourceName);
     if (existingContact) {
+      const allowedExisting = await db.contact.findFirst({
+        where: { id: existingContact.id, ...buildContactManageWhere(access) },
+        select: { id: true },
+      });
+      if (!allowedExisting) {
+        return { success: false, message: 'A matching contact exists but is assigned to another member.' };
+      }
       if (!existingContact.googleContactId) {
         const updates: any = {
           googleContactId: resourceName,
@@ -1777,7 +1827,7 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
 
       const createdContact = await tx.contact.create({
         data: {
-          locationId: expectedLocationId,
+          locationId,
           name: googleData.name || 'Google Contact',
           firstName: firstName || undefined,
           lastName: lastName || undefined,
@@ -1785,6 +1835,8 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
           phone: googleData.phone || undefined,
           status: 'new',
           contactType: 'Lead',
+          assignedUserId: access.internalUserId,
+          leadAssignedToAgent: access.internalUserId,
           // Set as linked to Google immediately
           googleContactId: resourceName,
           googleContactUpdatedAt: googleData.updateTime,
@@ -1796,7 +1848,7 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
 
       await enqueueContactSync(tx as Prisma.TransactionClient, {
         contactId: createdContact.id,
-        locationId: expectedLocationId,
+        locationId,
         operation: 'create',
         payload: { preferredUserId: internalUserId },
         providers: ['ghl']
@@ -1832,12 +1884,13 @@ export async function resolveSyncConflict(
     skipRevalidate?: boolean;
   }
 ) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: 'Unauthorized' };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, message: 'Unauthorized' };
+  const { userId, locationId } = access;
 
   try {
-    const getContactPatch = async () => db.contact.findUnique({
-      where: { id: contactId },
+    const getContactPatch = async () => db.contact.findFirst({
+      where: { id: contactId, ...buildContactManageWhere(access) },
       select: {
         name: true,
         firstName: true,
@@ -1868,7 +1921,7 @@ export async function resolveSyncConflict(
       return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
     }
 
-    const contact = await db.contact.findUnique({ where: { id: contactId } });
+    const contact = await db.contact.findFirst({ where: { id: contactId, ...buildContactManageWhere(access) } });
     if (!contact) return { success: false, message: 'Contact not found' };
 
     // 1. USE GOOGLE (Overwrite Local)
@@ -2886,15 +2939,17 @@ export async function queueViewingLeadRemindersAction(viewingId: string) {
 
 export async function checkPropertyOwnerEmail(propertyId: string) {
   try {
+    const access = await getActiveContactsAccess();
+    if (!access) return { hasEmail: false };
+    const property = await db.property.findFirst({
+      where: { id: propertyId, locationId: access.locationId }, select: { id: true },
+    });
+    if (!property) return { hasEmail: false };
     const ownerRole = await db.contactPropertyRole.findFirst({
       where: {
         propertyId: propertyId,
         role: 'owner', // using lower-case per contact stats
-        contact: {
-          email: {
-            not: null
-          }
-        }
+        contact: { ...buildContactManageWhere(access), email: { not: null } }
       },
       include: {
         contact: {
@@ -2908,7 +2963,7 @@ export async function checkPropertyOwnerEmail(propertyId: string) {
       where: {
         propertyId: propertyId,
         role: 'Owner',
-        contact: { email: { not: null } }
+        contact: { ...buildContactManageWhere(access), email: { not: null } }
       }
     }) : null;
 
@@ -2927,12 +2982,13 @@ export async function deleteContact(
     deleteFromGoogle?: boolean;
   }
 ) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: 'Unauthorized' };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, message: 'Unauthorized' };
+  const { userId, locationId } = access;
 
   try {
-    const contact = await db.contact.findUnique({
-      where: { id: contactId },
+    const contact = await db.contact.findFirst({
+      where: { id: contactId, ...buildContactManageWhere(access) },
       select: {
         locationId: true,
         ghlContactId: true,
@@ -2940,9 +2996,6 @@ export async function deleteContact(
       }
     });
     if (!contact) return { success: false, message: 'Contact not found' };
-
-    const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
-    if (!hasAccess) return { success: false, message: 'Unauthorized' };
 
     // 1. Delete from GoHighLevel
     if (options?.deleteFromGhl && contact.ghlContactId) {
@@ -3000,21 +3053,16 @@ export async function deleteContact(
 }
 
 export async function addContactHistoryEntry(contactId: string, entry: string, date: string) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: 'Unauthorized' };
-
   try {
-    const location = await getLocationContext();
-    if (!location?.id) return { success: false, message: 'Location not found' };
-
-    const [dbUser, contact] = await Promise.all([
-      db.user.findUnique({ where: { clerkId: userId }, select: { id: true } }),
-      db.contact.findFirst({ where: { id: contactId, locationId: location.id }, select: { id: true } }),
-    ]);
-    if (!dbUser) return { success: false, message: 'User not found' };
+    const access = await getActiveContactsAccess();
+    if (!access) return { success: false, message: 'Unauthorized' };
+    const contact = await db.contact.findFirst({
+      where: { id: contactId, ...buildContactManageWhere(access) },
+      select: { id: true },
+    });
     if (!contact) return { success: false, message: 'Contact not found' };
 
-    await logContactHistory(db, contactId, dbUser.id, 'MANUAL_ENTRY', { entry, date });
+    await logContactHistory(db, contactId, access.internalUserId, 'MANUAL_ENTRY', { entry, date });
 
     revalidatePath('/admin/contacts');
     return { success: true, message: 'Entry added to history.' };
@@ -3025,20 +3073,16 @@ export async function addContactHistoryEntry(contactId: string, entry: string, d
 }
 
 async function resolveManualActivityActor() {
-  const { userId } = await auth();
-  if (!userId) return { error: 'Unauthorized' as const };
-
+  const access = await getActiveContactsAccess();
+  if (!access) return { error: 'Unauthorized' as const };
   const [location, user] = await Promise.all([
-    getLocationContext(),
-    db.user.findUnique({
-      where: { clerkId: userId },
-      select: { id: true, name: true, email: true },
-    }),
+    db.location.findUnique({ where: { id: access.locationId } }),
+    db.user.findUnique({ where: { id: access.internalUserId }, select: { id: true, name: true, email: true } }),
   ]);
 
   if (!location?.id) return { error: 'Location not found' as const };
   if (!user) return { error: 'User not found' as const };
-  return { location, user };
+  return { access, location, user };
 }
 
 function invalidateManualActivityReads(contactId: string, conversationIds: string[]) {
@@ -3098,6 +3142,11 @@ export async function updateManualActivityEntry(historyId: string, entry: string
   if ('error' in actor) return { success: false, message: actor.error };
 
   try {
+    const allowed = await db.contactHistory.findFirst({
+      where: { id: historyId, contact: buildContactManageWhere(actor.access) },
+      select: { id: true },
+    });
+    if (!allowed) return { success: false, message: 'Activity not found' };
     const result = await updateManualActivityEntryRow({
       db,
       historyId,
@@ -3134,6 +3183,11 @@ export async function deleteManualActivityEntry(historyId: string, reason?: stri
   if ('error' in actor) return { success: false, message: actor.error };
 
   try {
+    const allowed = await db.contactHistory.findFirst({
+      where: { id: historyId, contact: buildContactManageWhere(actor.access) },
+      select: { id: true },
+    });
+    if (!allowed) return { success: false, message: 'Activity not found' };
     const result = await deleteManualActivityEntryRow({
       db,
       historyId,
@@ -3158,23 +3212,27 @@ export async function deleteManualActivityEntry(historyId: string, reason?: stri
 }
 
 export async function getContactDetails(contactId: string) {
-  const { userId } = await auth();
-  if (!userId) return null;
+  const access = await getActiveContactsAccess();
+  if (!access) return null;
+  const { userId, locationId } = access;
 
-  const contact = await db.contact.findUnique({
-    where: { id: contactId },
+  const contact = await db.contact.findFirst({
+    where: { id: contactId, ...buildContactVisibilityWhere(access, 'location') },
     include: {
       propertyRoles: {
+        where: { property: { locationId } },
         include: {
           property: { select: { id: true, title: true, reference: true } }
         }
       },
       companyRoles: {
+        where: { company: { locationId } },
         include: {
           company: { select: { id: true, name: true } }
         }
       },
       viewings: {
+        where: { property: { locationId } },
         include: {
           property: { select: { id: true, title: true, reference: true, unitNumber: true } },
           user: { select: { id: true, name: true } }
@@ -3185,9 +3243,6 @@ export async function getContactDetails(contactId: string) {
   });
 
   if (!contact) return null;
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
-  if (!hasAccess) return null;
 
   const languageProfiles = await (db as any).contactLanguage.findMany({
     where: { contactId: contact.id },
@@ -3211,7 +3266,7 @@ export async function getContactDetails(contactId: string) {
   let propertyMap: Record<string, string> = {};
   if (propertyIds.size > 0) {
     const properties = await db.property.findMany({
-      where: { id: { in: Array.from(propertyIds) } },
+      where: { id: { in: Array.from(propertyIds) }, locationId },
       select: { id: true, title: true, reference: true, unitNumber: true }
     });
     properties.forEach(p => {
@@ -3221,12 +3276,16 @@ export async function getContactDetails(contactId: string) {
 
   // Collect User IDs (Agent)
   const userIds = new Set<string>();
-  if (contact.leadAssignedToAgent) userIds.add(contact.leadAssignedToAgent);
+  if (contact.assignedUserId) userIds.add(contact.assignedUserId);
 
   let userMap: Record<string, string> = {};
   if (userIds.size > 0) {
     const users = await db.user.findMany({
-      where: { id: { in: Array.from(userIds) } },
+      where: {
+        id: { in: Array.from(userIds) },
+        locations: { some: { id: locationId } },
+        locationRoles: { some: { locationId } },
+      },
       select: { id: true, name: true, email: true }
     });
     users.forEach(u => {
@@ -3267,6 +3326,7 @@ export async function getContactDetails(contactId: string) {
     propertyMap,
     userMap,
     leadSources: leadSources.map(s => s.name),
+    canManage: canManageContact(access, contact.assignedUserId),
     isOutlookConnected,
     isGoogleConnected,
     isGhlConnected
@@ -3276,12 +3336,14 @@ export async function getContactDetails(contactId: string) {
 
 
 export async function unlinkGoogleContact(contactId: string, options?: { skipRevalidate?: boolean }) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: 'Unauthorized' };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, message: 'Unauthorized' };
 
   try {
+    const contact = await db.contact.findFirst({ where: { id: contactId, ...buildContactManageWhere(access) }, select: { id: true } });
+    if (!contact) return { success: false, message: 'Contact not found' };
     await db.contact.update({
-      where: { id: contactId },
+      where: { id: contact.id },
       data: {
         googleContactId: null,
         googleContactUpdatedAt: null,
@@ -3302,12 +3364,14 @@ export async function unlinkGoogleContact(contactId: string, options?: { skipRev
 export async function verifyAndHealContact(contactId: string, error: string | null) {
   if (!error?.includes('Link broken') && !error?.includes('not found')) return;
 
-  const { userId } = await auth();
-  if (!userId) return;
+  const access = await getActiveContactsAccess();
+  if (!access) return;
+  const contact = await db.contact.findFirst({ where: { id: contactId, ...buildContactManageWhere(access) }, select: { id: true } });
+  if (!contact) return;
 
   // Check connection
   const user = await db.user.findUnique({
-    where: { clerkId: userId },
+    where: { clerkId: access.userId },
     select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
   });
 
@@ -3320,18 +3384,12 @@ export async function verifyAndHealContact(contactId: string, error: string | nu
   }
 }
 
-export async function searchContactsAction(query: string) {
-  const { userId } = await auth();
-  if (!userId) return [];
-
+export async function searchContactsAction(query: string, requestedScope?: 'my' | 'location') {
   const rawQuery = String(query || '').trim();
   if (rawQuery.length < 2) return [];
 
-  const location = await getLocationContext();
-  if (!location?.id) return [];
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, location.id);
-  if (!hasAccess) return [];
+  const access = await getActiveContactsAccess();
+  if (!access) return [];
 
   const queryLower = rawQuery.toLowerCase();
   const queryDigits = rawQuery.replace(/\D/g, '');
@@ -3384,7 +3442,7 @@ export async function searchContactsAction(query: string) {
 
   const contacts = await db.contact.findMany({
     where: {
-      locationId: location.id,
+      ...buildContactVisibilityWhere(access, requestedScope),
       OR: orClauses,
     },
     take: 20,
@@ -3515,35 +3573,39 @@ export async function previewMergeContacts(sourceContactId: string, targetContac
   message?: string;
   preview?: MergeContactPreview;
 }> {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: "Unauthorized" };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, message: "Unauthorized" };
   if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) {
     return { success: false, message: "Select two different contacts." };
   }
 
   const [source, target] = await Promise.all([
-    db.contact.findUnique({
-      where: { id: sourceContactId },
+    db.contact.findFirst({
+      where: { id: sourceContactId, ...buildContactManageWhere(access) },
       select: { locationId: true },
     }),
-    db.contact.findUnique({
-      where: { id: targetContactId },
+    db.contact.findFirst({
+      where: { id: targetContactId, ...buildContactManageWhere(access) },
       select: { locationId: true },
     }),
   ]);
   if (!source) {
     const mergeHistory = await findMergeTargetForSource(db, sourceContactId);
+    const accessibleMergeTarget = mergeHistory
+      ? await db.contact.findFirst({
+          where: { id: mergeHistory.contactId, ...buildContactManageWhere(access) },
+          select: { id: true },
+        })
+      : null;
 
     return {
       success: false,
-      message: mergeHistory
-        ? `already_merged:${mergeHistory.contactId}`
+      message: accessibleMergeTarget
+        ? `already_merged:${accessibleMergeTarget.id}`
         : "Contact not found"
     };
   }
 
-  const hasAccess = await verifyUserHasAccessToLocation(userId, source.locationId);
-  if (!hasAccess) return { success: false, message: "Unauthorized" };
   if (!target) return { success: false, message: "Contact not found" };
   if (source.locationId !== target.locationId) {
     return { success: false, message: "Contacts must belong to the same location." };
@@ -3561,8 +3623,9 @@ export async function mergeContacts(
   targetContactId: string,
   fieldChoices: MergeContactFieldChoices = {}
 ) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, message: "Unauthorized" };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, message: "Unauthorized" };
+  const userId = access.userId;
 
   // Resolve internal user ID & Google sync capability
   const dbUser = await db.user.findUnique({
@@ -3574,17 +3637,23 @@ export async function mergeContacts(
   let targetConversationId: string | null = null;
 
   // Pre-transaction: Read source + target with all external IDs for post-merge cleanup
-  const source = await db.contact.findUnique({ where: { id: sourceContactId } });
-  const target = await db.contact.findUnique({ where: { id: targetContactId } });
+  const source = await db.contact.findFirst({ where: { id: sourceContactId, ...buildContactManageWhere(access) } });
+  const target = await db.contact.findFirst({ where: { id: targetContactId, ...buildContactManageWhere(access) } });
 
   if (!source) {
     // Check if already merged
     const mergeHistory = await findMergeTargetForSource(db, sourceContactId);
+    const accessibleMergeTarget = mergeHistory
+      ? await db.contact.findFirst({
+          where: { id: mergeHistory.contactId, ...buildContactManageWhere(access) },
+          select: { id: true },
+        })
+      : null;
 
     return {
       success: false,
-      message: mergeHistory
-        ? `already_merged:${mergeHistory.contactId}`
+      message: accessibleMergeTarget
+        ? `already_merged:${accessibleMergeTarget.id}`
         : "Contact not found"
     };
   }
@@ -3592,9 +3661,6 @@ export async function mergeContacts(
   if (source.locationId !== target.locationId) {
     return { success: false, message: "Contacts must belong to the same location." };
   }
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, source.locationId);
-  if (!hasAccess) return { success: false, message: "Unauthorized" };
 
   // Resolve location for GHL operations
   const location = await db.location.findUnique({
@@ -3810,19 +3876,18 @@ export async function mergeContacts(
 }
 
 export async function updateContactStage(contactId: string, newStage: string) {
-  const { userId } = await auth();
-  if (!userId) return { success: false, error: 'Unauthorized' };
+  if (!LEAD_STAGES.includes(newStage as any)) return { success: false, error: 'Invalid contact stage' };
+  const access = await getActiveContactsAccess();
+  if (!access) return { success: false, error: 'Unauthorized' };
+  const { userId, locationId } = access;
 
   const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } });
-  const contact = await db.contact.findUnique({
-    where: { id: contactId },
+  const contact = await db.contact.findFirst({
+    where: { id: contactId, ...buildContactManageWhere(access) },
     select: { leadStage: true, locationId: true }
   });
 
   if (!contact) return { success: false, error: 'Contact not found' };
-
-  const hasAccess = await verifyUserHasAccessToLocation(userId, contact.locationId);
-  if (!hasAccess) return { success: false, error: 'Unauthorized' };
 
   await db.$transaction(async (tx) => {
     await tx.contact.update({
@@ -3875,10 +3940,8 @@ export async function saveSharedContact(params: {
       return { success: false, error: 'Location not found' };
     }
 
-    const hasAccess = await verifyUserHasAccessToLocation(userId, location.id);
-    if (!hasAccess) {
-      return { success: false, error: 'Unauthorized' };
-    }
+    const access = await getActiveContactsAccess(location.id);
+    if (!access || access.userId !== userId) return { success: false, error: 'Unauthorized' };
 
     const normalizedPhone = normalizePhone(params.phoneNumber);
     const normalizedEmail = (params.email || '').trim().toLowerCase() || null;
@@ -3887,6 +3950,10 @@ export async function saveSharedContact(params: {
       const exactMatch = (await findContactsByPhoneDigitsWithFallback(db, location.id, normalizedPhone, { take: 1 }))[0];
 
       if (exactMatch) {
+        const allowed = await db.contact.findFirst({
+          where: { id: exactMatch.id, ...buildContactManageWhere(access) }, select: { id: true },
+        });
+        if (!allowed) return { success: false, error: 'A matching contact exists but is assigned to another member.' };
         return {
           success: true,
           contactId: exactMatch.id,
@@ -3904,6 +3971,10 @@ export async function saveSharedContact(params: {
       });
 
       if (emailMatch) {
+        const allowed = await db.contact.findFirst({
+          where: { id: emailMatch.id, ...buildContactManageWhere(access) }, select: { id: true },
+        });
+        if (!allowed) return { success: false, error: 'A matching contact exists but is assigned to another member.' };
         return {
           success: true,
           contactId: emailMatch.id,
@@ -3935,6 +4006,8 @@ export async function saveSharedContact(params: {
           leadSource: 'WhatsApp Contact Share',
           leadStage: 'Unassigned',
           leadPriority: 'Medium',
+          assignedUserId: access.internalUserId,
+          leadAssignedToAgent: access.internalUserId,
         },
       });
 
@@ -3950,7 +4023,7 @@ export async function saveSharedContact(params: {
         contactId: created.id,
         locationId: params.locationId,
         operation: 'create',
-        payload: { preferredUserId: dbUser?.id }
+        payload: { preferredUserId: access.internalUserId }
       });
 
       return created;
@@ -3979,6 +4052,13 @@ export async function saveSharedContact(params: {
       });
 
       if (existing) {
+        const allowed = await db.contact.findFirst({
+          where: { id: existing.id, ...buildContactManageWhere(access) },
+          select: { id: true },
+        });
+        if (!allowed) {
+          return { success: false, error: 'A matching contact exists but is assigned to another member.' };
+        }
         return {
           success: true,
           contactId: existing.id,
@@ -4015,9 +4095,9 @@ export async function checkSharedContactsSavedState(
       select: { id: true }
     });
 
-    if (!location || !(await verifyUserHasAccessToLocation(userId, location.id))) {
-       return { success: false, error: 'Location not found or unauthorized' };
-    }
+    if (!location) return { success: false, error: 'Location not found or unauthorized' };
+    const access = await getActiveContactsAccess(location.id);
+    if (!access || access.userId !== userId) return { success: false, error: 'Location not found or unauthorized' };
 
     const normalizedPhones = phoneNumbers.map(normalizePhone).filter(Boolean) as string[];
     if (normalizedPhones.length === 0) {
@@ -4030,7 +4110,7 @@ export async function checkSharedContactsSavedState(
       ? await db.contact.findMany({
           where: {
             id: { in: existingContactIds },
-            locationId: location.id,
+            ...buildContactManageWhere(access),
           },
           select: {
             id: true,

@@ -41,18 +41,24 @@ export function CompanyFilters() {
     };
 
     return (
-        <div className="flex gap-4 items-center">
-            <Input
-                placeholder="Search companies..."
-                defaultValue={searchParams.get("q")?.toString()}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="max-w-xs"
-            />
+        <div className="flex flex-wrap gap-4 items-center">
+            <div className="w-full max-w-xs">
+                <label htmlFor="company-search" className="sr-only">Search companies</label>
+                <Input
+                    id="company-search"
+                    type="search"
+                    placeholder="Search companies..."
+                    defaultValue={searchParams.get("q")?.toString()}
+                    onChange={(e) => handleSearch(e.target.value)}
+                />
+            </div>
 
-            <div className="bg-gray-100 p-1 rounded-lg flex items-center shrink-0">
+            <div role="group" aria-label="Filter companies by type" className="bg-gray-100 p-1 rounded-lg flex flex-wrap items-center">
                 {COMPANY_TYPES.map((type) => (
                     <button
                         key={type.value}
+                        type="button"
+                        aria-pressed={currentType === type.value}
                         onClick={() => handleTypeChange(type.value)}
                         className={cn(
                             "px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-md transition-all",
