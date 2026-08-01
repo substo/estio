@@ -177,6 +177,7 @@ export function WhatsAppStatus() {
     const [emailProviders, setEmailProviders] = useState<EmailProviderStatus[]>([]);
     const [phone, setPhone] = useState<string | null>(null);
     const [statusError, setStatusError] = useState<string | null>(null);
+    const [canViewWhatsAppStatus, setCanViewWhatsAppStatus] = useState(true);
     const statusPollInFlightRef = useRef(false);
 
     const applyWhatsAppStatus = (res: WhatsAppWebBridgeStatus) => {
@@ -206,6 +207,10 @@ export function WhatsAppStatus() {
                 method: 'GET',
                 cache: 'no-store',
             });
+            if (response.status === 403) {
+                setCanViewWhatsAppStatus(false);
+                return false;
+            }
             const res = await response.json();
             if (!response.ok) {
                 throw new Error(res?.error || 'Unable to check WhatsApp status.');
@@ -294,6 +299,8 @@ export function WhatsAppStatus() {
                 ? 'Connecting'
                 : 'Offline';
     const visibleEmailProviders = emailProviders.filter((provider) => provider.connected || provider.configured);
+
+    if (!canViewWhatsAppStatus) return null;
 
     return (
         <div className="flex items-center gap-2 text-xs px-2 py-1 bg-slate-50 border-b dark:border-slate-800 dark:bg-slate-950">

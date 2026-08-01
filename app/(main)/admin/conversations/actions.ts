@@ -8102,6 +8102,14 @@ async function getBasicLocationContext() {
     return getAuthenticatedLocationReadOnly();
 }
 
+async function getBasicAdminLocationContext() {
+    const access = await getActiveContactsAccess();
+    if (!access || access.role !== 'ADMIN') throw new Error('Unauthorized');
+    const location = await db.location.findUnique({ where: { id: access.locationId } });
+    if (!location) throw new Error('Unauthorized');
+    return location;
+}
+
 export async function getEmailSyncProvidersStatus() {
     try {
         const { userId: clerkUserId } = await auth();
@@ -8557,7 +8565,7 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
 
 export async function getWhatsAppWebBridgeStatus() {
     try {
-        const location = await getBasicLocationContext();
+        const location = await getBasicAdminLocationContext();
         return getWhatsAppWebBridgeStatusForLocation(location);
     } catch (error: any) {
         console.error("getWhatsAppWebBridgeStatus error:", error);
@@ -8587,7 +8595,7 @@ export async function getWhatsAppWebBridgeStatus() {
 
 export async function triggerWhatsAppWebBridgeConnection() {
     try {
-        const location = await getBasicLocationContext();
+        const location = await getBasicAdminLocationContext();
         const mode = await resolveLocationWhatsAppProviderMode(location.id);
 
         const doc = await settingsService.getDocument<any>({

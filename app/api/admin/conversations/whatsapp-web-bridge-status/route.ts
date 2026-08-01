@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { getLocationContext } from "@/lib/auth/location-context";
+import { getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 import { getWhatsAppWebBridgeStatusForLocation } from "@/lib/conversations/whatsapp-web-bridge-status";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
     try {
-        const location = await getLocationContext();
-        if (!location) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        const access = await getActiveContactsAccess();
+        if (!access || access.role !== "ADMIN") {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        const status = await getWhatsAppWebBridgeStatusForLocation(location);
+        const status = await getWhatsAppWebBridgeStatusForLocation({ id: access.locationId });
         return NextResponse.json(status, {
             headers: {
                 "Cache-Control": "no-store",
