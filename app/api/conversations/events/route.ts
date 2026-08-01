@@ -6,6 +6,9 @@ import {
     getConversationRealtimeEventsSince,
     isConversationRealtimeEnvelopeForLocation,
 } from "@/lib/realtime/conversation-events";
+import { getActiveContactsAccess } from "@/lib/contacts/active-location-access";
+import { buildConversationVisibilityWhere } from "@/lib/conversations/contact-assignment-access";
+import db from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +21,22 @@ const REDIS_CONNECTION = {
 const HEARTBEAT_INTERVAL_MS = 20_000;
 
 export async function GET(req: NextRequest) {
-    const location = await getLocationContext();
-    if (!location?.id) {
+    const [location, access] = await Promise.all([getLocationContext(), getActiveContactsAccess()]);
+    if (!location?.id || !access || access.locationId !== location.id) {
         return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
+
+    const eventIsVisible = async (event: any) => {
+        const conversationId = String(event?.conversationId || "").trim();
+        if (!conversationId) return false;
+        return !!(await db.conversation.findFirst({
+            where: {
+                id: conversationId,
+                ...buildConversationVisibilityWhere(access, "location"),
+            },
+            select: { id: true },
+        }));
+    };
 
     const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
     if (!flags.realtimeSse) {
@@ -91,17 +106,17 @@ export async function GET(req: NextRequest) {
                 const Redis = (await import("ioredis")).default;
                 subscriber = new Redis(REDIS_CONNECTION);
 
-                subscriber.on("message", (incomingChannel: string, rawMessage: string) => {
+                subscriber.on("message", async (incomingChannel: string, rawMessage: string) => {
                     if (incomingChannel !== channel) return;
 
                     try {
                         const parsed = JSON.parse(rawMessage);
                         if (!isConversationRealtimeEnvelopeForLocation(parsed, location.id)) return;
+                        if (!(await eventIsVisible(parsed))) return;
                         const eventId = parsed?.id ? String(parsed.id) : undefined;
                         sendEvent("conversation", parsed, eventId);
                     } catch {
-                        // Fallback for malformed payloads.
-                        sendEvent("conversation", { raw: rawMessage });
+                        // Malformed payloads are never forwarded across an authorization boundary.
                     }
                 });
 
@@ -121,6 +136,7 @@ export async function GET(req: NextRequest) {
                         limit: 300,
                     });
                     for (const event of replay) {
+                        if (!(await eventIsVisible(event))) continue;
                         sendEvent("conversation", event, event.id);
                     }
                 }

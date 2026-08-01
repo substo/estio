@@ -11,19 +11,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Calendar, Crown, User as UserIcon } from 'lucide-react';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import { updateUserCalendar, removeUserFromLocation, updateUserRole } from '../actions';
+import { Calendar, Crown, User as UserIcon } from 'lucide-react';
+import { updateMemberContactAccess, updateUserCalendar, updateUserRole } from '../actions';
 import { CreateCalendarDialog } from './create-calendar-dialog';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -43,7 +32,7 @@ interface TeamMemberCardProps {
         createdAt: Date;
         ghlCalendarId: string | null;
         ghlUserId: string | null;
-        locationRoles?: { role: 'ADMIN' | 'MEMBER'; invitedById: string | null }[];
+        locationRoles?: { role: 'ADMIN' | 'MEMBER'; invitedById: string | null; contactAccessScope: 'ASSIGNED_ONLY' | 'LOCATION_WIDE' }[];
     };
     calendars: Calendar[];
     isAdmin: boolean;
@@ -101,18 +90,6 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
         setLoading(false);
     };
 
-    const handleRemove = async () => {
-        setLoading(true);
-        const result = await removeUserFromLocation(user.id);
-        if (result.success) {
-            toast.success("User removed");
-            router.refresh();
-        } else {
-            toast.error(result.error || "Failed to remove user");
-        }
-        setLoading(false);
-    };
-
     return (
         <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -154,40 +131,28 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                         </Select>
                     )}
 
-                    {isAdmin && !isCurrentUser && !isOwner && (
-                        <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                    disabled={loading}
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Remove team member?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        This will remove {getDisplayName(user)}'s access to this location.
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                        onClick={handleRemove}
-                                        className="bg-red-600 hover:bg-red-700"
-                                    >
-                                        Remove
-                                    </AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
-                    )}
                 </div>
             </CardHeader>
             <CardContent>
+                {isAdmin && role === 'MEMBER' && (
+                    <form action={updateMemberContactAccess} className="mb-4 flex items-end gap-2 rounded-md border p-3">
+                        <input type="hidden" name="userId" value={user.id} />
+                        <div className="space-y-1">
+                            <label htmlFor={`contact-access-${user.id}`} className="text-xs font-medium">Contact visibility</label>
+                            <select
+                                id={`contact-access-${user.id}`}
+                                name="contactAccessScope"
+                                defaultValue={roleData?.contactAccessScope || 'ASSIGNED_ONLY'}
+                                className="h-9 rounded-md border bg-background px-3 text-sm"
+                            >
+                                <option value="ASSIGNED_ONLY">Assigned contacts only</option>
+                                <option value="LOCATION_WIDE">All location contacts</option>
+                            </select>
+                        </div>
+                        <Button type="submit" variant="outline" size="sm">Save contact access</Button>
+                        <p className="text-xs text-muted-foreground">Location-wide members can view all contacts, but manage only their own assignments.</p>
+                    </form>
+                )}
                 <div className="flex items-center justify-between">
                     <div className="text-xs text-muted-foreground">
                         Joined <span suppressHydrationWarning>{user.createdAt.toLocaleDateString()}</span>

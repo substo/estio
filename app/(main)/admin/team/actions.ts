@@ -1,12 +1,11 @@
 'use server';
 
 import db from '@/lib/db';
+import { Prisma } from '@prisma/client';
 import { clerkClient } from '@clerk/nextjs/server';
-import { cookies } from 'next/headers';
 import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { getLocationContext } from '@/lib/auth/location-context';
 import { getCalendars, createCalendarService } from '@/lib/ghl/calendars';
 import { updateGHLUser, searchGHLUsers, removeGHLUserFromLocation, createGHLUser } from '@/lib/ghl/users';
 import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
@@ -18,27 +17,41 @@ import {
     type ClerkIdentity,
     type PreviewIdentity,
 } from '@/lib/team/offboarding-preview-policy';
+import { randomUUID } from 'node:crypto';
+import {
+    createOffboardingConfirmationToken,
+    createOffboardingPreviewFingerprint,
+    isOffboardingExecutionConfigured,
+    requiredOffboardingPhrase,
+    verifyOffboardingConfirmationToken,
+    type OffboardingMode,
+    type OffboardingResponsibilityCounts,
+} from '@/lib/team/offboarding-confirmation';
+import { rebuildTaskReminderJobsForAssignee } from '@/lib/tasks/reminders';
+import { enqueueTaskSyncJobs } from '@/lib/tasks/sync-engine';
+import { enqueueViewingSyncJobs } from '@/lib/viewings/sync-engine';
+import { queueDefaultViewingLeadReminders } from '@/lib/viewings/reminders';
 import { canUpdateMemberContactAccess } from '@/lib/contacts/active-location-access';
+import { applyOffboardingResponsibilityMode, countOffboardingResponsibilities, shouldClearUserGlobalPrivateState } from '@/lib/team/offboarding-responsibilities';
 
 type OffboardingPreview = {
     asOf: string;
-    operation: 'Transfer responsibilities and deactivate';
+    operation: 'Remove access to this location';
+    mode: OffboardingMode;
+    suspendClerkGlobally: boolean;
     activeLocation: { id: string; name: string | null };
     source: PreviewIdentity & { clerkId: string };
-    successor: PreviewIdentity & { clerkId: string };
-    counts: {
-        assignedContacts: number;
-        inheritedConversations: number;
-        activeLocationDealsWithoutAssignee: number;
-        openTasks: number;
-        nonTerminalViewingSessions: number;
-        futureViewingsWithAmbiguousUserId: number;
-    };
+    successor: (PreviewIdentity & { clerkId: string }) | null;
+    counts: OffboardingResponsibilityCounts;
     unchangedShared: { label: string; count: number }[];
     preservedAttribution: { label: string; count: number }[];
     privateState: { label: string; configured: boolean; disposition: string }[];
     ambiguous: { label: string; count: number; reason: string }[];
     blockingConditions: string[];
+    confirmationToken: string | null;
+    confirmationPhrase: string;
+    fingerprint: string;
+    executionConfigured: boolean;
 };
 
 export type OffboardingPreviewResult =
@@ -46,21 +59,23 @@ export type OffboardingPreviewResult =
     | { success: false; error: string };
 
 async function getCurrentLocationId(): Promise<string> {
-    const cookieStore = await cookies();
-    let locationId = cookieStore.get('crm_location_id')?.value;
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) throw new Error('Unauthorized');
 
-    if (!locationId) {
-        const locationContext = await getLocationContext();
-        if (locationContext) {
-            locationId = locationContext.id;
-        }
+    const actor = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: {
+            locationRoles: {
+                where: { role: 'ADMIN' },
+                select: { locationId: true, location: { select: { users: { where: { clerkId: clerkUserId }, select: { id: true } } } } },
+            },
+        },
+    });
+    const activeAdminLocations = (actor?.locationRoles || []).filter((entry) => entry.location.users.length === 1);
+    if (activeAdminLocations.length !== 1) {
+        throw new Error('A single authoritative ADMIN location is required');
     }
-
-    if (!locationId) {
-        throw new Error('No location context found');
-    }
-
-    return locationId;
+    return activeAdminLocations[0].locationId;
 }
 
 async function requireAdminRole(locationId: string): Promise<string> {
@@ -69,22 +84,21 @@ async function requireAdminRole(locationId: string): Promise<string> {
         throw new Error('Unauthorized');
     }
 
-    // Try to check role via UserLocationRole, fallback to legacy check
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
-        include: {
-            locations: { where: { id: locationId } }
-        }
+        select: {
+            id: true,
+            locations: { where: { id: locationId }, select: { id: true } },
+            locationRoles: { where: { locationId, role: 'ADMIN' }, select: { id: true } },
+        },
     });
 
     if (!user) {
         throw new Error('User not found');
     }
 
-    // For now, any user connected to the location is allowed
-    // Full role check will be enabled after migration
-    if (!user.locations.length) {
-        throw new Error('User does not have access to this location');
+    if (user.locations.length !== 1 || user.locationRoles.length !== 1) {
+        throw new Error('Administrator access required');
     }
 
     return user.id;
@@ -123,10 +137,12 @@ const previewIdentitySelect = {
     locationRoles: { select: { locationId: true, role: true, location: { select: { name: true } } } },
 } as const;
 
-/** Read-only Slice 1. It deliberately has no paired execution action. */
+/** Read-only preview. Identity intent and all counts are resolved server-side. */
 export async function previewTransferResponsibilities(input: {
     sourceEmail: string;
-    successorEmail: string;
+    successorEmail?: string;
+    mode: OffboardingMode;
+    suspendClerkGlobally: boolean;
 }): Promise<OffboardingPreviewResult> {
     try {
         const { userId: actorClerkId } = await auth();
@@ -140,16 +156,22 @@ export async function previewTransferResponsibilities(input: {
         const locationId = activeMembership.locationId;
         const sourceEmail = normalizeOffboardingEmail(input.sourceEmail || '');
         const successorEmail = normalizeOffboardingEmail(input.successorEmail || '');
-        if (!sourceEmail || !successorEmail) throw new Error('Source and successor emails are required');
+        if (!['TRANSFER', 'KEEP_ASSIGNED'].includes(input.mode)) throw new Error('A valid offboarding mode is required');
+        if (!sourceEmail) throw new Error('Source email is required');
+        if (input.mode === 'TRANSFER' && !successorEmail) throw new Error('Successor email is required for TRANSFER');
 
         const [sourceRecords, successorRecords, clerk] = await Promise.all([
             db.user.findMany({ where: { email: { equals: sourceEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
-            db.user.findMany({ where: { email: { equals: successorEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
+            input.mode === 'TRANSFER'
+                ? db.user.findMany({ where: { email: { equals: successorEmail, mode: 'insensitive' } }, select: previewIdentitySelect })
+                : Promise.resolve([]),
             clerkClient(),
         ]);
         const [sourceClerkResult, successorClerkResult] = await Promise.all([
             clerk.users.getUserList({ emailAddress: [sourceEmail], limit: 10 }),
-            clerk.users.getUserList({ emailAddress: [successorEmail], limit: 10 }),
+            input.mode === 'TRANSFER'
+                ? clerk.users.getUserList({ emailAddress: [successorEmail], limit: 10 })
+                : Promise.resolve({ data: [] }),
         ]);
         const mapClerk = (users: typeof sourceClerkResult.data): ClerkIdentity[] => users.map((user) => ({
             id: user.id,
@@ -159,25 +181,19 @@ export async function previewTransferResponsibilities(input: {
             label: 'Source', email: sourceEmail, localMatches: sourceRecords.map(toPreviewIdentity),
             clerkMatches: mapClerk(sourceClerkResult.data), activeLocationId: locationId,
         });
-        const successor = requireExactPreviewIdentity({
+        const successor = input.mode === 'TRANSFER' ? requireExactPreviewIdentity({
             label: 'Successor', email: successorEmail, localMatches: successorRecords.map(toPreviewIdentity),
-            clerkMatches: mapClerk(successorClerkResult.data), activeLocationId: locationId,
-        });
-        assertOffboardingPair(source, successor);
+            clerkMatches: mapClerk(successorClerkResult.data as typeof sourceClerkResult.data), activeLocationId: locationId,
+        }) : null;
+        if (successor) assertOffboardingPair(source, successor);
 
         const now = new Date();
         const [
-            adminCount, assignedContacts, inheritedConversations, activeDeals, openTasks, viewingSessions,
-            futureViewings, properties, companies, projects, prospects, contactHistory, messages,
+            adminCount, counts, properties, companies, projects, prospects, contactHistory, messages,
             propertyAttribution, legacyUnresolvedContacts, privateUser,
         ] = await Promise.all([
             db.userLocationRole.count({ where: { locationId, role: 'ADMIN', user: { locations: { some: { id: locationId } } } } }),
-            db.contact.count({ where: { locationId, assignedUserId: source.id } }),
-            db.conversation.count({ where: { locationId, contact: { locationId, assignedUserId: source.id } } }),
-            db.dealContext.count({ where: { locationId, stage: 'ACTIVE' } }),
-            db.contactTask.count({ where: { locationId, assignedUserId: source.id, deletedAt: null, status: 'open' } }),
-            db.viewingSession.count({ where: { locationId, agentId: source.id, status: { notIn: ['completed', 'expired'] } } }),
-            db.viewing.count({ where: { userId: source.id, date: { gte: now }, status: { notIn: ['completed', 'cancelled', 'canceled', 'no_show'] }, OR: [{ contact: { locationId } }, { property: { locationId } }] } }),
+            countOffboardingResponsibilities(db, { locationId, sourceUserId: source.id, viewingCutoff: now }),
             db.property.count({ where: { locationId } }),
             db.company.count({ where: { locationId } }),
             db.project.count({ where: { locationId } }),
@@ -202,20 +218,47 @@ export async function previewTransferResponsibilities(input: {
         const blockingConditions = [
             ...(source.memberships.find((membership) => membership.locationId === locationId)?.role === 'ADMIN' && adminCount <= 1
                 ? ['Source is the final active ADMIN for this location'] : []),
-            ...(otherMemberships.length ? ['Source has other location memberships; global retirement requires a separate explicit decision'] : []),
-            'DealContext has no authoritative user assignment field; deal transfer is deferred to Slice 4',
-            'Viewing.userId is not confirmed as current responsibility; future viewings remain ambiguous',
+            ...(input.suspendClerkGlobally && otherMemberships.length
+                ? ['Global identity retirement is unavailable while the source has other location memberships'] : []),
+            ...(!isOffboardingExecutionConfigured() ? ['OFFBOARDING_CONFIRMATION_SECRET is not configured'] : []),
         ];
+
+        const fingerprint = createOffboardingPreviewFingerprint({
+            locationId,
+            sourceUserId: source.id,
+            successorUserId: successor?.id || null,
+            mode: input.mode,
+            suspendClerkGlobally: input.suspendClerkGlobally,
+            counts,
+        });
+        const confirmationPhrase = requiredOffboardingPhrase(input.mode, source.email);
+        const confirmationToken = blockingConditions.length === 0
+            ? createOffboardingConfirmationToken({
+                confirmationId: randomUUID(),
+                actorUserId: actorRecord!.id,
+                locationId,
+                sourceUserId: source.id,
+                successorUserId: successor?.id || null,
+                sourceClerkId: source.clerkId,
+                successorClerkId: successor?.clerkId || null,
+                sourceEmail,
+                successorEmail: successor?.email || null,
+                mode: input.mode,
+                suspendClerkGlobally: input.suspendClerkGlobally,
+                previewFingerprint: fingerprint,
+                responsibilityCutoff: now.toISOString(),
+                issuedAt: Date.now(),
+            })
+            : null;
 
         return { success: true, preview: {
             asOf: now.toISOString(),
-            operation: 'Transfer responsibilities and deactivate',
+            operation: 'Remove access to this location',
+            mode: input.mode,
+            suspendClerkGlobally: input.suspendClerkGlobally,
             activeLocation: { id: locationId, name: activeMembership.locationName },
             source, successor,
-            counts: {
-                assignedContacts, inheritedConversations, activeLocationDealsWithoutAssignee: activeDeals,
-                openTasks, nonTerminalViewingSessions: viewingSessions, futureViewingsWithAmbiguousUserId: futureViewings,
-            },
+            counts,
             unchangedShared: [
                 { label: 'Properties', count: properties }, { label: 'Companies', count: companies },
                 { label: 'Projects', count: projects }, { label: 'Prospecting records', count: prospects },
@@ -226,22 +269,289 @@ export async function previewTransferResponsibilities(input: {
                 { label: 'Property creator/updater records', count: propertyAttribution },
             ],
             privateState: [
-                { label: 'Google OAuth and Gmail sync', configured: !!(privateUser?.googleAccessToken || privateUser?.googleRefreshToken || privateUser?.googleSyncToken || privateUser?.googleSyncEnabled || privateUser?.gmailSyncState), disposition: 'Disable/revoke; never transfer credentials or cursors' },
-                { label: 'Outlook OAuth and browser session', configured: !!(privateUser?.outlookAccessToken || privateUser?.outlookRefreshToken || privateUser?.outlookSyncEnabled || privateUser?.outlookPasswordEncrypted || privateUser?.outlookSessionCookies || privateUser?.outlookSyncState), disposition: 'Disable/revoke; never transfer credentials or cookies' },
-                { label: 'Personal CRM credentials', configured: !!(privateUser?.crmUsername || privateUser?.crmPassword), disposition: 'Disable; never transfer credentials' },
-                { label: 'Web push subscriptions', configured: !!privateUser?._count.webPushSubscriptions, disposition: 'Disable; never transfer subscriptions' },
+                { label: 'Google OAuth and Gmail sync', configured: !!(privateUser?.googleAccessToken || privateUser?.googleRefreshToken || privateUser?.googleSyncToken || privateUser?.googleSyncEnabled || privateUser?.gmailSyncState), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials or cursors' },
+                { label: 'Outlook OAuth and browser session', configured: !!(privateUser?.outlookAccessToken || privateUser?.outlookRefreshToken || privateUser?.outlookSyncEnabled || privateUser?.outlookPasswordEncrypted || privateUser?.outlookSessionCookies || privateUser?.outlookSyncState), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials or cookies' },
+                { label: 'Personal CRM credentials', configured: !!(privateUser?.crmUsername || privateUser?.crmPassword), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials' },
+                { label: 'Web push subscriptions', configured: !!privateUser?._count.webPushSubscriptions, disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer subscriptions' },
                 { label: 'Notifications and reminder preferences', configured: !!(privateUser?._count.userNotifications || privateUser?.taskReminderPreference), disposition: 'Retain privately; never copy to successor' },
                 { label: 'Clerk sessions', configured: true, disposition: 'Location access removal is authoritative; global suspension requires scope confirmation' },
             ],
             ambiguous: [
-                { label: 'Active location deals', count: activeDeals, reason: 'No assignee field exists' },
-                { label: 'Future viewings', count: futureViewings, reason: 'Viewing.userId may be historical attribution' },
+                { label: 'Active deals without a safe assignee', count: counts.activeUnassignedDeals, reason: 'Conservative Deal backfill could not classify these; ADMIN must assign them explicitly' },
                 { label: 'Legacy contacts left unassigned', count: legacyUnresolvedContacts, reason: 'Legacy identifier was not guessed or backfilled; ADMIN must resolve it explicitly' },
             ],
             blockingConditions,
+            confirmationToken,
+            confirmationPhrase,
+            fingerprint,
+            executionConfigured: isOffboardingExecutionConfigured(),
         } };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unable to build preview' };
+    }
+}
+
+export type ExecuteOffboardingResult =
+    | { success: true; auditId: string; counts: Record<string, number>; externalErrors: string[] }
+    | { success: false; error: string };
+
+/**
+ * Final execution path. It accepts no client location, IDs, roles, or counts.
+ * A fresh server preview and an exact, short-lived signed confirmation are mandatory.
+ */
+export async function executeTransferResponsibilities(input: {
+    confirmationToken: string;
+    confirmationPhrase: string;
+    acknowledgeNoHistoricalRewrite: boolean;
+}): Promise<ExecuteOffboardingResult> {
+    let localCommit: { auditId: string; counts: Record<string, number>; taskIds: string[]; viewingIds: string[] } | null = null;
+    try {
+        if (!input.acknowledgeNoHistoricalRewrite) throw new Error('Confirmation acknowledgement is required');
+        const token = verifyOffboardingConfirmationToken(input.confirmationToken);
+        const { userId: actorClerkId } = await auth();
+        if (!actorClerkId) throw new Error('Unauthorized');
+
+        const actor = await db.user.findUnique({ where: { clerkId: actorClerkId }, select: { id: true } });
+        if (!actor || actor.id !== token.actorUserId) throw new Error('Confirmation actor does not match');
+        if (input.confirmationPhrase !== requiredOffboardingPhrase(token.mode, token.sourceEmail)) {
+            throw new Error('Confirmation phrase does not match');
+        }
+
+        const fresh = await previewTransferResponsibilities({
+            sourceEmail: token.sourceEmail,
+            successorEmail: token.successorEmail || undefined,
+            mode: token.mode,
+            suspendClerkGlobally: token.suspendClerkGlobally,
+        });
+        if (!fresh.success) throw new Error(fresh.error);
+        const preview = fresh.preview;
+        if (preview.blockingConditions.length) throw new Error(preview.blockingConditions.join('; '));
+        if (
+            preview.activeLocation.id !== token.locationId
+            || preview.source.id !== token.sourceUserId
+            || (preview.successor?.id || null) !== token.successorUserId
+            || preview.source.clerkId !== token.sourceClerkId
+            || (preview.successor?.clerkId || null) !== token.successorClerkId
+        ) {
+            throw new Error('Fresh preview no longer matches confirmation');
+        }
+
+        if (preview.fingerprint !== token.previewFingerprint) {
+            throw new Error('Responsibilities changed since preview; create a fresh preview');
+        }
+
+        const now = new Date();
+        localCommit = await db.$transaction(async (tx) => {
+            const [actorRole, sourceRole, successorRole, activeAdminCount, otherRoleCount, otherConnectionCount] = await Promise.all([
+                tx.userLocationRole.findFirst({ where: { userId: actor.id, locationId: token.locationId, role: 'ADMIN', user: { locations: { some: { id: token.locationId } } } }, select: { id: true } }),
+                tx.userLocationRole.findFirst({ where: { userId: token.sourceUserId, locationId: token.locationId, user: { locations: { some: { id: token.locationId } } } }, select: { id: true, role: true } }),
+                token.successorUserId
+                    ? tx.userLocationRole.findFirst({ where: { userId: token.successorUserId, locationId: token.locationId, user: { locations: { some: { id: token.locationId } } } }, select: { id: true } })
+                    : Promise.resolve(null),
+                tx.userLocationRole.count({ where: { locationId: token.locationId, role: 'ADMIN', user: { locations: { some: { id: token.locationId } } } } }),
+                tx.userLocationRole.count({ where: { userId: token.sourceUserId, locationId: { not: token.locationId } } }),
+                tx.location.count({ where: { id: { not: token.locationId }, users: { some: { id: token.sourceUserId } } } }),
+            ]);
+            if (!actorRole || !sourceRole || (token.mode === 'TRANSFER' && !successorRole)) throw new Error('Active membership changed; build a new preview');
+            if (sourceRole.role === 'ADMIN' && activeAdminCount <= 1) throw new Error('Source is the final active ADMIN');
+            const hasOtherMembership = otherRoleCount > 0 || otherConnectionCount > 0;
+            if (token.suspendClerkGlobally && hasOtherMembership) {
+                throw new Error('Global identity retirement is unavailable while other memberships exist');
+            }
+
+            const transactionalCounts = await countOffboardingResponsibilities(tx, {
+                locationId: token.locationId,
+                sourceUserId: token.sourceUserId,
+                viewingCutoff: new Date(token.responsibilityCutoff),
+            });
+            const transactionalFingerprint = createOffboardingPreviewFingerprint({
+                locationId: token.locationId,
+                sourceUserId: token.sourceUserId,
+                successorUserId: token.successorUserId,
+                mode: token.mode,
+                suspendClerkGlobally: token.suspendClerkGlobally,
+                counts: transactionalCounts,
+            });
+            if (transactionalFingerprint !== token.previewFingerprint) {
+                throw new Error('Responsibilities changed during confirmation; create a fresh preview');
+            }
+
+            const [taskRows, viewingRows] = token.mode === 'TRANSFER' ? await Promise.all([
+                tx.contactTask.findMany({
+                    where: { locationId: token.locationId, assignedUserId: token.sourceUserId, deletedAt: null, status: 'open' },
+                    select: { id: true },
+                }),
+                tx.viewing.findMany({
+                    where: {
+                        userId: token.sourceUserId,
+                        date: { gte: new Date(token.responsibilityCutoff) },
+                        status: { notIn: ['completed', 'cancelled', 'canceled', 'no_show'] },
+                        OR: [{ contact: { locationId: token.locationId } }, { property: { locationId: token.locationId } }],
+                    },
+                    select: { id: true },
+                }),
+            ]) : [[], []];
+
+            const responsibilityChanges = await applyOffboardingResponsibilityMode(tx, {
+                mode: token.mode,
+                locationId: token.locationId,
+                sourceUserId: token.sourceUserId,
+                successorUserId: token.successorUserId,
+                taskIds: taskRows.map((row) => row.id),
+                viewingIds: viewingRows.map((row) => row.id),
+                viewingCutoff: new Date(token.responsibilityCutoff),
+            });
+            if (token.mode === 'TRANSFER' && (
+                responsibilityChanges.contacts !== transactionalCounts.assignedContacts
+                || responsibilityChanges.deals !== transactionalCounts.activeAssignedDeals
+                || responsibilityChanges.tasks !== transactionalCounts.openTasks
+                || responsibilityChanges.viewingSessions !== transactionalCounts.nonTerminalViewingSessions
+                || responsibilityChanges.futureViewings !== transactionalCounts.futureActionableViewings
+            )) throw new Error('Responsibility transfer count changed; transaction rolled back');
+
+            const canceledReminders = await tx.taskReminderJob.updateMany({
+                where: { locationId: token.locationId, userId: token.sourceUserId, status: { in: ['pending', 'processing', 'failed'] } },
+                data: { status: 'canceled', processedAt: now, lockedAt: null, lockedBy: null, lastError: 'Canceled by location offboarding' },
+            });
+            const clearPrivateState = shouldClearUserGlobalPrivateState(otherRoleCount, otherConnectionCount);
+
+            await Promise.all([
+                ...(clearPrivateState ? [
+                    tx.gmailSyncState.deleteMany({ where: { userId: token.sourceUserId } }),
+                    tx.outlookSyncState.deleteMany({ where: { userId: token.sourceUserId } }),
+                    tx.googleContactDirectoryState.deleteMany({ where: { userId: token.sourceUserId } }),
+                    tx.googleContactDirectoryEntry.deleteMany({ where: { userId: token.sourceUserId } }),
+                    tx.webPushSubscription.deleteMany({ where: { userId: token.sourceUserId } }),
+                    tx.gmailSyncOutbox.updateMany({
+                    where: { userId: token.sourceUserId, status: { in: ['pending', 'processing', 'failed'] } },
+                    data: { status: 'disabled', processedAt: now, lockedAt: null, lockedBy: null, lastError: 'Disabled by user offboarding' },
+                    }),
+                ] : []),
+                tx.user.update({
+                    where: { id: token.sourceUserId },
+                    data: {
+                        ...(clearPrivateState ? {
+                            googleAccessToken: null, googleRefreshToken: null, googleSyncToken: null,
+                            googleSyncEnabled: false, googleAutoSyncEnabled: false,
+                            outlookAccessToken: null, outlookRefreshToken: null, outlookSyncEnabled: false,
+                            outlookSubscriptionId: null, outlookSubscriptionExpiry: null,
+                            outlookPasswordEncrypted: null, outlookSessionCookies: null, outlookSessionExpiry: null,
+                            crmUsername: null, crmPassword: null,
+                        } : {}),
+                        locations: { disconnect: { id: token.locationId } },
+                    },
+                }),
+                tx.userLocationRole.delete({ where: { id: sourceRole.id } }),
+            ]);
+
+            const audit = await tx.userOffboardingAudit.create({
+                data: {
+                    locationId: token.locationId,
+                    actorUserId: actor.id,
+                    sourceUserId: token.sourceUserId,
+                    successorUserId: token.successorUserId,
+                    mode: token.mode,
+                    operation: 'Remove access to this location',
+                    confirmationId: token.confirmationId,
+                    status: 'LOCAL_COMPLETE',
+                    globalSuspensionRequested: token.suspendClerkGlobally,
+                    previewJson: {
+                        asOf: preview.asOf,
+                        mode: token.mode,
+                        suspendClerkGlobally: token.suspendClerkGlobally,
+                        fingerprint: token.previewFingerprint,
+                        counts: preview.counts,
+                        unchangedShared: preview.unchangedShared,
+                        preservedAttribution: preview.preservedAttribution,
+                        privateState: preview.privateState.map(({ label, configured, disposition }) => ({ label, configured, disposition })),
+                    },
+                    resultJson: { ...responsibilityChanges, canceledReminderJobs: canceledReminders.count },
+                },
+                select: { id: true },
+            });
+            return { auditId: audit.id, counts: { ...responsibilityChanges, canceledReminderJobs: canceledReminders.count }, taskIds: taskRows.map((row) => row.id), viewingIds: viewingRows.map((row) => row.id) };
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        const transactionResult = localCommit;
+
+        const externalErrors: string[] = [];
+        const recordExternalError = (description: string, error: unknown) => {
+            console.error(`[Team offboarding] ${description}`, error);
+            externalErrors.push(description);
+        };
+        for (const taskId of transactionResult.taskIds) {
+            try { await enqueueTaskSyncJobs({ taskId, operation: 'update' }); }
+            catch (error) { recordExternalError('Task synchronization requires attention', error); }
+        }
+        if (token.successorUserId) {
+            try { await rebuildTaskReminderJobsForAssignee(token.successorUserId); }
+            catch (error) { recordExternalError('Task reminder rebuilding requires attention', error); }
+        }
+        for (const viewingId of transactionResult.viewingIds) {
+            try { await enqueueViewingSyncJobs({ viewingId, operation: 'update' }); }
+            catch (error) { recordExternalError('Viewing synchronization requires attention', error); }
+            try { await queueDefaultViewingLeadReminders(viewingId); }
+            catch (error) { recordExternalError('Viewing reminder rebuilding requires attention', error); }
+        }
+
+        let sourceUser: { clerkId: string | null; ghlUserId: string | null } | null = null;
+        let location: { ghlLocationId: string | null } | null = null;
+        try {
+            [sourceUser, location] = await Promise.all([
+                db.user.findUnique({ where: { id: token.sourceUserId }, select: { clerkId: true, ghlUserId: true } }),
+                db.location.findUnique({ where: { id: token.locationId }, select: { ghlLocationId: true } }),
+            ]);
+        } catch (error) { recordExternalError('External account cleanup could not be evaluated', error); }
+        if (sourceUser?.ghlUserId && location?.ghlLocationId) {
+            try {
+                const removed = await removeGHLUserFromLocation(location.ghlLocationId, sourceUser.ghlUserId);
+                if (!removed) throw new Error('Provider returned an unsuccessful result');
+            } catch (error) { recordExternalError('GHL access cleanup requires attention', error); }
+        }
+        if (token.suspendClerkGlobally && sourceUser?.clerkId) {
+            try {
+                const clerk = await clerkClient();
+                const sessions = await clerk.sessions.getSessionList({ userId: sourceUser.clerkId, limit: 100 });
+                for (const session of sessions.data) await clerk.sessions.revokeSession(session.id);
+                await clerk.users.banUser(sourceUser.clerkId);
+            } catch (error) {
+                recordExternalError('Global Clerk retirement requires attention', error);
+            }
+        }
+
+        try {
+            await db.userOffboardingAudit.update({
+                where: { id: transactionResult.auditId },
+                data: {
+                    status: externalErrors.length ? 'COMPLETED_WITH_EXTERNAL_ERRORS' : 'COMPLETED',
+                    resultJson: { ...transactionResult.counts, externalErrors },
+                },
+            });
+        } catch (error) {
+            recordExternalError('Audit finalization requires attention; the LOCAL_COMPLETE audit remains authoritative', error);
+        }
+        try {
+            revalidatePath('/admin/team');
+            revalidatePath('/admin/contacts');
+            revalidatePath('/admin/conversations');
+        } catch (error) { recordExternalError('UI cache refresh requires attention', error); }
+        return { success: true, auditId: transactionResult.auditId, counts: transactionResult.counts, externalErrors };
+    } catch (error) {
+        if (localCommit) {
+            console.error('[Team offboarding] Unexpected post-commit failure', error);
+            return {
+                success: true,
+                auditId: localCommit.auditId,
+                counts: localCommit.counts,
+                externalErrors: ['Unexpected external cleanup failure requires attention'],
+            };
+        }
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+            return { success: false, error: 'Membership changed concurrently; create a fresh preview' };
+        }
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            return { success: false, error: 'This confirmation was already used; create a fresh preview' };
+        }
+        return { success: false, error: error instanceof Error ? error.message : 'Offboarding failed' };
     }
 }
 
@@ -250,32 +560,24 @@ export async function previewTransferResponsibilities(input: {
 export async function updateMemberContactAccess(formData: FormData): Promise<void> {
     let outcome = 'error';
     try {
-        const location = await getLocationContext();
-        const { userId: clerkUserId } = await auth();
+        const locationId = await getCurrentLocationId();
+        await requireAdminRole(locationId);
         const targetUserId = String(formData.get('userId') || '').trim();
         const scope = String(formData.get('contactAccessScope') || '');
-        if (!location || !clerkUserId || !targetUserId || !['ASSIGNED_ONLY', 'LOCATION_WIDE'].includes(scope)) {
-            throw new Error('Invalid request');
-        }
+        if (!targetUserId || !['ASSIGNED_ONLY', 'LOCATION_WIDE'].includes(scope)) throw new Error('Invalid request');
 
-        const [actor, target] = await Promise.all([
-            db.userLocationRole.findFirst({
-                where: { locationId: location.id, role: 'ADMIN', user: { clerkId: clerkUserId, locations: { some: { id: location.id } } } },
-                select: { role: true },
-            }),
-            db.userLocationRole.findFirst({
-                where: { locationId: location.id, userId: targetUserId, role: 'MEMBER', user: { locations: { some: { id: location.id } } } },
-                select: { id: true, role: true },
-            }),
-        ]);
-        if (!actor || !target || !canUpdateMemberContactAccess(actor.role, target.role)) throw new Error('Forbidden');
-
+        const target = await db.userLocationRole.findFirst({
+            where: { locationId, userId: targetUserId, role: 'MEMBER', user: { locations: { some: { id: locationId } } } },
+            select: { id: true, role: true },
+        });
+        if (!target || !canUpdateMemberContactAccess('ADMIN', target.role)) throw new Error('Forbidden');
         await db.userLocationRole.update({
             where: { id: target.id },
             data: { contactAccessScope: scope as 'ASSIGNED_ONLY' | 'LOCATION_WIDE' },
         });
         revalidatePath('/admin/team');
         revalidatePath('/admin/contacts');
+        revalidatePath('/admin/conversations');
         outcome = 'updated';
     } catch (error) {
         console.error('[Team] Failed to update contact access:', error);
@@ -465,7 +767,9 @@ export async function inviteUserToLocation(formData: FormData) {
         // Fix: Check for existing pending invitations and revoke them to prevent 422 Error
         try {
             const pendingInvites = await client.invitations.getInvitationList({ status: 'pending' });
-            const existingInvite = pendingInvites.data.find(inv => inv.emailAddress === normalizedEmail);
+            const existingInvite = pendingInvites.data.find(inv =>
+                inv.emailAddress.toLowerCase() === normalizedEmail && inv.publicMetadata?.locationId === locationId
+            );
 
             if (existingInvite) {
                 console.log(`[Team] Found pending invitation for ${normalizedEmail}, revoking to send fresh one.`);
@@ -504,7 +808,10 @@ export async function revokeInvitation(invitationId: string) {
 
     try {
         const client = await clerkClient();
-        await client.invitations.revokeInvitation(invitationId);
+        const invitations = await client.invitations.getInvitationList({ status: 'pending' });
+        const invitation = invitations.data.find((entry) => entry.id === invitationId && entry.publicMetadata?.locationId === locationId);
+        if (!invitation) return { success: false, error: 'Invitation not found for this location' };
+        await client.invitations.revokeInvitation(invitation.id);
         revalidatePath('/admin/team');
         return { success: true };
     } catch (error) {
@@ -525,7 +832,7 @@ export async function resendInvitation(invitationId: string) {
         const invitationList = await client.invitations.getInvitationList({ status: 'pending' });
         const invitation = invitationList.data.find((inv) => inv.id === invitationId);
 
-        if (!invitation) {
+        if (!invitation || invitation.publicMetadata?.locationId !== locationId) {
             console.warn(`[ResendInvitation] Invitation ${invitationId} NOT FOUND in pending list.`);
             return { success: false, error: 'Invitation not found' };
         }
@@ -578,14 +885,23 @@ export async function resendInvitation(invitationId: string) {
 
 export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER') {
     const locationId = await getCurrentLocationId();
-    await requireAdminRole(locationId);
+    const adminUserId = await requireAdminRole(locationId);
 
     try {
-        // 1. Update DB Role
-        await db.userLocationRole.update({
-            where: { userId_locationId: { userId, locationId } },
-            data: { role: newRole },
-        });
+        await db.$transaction(async (tx) => {
+            const [actorRole, targetRole] = await Promise.all([
+                tx.userLocationRole.findFirst({ where: { userId: adminUserId, locationId, role: 'ADMIN', user: { locations: { some: { id: locationId } } } }, select: { id: true } }),
+                tx.userLocationRole.findFirst({ where: { userId, locationId, user: { locations: { some: { id: locationId } } } }, select: { id: true, role: true } }),
+            ]);
+            if (!actorRole) throw new Error('Administrator access changed');
+            if (!targetRole) throw new Error('Team member not found for this location');
+            if (newRole === 'MEMBER' && adminUserId === userId) throw new Error('You cannot demote yourself');
+            if (newRole === 'MEMBER' && targetRole.role === 'ADMIN') {
+                const activeAdmins = await tx.userLocationRole.count({ where: { locationId, role: 'ADMIN', user: { locations: { some: { id: locationId } } } } });
+                if (activeAdmins <= 1) throw new Error('The final active ADMIN cannot be demoted');
+            }
+            await tx.userLocationRole.update({ where: { id: targetRole.id }, data: { role: newRole } });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
         // 2. Sync to Clerk & GHL
         const user = await db.user.findUnique({
@@ -662,76 +978,18 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
     }
 }
 
-export async function removeUserFromLocation(userId: string) {
-    const locationId = await getCurrentLocationId();
-    const adminUserId = await requireAdminRole(locationId);
-
-    // Prevent self-removal
-    const adminUser = await db.user.findUnique({ where: { id: adminUserId } });
-    if (adminUser?.id === userId) {
-        return { success: false, error: 'Cannot remove yourself' };
-    }
-
-    try {
-        // 0. Get user details for robust offboarding
-        const userToRemove = await db.user.findUnique({
-            where: { id: userId },
-            include: { locations: { where: { id: locationId } } }
-        });
-
-        if (userToRemove) {
-            // 1. GHL OFFBOARDING
-            // If they have a connected GHL User ID and this location has a GHL Location ID...
-            const location = await db.location.findUnique({ where: { id: locationId } });
-
-            if (isGhlIntegrationEnabled() && userToRemove.ghlUserId && location?.ghlLocationId) {
-                console.log(`[Team] Offboarding User ${userId} from GHL...`);
-                await removeGHLUserFromLocation(location.ghlLocationId, userToRemove.ghlUserId);
-            }
-
-            // 2. GOOGLE SYNC OFFBOARDING
-            // Revoke Google Sync to prevent zombie updates or leaked data
-            if (userToRemove.googleSyncEnabled || userToRemove.googleRefreshToken) {
-                console.log(`[Team] Revoking Google Sync for User ${userId}`);
-                await db.user.update({
-                    where: { id: userId },
-                    data: {
-                        googleSyncEnabled: false,
-                        googleRefreshToken: null,
-                        googleAccessToken: null,
-                        googleSyncToken: null
-                    }
-                });
-            }
-        }
-
-        // 3. REMOVE ACCESS (Local)
-        // Try to delete role (will fail gracefully if table doesn't exist)
-        try {
-            await db.userLocationRole.delete({
-                where: { userId_locationId: { userId, locationId } },
-            });
-        } catch (e) {
-            console.warn('[Team] UserLocationRole table not ready, skipping role deletion');
-        }
-
-        // Disconnect from location
-        await db.location.update({
-            where: { id: locationId },
-            data: { users: { disconnect: { id: userId } } }
-        });
-
-        revalidatePath('/admin/team');
-        return { success: true };
-    } catch (error) {
-        console.error('[Team] Failed to remove user:', error);
-        return { success: false, error: 'Failed to remove user' };
-    }
+export async function removeUserFromLocation(_userId: string) {
+    return {
+        success: false,
+        error: 'Direct removal is disabled. Use Transfer responsibilities and deactivate with a fresh confirmed preview.',
+    };
 }
 
 // ============ GHL CALENDAR MANAGEMENT (from old settings/team) ============
 
-export async function getGHLCalendars(locationId: string) {
+export async function getGHLCalendars() {
+    const locationId = await getCurrentLocationId();
+    await requireAdminRole(locationId);
     if (!isGhlIntegrationEnabled()) {
         return [];
     }
@@ -751,8 +1009,12 @@ export async function getGHLCalendars(locationId: string) {
 
 export async function updateUserCalendar(userId: string, calendarId: string | null) {
     try {
+        const locationId = await getCurrentLocationId();
+        await requireAdminRole(locationId);
+        const target = await db.user.findFirst({ where: { id: userId, locations: { some: { id: locationId } } }, select: { id: true } });
+        if (!target) return { success: false, error: 'Team member not found for this location' };
         await db.user.update({
-            where: { id: userId },
+            where: { id: target.id },
             data: { ghlCalendarId: calendarId },
         });
         revalidatePath('/admin/team');
@@ -768,29 +1030,28 @@ export async function createGHLCalendarForUser(
     data: { name: string; slotDuration: number }
 ) {
     try {
+        const activeLocationId = await getCurrentLocationId();
+        await requireAdminRole(activeLocationId);
         if (!isGhlIntegrationEnabled()) {
             return { success: false, message: 'GHL integration is paused.' };
         }
 
-        const adminUser = await auth();
-        if (!adminUser.userId) return { success: false, message: 'Unauthorized' };
-
-        const user = await db.user.findUnique({
-            where: { id: userId },
-            include: { locations: true }
+        const user = await db.user.findFirst({
+            where: { id: userId, locations: { some: { id: activeLocationId } } },
+            include: { locations: { where: { id: activeLocationId } } }
         });
 
         if (!user) return { success: false, message: 'User not found' };
 
-        const locationId = user.locations[0]?.ghlLocationId;
-        if (!locationId) return { success: false, message: 'User has no GHL Location' };
+        const ghlLocationId = user.locations[0]?.ghlLocationId;
+        if (!ghlLocationId) return { success: false, message: 'User has no GHL Location' };
 
         if (!user.ghlUserId) {
             return { success: false, message: 'User is not linked to a GHL User ID yet.' };
         }
 
         const newCalendar = await createCalendarService({
-            locationId,
+            locationId: ghlLocationId,
             name: data.name,
             duration: data.slotDuration,
             teamMembers: [user.ghlUserId],
@@ -830,8 +1091,8 @@ export async function updateTeamMemberProfile(formData: FormData) {
 
     try {
         // 1. Get current user data to ensure we have GHL/Clerk IDs
-        const existingUser = await db.user.findUnique({
-            where: { id: userId },
+        const existingUser = await db.user.findFirst({
+            where: { id: userId, locations: { some: { id: locationId } } },
             include: {
                 locationRoles: {
                     where: { locationId },
@@ -840,8 +1101,8 @@ export async function updateTeamMemberProfile(formData: FormData) {
             }
         });
 
-        if (!existingUser) {
-            return { success: false, error: 'User not found' };
+        if (!existingUser || existingUser.locationRoles.length !== 1) {
+            return { success: false, error: 'Team member not found for this location' };
         }
 
         // 2. Update local DB

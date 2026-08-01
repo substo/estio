@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sendReply } from "@/app/(main)/admin/conversations/actions";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { parseSendReplyApiPayload } from "@/lib/conversations/send-reply-contract";
+import { getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 
 function serializeSendError(error: unknown): string {
     if (error instanceof Error) return error.message;
@@ -15,8 +16,8 @@ function serializeSendError(error: unknown): string {
 
 export async function POST(request: Request) {
     try {
-        const location = await getLocationContext();
-        if (!location?.id) {
+        const [location, access] = await Promise.all([getLocationContext(), getActiveContactsAccess()]);
+        if (!location?.id || !access || access.locationId !== location.id) {
             return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
         }
 

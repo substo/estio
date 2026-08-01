@@ -27,8 +27,17 @@ const CONVERSATION_LIST_CONTACT_SELECT = {
     contactType: true,
 } as const;
 
-export function buildConversationStatusWhere(status: ConversationListStatus, locationId: string) {
-    const where: any = { locationId };
+export function buildConversationStatusWhere(
+    status: ConversationListStatus,
+    locationId: string,
+    assignedUserId?: string,
+) {
+    const where: any = {
+        locationId,
+        ...(assignedUserId
+            ? { contact: { is: { locationId, assignedUserId } } }
+            : {}),
+    };
     if (status === "active") {
         where.deletedAt = null;
         where.archivedAt = null;
@@ -41,10 +50,17 @@ export function buildConversationStatusWhere(status: ConversationListStatus, loc
     return where;
 }
 
-export function buildRankedConversationHydrationWhere(locationId: string, conversationIds: string[]) {
+export function buildRankedConversationHydrationWhere(
+    locationId: string,
+    conversationIds: string[],
+    assignedUserId?: string,
+) {
     return {
         locationId,
         id: { in: conversationIds },
+        ...(assignedUserId
+            ? { contact: { is: { locationId, assignedUserId } } }
+            : {}),
     };
 }
 
@@ -233,12 +249,13 @@ async function buildPropertyRecommendationSummaryMap(
 
 export async function queryConversationListSnapshot(args: {
     locationId: string;
+    assignedUserId?: string;
     status: ConversationListStatus;
     cursor: ConversationCursor | null;
     pageSize: number;
     selectedConversationId?: string | null;
 }) {
-    const where = buildConversationStatusWhere(args.status, args.locationId);
+    const where = buildConversationStatusWhere(args.status, args.locationId, args.assignedUserId);
     const paginatedWhere: any = args.cursor
         ? {
             ...where,
@@ -275,7 +292,12 @@ export async function queryConversationListSnapshot(args: {
         !rows.some((item: any) => item.id === args.selectedConversationId || item.ghlConversationId === args.selectedConversationId)
     ) {
         const selectedConversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(args.locationId, args.selectedConversationId),
+            where: {
+                AND: [
+                    buildConversationReferenceWhere(args.locationId, args.selectedConversationId),
+                    buildConversationStatusWhere("all", args.locationId, args.assignedUserId),
+                ],
+            },
             include: { contact: { select: CONVERSATION_LIST_CONTACT_SELECT } },
         });
         if (selectedConversation) {
@@ -296,11 +318,12 @@ export async function queryConversationListSnapshot(args: {
 export const getCachedConversationListSnapshot = unstable_cache(
     async (
         locationId: string,
+        assignedUserId: string | undefined,
         status: ConversationListStatus,
         cursor: ConversationCursor | null,
         pageSize: number,
         selectedConversationId?: string | null
-    ) => queryConversationListSnapshot({ locationId, status, cursor, pageSize, selectedConversationId }),
+    ) => queryConversationListSnapshot({ locationId, assignedUserId, status, cursor, pageSize, selectedConversationId }),
     ["conversations:list:snapshot:v2"],
     {
         revalidate: 8,
@@ -339,9 +362,10 @@ export async function mapConversationListSnapshotRows(args: {
 export async function hydrateRankedConversationRows(args: {
     location: ConversationRowMapperLocation & { id: string };
     rankedConversationIds: string[];
+    assignedUserId?: string;
 }) {
     const fetchedRows = await db.conversation.findMany({
-        where: buildRankedConversationHydrationWhere(args.location.id, args.rankedConversationIds),
+        where: buildRankedConversationHydrationWhere(args.location.id, args.rankedConversationIds, args.assignedUserId),
         include: {
             contact: { select: CONVERSATION_LIST_CONTACT_SELECT },
         },
@@ -383,6 +407,7 @@ export async function hydrateRankedConversationRows(args: {
 
 export async function queryConversationListDelta(args: {
     location: ConversationRowMapperLocation & { id: string };
+    assignedUserId?: string;
     status: Exclude<ConversationListStatus, "tasks">;
     cursor: ConversationDeltaCursor;
     limit: number;
@@ -391,6 +416,9 @@ export async function queryConversationListDelta(args: {
     const rows = await db.conversation.findMany({
         where: {
             locationId: args.location.id,
+            ...(args.assignedUserId
+                ? { contact: { is: { locationId: args.location.id, assignedUserId: args.assignedUserId } } }
+                : {}),
             OR: [
                 { updatedAt: { gt: new Date(args.cursor.updatedAtMs) } },
                 {

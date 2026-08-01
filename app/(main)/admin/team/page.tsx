@@ -1,43 +1,50 @@
 import db from "@/lib/db";
-import { cookies } from "next/headers";
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation, verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
-import { getLocationContext } from "@/lib/auth/location-context";
-import { redirect } from "next/navigation";
 import { TeamMemberCard } from "./_components/team-member-card";
 import { InviteUserDialog } from "./_components/invite-user-dialog";
 import { PendingInvitationsList } from "./_components/pending-invitations-list";
-import { getGHLCalendars, updateMemberContactAccess } from "./actions";
+import { getGHLCalendars } from "./actions";
 import { checkGHLSMTPStatus } from "@/lib/ghl/email";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import { OffboardingPreview } from "./_components/offboarding-preview";
+import { resolveStrictAdminLocation, type PreviewIdentity } from "@/lib/team/offboarding-preview-policy";
 
-export default async function TeamPage(props: { searchParams: Promise<{ contactAccess?: string }> }) {
-    const { contactAccess } = await props.searchParams;
-    const cookieStore = await cookies();
-    let locationId = cookieStore.get("crm_location_id")?.value;
-
-    if (!locationId) {
-        const locationContext = await getLocationContext();
-        if (locationContext) {
-            locationId = locationContext.id;
-        }
-    }
-
-    if (!locationId) {
-        return <div className="p-6">No location context found.</div>;
-    }
-
+export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string }> }) {
+    const contactAccessResult = (await searchParams)?.contactAccess;
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) {
         return <div className="p-6">Unauthorized</div>;
     }
 
-    const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, locationId);
-    if (!hasAccess) {
-        redirect('/admin');
+    const actor = await db.user.findUnique({
+        where: { clerkId: clerkUserId },
+        select: {
+            id: true, email: true, clerkId: true, firstName: true, lastName: true,
+            locations: { select: { id: true, name: true } },
+            locationRoles: { select: { locationId: true, role: true, location: { select: { name: true } } } },
+        },
+    });
+    const connectedIds = new Set(actor?.locations.map((entry) => entry.id) || []);
+    const actorIdentity: PreviewIdentity | null = actor ? {
+        id: actor.id,
+        email: actor.email,
+        clerkId: actor.clerkId,
+        firstName: actor.firstName,
+        lastName: actor.lastName,
+        memberships: actor.locationRoles.map((entry) => ({
+            locationId: entry.locationId,
+            locationName: entry.location.name,
+            role: entry.role,
+            connected: connectedIds.has(entry.locationId),
+        })),
+    } : null;
+    let activeMembership;
+    try {
+        activeMembership = resolveStrictAdminLocation(actorIdentity);
+    } catch {
+        return <div className="p-6">A current, unambiguous ADMIN role is required.</div>;
     }
-    const canPreviewOffboarding = await verifyUserIsLocationAdmin(clerkUserId, locationId);
+    const locationId = activeMembership.locationId;
 
     // Get location with users
     const location = await db.location.findUnique({
@@ -70,7 +77,7 @@ export default async function TeamPage(props: { searchParams: Promise<{ contactA
     const users = location.users || [];
 
     // Fetch GHL calendars for calendar assignment
-    const calendars = await getGHLCalendars(locationId);
+    const calendars = await getGHLCalendars();
 
     // Check SMTP Status
     const smtpStatus = isGhlIntegrationEnabled() && location.ghlLocationId
@@ -90,19 +97,7 @@ export default async function TeamPage(props: { searchParams: Promise<{ contactA
             publicMetadata: inv.publicMetadata,
         }));
 
-    // Check current user role (try new table, fallback to allowing all location users)
-    let isAdmin = true; // Default to admin until roles are migrated
-    try {
-        const currentUser = await db.user.findUnique({
-            where: { clerkId: clerkUserId },
-            include: { locationRoles: { where: { locationId } } }
-        });
-        if (currentUser?.locationRoles?.length) {
-            isAdmin = currentUser.locationRoles[0].role === 'ADMIN';
-        }
-    } catch (e) {
-        // Table doesn't exist yet, allow all users for now
-    }
+    const isAdmin = true;
 
     return (
         <div className="p-6">
@@ -117,12 +112,16 @@ export default async function TeamPage(props: { searchParams: Promise<{ contactA
             </div>
 
             <div className="grid gap-4">
-                {contactAccess === 'updated' ? (
-                    <p role="status" aria-live="polite" className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">Contact access updated.</p>
-                ) : contactAccess === 'error' ? (
-                    <p role="alert" aria-live="assertive" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">Contact access could not be updated.</p>
-                ) : null}
-                {canPreviewOffboarding && <OffboardingPreview />}
+                {contactAccessResult && (
+                    <div
+                        role={contactAccessResult === 'updated' ? 'status' : 'alert'}
+                        aria-live="polite"
+                        className={contactAccessResult === 'updated' ? 'rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800' : 'rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800'}
+                    >
+                        {contactAccessResult === 'updated' ? 'Contact access updated.' : 'Contact access could not be updated.'}
+                    </div>
+                )}
+                <OffboardingPreview />
                 {!smtpStatus.isConfigured && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
                         <div className="flex">
@@ -147,30 +146,16 @@ export default async function TeamPage(props: { searchParams: Promise<{ contactA
                         No team members found. Invite users to give them access.
                     </div>
                 )}
-                {users.map((user) => {
-                    const membership = user.locationRoles[0];
-                    return <div key={user.id} className="space-y-2">
+                {users.map((user) => (
+                    <div key={user.id} className="space-y-2">
                         <TeamMemberCard
                             user={user}
                             calendars={calendars}
                             isAdmin={isAdmin}
                             isCurrentUser={user.clerkId === clerkUserId}
                         />
-                        {canPreviewOffboarding && membership?.role === 'MEMBER' ? (
-                            <form action={updateMemberContactAccess} className="flex flex-wrap items-end gap-2 rounded border bg-muted/20 p-3">
-                                <input type="hidden" name="userId" value={user.id} />
-                                <div className="space-y-1">
-                                    <label htmlFor={`contact-access-${user.id}`} className="text-sm font-medium">Contact access</label>
-                                    <select id={`contact-access-${user.id}`} name="contactAccessScope" defaultValue={membership.contactAccessScope} className="block h-9 rounded-md border bg-background px-3 text-sm">
-                                        <option value="ASSIGNED_ONLY">Assigned contacts only</option>
-                                        <option value="LOCATION_WIDE">All location contacts</option>
-                                    </select>
-                                </div>
-                                <button type="submit" className="h-9 rounded-md bg-primary px-3 text-sm text-primary-foreground">Save</button>
-                            </form>
-                        ) : null}
-                    </div>;
-                })}
+                    </div>
+                ))}
             </div>
         </div>
     );

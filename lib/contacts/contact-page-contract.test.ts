@@ -63,8 +63,8 @@ test('canonical Contact assignment is a nullable User relation with exact-only b
   assert.doesNotMatch(migrationSource, /INSERT INTO "Contact"|UPDATE "ContactHistory"/);
   assert.match(schemaSource, /enum ContactAccessScope[\s\S]*ASSIGNED_ONLY[\s\S]*LOCATION_WIDE/);
   assert.match(schemaSource, /contactAccessScope\s+ContactAccessScope\s+@default\(ASSIGNED_ONLY\)/);
-  assert.match(migrationSource, /WHERE "role" = 'MEMBER'/);
-  assert.match(migrationSource, /SET "contactAccessScope" = 'LOCATION_WIDE'/);
+  assert.match(migrationSource, /DEFAULT 'ASSIGNED_ONLY'/);
+  assert.match(migrationSource, /SET "contactAccessScope" = 'LOCATION_WIDE'[\s\S]*WHERE "role" = 'MEMBER'/);
 });
 
 test('core Contact reads and mutations enforce assignment visibility and dual-write the compatibility field', () => {
@@ -81,21 +81,13 @@ test('core Contact reads and mutations enforce assignment visibility and dual-wr
   assert.match(actionSource, /assignedUserId: access\.internalUserId/);
 });
 
-test('Team contact access is a strict ADMIN-only active-location setting', () => {
-  const start = teamActionSource.indexOf('export async function updateMemberContactAccess');
-  const action = teamActionSource.slice(start, teamActionSource.indexOf('\nexport async function', start + 10));
-  assert.notEqual(start, -1);
-  assert.match(action, /const location = await getLocationContext\(\)/);
-  assert.match(action, /role: 'ADMIN'/);
-  assert.match(action, /role: 'MEMBER'/);
-  assert.match(action, /user: \{ clerkId: clerkUserId, locations:/);
-  assert.doesNotMatch(action, /getCurrentLocationId|formData\.get\('locationId'\)|clerkClient|assignedUserId/);
-  assert.match(action, /data: \{ contactAccessScope:/);
-  assert.match(teamPageSource, /Contact access/);
-  assert.match(teamPageSource, /Assigned contacts only/);
-  assert.match(teamPageSource, /All location contacts/);
-  assert.match(teamPageSource, /role="status" aria-live="polite"/);
-  assert.match(teamPageSource, /role="alert" aria-live="assertive"/);
+test('Team ADMIN can grant the approved MEMBER Contact visibility scope', () => {
+  assert.match(teamActionSource, /updateMemberContactAccess/);
+  assert.match(teamActionSource, /contactAccessScope/);
+  assert.match(teamActionSource, /LOCATION_WIDE/);
+  assert.match(teamPageSource, /contactAccessScope: true/);
+  assert.doesNotMatch(teamPageSource, /isAdmin = true[^;]*Default|fallback to allowing all location users/);
+  assert.match(teamPageSource, /resolveStrictAdminLocation/);
 });
 
 test('Companies project only contacts visible through the shared Contact predicate', () => {

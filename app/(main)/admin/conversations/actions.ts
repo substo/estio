@@ -1,6 +1,5 @@
 'use server';
 
-import { getLocationContext } from "@/lib/auth/location-context";
 import { getConversations, getMessages, getConversation, sendMessage, getMessage, Conversation, Message } from "@/lib/ghl/conversations";
 import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
@@ -142,6 +141,12 @@ import {
 } from "@/lib/property-match-campaigns/feedback-service";
 import { clearContactPropertyInteractionsForSource } from "@/lib/property-match-campaigns/profile-service";
 import { withProfileVerificationInvalidation } from "@/lib/contacts/profile-verification";
+import { buildContactManageWhere, getActiveContactsAccess } from "@/lib/contacts/active-location-access";
+import {
+    buildConversationVisibilityWhere,
+    getConversationAssignmentUserId,
+    resolveConversationScope,
+} from "@/lib/conversations/contact-assignment-access";
 import {
     buildCampaignDraftInstruction,
     canCandidateDraftOrSend,
@@ -986,10 +991,12 @@ function buildGroupParticipantDraftName(participant: {
 }
 
 async function getScopedConversationParticipant(locationId: string, participantId: string) {
+    const access = await getActiveContactsAccess(locationId);
+    if (!access) return null;
     return db.conversationParticipant.findFirst({
         where: {
             id: participantId,
-            conversation: { locationId },
+            conversation: buildConversationVisibilityWhere(access, "location"),
         },
         include: {
             contact: {
@@ -1028,6 +1035,8 @@ async function findLikelyContactsForGroupParticipant(locationId: string, partici
     displayName?: string | null;
     contactId?: string | null;
 }) {
+    const access = await getActiveContactsAccess(locationId);
+    if (!access) return [];
     const phoneDigits = normalizePhoneDigits(participant.phoneDigits);
     const lidRaw = String(participant.lidJid || "").replace("@lid", "").trim();
     const displayName = normalizeParticipantDisplayName(participant.displayName);
@@ -1035,7 +1044,7 @@ async function findLikelyContactsForGroupParticipant(locationId: string, partici
 
     const candidates = await db.contact.findMany({
         where: {
-            locationId,
+            ...buildContactManageWhere(access),
             ...(participant.contactId ? { id: { not: participant.contactId } } : {}),
             OR: [
                 ...(phoneDigits && phoneDigits.length >= 7 ? [{ phone: { contains: phoneDigits.slice(-7) } }] : []),
@@ -1120,6 +1129,8 @@ async function ensureRealContactForGroupParticipant(params: {
     name?: string | null;
     phone?: string | null;
 }) {
+    const access = await getActiveContactsAccess(params.locationId);
+    if (!access) throw new Error("Unauthorized");
     const participant = params.participant;
     if (!participant) throw new Error("Participant not found");
 
@@ -1132,7 +1143,7 @@ async function ensureRealContactForGroupParticipant(params: {
 
     if (requestedContactId) {
         const existing = await db.contact.findFirst({
-            where: { id: requestedContactId, locationId: params.locationId },
+            where: { id: requestedContactId, ...buildContactManageWhere(access) },
             select: { id: true, phone: true, lid: true, name: true },
         });
         if (!existing) {
@@ -1153,7 +1164,7 @@ async function ensureRealContactForGroupParticipant(params: {
 
     if (participant.contactId) {
         const existing = await db.contact.findFirst({
-            where: { id: participant.contactId, locationId: params.locationId },
+            where: { id: participant.contactId, ...buildContactManageWhere(access) },
             select: { id: true, phone: true, lid: true, name: true },
         });
         if (existing) {
@@ -1172,7 +1183,7 @@ async function ensureRealContactForGroupParticipant(params: {
     if (trustedPhone || participantLidRaw) {
         const existingExact = await db.contact.findFirst({
             where: {
-                locationId: params.locationId,
+                ...buildContactManageWhere(access),
                 OR: [
                     ...(trustedPhone ? [{ phone: trustedPhone }] : []),
                     ...(participantLidRaw ? [{ lid: { contains: participantLidRaw } }] : []),
@@ -1197,6 +1208,8 @@ async function ensureRealContactForGroupParticipant(params: {
     const created = await db.contact.create({
         data: {
             locationId: params.locationId,
+            assignedUserId: access.internalUserId,
+            leadAssignedToAgent: access.internalUserId,
             name: draftName,
             phone: trustedPhone,
             lid: participant.lidJid || undefined,
@@ -1909,44 +1922,68 @@ async function persistTranscriptManualAuditEvent(args: {
 
 async function getAuthenticatedLocationReadOnly(options?: { requireGhlToken?: boolean }) {
     const requireGhlToken = options?.requireGhlToken === true;
-    const location = await getLocationContext();
-    if (!location) {
+    const access = await getActiveContactsAccess();
+    if (!access) {
         throw new Error("Unauthorized");
     }
+    const location = await db.location.findUnique({ where: { id: access.locationId } });
+    if (!location) throw new Error("Unauthorized");
     if (requireGhlToken && !location.ghlAccessToken) {
         throw new Error("Unauthorized or GHL not connected");
     }
     return location;
 }
 
+async function getAuthenticatedConversationContext(
+    requestedScope?: string | null,
+    options?: { requireGhlToken?: boolean },
+) {
+    const access = await getActiveContactsAccess();
+    if (!access) throw new Error("Unauthorized");
+    const location = await db.location.findUnique({ where: { id: access.locationId } });
+    if (!location) throw new Error("Unauthorized");
+    if (options?.requireGhlToken && !location.ghlAccessToken) {
+        throw new Error("Unauthorized or GHL not connected");
+    }
+    return {
+        access,
+        location,
+        scope: resolveConversationScope(access, requestedScope),
+        assignedUserId: getConversationAssignmentUserId(access, requestedScope),
+    };
+}
+
+async function buildAuthorizedConversationReferenceWhere(
+    locationId: string,
+    conversationRef: string,
+): Promise<Prisma.ConversationWhereInput> {
+    const access = await getActiveContactsAccess(locationId);
+    if (!access) throw new Error("Unauthorized");
+    return {
+        AND: [
+            buildConversationReferenceWhere(locationId, conversationRef),
+            buildConversationVisibilityWhere(access, "location"),
+        ],
+    };
+}
+
 async function getAuthenticatedLocationActorFastReadOnly(options?: { requireGhlToken?: boolean }) {
     const requireGhlToken = options?.requireGhlToken === true;
-    const { userId: clerkUserId } = await auth();
-    if (!clerkUserId) {
-        throw new Error("Unauthorized");
-    }
-
-    const user = await db.user.findUnique({
-        where: { clerkId: clerkUserId },
-        select: {
-            id: true,
-            locations: { take: 1 },
-        },
-    });
-    const location = user?.locations?.[0] || null;
-    if (!user || !location) {
-        throw new Error("Unauthorized");
-    }
+    const access = await getActiveContactsAccess();
+    if (!access) throw new Error("Unauthorized");
+    const location = await db.location.findUnique({ where: { id: access.locationId } });
+    if (!location) throw new Error("Unauthorized");
     if (requireGhlToken && !location.ghlAccessToken) {
         throw new Error("Unauthorized or GHL not connected");
     }
 
     return {
         location,
+        access,
         actor: {
-            clerkUserId,
-            userId: user.id,
-            isAdmin: false,
+            clerkUserId: access.userId,
+            userId: access.internalUserId,
+            isAdmin: access.role === "ADMIN",
             hasAccess: true,
             roleSource: "location_role" as const,
         },
@@ -1999,7 +2036,7 @@ function emitConversationRealtimeEvent(args: {
 export async function fetchConversations(
     status: 'active' | 'archived' | 'trash' | 'tasks' | 'all' = 'active',
     selectedConversationId?: string | null,
-    options?: { cursor?: string | null; limit?: number | null }
+    options?: { cursor?: string | null; limit?: number | null; scope?: "my" | "location" }
 ) {
     const traceId = createTraceId();
     try {
@@ -2010,7 +2047,7 @@ export async function fetchConversations(
             MAX_PAGE_SIZE
         );
         const cursor = decodeConversationCursor(options?.cursor);
-        const location = await getAuthenticatedLocationReadOnly();
+        const { location, assignedUserId, scope } = await getAuthenticatedConversationContext(options?.scope);
         const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
         return await withServerTiming("conversations.fetch_list", {
@@ -2021,11 +2058,13 @@ export async function fetchConversations(
             hasCursor: !!cursor,
             selectedConversationId: selectedConversationId || null,
             cached: flags.workspaceV2,
+            scope,
         }, async () => {
             const snapshot = flags.workspaceV2
-                ? await getCachedConversationListSnapshot(location.id, status, cursor, pageSize, selectedConversationId || null)
+                ? await getCachedConversationListSnapshot(location.id, assignedUserId, status, cursor, pageSize, selectedConversationId || null)
                 : await queryConversationListSnapshot({
                     locationId: location.id,
+                    assignedUserId,
                     status,
                     cursor,
                     pageSize,
@@ -2064,14 +2103,20 @@ export async function fetchMessages(
     };
     const ensureHistory = !!options?.ensureHistory;
     const authStartedAtMs = Date.now();
+    const { access, location: readOnlyLocation } = await getAuthenticatedConversationContext("location");
     const location = ensureHistory
         ? await getAuthenticatedLocationExternal()
-        : await getAuthenticatedLocationReadOnly();
+        : readOnlyLocation;
     markTiming("auth_ms", authStartedAtMs);
 
     const conversationStartedAtMs = Date.now();
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: {
+            AND: [
+                buildConversationReferenceWhere(location.id, conversationId),
+                buildConversationVisibilityWhere(access, "location"),
+            ],
+        },
         include: { contact: true, syncRecords: true }
     });
     markTiming("conversation_ms", conversationStartedAtMs);
@@ -2131,7 +2176,19 @@ export async function getConversationWorkspaceCore(
     }
 
     try {
-        const location = await getAuthenticatedLocationReadOnly();
+        const { access, location } = await getAuthenticatedConversationContext("location");
+        const authorizedConversation = await db.conversation.findFirst({
+            where: {
+                AND: [
+                    buildConversationReferenceWhere(location.id, trimmedConversationId),
+                    buildConversationVisibilityWhere(access, "location"),
+                ],
+            },
+            select: { id: true },
+        });
+        if (!authorizedConversation) {
+            return { success: false as const, traceId, error: "Conversation not found." };
+        }
         const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
         const includeMessages = options?.includeMessages !== false;
@@ -2222,7 +2279,19 @@ export async function getConversationWorkspaceSidebar(conversationId: string) {
     }
 
     try {
-        const location = await getAuthenticatedLocationReadOnly();
+        const { access, location } = await getAuthenticatedConversationContext("location");
+        const authorizedConversation = await db.conversation.findFirst({
+            where: {
+                AND: [
+                    buildConversationReferenceWhere(location.id, trimmedConversationId),
+                    buildConversationVisibilityWhere(access, "location"),
+                ],
+            },
+            select: { id: true },
+        });
+        if (!authorizedConversation) {
+            return { success: false as const, traceId, error: "Conversation not found." };
+        }
         const flags = getConversationFeatureFlags(location.id, { locationSmsRelayEnabled: !!(location as any).smsRelayEnabled });
 
         return await withServerTiming("conversations.workspace_sidebar", {
@@ -2328,13 +2397,13 @@ export async function getConversationListDelta(
     status: 'active' | 'archived' | 'trash' | 'tasks' | 'all' = 'active',
     sinceCursor?: string | null,
     activeConversationId?: string | null,
-    options?: { limit?: number }
+    options?: { limit?: number; scope?: "my" | "location" }
 ) {
     const traceId = createTraceId();
 
     try {
         const normalizedStatus: Exclude<ConversationListStatus, "tasks"> = status === "tasks" ? "active" : status;
-        const location = await getAuthenticatedLocationReadOnly();
+        const { location, assignedUserId, scope } = await getAuthenticatedConversationContext(options?.scope);
         const parsedCursor = decodeConversationDeltaCursor(sinceCursor);
         const limit = Math.min(
             Math.max(Number(options?.limit || DEFAULT_LIST_DELTA_LIMIT), 1),
@@ -2360,9 +2429,11 @@ export async function getConversationListDelta(
             hasCursor: !!parsedCursor,
             limit,
             activeConversationId: activeConversationId || null,
+            scope,
         }, async () => {
             const delta = await queryConversationListDelta({
                 location,
+                assignedUserId,
                 status: normalizedStatus,
                 cursor: parsedCursor,
                 limit,
@@ -2410,11 +2481,13 @@ export async function refreshConversationOnDemand(
     }
 
     try {
-        const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: mode === "full_sync" });
+        const { access, location } = await getAuthenticatedConversationContext("location", { requireGhlToken: mode === "full_sync" });
         const conversation = await db.conversation.findFirst({
             where: {
-                locationId: location.id,
-                ghlConversationId: trimmedConversationId,
+                AND: [
+                    buildConversationReferenceWhere(location.id, trimmedConversationId),
+                    buildConversationVisibilityWhere(access, "location"),
+                ],
             },
             select: {
                 id: true,
@@ -2606,7 +2679,7 @@ export async function searchConversationTranscriptMatches(
     try {
         const location = await getAuthenticatedLocation();
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, String(conversationId || "").trim()),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, String(conversationId || "").trim()),
             select: { id: true, locationId: true },
         });
 
@@ -3101,7 +3174,7 @@ export async function refetchWhatsAppMediaAttachment(
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         include: {
             contact: {
                 select: {
@@ -3537,7 +3610,7 @@ export async function bulkRequestWhatsAppAudioTranscripts(
         }
 
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             select: {
                 id: true,
                 locationId: true,
@@ -4167,7 +4240,7 @@ export async function syncWhatsAppHistory(conversationId: string, limit: number 
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         include: { contact: true, syncRecords: true }
     });
 
@@ -4541,7 +4614,7 @@ export async function createWhatsAppMediaUploadUrl(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         select: { id: true, locationId: true, contactId: true }
     });
 
@@ -4653,7 +4726,7 @@ export async function sendWhatsAppMediaReply(
                         : (cleanCaption || "[Image]");
 
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             select: { id: true, locationId: true, contactId: true }
         });
         if (!conversation || conversation.locationId !== location.id) {
@@ -4840,7 +4913,7 @@ export async function sendWhatsAppTemplateReply(
         }
 
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             select: { id: true, locationId: true, contactId: true },
         });
         if (!conversation || conversation.locationId !== location.id) {
@@ -5017,6 +5090,29 @@ export async function sendReply(
     }
 ) {
     try {
+        const { access: sendAccess, location: sendLocation } = await getAuthenticatedConversationContext("location");
+        const authorizedConversation = await db.conversation.findFirst({
+            where: {
+                AND: [
+                    buildConversationReferenceWhere(sendLocation.id, conversationId),
+                    buildConversationVisibilityWhere(sendAccess, "location"),
+                ],
+            },
+            select: {
+                id: true,
+                contactId: true,
+                contact: { select: { id: true, ghlContactId: true } },
+            },
+        });
+        const requestedContactId = String(contactId || "").trim();
+        if (
+            !authorizedConversation
+            || !authorizedConversation.contact
+            || ![authorizedConversation.contact.id, authorizedConversation.contact.ghlContactId].filter(Boolean).includes(requestedContactId)
+        ) {
+            return { success: false, error: "Conversation not found." };
+        }
+
         if (type === "WhatsApp") {
             console.info(JSON.stringify({
                 scope: "whatsapp_send_lifecycle",
@@ -5061,7 +5157,7 @@ export async function sendReply(
             }
 
             const conversation = await db.conversation.findFirst({
-                where: buildConversationReferenceWhere(location.id, conversationId),
+                where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
                 select: { id: true, locationId: true, contactId: true, ghlConversationId: true },
             });
             if (!conversation || conversation.locationId !== location.id) {
@@ -5252,7 +5348,7 @@ export async function sendReply(
         }
 
         const localConversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             include: {
                 contact: {
                     select: {
@@ -5570,7 +5666,7 @@ async function prepareAIDraftRequest(args: {
     const lookupStartedAt = Date.now();
     const conversationRecord = await db.conversation.findFirst({
         where: {
-            ...buildConversationReferenceWhere(location.id, conversationId),
+            ...await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         },
         select: {
             id: true,
@@ -5886,7 +5982,7 @@ export async function setConversationReplyLanguageOverride(
         return { success: false as const, error: "Invalid language code." };
     }
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, trimmedConversationId),
         select: { id: true, ghlConversationId: true },
     });
 
@@ -5935,7 +6031,7 @@ export async function previewTranslatedReply(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, trimmedConversationId),
         include: {
             contact: {
                 select: { preferredLang: true },
@@ -6067,7 +6163,7 @@ export async function translateSelectedText(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, trimmedConversationId),
         select: { id: true, replyLanguageOverride: true },
     });
 
@@ -6359,7 +6455,7 @@ export async function translateConversationThread(
     }
 
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, trimmedConversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, trimmedConversationId),
         include: {
             contact: { select: { preferredLang: true } },
         },
@@ -6825,8 +6921,9 @@ export async function orchestrateAction(conversationId: string, contactId: strin
 }
 
 export async function createDealContext(title: string, conversationIds: string[]) {
-    const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
+    const { access, location } = await getAuthenticatedConversationContext("location");
     const normalizedRefs = Array.from(new Set((conversationIds || []).map((id) => String(id || "").trim()).filter(Boolean)));
+    if (normalizedRefs.length === 0) throw new Error("Select at least one conversation.");
 
     // Auto-detect properties from the contacts involved
     let propertyIds: string[] = [];
@@ -6834,20 +6931,18 @@ export async function createDealContext(title: string, conversationIds: string[]
     try {
         const conversations = await db.conversation.findMany({
             where: {
-                locationId: location.id,
-                OR: [
-                    { id: { in: normalizedRefs } },
-                    { ghlConversationId: { in: normalizedRefs } },
-                    {
-                        syncRecords: {
-                            some: {
-                                providerConversationId: { in: normalizedRefs },
-                            },
-                        },
-                    },
+                AND: [
+                    buildConversationVisibilityWhere(access, "location"),
+                    { OR: [
+                        { id: { in: normalizedRefs } },
+                        { ghlConversationId: { in: normalizedRefs } },
+                        { syncRecords: { some: { providerConversationId: { in: normalizedRefs } } } },
+                        { syncRecords: { some: { providerThreadId: { in: normalizedRefs } } } },
+                    ] },
                 ],
             },
             include: {
+                syncRecords: { select: { providerConversationId: true, providerThreadId: true } },
                 contact: {
                     include: {
                         propertyRoles: {
@@ -6858,14 +6953,21 @@ export async function createDealContext(title: string, conversationIds: string[]
             },
         });
 
+        const allRefsResolved = normalizedRefs.every((ref) => conversations.some((conversation) => (
+            conversation.id === ref
+            || conversation.ghlConversationId === ref
+            || conversation.syncRecords.some((sync) => sync.providerConversationId === ref || sync.providerThreadId === ref)
+        )));
+        if (!allRefsResolved) throw new Error("One or more conversations are unavailable.");
+
         canonicalConversationIds = conversations.map((conversation) => conversation.id);
         const allPropIds = conversations.flatMap((conversation: any) =>
             (conversation.contact?.propertyRoles || []).map((role: any) => role.propertyId)
         );
         propertyIds = Array.from(new Set(allPropIds));
     } catch (e) {
-        console.warn("Failed to auto-detect properties for Deal Context", e);
-        // non-fatal, proceed with empty properties
+        console.warn("Failed to resolve authorized conversations for Deal Context", e);
+        throw e;
     }
 
     // Create the DB record
@@ -6873,7 +6975,8 @@ export async function createDealContext(title: string, conversationIds: string[]
         data: {
             title,
             locationId: location.id,
-            conversationIds: canonicalConversationIds.length > 0 ? canonicalConversationIds : normalizedRefs,
+            assignedUserId: access.internalUserId,
+            conversationIds: canonicalConversationIds,
             propertyIds, // Auto-populated
             stage: 'ACTIVE'
         }
@@ -7165,7 +7268,7 @@ export async function updateContactClientContextAction(conversationId: string, c
     const requestedConversationId = String(conversationId || "").trim();
     if (requestedConversationId) {
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, requestedConversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, requestedConversationId),
             select: { id: true },
         });
         conversationInternalId = conversation?.id || null;
@@ -7218,7 +7321,7 @@ export async function scanContactVerificationAction(contactId: string, conversat
     logTiming("action_start");
 
     const authStartedAt = Date.now();
-    const { location, actor } = await getAuthenticatedLocationActorFastReadOnly({ requireGhlToken: false });
+    const { location, access, actor } = await getAuthenticatedLocationActorFastReadOnly({ requireGhlToken: false });
     logTiming("action_auth_end", {
         locationId: location.id,
         authMs: Date.now() - authStartedAt,
@@ -7232,7 +7335,7 @@ export async function scanContactVerificationAction(contactId: string, conversat
     const contactLookupStartedAt = Date.now();
     const contact = await db.contact.findFirst({
         where: {
-            locationId: location.id,
+            ...buildContactManageWhere(access),
             OR: [{ id: contactId }, { ghlContactId: contactId }],
         },
         select: {
@@ -7996,11 +8099,7 @@ export async function sendPropertyMatchCandidateAction(candidateId: string, draf
 
 // Helper to get location without strict GHL requirement
 async function getBasicLocationContext() {
-    const location = await getLocationContext();
-    if (!location) {
-        throw new Error("Unauthorized");
-    }
-    return location;
+    return getAuthenticatedLocationReadOnly();
 }
 
 export async function getEmailSyncProvidersStatus() {
@@ -8209,7 +8308,7 @@ async function resolveConversationChannelCapabilitiesForLocation(
     conversationId: string
 ): Promise<{ capabilities: ConversationChannelCapabilities; contactPhone: string | null; contactEmail: string | null }> {
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         select: {
             contact: {
                 select: {
@@ -8390,7 +8489,7 @@ export async function getSmsChannelEligibility(conversationId: string) {
         const location = await getBasicLocationContext();
 
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             select: {
                 contact: {
                     select: {
@@ -8823,7 +8922,7 @@ export async function generatePlanAction(conversationId: string, contactId: stri
 
     // 1. Fetch History
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         include: { messages: { orderBy: { createdAt: 'asc' }, take: 30 } }
     });
 
@@ -9076,7 +9175,7 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
 export async function getAgentPlan(conversationId: string) {
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         select: {
             agentPlan: true,
             promptTokens: true,
@@ -9158,7 +9257,7 @@ export async function getAgentExecutionHistoryPage(
 ) {
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         select: { id: true }
     });
 
@@ -9234,7 +9333,7 @@ export async function getAgentExecutions(conversationId: string) {
 export async function getAgentExecutionDetail(conversationId: string, executionId: string) {
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
         select: { id: true }
     });
 
@@ -9317,8 +9416,7 @@ export async function getAggregateAIUsage() {
     };
 
     try {
-        const location = await getLocationContext();
-        if (!location) return emptyResult;
+        const location = await getAuthenticatedLocationReadOnly();
 
         // Calculate date boundaries
         const now = new Date();
@@ -9726,13 +9824,10 @@ export async function getAggregateAIUsage() {
  */
 export async function getConversationTranscriptUsage(conversationId: string) {
     try {
-        const location = await getLocationContext();
-        if (!location) return { totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 };
+        const { location } = await getAuthenticatedConversationContext("location");
 
         const conversation = await db.conversation.findFirst({
-            where: {
-                ...buildConversationReferenceWhere(location.id, conversationId)
-            },
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             select: { id: true }
         });
         if (!conversation) return { totalTokens: 0, totalCost: 0, transcriptCount: 0, extractionCount: 0 };
@@ -9766,11 +9861,16 @@ export async function getConversationTranscriptUsage(conversationId: string) {
 
 
 export async function refreshConversation(conversationId: string) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     // Fetch from DB to get latest fields like suggestedActions
     const conversation = await db.conversation.findFirst({
-        where: buildConversationReferenceWhere(location.id, conversationId),
+        where: {
+            AND: [
+                buildConversationReferenceWhere(location.id, conversationId),
+                buildConversationVisibilityWhere(access, "location"),
+            ],
+        },
         include: { contact: true }
     });
 
@@ -9805,7 +9905,7 @@ export async function refreshConversation(conversationId: string) {
 }
 
 export async function markConversationAsRead(conversationId: string) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationId) {
         return { success: false, error: "Missing conversationId" };
@@ -9813,7 +9913,12 @@ export async function markConversationAsRead(conversationId: string) {
 
     try {
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: {
+                AND: [
+                    buildConversationReferenceWhere(location.id, conversationId),
+                    buildConversationVisibilityWhere(access, "location"),
+                ],
+            },
             select: { id: true, contactId: true },
         });
         if (!conversation) {
@@ -9858,7 +9963,7 @@ export async function markConversationAsRead(conversationId: string) {
 }
 
 export async function deleteConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -9869,7 +9974,10 @@ export async function deleteConversations(conversationIds: string[]) {
             locationId: location.id,
             conversationRefs: conversationIds,
             state: "notDeleted",
-            findMany: (query) => db.conversation.findMany(query),
+            findMany: (query) => db.conversation.findMany({
+                ...query,
+                where: { AND: [query.where, buildConversationVisibilityWhere(access, "location")] },
+            }),
         });
         if (!resolved.success) return resolved;
 
@@ -9917,7 +10025,7 @@ export async function deleteConversations(conversationIds: string[]) {
 }
 
 export async function restoreConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -9928,7 +10036,10 @@ export async function restoreConversations(conversationIds: string[]) {
             locationId: location.id,
             conversationRefs: conversationIds,
             state: "trashed",
-            findMany: (query) => db.conversation.findMany(query),
+            findMany: (query) => db.conversation.findMany({
+                ...query,
+                where: { AND: [query.where, buildConversationVisibilityWhere(access, "location")] },
+            }),
         });
         if (!resolved.success) return resolved;
         const targetConversations = resolved.targets;
@@ -9974,7 +10085,7 @@ export async function restoreConversations(conversationIds: string[]) {
 }
 
 export async function permanentlyDeleteConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -9985,7 +10096,10 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
             locationId: location.id,
             conversationRefs: conversationIds,
             state: "trashed",
-            findMany: (query) => db.conversation.findMany(query),
+            findMany: (query) => db.conversation.findMany({
+                ...query,
+                where: { AND: [query.where, buildConversationVisibilityWhere(access, "location")] },
+            }),
         });
         if (!resolved.success) return resolved;
         const targetConversations = resolved.targets;
@@ -10017,7 +10131,7 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
 }
 
 export async function archiveConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -10028,7 +10142,10 @@ export async function archiveConversations(conversationIds: string[]) {
             locationId: location.id,
             conversationRefs: conversationIds,
             state: "active",
-            findMany: (query) => db.conversation.findMany(query),
+            findMany: (query) => db.conversation.findMany({
+                ...query,
+                where: { AND: [query.where, buildConversationVisibilityWhere(access, "location")] },
+            }),
         });
         if (!resolved.success) return resolved;
         const targetConversations = resolved.targets;
@@ -10072,7 +10189,7 @@ export async function archiveConversations(conversationIds: string[]) {
 }
 
 export async function unarchiveConversations(conversationIds: string[]) {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
         return { success: false, error: "No conversations selected" };
@@ -10083,7 +10200,10 @@ export async function unarchiveConversations(conversationIds: string[]) {
             locationId: location.id,
             conversationRefs: conversationIds,
             state: "archived",
-            findMany: (query) => db.conversation.findMany(query),
+            findMany: (query) => db.conversation.findMany({
+                ...query,
+                where: { AND: [query.where, buildConversationVisibilityWhere(access, "location")] },
+            }),
         });
         if (!resolved.success) return resolved;
         const targetConversations = resolved.targets;
@@ -10126,13 +10246,13 @@ export async function unarchiveConversations(conversationIds: string[]) {
 }
 
 export async function emptyTrash() {
-    const location = await getAuthenticatedLocationReadOnly();
+    const { access, location } = await getAuthenticatedConversationContext("location");
 
     try {
         // Permanently delete all conversations in trash
         const deletedRows = await db.conversation.findMany({
             where: {
-                locationId: location.id,
+                ...buildConversationVisibilityWhere(access, "location"),
                 deletedAt: { not: null }
             },
             select: { id: true },
@@ -10140,7 +10260,7 @@ export async function emptyTrash() {
 
         const result = await db.conversation.deleteMany({
             where: {
-                locationId: location.id,
+                ...buildConversationVisibilityWhere(access, "location"),
                 deletedAt: { not: null }
             }
         });
@@ -10165,11 +10285,10 @@ export async function emptyTrash() {
 
 export async function getConversationParticipants(conversationId: string) {
     try {
-        const location = await getLocationContext();
-        if (!location) throw new Error("Unauthorized");
+        const location = await getAuthenticatedLocationReadOnly();
 
         const conversation = await db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId)
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId)
         });
 
         if (!conversation) return { success: false, error: "Conversation not found" };
@@ -10221,8 +10340,7 @@ export async function getConversationParticipants(conversationId: string) {
 
 export async function prepareGroupParticipantSave(participantId: string) {
     try {
-        const location = await getLocationContext();
-        if (!location) throw new Error("Unauthorized");
+        const location = await getAuthenticatedLocationReadOnly();
 
         const participant = await getScopedConversationParticipant(location.id, participantId);
         if (!participant) return { success: false, error: "Participant not found" };
@@ -10266,8 +10384,7 @@ const SaveGroupParticipantSchema = z.object({
 
 export async function saveGroupParticipantContact(input: z.infer<typeof SaveGroupParticipantSchema>) {
     try {
-        const location = await getLocationContext();
-        if (!location) throw new Error("Unauthorized");
+        const location = await getAuthenticatedLocationReadOnly();
 
         const parsed = SaveGroupParticipantSchema.parse(input);
         const participant = await getScopedConversationParticipant(location.id, parsed.participantId);
@@ -10292,8 +10409,7 @@ export async function saveGroupParticipantContact(input: z.infer<typeof SaveGrou
 
 export async function openConversationForGroupParticipant(participantId: string) {
     try {
-        const location = await getLocationContext();
-        if (!location) throw new Error("Unauthorized");
+        const location = await getAuthenticatedLocationReadOnly();
 
         const participant = await getScopedConversationParticipant(location.id, participantId);
         if (!participant) return { success: false, error: "Participant not found" };
@@ -12922,6 +13038,7 @@ type ConversationSearchMode = "auto" | "contact" | "broad";
 
 async function searchConversationContactPhonesFast(args: {
     locationId: string;
+    assignedUserId?: string;
     queryDigits: string;
     limit: number;
     status?: Extract<ConversationListStatus, "active" | "archived" | "trash">;
@@ -12942,6 +13059,9 @@ async function searchConversationContactPhonesFast(args: {
                 : args.status === "trash"
                     ? Prisma.sql`c."deletedAt" IS NOT NULL`
                     : Prisma.sql`c."deletedAt" IS NULL`;
+    const assignmentSql = args.assignedUserId
+        ? Prisma.sql`ct."assignedUserId" = ${args.assignedUserId}`
+        : Prisma.sql`TRUE`;
 
     return db.$queryRaw<Array<{ conversationId: string; score: number }>>`
         SELECT
@@ -12957,6 +13077,7 @@ async function searchConversationContactPhonesFast(args: {
         JOIN "Conversation" c ON c."contactId" = ct.id
         WHERE ct."locationId" = ${args.locationId}
           AND c."locationId" = ${args.locationId}
+          AND ${assignmentSql}
           AND ${statusSql}
           AND ct.phone IS NOT NULL
           AND (
@@ -12976,9 +13097,10 @@ export async function searchConversations(query: string, options?: {
     limit?: number;
     status?: Extract<ConversationListStatus, "active" | "archived" | "trash">;
     mode?: ConversationSearchMode;
+    scope?: "my" | "location";
 }) {
     try {
-        const location = await getAuthenticatedLocationReadOnly();
+        const { location, assignedUserId } = await getAuthenticatedConversationContext(options?.scope);
         const traceId = createTraceId();
         const MAX_SEARCH_LIMIT = 50;
         const limit = Math.min(Math.max(Number(options?.limit || 20), 1), MAX_SEARCH_LIMIT);
@@ -13025,9 +13147,15 @@ export async function searchConversations(query: string, options?: {
                     : status === "trash"
                         ? Prisma.sql`c."deletedAt" IS NOT NULL`
                         : Prisma.sql`c."deletedAt" IS NULL`;
+        const assignmentSql = assignedUserId
+            ? Prisma.sql`ct."assignedUserId" = ${assignedUserId}`
+            : Prisma.sql`TRUE`;
 
         const fallbackWhere: any = {
             locationId: location.id,
+            ...(assignedUserId
+                ? { contact: { is: { locationId: location.id, assignedUserId } } }
+                : {}),
             ...(status === "active"
                 ? { deletedAt: null, archivedAt: null }
                 : status === "archived"
@@ -13053,6 +13181,7 @@ export async function searchConversations(query: string, options?: {
                     queryDigits,
                     limit,
                     status,
+                    assignedUserId,
                 }));
                 fastPhoneUsed = rankedRows.length > 0;
             }
@@ -13082,6 +13211,7 @@ export async function searchConversations(query: string, options?: {
                         JOIN "Conversation" c ON c."contactId" = ct.id
                         WHERE ct."locationId" = ${location.id}
                           AND c."locationId" = ${location.id}
+                          AND ${assignmentSql}
                           AND ${statusSql}
                           AND ct.phone IS NOT NULL
                           AND (
@@ -13103,6 +13233,7 @@ export async function searchConversations(query: string, options?: {
                         JOIN "Conversation" c ON c."contactId" = ct.id
                         WHERE wam."locationId" = ${location.id}
                           AND c."locationId" = ${location.id}
+                          AND ${assignmentSql}
                           AND ${statusSql}
                           AND (
                             wam.phone = ${queryDigits}
@@ -13116,7 +13247,9 @@ export async function searchConversations(query: string, options?: {
                             4.4 AS score
                         FROM "ConversationParticipant" cp
                         JOIN "Conversation" c ON c.id = cp."conversationId"
+                        JOIN "Contact" ct ON ct.id = c."contactId"
                         WHERE c."locationId" = ${location.id}
+                          AND ${assignmentSql}
                           AND ${statusSql}
                           AND cp."phoneDigits" = ${queryDigits}
                     ),
@@ -13160,6 +13293,7 @@ export async function searchConversations(query: string, options?: {
                     FROM "Conversation" c
                     JOIN "Contact" ct ON ct.id = c."contactId"
                     WHERE c."locationId" = ${location.id}
+                      AND ${assignmentSql}
                       AND ${statusSql}
                       AND (
                         COALESCE(c."lastMessageBody", '') ILIKE ${likeQuery}
@@ -13223,6 +13357,7 @@ export async function searchConversations(query: string, options?: {
                 JOIN "Contact" ct ON ct.id = c."contactId"
                 CROSS JOIN search_term st
                 WHERE c."locationId" = ${location.id}
+                  AND ${assignmentSql}
                   AND ${statusSql}
                   AND (
                     to_tsvector(
@@ -13247,8 +13382,10 @@ export async function searchConversations(query: string, options?: {
                     0.7 + similarity(COALESCE(c."lastMessageBody", ''), st.q)
                     + 0.4 * ts_rank_cd(to_tsvector('simple', COALESCE(c."lastMessageBody", '')), st.tsq) AS score
                 FROM "Conversation" c
+                JOIN "Contact" ct ON ct.id = c."contactId"
                 CROSS JOIN search_term st
                 WHERE c."locationId" = ${location.id}
+                  AND ${assignmentSql}
                   AND ${statusSql}
                   AND (
                     to_tsvector('simple', COALESCE(c."lastMessageBody", '')) @@ st.tsq
@@ -13334,8 +13471,10 @@ export async function searchConversations(query: string, options?: {
                             ) AS score
                         FROM "Message" m
                         JOIN "Conversation" c ON c.id = m."conversationId"
+                        JOIN "Contact" ct ON ct.id = c."contactId"
                         CROSS JOIN search_term st
                         WHERE c."locationId" = ${location.id}
+                          AND ${assignmentSql}
                           AND ${statusSql}
                           AND (
                             to_tsvector('simple', COALESCE(m.body, '')) @@ st.tsq
@@ -13353,8 +13492,10 @@ export async function searchConversations(query: string, options?: {
                         FROM "MessageTranscript" mt
                         JOIN "Message" m ON m.id = mt."messageId"
                         JOIN "Conversation" c ON c.id = m."conversationId"
+                        JOIN "Contact" ct ON ct.id = c."contactId"
                         CROSS JOIN search_term st
                         WHERE c."locationId" = ${location.id}
+                          AND ${assignmentSql}
                           AND ${statusSql}
                           AND (
                             to_tsvector('simple', COALESCE(mt.text, '')) @@ st.tsq
@@ -13427,6 +13568,7 @@ export async function searchConversations(query: string, options?: {
         const conversations = await hydrateRankedConversationRows({
             location,
             rankedConversationIds,
+            assignedUserId,
         });
 
         logPerformanceMetric("conversations.search", {
@@ -14431,7 +14573,7 @@ export async function addConversationActivityEntry(
             select: { id: true, firstName: true, name: true, email: true }
         }),
         db.conversation.findFirst({
-            where: buildConversationReferenceWhere(location.id, conversationId),
+            where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
             select: { id: true, contactId: true, ghlConversationId: true }
         }),
     ]);

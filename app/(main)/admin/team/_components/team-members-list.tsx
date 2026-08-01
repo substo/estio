@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import {
     Table,
     TableBody,
@@ -17,20 +16,9 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Shield, User as UserIcon, Crown } from 'lucide-react';
-import { updateUserRole, removeUserFromLocation } from '../actions';
+import { User as UserIcon, Crown } from 'lucide-react';
+import { updateUserRole } from '../actions';
 import { useRouter } from 'next/navigation';
 
 interface TeamMember {
@@ -62,13 +50,6 @@ export function TeamMembersList({ members, isAdmin, currentUserId }: TeamMembers
     async function handleRoleChange(userId: string, newRole: 'ADMIN' | 'MEMBER') {
         setLoading(userId);
         await updateUserRole(userId, newRole);
-        setLoading(null);
-        router.refresh();
-    }
-
-    async function handleRemove(userId: string) {
-        setLoading(userId);
-        await removeUserFromLocation(userId);
         setLoading(null);
         router.refresh();
     }
@@ -156,41 +137,7 @@ export function TeamMembersList({ members, isAdmin, currentUserId }: TeamMembers
                                 <TableCell className="text-gray-500">
                                     {member.createdAt.toLocaleDateString()}
                                 </TableCell>
-                                {isAdmin && (
-                                    <TableCell className="text-right">
-                                        {!isSelf && (
-                                            <AlertDialog>
-                                                <AlertDialogTrigger asChild>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                        disabled={loading === member.user.id}
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </AlertDialogTrigger>
-                                                <AlertDialogContent>
-                                                    <AlertDialogHeader>
-                                                        <AlertDialogTitle>Remove team member?</AlertDialogTitle>
-                                                        <AlertDialogDescription>
-                                                            This will remove {member.user.name || member.user.email}'s access to this location. They can be re-invited later.
-                                                        </AlertDialogDescription>
-                                                    </AlertDialogHeader>
-                                                    <AlertDialogFooter>
-                                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                        <AlertDialogAction
-                                                            onClick={() => handleRemove(member.user.id)}
-                                                            className="bg-red-600 hover:bg-red-700"
-                                                        >
-                                                            Remove
-                                                        </AlertDialogAction>
-                                                    </AlertDialogFooter>
-                                                </AlertDialogContent>
-                                            </AlertDialog>
-                                        )}
-                                    </TableCell>
-                                )}
+                                {isAdmin && <TableCell className="text-right" />}
                             </TableRow>
                         );
                     })}

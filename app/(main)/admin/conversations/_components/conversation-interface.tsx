@@ -230,6 +230,7 @@ type PendingPropertyImportDraftRequest = {
 
 interface ConversationInterfaceProps {
     locationId: string;
+    scope: 'my' | 'location';
     initialConversations: Conversation[];
     initialConversationListPageInfo?: {
         hasMore: boolean;
@@ -316,7 +317,7 @@ function findConversationForSelection(items: Conversation[], selectedId: string)
     return items.find((conversation) => conversationMatchesSelection(conversation, selectedId)) || null;
 }
 
-export function ConversationInterface({ locationId, initialConversations, initialConversationListPageInfo, initialSelectedConversationId, initialDeals, featureFlags }: ConversationInterfaceProps) {
+export function ConversationInterface({ locationId, scope, initialConversations, initialConversationListPageInfo, initialSelectedConversationId, initialDeals, featureFlags }: ConversationInterfaceProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -492,6 +493,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 limit: 50,
                 status: viewFilter,
                 mode: 'contact',
+                scope,
             })
                 .then(res => {
                     if (isCancelled || searchRequestIdRef.current !== requestId) return;
@@ -516,7 +518,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             isCancelled = true;
             clearTimeout(searchTimer);
         };
-    }, [searchQuery, viewFilter, viewMode]);
+    }, [searchQuery, scope, viewFilter, viewMode]);
 
     const normalizedSearchQuery = searchQuery.trim();
     const instantSearchResults = useMemo(
@@ -1012,9 +1014,9 @@ export function ConversationInterface({ locationId, initialConversations, initia
     // Fetch Deals when switching mode
     useEffect(() => {
         if (viewMode === 'deals' && deals.length === 0) {
-            getDealContexts().then(setDeals).catch(console.error);
+            getDealContexts(scope).then(setDeals).catch(console.error);
         }
-    }, [deals.length, viewMode]);
+    }, [deals.length, scope, viewMode]);
 
     const { loadDealWorkspaceSidebar } = useDealWorkspaceHydration({
         viewMode,
@@ -1118,7 +1120,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         // Tasks view uses its own data source (GlobalTaskList), skip conversation fetching.
         if (viewFilter === 'tasks') return;
 
-        fetchConversations(viewFilter, activeIdRef.current || undefined)
+        fetchConversations(viewFilter, activeIdRef.current || undefined, { scope })
             .then(data => {
                 replaceConversationListFromResponse(data);
             })
@@ -1126,7 +1128,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 console.error("Failed to fetch conversations:", err);
                 toast({ title: "Error", description: "Failed to load conversations.", variant: "destructive" });
             });
-    }, [viewFilter, replaceConversationListFromResponse]);
+    }, [scope, viewFilter, replaceConversationListFromResponse]);
 
     // When in Tasks view and a task is clicked, load its conversation so center/right panels can render.
     useEffect(() => {
@@ -1156,6 +1158,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
             const data = await fetchConversations(viewFilter, activeId || undefined, {
                 cursor: conversationListNextCursor,
                 limit: 50,
+                scope,
             });
             appendConversationPageFromResponse(data);
         } catch (err: any) {
@@ -1171,6 +1174,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
         conversationListNextCursor,
         viewFilter,
         activeId,
+        scope,
         appendConversationPageFromResponse,
     ]);
 
@@ -1456,6 +1460,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
     });
 
     const { runRealtimeRefresh, isConversationWorkspaceRefreshBusy } = useConversationRefreshOrchestration({
+        scope,
         viewMode,
         viewFilter,
         activeId,
@@ -3572,7 +3577,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                 onOpenChange={setSyncAllOpen}
                 onComplete={async () => {
                     // Refresh conversations list after sync
-                    const data = await fetchConversations(viewFilter, activeId || undefined);
+                    const data = await fetchConversations(viewFilter, activeId || undefined, { scope });
                     replaceConversationListFromResponse(data);
                 }}
             />
@@ -3611,7 +3616,7 @@ export function ConversationInterface({ locationId, initialConversations, initia
                     setActiveId(conversationId);
                     toast({ title: "Conversation Created", description: "You can now send messages." });
 
-                    void fetchConversations(viewFilter, conversationId)
+                    void fetchConversations(viewFilter, conversationId, { scope })
                         .then((data) => {
                             replaceConversationListFromResponse(data);
                         })

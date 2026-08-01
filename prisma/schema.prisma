@@ -219,6 +219,7 @@ model User {
   locations     Location[]         @relation("LocationToUser")
   locationRoles UserLocationRole[]
   assignedContacts Contact[] @relation("ContactAssignedUser")
+  assignedDeals    DealContext[] @relation("DealAssignedUser")
 
   createdProperties            Property[]                  @relation("PropertyCreator")
   updatedProperties            Property[]                  @relation("PropertyUpdater")
@@ -1153,6 +1154,25 @@ model UserLocationRole {
   @@index([locationId, role])
 }
 
+model UserOffboardingAudit {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  locationId      String
+  actorUserId     String
+  sourceUserId    String
+  successorUserId String?
+  mode            String
+  operation       String
+  confirmationId  String   @unique
+  status          String
+  globalSuspensionRequested Boolean @default(false)
+  previewJson     Json
+  resultJson      Json?
+
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([sourceUserId, createdAt(sort: Desc)])
+}
+
 model Project {
   id              String    @id @default(cuid())
   createdAt       DateTime  @default(now())
@@ -1712,6 +1732,8 @@ model DealContext {
 
   title      String // e.g. "Sale of Sea Caves Villa"
   locationId String
+  assignedUserId String?
+  assignedUser   User? @relation("DealAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   // Linked References (Stored as ID arrays to avoid complex relations with non-DB GHL objects)
   conversationIds String[]
@@ -1738,6 +1760,7 @@ model DealContext {
   aiDecisions AiDecision[]
 
   @@index([locationId])
+  @@index([locationId, assignedUserId])
   @@index([lastActivityAt])
 }
 

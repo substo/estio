@@ -17,47 +17,18 @@ import {
     getConversationWorkspaceCore,
     refreshConversation,
 } from '../actions';
-import { ACTIVE_REFRESH_MESSAGE_LIMIT, THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydration';
+import { THREAD_TARGET_MESSAGE_COUNT } from '@/lib/conversations/thread-hydration';
 import { hasPendingTranscripts, getMessageSignature } from './conversation-transcript-actions';
+import {
+    getActiveConversationReconcileIntervalMs,
+    getActiveWorkspaceRefreshOptions,
+    getConversationListReconcileIntervalMs,
+} from './conversation-refresh-policy';
 
 const ACTIVE_POLL_GRACE_MS = 2500;
 const ACTIVE_ACTIVITY_REFRESH_INTERVAL_MS = 60_000;
-const CONNECTED_LIST_RECONCILE_INTERVAL_MS = 15_000;
-const CONNECTED_ACTIVE_RECONCILE_INTERVAL_MS = 5_000;
-
-export function getActiveWorkspaceRefreshOptions({
-    pendingTranscripts,
-    workspaceActivityLimit,
-}: {
-    pendingTranscripts: boolean;
-    workspaceActivityLimit: number;
-}) {
-    const includeActivity = pendingTranscripts === true;
-    const messageLimit = pendingTranscripts ? THREAD_TARGET_MESSAGE_COUNT : ACTIVE_REFRESH_MESSAGE_LIMIT;
-    const messageMetadataMode = pendingTranscripts ? "full" : "firstPaint";
-
-    return {
-        messageLimit,
-        messageMetadataMode,
-        includeActivity,
-        activityLimit: workspaceActivityLimit,
-        refreshMode: "active_refresh",
-    } as const;
-}
-
-export function getConversationListReconcileIntervalMs(balancedPolling: boolean) {
-    return balancedPolling ? CONNECTED_LIST_RECONCILE_INTERVAL_MS : 3_000;
-}
-
-export function getActiveConversationReconcileIntervalMs(args: {
-    balancedPolling: boolean;
-    pendingTranscripts: boolean;
-}) {
-    if (!args.balancedPolling) return 3_000;
-    return CONNECTED_ACTIVE_RECONCILE_INTERVAL_MS;
-}
-
 type UseConversationRefreshOrchestrationArgs = {
+    scope: 'my' | 'location';
     viewMode: 'chats' | 'deals';
     viewFilter: 'active' | 'archived' | 'trash' | 'tasks';
     activeId: string | null;
@@ -86,6 +57,7 @@ type UseConversationRefreshOrchestrationArgs = {
 };
 
 export function useConversationRefreshOrchestration({
+    scope,
     viewMode,
     viewFilter,
     activeId,
@@ -322,7 +294,8 @@ export function useConversationRefreshOrchestration({
                 const delta = await getConversationListDelta(
                     viewFilter,
                     conversationDeltaCursorRef.current,
-                    selectedConversationId
+                    selectedConversationId,
+                    { scope },
                 );
                 if (delta?.success) {
                     applyConversationDeltaPayload(delta);
@@ -346,6 +319,7 @@ export function useConversationRefreshOrchestration({
         refreshActiveWorkspaceCore,
         realtimeRefreshTimerRef,
         searchQuery,
+        scope,
         viewFilter,
         viewMode,
     ]);
@@ -371,7 +345,7 @@ export function useConversationRefreshOrchestration({
                 const selectedConversationId = activeIdRef.current || undefined;
                 if (!featureFlags.workspaceV2) {
                     trackClientRequest("legacy_list_poll", { viewFilter });
-                    const snapshot = await fetchConversations(viewFilter, selectedConversationId);
+                    const snapshot = await fetchConversations(viewFilter, selectedConversationId, { scope });
                     if (cancelled) return;
                     replaceConversationListFromResponse(snapshot);
                     return;
@@ -381,7 +355,8 @@ export function useConversationRefreshOrchestration({
                 const delta = await getConversationListDelta(
                     viewFilter,
                     conversationDeltaCursorRef.current,
-                    selectedConversationId
+                    selectedConversationId,
+                    { scope },
                 );
                 if (cancelled || !delta?.success) return;
                 applyConversationDeltaPayload(delta);
@@ -406,7 +381,7 @@ export function useConversationRefreshOrchestration({
             cancelled = true;
             clearInterval(intervalId);
         };
-    }, [viewMode, viewFilter, isTabVisible, searchQuery, featureFlags.balancedPolling, featureFlags.workspaceV2, activeIdRef, conversationDeltaCursorRef, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
+    }, [viewMode, viewFilter, isTabVisible, searchQuery, scope, featureFlags.balancedPolling, featureFlags.workspaceV2, activeIdRef, conversationDeltaCursorRef, applyConversationDeltaPayload, markConversationReadInUi, replaceConversationListFromResponse, trackClientRequest]);
 
     useEffect(() => {
         if (viewMode !== 'chats' || !activeId) return;

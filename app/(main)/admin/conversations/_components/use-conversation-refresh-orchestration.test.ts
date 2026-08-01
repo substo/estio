@@ -9,7 +9,7 @@ import {
     getActiveConversationReconcileIntervalMs,
     getActiveWorkspaceRefreshOptions,
     getConversationListReconcileIntervalMs,
-} from './use-conversation-refresh-orchestration';
+} from './conversation-refresh-policy';
 
 test('active workspace refresh uses first-paint message options when transcripts are not pending', () => {
     assert.deepEqual(getActiveWorkspaceRefreshOptions({

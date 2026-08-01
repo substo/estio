@@ -1,7 +1,6 @@
 'use server';
 
 import db from "@/lib/db";
-import { getLocationContext } from "@/lib/auth/location-context";
 import type { Conversation } from "@/lib/ghl/conversations";
 import {
     assembleTimelineEvents,
@@ -14,6 +13,9 @@ import {
 } from "@/lib/queue/deal-enrichment";
 import { DealAgent } from "@/lib/ai/agent";
 import { collectDealConversationReferences, resolveDealConversationRefs, syncDealConversationLinks } from "@/lib/deals/conversation-links";
+import { getActiveContactsAccess, type ActiveContactsAccess } from "@/lib/contacts/active-location-access";
+import { buildConversationVisibilityWhere } from "@/lib/conversations/contact-assignment-access";
+import { buildDealManageWhere, buildDealVisibilityWhere } from "@/lib/deals/assignment-access";
 
 type DealTimelineWindow = {
     oldestCursor: string | null;
@@ -22,10 +24,12 @@ type DealTimelineWindow = {
     requestedLimit: number;
 };
 
-async function getAuthenticatedLocation() {
-    const location = await getLocationContext();
-    if (!location?.id) throw new Error("Unauthorized");
-    return location;
+async function getAuthenticatedDealAccess(requestedScope?: string | null) {
+    const access = await getActiveContactsAccess();
+    if (!access) throw new Error("Unauthorized");
+    const location = await db.location.findUnique({ where: { id: access.locationId } });
+    if (!location) throw new Error("Unauthorized");
+    return { access, location, requestedScope };
 }
 
 function mapDealConversationRowToUi(row: any, ghlLocationId: string | null): Conversation {
@@ -51,9 +55,14 @@ function mapDealConversationRowToUi(row: any, ghlLocationId: string | null): Con
     };
 }
 
-async function queryDealParticipants(dealId: string, locationId: string, ghlLocationId: string | null) {
+async function queryDealParticipants(
+    dealId: string,
+    access: ActiveContactsAccess,
+    ghlLocationId: string | null,
+) {
+    const locationId = access.locationId;
     const deal = await db.dealContext.findFirst({
-        where: { id: dealId, locationId },
+        where: { id: dealId, ...buildDealManageWhere(access) },
         select: {
             id: true,
             title: true,
@@ -76,13 +85,15 @@ async function queryDealParticipants(dealId: string, locationId: string, ghlLoca
     const refs = collectDealConversationReferences(deal);
     const conversations = await db.conversation.findMany({
         where: {
-            locationId,
-            OR: [
-                { id: { in: refs.linkedConversationIds } },
-                { id: { in: refs.legacyConversationRefs } },
-                { ghlConversationId: { in: refs.legacyConversationRefs } },
-                { syncRecords: { some: { providerConversationId: { in: refs.legacyConversationRefs } } } },
-                { syncRecords: { some: { providerThreadId: { in: refs.legacyConversationRefs } } } },
+            AND: [
+                buildConversationVisibilityWhere(access, "location"),
+                { OR: [
+                    { id: { in: refs.linkedConversationIds } },
+                    { id: { in: refs.legacyConversationRefs } },
+                    { ghlConversationId: { in: refs.legacyConversationRefs } },
+                    { syncRecords: { some: { providerConversationId: { in: refs.legacyConversationRefs } } } },
+                    { syncRecords: { some: { providerThreadId: { in: refs.legacyConversationRefs } } } },
+                ] },
             ],
         },
         include: {
@@ -116,13 +127,13 @@ function buildDealTimelineWindow(events: any[], requestedLimit: number): DealTim
     };
 }
 
-export async function getDealContexts() {
-    const location = await getAuthenticatedLocation();
+export async function getDealContexts(scope?: "my" | "location") {
+    const { access } = await getAuthenticatedDealAccess(scope);
 
     // Fetch all active deals
     const deals = await db.dealContext.findMany({
         where: {
-            locationId: location.id,
+            ...buildDealVisibilityWhere(access, scope),
             stage: { not: 'CLOSED' }
         },
         orderBy: { lastActivityAt: 'desc' },
@@ -133,7 +144,6 @@ export async function getDealContexts() {
 }
 
 export async function getDealContext(id: string) {
-    const location = await getAuthenticatedLocation();
     const [core, sidebar] = await Promise.all([
         getDealWorkspaceCore(id, { take: 1 }),
         getDealWorkspaceSidebar(id),
@@ -150,7 +160,7 @@ export async function getDealContext(id: string) {
 }
 
 export async function findExistingDeal(conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
     const resolved = await resolveDealConversationRefs(db as any, location.id, conversationIds);
     const resolvedConversationIds = resolved.map((item) => item.conversationId);
     const refs = Array.from(new Set([...conversationIds, ...resolvedConversationIds].filter(Boolean)));
@@ -158,7 +168,7 @@ export async function findExistingDeal(conversationIds: string[]) {
     // Find any active deal that contains ANY of the selected conversations
     const deals = await db.dealContext.findMany({
         where: {
-            locationId: location.id,
+            ...buildDealManageWhere(access),
             stage: 'ACTIVE',
             OR: [
                 { conversationLinks: { some: { conversationId: { in: resolvedConversationIds } } } },
@@ -181,7 +191,7 @@ export async function findExistingDeal(conversationIds: string[]) {
 }
 
 export async function createPersistentDeal(title: string, conversationIds: string[]) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
     const normalizedTitle = String(title || "").trim() || "Untitled Deal";
     const normalizedConversationIds = Array.from(new Set(
         (Array.isArray(conversationIds) ? conversationIds : [])
@@ -199,11 +209,21 @@ export async function createPersistentDeal(title: string, conversationIds: strin
     }
 
     const canonicalConversationIds = resolved.map((item) => item.conversationId);
+    const visibleConversationCount = await db.conversation.count({
+        where: {
+            id: { in: canonicalConversationIds },
+            ...buildConversationVisibilityWhere(access, "location"),
+        },
+    });
+    if (visibleConversationCount !== canonicalConversationIds.length) {
+        throw new Error("One or more conversations are unavailable.");
+    }
     const queuedAt = new Date().toISOString();
     const dealContext = await db.dealContext.create({
         data: {
             title: normalizedTitle,
             locationId: location.id,
+            assignedUserId: access.internalUserId,
             conversationIds: canonicalConversationIds,
             propertyIds: [],
             stage: 'ACTIVE',
@@ -252,14 +272,14 @@ export async function getDealWorkspaceCore(
         beforeCursor?: string | null;
     }
 ) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
     const normalizedDealId = String(dealId || "").trim();
     const requestedTake = Number(options?.take);
     const take = Number.isFinite(requestedTake) && requestedTake > 0
         ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
         : 40;
 
-    const resolved = await queryDealParticipants(normalizedDealId, location.id, location.ghlLocationId || null);
+    const resolved = await queryDealParticipants(normalizedDealId, access, location.ghlLocationId || null);
     if (!resolved) {
         return {
             success: false as const,
@@ -287,10 +307,10 @@ export async function getDealWorkspaceCore(
 }
 
 export async function getDealWorkspaceSidebar(dealId: string) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
     const normalizedDealId = String(dealId || "").trim();
 
-    const resolved = await queryDealParticipants(normalizedDealId, location.id, location.ghlLocationId || null);
+    const resolved = await queryDealParticipants(normalizedDealId, access, location.ghlLocationId || null);
     if (!resolved) {
         return {
             success: false as const,
@@ -314,10 +334,10 @@ export async function getDealWorkspaceSidebar(dealId: string) {
 }
 
 export async function updateDealStatus(dealId: string, status: string) {
-    const location = await getAuthenticatedLocation();
+    const { access } = await getAuthenticatedDealAccess("location");
 
     const result = await db.dealContext.updateMany({
-        where: { id: dealId, locationId: location.id },
+        where: { id: dealId, ...buildDealManageWhere(access) },
         data: { stage: status }
     });
     if (result.count === 0) {
@@ -328,11 +348,11 @@ export async function updateDealStatus(dealId: string, status: string) {
 }
 
 export async function runDealAgentAction(dealId: string, message: string, history: any[]) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
 
     // Check access
     const deal = await db.dealContext.findFirst({
-        where: { id: dealId, locationId: location.id }
+        where: { id: dealId, ...buildDealManageWhere(access) }
     });
     if (!deal) throw new Error("Deal not found");
 
@@ -358,10 +378,10 @@ export async function runDealAgentAction(dealId: string, message: string, histor
 }
 
 export async function removeConversationFromDeal(dealId: string, conversationId: string) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
 
     const deal = await db.dealContext.findFirst({
-        where: { id: dealId, locationId: location.id },
+        where: { id: dealId, ...buildDealManageWhere(access) },
         select: { conversationIds: true }
     });
 
@@ -399,11 +419,16 @@ export async function fetchDealTimeline(
         beforeCursor?: string | null;
     }
 ) {
-    const location = await getAuthenticatedLocation();
+    const { access, location } = await getAuthenticatedDealAccess("location");
     const requestedTake = Number(options?.take);
     const take = Number.isFinite(requestedTake) && requestedTake > 0
         ? Math.min(Math.max(Math.floor(requestedTake), 1), 500)
         : 40;
+    const deal = await db.dealContext.findFirst({
+        where: { id: dealId, ...buildDealManageWhere(access) },
+        select: { id: true },
+    });
+    if (!deal) throw new Error("Deal not found");
 
     const timeline = await assembleTimelineEvents({
         mode: "deal",
