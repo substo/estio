@@ -69,6 +69,9 @@ export class WhatsAppSessionAuthCoordinator {
             let preserveInitialProfile = false;
             try {
                 await ensureSessionAuthProfileQuiescent({ profilePath, terminate: true });
+                if (claimed.discardLocalProfile) {
+                    await rm(profilePath, { recursive: true, force: true });
+                }
                 if (placement.currentGeneration === 0) {
                     const localProfileState = await inspectLocalAuthProfileState(profilePath);
                     preserveInitialProfile = localProfileState !== "missing";

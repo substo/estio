@@ -1177,8 +1177,10 @@ export default function WhatsAppSettingsPage() {
                                             </div>
                                         </div>
                                         <div className="rounded-md border p-3">
-                                            <div className="text-xs text-muted-foreground">Default</div>
-                                            <div className="truncate font-medium">{settings.whatsappProviderMode === "web_bridge" ? "Yes" : "No"}</div>
+                                            <div className="text-xs text-muted-foreground">Outbound</div>
+                                            <div className="truncate font-medium">
+                                                {settings.webBridgeSession?.isDefaultOutbound ? "Web Bridge active" : "Not active"}
+                                            </div>
                                         </div>
                                         <div className="rounded-md border p-3">
                                             <div className="text-xs text-muted-foreground">Service</div>
@@ -1248,6 +1250,15 @@ export default function WhatsAppSettingsPage() {
                                             </AlertDescription>
                                         </Alert>
                                     )}
+                                    {!settings.webBridgeSession && (
+                                        <Alert>
+                                            <CheckCircle2 className="h-4 w-4" />
+                                            <AlertTitle>No saved WhatsApp login</AlertTitle>
+                                            <AlertDescription>
+                                                Connect can only create a new QR code. WhatsApp cannot relink until someone scans it from the phone.
+                                            </AlertDescription>
+                                        </Alert>
+                                    )}
                                     {settings.webBridgeDiagnostics?.stale && (
                                         <Alert>
                                             <AlertTriangle className="h-4 w-4" />
@@ -1293,11 +1304,11 @@ export default function WhatsAppSettingsPage() {
                                             Disconnect
                                         </Button>
                                         <Button type="button" variant="outline" onClick={handleClearWebBridge} disabled={cloudBusy || !settings.webBridgeSession}>
-                                            Clear Session
+                                            Delete Saved Login
                                         </Button>
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        Connect starts the Web Bridge and keeps this location on `web_bridge`. Restart preserves saved pairing files. Disconnect stops the worker session. Clear Session removes LocalAuth pairing and forces a fresh QR.
+                                        Connect creates or starts the Web Bridge. Restart preserves the saved login. Disconnect only stops it. Delete Saved Login removes LocalAuth pairing and requires a fresh QR scan from the phone.
                                     </div>
                                 </div>
                             </div>

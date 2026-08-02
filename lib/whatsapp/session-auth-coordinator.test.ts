@@ -28,10 +28,14 @@ function placement() {
     };
 }
 
-function coordinator(dataPath: string) {
+function coordinator(dataPath: string, options: { discardLocalProfile?: boolean } = {}) {
     const calls = { completed: 0, failed: 0 };
     const store = {
-        claimAttach: async () => ({ placement: placement(), alreadyAttached: false }),
+        claimAttach: async () => ({
+            placement: placement(),
+            alreadyAttached: false,
+            discardLocalProfile: options.discardLocalProfile === true,
+        }),
         completeAttach: async (claimed: any) => {
             calls.completed += 1;
             return { ...claimed, state: "attached" };
@@ -83,6 +87,26 @@ test("generation-zero attach leaves a genuinely new session empty for QR linking
 
         assert.equal(attached.durableReady, false);
         await assert.rejects(access(profilePath));
+        assert.deepEqual(calls, { completed: 1, failed: 0 });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("relink-required attach deletes a complete stale local login before starting", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wa-auth-relink-"));
+    try {
+        const profilePath = getLocalAuthProfilePath(root, "bridge_session_1");
+        await mkdir(path.join(profilePath, "Default", "IndexedDB"), { recursive: true });
+        await mkdir(path.join(profilePath, "Default", "Local Storage"), { recursive: true });
+        const marker = path.join(profilePath, "Default", "IndexedDB", "auth.db");
+        await writeFile(marker, "stale-auth");
+        const { value, calls } = coordinator(root, { discardLocalProfile: true });
+
+        const attached = await value.attach({ ownership, bridgeSessionId: "bridge_session_1" });
+
+        assert.equal(attached.durableReady, false);
+        await assert.rejects(access(marker));
         assert.deepEqual(calls, { completed: 1, failed: 0 });
     } finally {
         await rm(root, { recursive: true, force: true });

@@ -39,6 +39,7 @@ import {
     type SmsRelayStats,
     type DeviceActivityStats,
 } from "./actions";
+import { getDeviceHeaderStatus } from "./device-header-status";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -654,6 +655,7 @@ export default function SmsRelaySettingsPage() {
     const [egressBusy, setEgressBusy] = useState(false);
     const [reconnectFeedback, setReconnectFeedback] = useState<string | null>(null);
     const [unlinkFeedback, setUnlinkFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+    const headerStatus = getDeviceHeaderStatus(devices, loading);
 
     const reload = useCallback(() => {
         startTransition(async () => {
@@ -790,10 +792,22 @@ export default function SmsRelaySettingsPage() {
                     <div>
                         <h1 style={styles.pageTitle}>
                             Connected Devices
-                            <span style={styles.liveIndicator}>
-                                <span style={{ ...styles.pulseDotAnim, background: "#22c55e", width: 6, height: 6, top: "50%", left: "50%", marginTop: -3, marginLeft: -3 }} />
-                                <span style={{ ...styles.dot.online, width: 6, height: 6 }} />
-                                <span style={{ fontSize: 10, color: "#16a34a", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>Live</span>
+                            <span
+                                aria-live="polite"
+                                aria-label={`Device status: ${headerStatus.label.toLowerCase()}`}
+                                style={{
+                                    ...styles.liveIndicator,
+                                    background: headerStatus.background,
+                                    borderColor: headerStatus.borderColor,
+                                }}
+                            >
+                                {headerStatus.pulse && (
+                                    <span style={{ ...styles.pulseDotAnim, background: headerStatus.dotColor, width: 6, height: 6, top: "50%", left: "50%", marginTop: -3, marginLeft: -3 }} />
+                                )}
+                                <span style={{ ...styles.dot.online, background: headerStatus.dotColor, width: 6, height: 6 }} />
+                                <span style={{ fontSize: 10, color: headerStatus.color, textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
+                                    {headerStatus.label}
+                                </span>
                             </span>
                         </h1>
                         <p style={styles.pageSubtitle}>

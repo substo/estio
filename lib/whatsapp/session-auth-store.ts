@@ -62,8 +62,10 @@ export class SessionAuthPlacementStore {
             if (placement.locationId !== ownership.locationId || placement.bindingId !== ownership.bindingId) {
                 throw new Error("Session-auth placement scope conflicts with authoritative ownership");
             }
+            let discardLocalProfile = false;
             if (placement.state !== "detached") {
                 if (placement.state === "relink_required") {
+                    discardLocalProfile = true;
                     placement = record(await tx.whatsAppSessionAuthPlacement.update({
                         where: { id: placement.id },
                         data: { state: "detached", currentGeneration: 0, lastKnownGoodGeneration: 0 },
@@ -114,6 +116,7 @@ export class SessionAuthPlacementStore {
                         ),
                     });
                     if (!canRestore) {
+                        discardLocalProfile = true;
                         placement = record(await tx.whatsAppSessionAuthPlacement.update({
                             where: { id: placement.id }, data: { state: "detached" },
                         }));
@@ -128,7 +131,7 @@ export class SessionAuthPlacementStore {
             if (changed.count !== 1) throw new Error("Session-auth attach lost the single-writer race");
             placement = record(await tx.whatsAppSessionAuthPlacement.findUnique({ where: { id: placement.id } }));
             await tx.whatsAppSessionAuthAuditEvent.create({ data: auditData(placement, "attach_claimed", "success") });
-            return { placement, alreadyAttached: false };
+            return { placement, alreadyAttached: false, discardLocalProfile };
         });
     }
 

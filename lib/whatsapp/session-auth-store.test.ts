@@ -134,6 +134,25 @@ test("authoritative unhealthy owner detaches without publishing a checkpoint", a
     ]);
 });
 
+test("relink-required placement forces the worker to discard any stale local login", async () => {
+    const { db, state } = fakeDb();
+    Object.assign(state.placement, {
+        state: "relink_required",
+        currentGeneration: 2,
+        lastKnownGoodGeneration: 2,
+        recoveryStatus: "relink_required",
+        lastErrorCode: "operator_clear",
+    });
+    const store = new SessionAuthPlacementStore(db);
+
+    const claimed = await store.claimAttach(ownership);
+
+    assert.equal(claimed.discardLocalProfile, true);
+    assert.equal(claimed.placement.currentGeneration, 0);
+    assert.equal(claimed.placement.lastKnownGoodGeneration, 0);
+    assert.equal(claimed.placement.state, "attaching");
+});
+
 test("non-authoritative owner cannot detach a durable profile without a checkpoint", async () => {
     const { db } = fakeDb();
     const store = new SessionAuthPlacementStore(db);
