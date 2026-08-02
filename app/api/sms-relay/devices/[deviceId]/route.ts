@@ -13,6 +13,9 @@ import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { requireSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
+import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import { unlinkSmsRelayDevice } from "@/lib/sms-relay/unlink-device";
+import { clearWhatsAppWebBridgeSession } from "@/lib/whatsapp/web-bridge";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
 
         const location = await getLocationContext();
         if (!location) return NextResponse.json({ error: "No location" }, { status: 404 });
+        if (!await verifyUserIsLocationAdmin(userId, location.id)) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
 
         const device = await (db as any).smsRelayDevice.findFirst({
             where: { id: params.deviceId, locationId: location.id },
@@ -132,32 +138,39 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
 
         const location = await getLocationContext();
         if (!location) return NextResponse.json({ error: "No location" }, { status: 404 });
+        if (!await verifyUserIsLocationAdmin(userId, location.id)) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
 
-        const existing = await (db as any).smsRelayDevice.findFirst({
-            where: { id: params.deviceId, locationId: location.id },
-            select: { id: true, label: true },
+        const result = await db.$transaction((tx) => unlinkSmsRelayDevice(tx as any, {
+            deviceId: params.deviceId,
+            locationId: location.id,
+        }));
+        if (!result.found) return NextResponse.json({ error: "Device not found" }, { status: 404 });
+
+        console.info("[SmsRelay] Device safely unlinked", {
+            deviceId: params.deviceId,
+            locationId: location.id,
+            canceledJobs: result.canceledJobs,
+            retainedForAudit: result.retainedForAudit,
         });
-        if (!existing) return NextResponse.json({ error: "Device not found" }, { status: 404 });
-
-        // Cancel all pending/processing outbox jobs for this device
-        await (db as any).smsRelayOutbox.updateMany({
-            where: {
-                deviceId: params.deviceId,
-                status: { in: ["pending", "processing", "failed"] },
-            },
-            data: { status: "cancelled", lastError: "Device was unlinked." },
+        let externalWarning: string | null = null;
+        if (result.retainedForAudit) {
+            try {
+                const cleanup = await clearWhatsAppWebBridgeSession(location.id);
+                if (!cleanup.workerCleared) {
+                    externalWarning = "The device is deactivated locally; WhatsApp worker cleanup will need attention if the worker returns.";
+                }
+            } catch (error) {
+                console.error("[SmsRelay] Post-unlink WhatsApp cleanup failed", error);
+                externalWarning = "The device is deactivated locally; WhatsApp worker cleanup requires attention.";
+            }
+        }
+        return NextResponse.json({
+            success: true,
+            retainedForAudit: result.retainedForAudit,
+            externalWarning,
         });
-
-        // Delete the device (cascades outbox rows via FK)
-        await (db as any).smsRelayDevice.delete({
-            where: { id: params.deviceId },
-        });
-
-        console.log(
-            `[SmsRelay] Device unlinked: ${params.deviceId} ("${existing.label}") from location ${location.id}`
-        );
-
-        return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error("[SmsRelay] DELETE device error:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

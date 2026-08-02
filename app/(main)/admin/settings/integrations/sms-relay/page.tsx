@@ -33,7 +33,6 @@ import {
     getSmsRelayToggle,
     toggleSmsRelay,
     initiatePairing,
-    unlinkDevice,
     updateDevice,
     getDeviceActivityStats,
     type SmsRelayDevice,
@@ -654,6 +653,7 @@ export default function SmsRelaySettingsPage() {
     const [egressStatus, setEgressStatus] = useState<WhatsAppEgressStatus | null>(null);
     const [egressBusy, setEgressBusy] = useState(false);
     const [reconnectFeedback, setReconnectFeedback] = useState<string | null>(null);
+    const [unlinkFeedback, setUnlinkFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
     const reload = useCallback(() => {
         startTransition(async () => {
@@ -695,8 +695,23 @@ export default function SmsRelaySettingsPage() {
 
     const handleUnlink = (deviceId: string) => {
         startTransition(async () => {
-            await unlinkDevice(deviceId);
-            reload();
+            setUnlinkFeedback(null);
+            try {
+                const response = await fetch(`/api/sms-relay/devices/${encodeURIComponent(deviceId)}`, {
+                    method: "DELETE",
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result?.error || "Unable to unlink the device");
+                setUnlinkFeedback({
+                    tone: "success",
+                    message: result?.externalWarning
+                        ? `Device unlinked. ${result.externalWarning}`
+                        : "Device and linked WhatsApp session deactivated. Retained audit history was preserved.",
+                });
+                reload();
+            } catch (error: any) {
+                setUnlinkFeedback({ tone: "error", message: error?.message || "Unable to unlink the device" });
+            }
         });
     };
 
@@ -984,6 +999,18 @@ export default function SmsRelaySettingsPage() {
             {/* Devices */}
             <div style={styles.section}>
                 <h2 style={styles.sectionTitle}>Paired Devices</h2>
+                {unlinkFeedback && (
+                    <div
+                        role={unlinkFeedback.tone === "error" ? "alert" : "status"}
+                        style={{
+                            marginBottom: 12,
+                            color: unlinkFeedback.tone === "error" ? "#b91c1c" : "#166534",
+                            fontSize: 14,
+                        }}
+                    >
+                        {unlinkFeedback.message}
+                    </div>
+                )}
                 {loading && devices.length === 0 ? (
                     <div style={styles.emptyState}>Loading…</div>
                 ) : devices.length === 0 ? (

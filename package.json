@@ -30,7 +30,8 @@
         "ops:wa-egress:node-config": "tsx scripts/ops/whatsapp-device-egress-node-config.ts",
         "ops:wa-egress:preflight": "tsx scripts/ops/whatsapp-device-egress-preflight.ts",
         "ops:wa-egress:control": "tsx scripts/ops/whatsapp-device-egress-control.ts",
-        "ops:wa-egress:acceptance": "tsx scripts/ops/whatsapp-device-egress-acceptance.ts"
+        "ops:wa-egress:acceptance": "tsx scripts/ops/whatsapp-device-egress-acceptance.ts",
+        "location:backup": "tsx scripts/location-backup.ts"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.995.0",

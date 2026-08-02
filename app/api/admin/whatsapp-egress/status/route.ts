@@ -29,6 +29,7 @@ export async function GET() {
                                 label: true,
                                 platform: true,
                                 status: true,
+                                paired: true,
                                 capabilities: true,
                                 appVersion: true,
                                 lastSeenAt: true,
@@ -46,7 +47,14 @@ export async function GET() {
         }),
         getWhatsAppWebBridgeHealth().catch(() => null),
     ]);
-    const binding = session?.tunnelBinding || null;
+    const rawBinding = session?.tunnelBinding || null;
+    const binding = rawBinding
+        && rawBinding.status !== "revoked"
+        && rawBinding.desiredState !== "disabled"
+        && rawBinding.device.paired
+        && !rawBinding.device.tunnelRevokedAt
+        ? rawBinding
+        : null;
     const sessionRef = redactOperationalIdentifier(session?.sessionId, "session");
     const locationRef = redactOperationalIdentifier(location.id, "location");
     const workerSession = (bridgeHealth?.sessions || []).find((candidate: any) =>

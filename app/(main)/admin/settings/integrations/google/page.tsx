@@ -18,6 +18,7 @@ import {
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { resolveGoogleConnectionState } from "@/lib/google/connection-state";
+import { DisconnectGoogleButton } from "./disconnect-google-button";
 
 type GoogleTasklistOption = {
     id: string;
@@ -135,6 +136,8 @@ export default async function GoogleIntegrationPage({
     });
     const resolvedParams = await searchParams;
     const isNewConnection = resolvedParams?.google_connected === 'true';
+    const isDisconnected = resolvedParams?.google_disconnected === 'true';
+    const hasRevocationWarning = resolvedParams?.google_revoke_warning === 'true';
     const googleErrorCode = typeof resolvedParams?.google_error === "string"
         ? resolvedParams.google_error
         : null;
@@ -175,6 +178,25 @@ export default async function GoogleIntegrationPage({
                     <div className="flex items-center">
                         <CheckCircle2 className="mr-2 h-5 w-5" />
                         <p>Successfully connected to Google!</p>
+                    </div>
+                </div>
+            )}
+            {isDisconnected && (
+                <div
+                    role={hasRevocationWarning ? "alert" : "status"}
+                    className={hasRevocationWarning
+                        ? "rounded-md bg-amber-50 p-4 text-amber-700 dark:bg-amber-900/10 dark:text-amber-400"
+                        : "rounded-md bg-green-50 p-4 text-green-700 dark:bg-green-900/10 dark:text-green-400"}
+                >
+                    <div className="flex items-center">
+                        {hasRevocationWarning
+                            ? <AlertCircle className="mr-2 h-5 w-5" />
+                            : <CheckCircle2 className="mr-2 h-5 w-5" />}
+                        <p>
+                            {hasRevocationWarning
+                                ? "Google was disconnected from Estio. Remote token revocation needs administrator attention."
+                                : "Google was disconnected successfully."}
+                        </p>
                     </div>
                 </div>
             )}
@@ -229,11 +251,14 @@ export default async function GoogleIntegrationPage({
                                 </Link>
                             </Button>
                         ) : (
-                            <Button variant="outline" className="w-full" asChild>
-                                <Link href="/api/google/auth">
-                                    Reconnect / Update Permissions
-                                </Link>
-                            </Button>
+                            <div className="space-y-2">
+                                <Button variant="outline" className="w-full" asChild>
+                                    <Link href="/api/google/auth">
+                                        Reconnect / Update Permissions
+                                    </Link>
+                                </Button>
+                                <DisconnectGoogleButton />
+                            </div>
                         )}
                         {isConnected && (
                             <p className="text-xs text-center text-muted-foreground mt-2">

@@ -149,6 +149,23 @@ test("classifies db-ready but worker-missing state as stale", () => {
     assert.equal(diagnostics.stale, true);
 });
 
+test("authoritative local disconnect remains unlinked when the worker is unreachable", () => {
+    const diagnostics = buildWebBridgeDiagnostics({
+        expectedSessionDir,
+        session: { sessionId: "estio_loc_1", status: "disconnected" },
+        health: {
+            reachable: false,
+            ok: false,
+            error: "WhatsApp Web Bridge health check timed out.",
+            sessions: [],
+        },
+    });
+
+    assert.equal(diagnostics.status, "unlinked");
+    assert.equal(diagnostics.severity, "warning");
+    assert.equal(diagnostics.workerReady, false);
+});
+
 test("classifies qr worker status as relink required", () => {
     const diagnostics = buildWebBridgeDiagnostics({
         expectedSessionDir,

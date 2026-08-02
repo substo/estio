@@ -10,6 +10,7 @@
 
 # testing
 /coverage
+/backups/locations/
 
 # next.js
 /.next/

@@ -11,6 +11,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { requireSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
+import { unlinkSmsRelayDevice } from "@/lib/sms-relay/unlink-device";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,7 +66,14 @@ export async function getSmsRelayDevices(): Promise<SmsRelayDevice[]> {
     if (!location) return [];
 
     const devices = await (db as any).smsRelayDevice.findMany({
-        where: { locationId: location.id },
+        where: {
+            locationId: location.id,
+            tunnelRevokedAt: null,
+            OR: [
+                { paired: true },
+                { paired: false, pairExpiresAt: { gt: new Date() } },
+            ],
+        },
         orderBy: { createdAt: "desc" },
         select: {
             id: true,
@@ -103,7 +111,12 @@ export async function initiatePairing(
 
     // Remove stale unpaired devices with same label
     await (db as any).smsRelayDevice.deleteMany({
-        where: { locationId: location.id, paired: false, label: label.trim() },
+        where: {
+            locationId: location.id,
+            paired: false,
+            label: label.trim(),
+            tunnelBinding: null,
+        },
     });
 
     const device = await (db as any).smsRelayDevice.create({
@@ -154,28 +167,23 @@ export async function updateDevice(
 }
 
 // ---------------------------------------------------------------------------
-// Unlink / delete a device
+// Safely unlink a device while retaining immutable tunnel audit history
 // ---------------------------------------------------------------------------
 
-export async function unlinkDevice(deviceId: string): Promise<void> {
-    const location = await getSmsRelayLocation({ required: true });
-
-    const device = await (db as any).smsRelayDevice.findFirst({
-        where: { id: deviceId, locationId: location.id },
-        select: { id: true },
-    });
-    if (!device) return;
-
-    // Cancel pending jobs first
-    await (db as any).smsRelayOutbox.updateMany({
-        where: {
+export async function unlinkDevice(deviceId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const location = await getSmsRelayLocation({ required: true });
+        const result = await db.$transaction((tx) => unlinkSmsRelayDevice(tx as any, {
             deviceId,
-            status: { in: ["pending", "processing", "failed"] },
-        },
-        data: { status: "cancelled", lastError: "Device was unlinked by user." },
-    });
-
-    await (db as any).smsRelayDevice.delete({ where: { id: deviceId } });
+            locationId: location.id,
+        }));
+        return result.found
+            ? { success: true }
+            : { success: false, error: "Device not found" };
+    } catch (error) {
+        console.error("[SmsRelay] Safe unlink failed", error);
+        return { success: false, error: "Unable to unlink the device safely" };
+    }
 }
 
 // ---------------------------------------------------------------------------

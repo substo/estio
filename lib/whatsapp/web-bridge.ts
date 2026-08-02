@@ -448,12 +448,54 @@ export async function restartWhatsAppWebBridgeSession(locationId: string) {
 }
 
 export async function clearWhatsAppWebBridgeSession(locationId: string) {
-    const session = await getWhatsAppWebBridgeSession(locationId);
-    if (session) {
-        await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/clear`, { method: "POST", timeoutMs: 15_000 }).catch(() => null);
-        await (db as any).whatsAppWebBridgeSession.delete({ where: { locationId } }).catch(() => null);
-    }
-    return { success: true };
+    const session = await (db as any).whatsAppWebBridgeSession.findUnique({
+        where: { locationId },
+        include: { tunnelBinding: { select: { id: true } } },
+    });
+    if (!session) return { success: true, skipped: true, workerCleared: true };
+
+    let workerCleared = true;
+    await bridgeFetch(`/sessions/${encodeURIComponent(session.sessionId)}/clear`, {
+        method: "POST",
+        timeoutMs: 15_000,
+    }).catch((error) => {
+        workerCleared = false;
+        console.warn("[WhatsApp Web Bridge] Worker clear unavailable; local session remains deactivated", {
+            locationRef: redactOperationalIdentifier(locationId, "location"),
+            reason: error instanceof Error ? error.message : "worker_clear_failed",
+        });
+    });
+
+    await db.$transaction(async (tx: any) => {
+        if (session.tunnelBinding?.id) {
+            await tx.whatsAppSessionAuthPlacement.updateMany({
+                where: { bindingId: session.tunnelBinding.id },
+                data: {
+                    state: "relink_required",
+                    recoveryStatus: "relink_required",
+                    lastErrorCode: "SESSION_CLEARED",
+                    gatewayNodeId: null,
+                    ownerInstanceId: null,
+                    operationId: null,
+                    operationStartedAt: null,
+                    operationDeadlineAt: null,
+                },
+            });
+        }
+        await tx.whatsAppWebBridgeSession.update({
+            where: { id: session.id },
+            data: {
+                status: "disconnected",
+                egressMode: "server",
+                phone: null,
+                qrCode: null,
+                lastReadyAt: null,
+                isDefaultOutbound: false,
+                lastError: null,
+            },
+        });
+    });
+    return { success: true, skipped: false, workerCleared };
 }
 
 export async function sendWhatsAppWebBridgeMessage(input: {

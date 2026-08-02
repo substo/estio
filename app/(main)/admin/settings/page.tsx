@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { currentUser } from "@clerk/nextjs/server";
+import { getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 
 type SettingsSection = {
   title: string;
@@ -29,6 +29,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     description: "Manage team members and GHL calendar assignments.",
     href: "/admin/team",
     actionLabel: "Manage Team",
+    requiresAdmin: true,
+  },
+  {
+    title: "Location Data",
+    description: "Preview the location-owned records that an administrative cleanup would erase or retain.",
+    href: "/admin/settings/location-data",
+    actionLabel: "Review Location Data",
     requiresAdmin: true,
   },
   {
@@ -80,9 +87,8 @@ function SettingsCard({ section }: { section: SettingsSection }) {
 }
 
 export default async function SettingsPage() {
-  const user = await currentUser();
-  const role = user?.publicMetadata?.ghlRole;
-  const isAdmin = role === "admin" || role === "agency";
+  const access = await getActiveContactsAccess();
+  const isAdmin = access?.role === "ADMIN";
   const visibleSections = SETTINGS_SECTIONS.filter((section) => !section.requiresAdmin || isAdmin);
 
   return (

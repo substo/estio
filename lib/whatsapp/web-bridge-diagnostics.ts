@@ -119,7 +119,11 @@ export function buildWebBridgeDiagnostics(args: {
     let status: WhatsAppWebBridgeOperationalStatus = "healthy";
     let message = "WhatsApp Web Bridge is reachable and ready.";
 
-    if (!reachable) {
+    if (dbStatus === "disconnected" || dbStatus === "not_created") {
+        severity = "warning";
+        status = "unlinked";
+        message = "Bridge session is not linked. Start the session and scan the QR code.";
+    } else if (!reachable) {
         severity = "error";
         status = "worker_unreachable";
         message = health?.error || "WhatsApp Web Bridge worker is not reachable.";
@@ -143,7 +147,7 @@ export function buildWebBridgeDiagnostics(args: {
         severity = "warning";
         status = "qr_required";
         message = "QR code is waiting to be scanned.";
-    } else if (workerStatus === "disconnected" || dbStatus === "disconnected" || dbStatus === "not_created") {
+    } else if (workerStatus === "disconnected") {
         severity = "warning";
         status = "unlinked";
         message = "Bridge session is not linked. Start the session and scan the QR code.";
