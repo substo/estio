@@ -62,10 +62,10 @@ const INTEGRATION_GROUPS: IntegrationGroup[] = [
         description: "Channels used for customer conversations, email, contacts, and SMS.",
         sections: [
             {
-                title: "WhatsApp Business",
-                description: "Connect your WhatsApp Business Account to send and receive messages directly from the dashboard.",
+                title: "WhatsApp",
+                description: "Connect the WhatsApp account used on your phone by scanning a QR code.",
                 href: "/admin/settings/integrations/whatsapp",
-                cta: "Configure Integration",
+                cta: "Connect WhatsApp",
                 icon: MessageSquare,
                 iconClassName: "bg-green-100 text-green-600 dark:bg-green-900/20 dark:text-green-400",
             },
