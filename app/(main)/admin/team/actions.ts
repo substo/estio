@@ -13,6 +13,7 @@ import {
     assertOffboardingPair,
     normalizeOffboardingEmail,
     requireExactPreviewIdentity,
+    requirePreviewIdentityById,
     resolveStrictAdminLocation,
     type ClerkIdentity,
     type PreviewIdentity,
@@ -331,8 +332,8 @@ export async function executeAssignmentRecovery(input: {
 
 /** Read-only preview. Identity intent and all counts are resolved server-side. */
 export async function previewTransferResponsibilities(input: {
-    sourceEmail: string;
-    successorEmail?: string;
+    sourceUserId: string;
+    successorUserId?: string;
     mode: OffboardingMode;
     suspendClerkGlobally: boolean;
 }): Promise<OffboardingPreviewResult> {
@@ -346,38 +347,45 @@ export async function previewTransferResponsibilities(input: {
         });
         const activeMembership = resolveStrictAdminLocation(actorRecord ? toPreviewIdentity(actorRecord) : null);
         const locationId = activeMembership.locationId;
-        const sourceEmail = normalizeOffboardingEmail(input.sourceEmail || '');
-        const successorEmail = normalizeOffboardingEmail(input.successorEmail || '');
+        const sourceUserId = String(input.sourceUserId || '').trim();
+        const successorUserId = String(input.successorUserId || '').trim();
         if (!['TRANSFER', 'KEEP_ASSIGNED'].includes(input.mode)) throw new Error('A valid offboarding mode is required');
-        if (!sourceEmail) throw new Error('Source email is required');
-        if (input.mode === 'TRANSFER' && !successorEmail) throw new Error('Successor email is required for TRANSFER');
+        if (!sourceUserId) throw new Error('Source user is required');
+        if (input.mode === 'TRANSFER' && !successorUserId) throw new Error('Successor user is required for TRANSFER');
+        if (input.mode === 'TRANSFER' && sourceUserId === successorUserId) throw new Error('Source and successor must be different users');
 
-        const [sourceRecords, successorRecords, clerk] = await Promise.all([
-            db.user.findMany({ where: { email: { equals: sourceEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
-            input.mode === 'TRANSFER'
-                ? db.user.findMany({ where: { email: { equals: successorEmail, mode: 'insensitive' } }, select: previewIdentitySelect })
-                : Promise.resolve([]),
-            clerkClient(),
+        const requestedIds = input.mode === 'TRANSFER' ? [sourceUserId, successorUserId] : [sourceUserId];
+        const localRecords = await db.user.findMany({
+            where: { id: { in: requestedIds } },
+            select: previewIdentitySelect,
+        });
+        const localIdentities = localRecords.map(toPreviewIdentity);
+        const sourceLocal = localIdentities.find((identity) => identity.id === sourceUserId);
+        const successorLocal = localIdentities.find((identity) => identity.id === successorUserId);
+        if (!sourceLocal?.clerkId) throw new Error('Source local User and Clerk identity do not agree');
+        if (input.mode === 'TRANSFER' && !successorLocal?.clerkId) throw new Error('Successor local User and Clerk identity do not agree');
+
+        const clerk = await clerkClient();
+        const [sourceClerkUser, successorClerkUser] = await Promise.all([
+            clerk.users.getUser(sourceLocal.clerkId),
+            input.mode === 'TRANSFER' && successorLocal?.clerkId
+                ? clerk.users.getUser(successorLocal.clerkId)
+                : Promise.resolve(null),
         ]);
-        const [sourceClerkResult, successorClerkResult] = await Promise.all([
-            clerk.users.getUserList({ emailAddress: [sourceEmail], limit: 10 }),
-            input.mode === 'TRANSFER'
-                ? clerk.users.getUserList({ emailAddress: [successorEmail], limit: 10 })
-                : Promise.resolve({ data: [] }),
-        ]);
-        const mapClerk = (users: typeof sourceClerkResult.data): ClerkIdentity[] => users.map((user) => ({
+        const toClerkIdentity = (user: typeof sourceClerkUser | null): ClerkIdentity | null => user ? ({
             id: user.id,
             emails: user.emailAddresses.map((entry) => entry.emailAddress),
-        }));
-        const source = requireExactPreviewIdentity({
-            label: 'Source', email: sourceEmail, localMatches: sourceRecords.map(toPreviewIdentity),
-            clerkMatches: mapClerk(sourceClerkResult.data), activeLocationId: locationId,
+        }) : null;
+        const source = requirePreviewIdentityById({
+            label: 'Source', userId: sourceUserId, localMatches: localIdentities,
+            clerkIdentity: toClerkIdentity(sourceClerkUser), activeLocationId: locationId,
         });
-        const successor = input.mode === 'TRANSFER' ? requireExactPreviewIdentity({
-            label: 'Successor', email: successorEmail, localMatches: successorRecords.map(toPreviewIdentity),
-            clerkMatches: mapClerk(successorClerkResult.data as typeof sourceClerkResult.data), activeLocationId: locationId,
+        const successor = input.mode === 'TRANSFER' ? requirePreviewIdentityById({
+            label: 'Successor', userId: successorUserId, localMatches: localIdentities,
+            clerkIdentity: toClerkIdentity(successorClerkUser), activeLocationId: locationId,
         }) : null;
         if (successor) assertOffboardingPair(source, successor);
+        if (source.id === actorRecord!.id) throw new Error('You cannot remove yourself from the active location');
 
         const now = new Date();
         const [
@@ -433,8 +441,8 @@ export async function previewTransferResponsibilities(input: {
                 successorUserId: successor?.id || null,
                 sourceClerkId: source.clerkId,
                 successorClerkId: successor?.clerkId || null,
-                sourceEmail,
-                successorEmail: successor?.email || null,
+                sourceEmail: normalizeOffboardingEmail(source.email),
+                successorEmail: successor ? normalizeOffboardingEmail(successor.email) : null,
                 mode: input.mode,
                 suspendClerkGlobally: input.suspendClerkGlobally,
                 previewFingerprint: fingerprint,
@@ -510,8 +518,8 @@ export async function executeTransferResponsibilities(input: {
         }
 
         const fresh = await previewTransferResponsibilities({
-            sourceEmail: token.sourceEmail,
-            successorEmail: token.successorEmail || undefined,
+            sourceUserId: token.sourceUserId,
+            successorUserId: token.successorUserId || undefined,
             mode: token.mode,
             suspendClerkGlobally: token.suspendClerkGlobally,
         });
@@ -545,6 +553,7 @@ export async function executeTransferResponsibilities(input: {
                 tx.location.count({ where: { id: { not: token.locationId }, users: { some: { id: token.sourceUserId } } } }),
             ]);
             if (!actorRole || !sourceRole || (token.mode === 'TRANSFER' && !successorRole)) throw new Error('Active membership changed; build a new preview');
+            if (actor.id === token.sourceUserId) throw new Error('You cannot remove yourself from the active location');
             if (sourceRole.role === 'ADMIN' && activeAdminCount <= 1) throw new Error('Source is the final active ADMIN');
             const hasOtherMembership = otherRoleCount > 0 || otherConnectionCount > 0;
             if (token.suspendClerkGlobally && hasOtherMembership) {

@@ -70,6 +70,36 @@ export function requireExactPreviewIdentity(args: {
   return { ...local, clerkId: local.clerkId };
 }
 
+export function requirePreviewIdentityById(args: {
+  label: "Source" | "Successor";
+  userId: string;
+  localMatches: PreviewIdentity[];
+  clerkIdentity: ClerkIdentity | null;
+  activeLocationId: string;
+}): PreviewIdentity & { clerkId: string } {
+  const localMatches = args.localMatches.filter((identity) => identity.id === args.userId);
+  if (localMatches.length !== 1) {
+    throw new Error(`${args.label} must resolve to exactly one local User`);
+  }
+
+  const local = localMatches[0];
+  if (!local.clerkId || !args.clerkIdentity || local.clerkId !== args.clerkIdentity.id) {
+    throw new Error(`${args.label} local User and Clerk identity do not agree`);
+  }
+  if (!args.clerkIdentity.emails.some((email) => normalizeOffboardingEmail(email) === normalizeOffboardingEmail(local.email))) {
+    throw new Error(`${args.label} canonical email no longer matches the Clerk identity`);
+  }
+
+  const membership = local.memberships.find(
+    (candidate) => candidate.locationId === args.activeLocationId,
+  );
+  if (!membership?.connected || !membership.role) {
+    throw new Error(`${args.label} is not an active member of this location`);
+  }
+
+  return { ...local, clerkId: local.clerkId };
+}
+
 export function assertOffboardingPair(source: PreviewIdentity, successor: PreviewIdentity): void {
   if (source.id === successor.id || normalizeOffboardingEmail(source.email) === normalizeOffboardingEmail(successor.email)) {
     throw new Error("Source and successor must be different users");

@@ -8,8 +8,11 @@ import { checkGHLSMTPStatus } from "@/lib/ghl/email";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import { resolveStrictAdminLocation, type PreviewIdentity } from "@/lib/team/offboarding-preview-policy";
 
-export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string }> }) {
-    const contactAccessResult = (await searchParams)?.contactAccess;
+export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string; removalAudit?: string; cleanupWarning?: string }> }) {
+    const resolvedSearchParams = await searchParams;
+    const contactAccessResult = resolvedSearchParams?.contactAccess;
+    const removalAudit = resolvedSearchParams?.removalAudit;
+    const cleanupWarning = resolvedSearchParams?.cleanupWarning === '1';
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) {
         return <div className="p-6">Unauthorized</div>;
@@ -60,9 +63,9 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
                     createdAt: true,
                     ghlCalendarId: true,
                     ghlUserId: true,
+                    locations: { select: { id: true } },
                     locationRoles: {
-                        where: { locationId },
-                        select: { role: true, invitedById: true, contactAccessScope: true }
+                        select: { locationId: true, role: true, invitedById: true, contactAccessScope: true }
                     }
                 }
             }
@@ -74,6 +77,13 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
     }
 
     const users = location.users || [];
+    const removalMembers = users
+        .filter((user) => user.locationRoles.some((entry) => entry.locationId === locationId))
+        .map((user) => ({
+            id: user.id,
+            email: user.email,
+            name: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unnamed User',
+        }));
 
     // Fetch GHL calendars for calendar assignment
     const calendars = await getGHLCalendars();
@@ -120,6 +130,12 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
                         {contactAccessResult === 'updated' ? 'Contact access updated.' : 'Contact access could not be updated.'}
                     </div>
                 )}
+                {removalAudit && (
+                    <div role="status" aria-live="polite" className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">
+                        <p>Location access was removed successfully. Audit ID: <span className="font-mono">{removalAudit}</span>.</p>
+                        {cleanupWarning && <p className="mt-1">Some external cleanup requires attention. The successful local removal was not rolled back.</p>}
+                    </div>
+                )}
                 {!smtpStatus.isConfigured && (
                     <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
                         <div className="flex">
@@ -151,6 +167,10 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
                             calendars={calendars}
                             isAdmin={isAdmin}
                             isCurrentUser={user.clerkId === clerkUserId}
+                            activeLocation={{ id: location.id, name: location.name }}
+                            removalMembers={removalMembers}
+                            hasOtherMembership={user.locations.some((entry) => entry.id !== locationId)
+                                || user.locationRoles.some((entry) => entry.locationId !== locationId)}
                         />
                     </div>
                 ))}

@@ -16,7 +16,7 @@ import { updateMemberContactAccess, updateUserCalendar, updateUserRole } from '.
 import { CreateCalendarDialog } from './create-calendar-dialog';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-import { OffboardingPreview } from './offboarding-preview';
+import { RemoveUserDialog } from './offboarding-preview';
 import { AssignmentRecovery } from './assignment-recovery';
 
 interface Calendar {
@@ -34,11 +34,14 @@ interface TeamMemberCardProps {
         createdAt: Date;
         ghlCalendarId: string | null;
         ghlUserId: string | null;
-        locationRoles?: { role: 'ADMIN' | 'MEMBER'; invitedById: string | null; contactAccessScope: 'ASSIGNED_ONLY' | 'LOCATION_WIDE' }[];
+        locationRoles?: { locationId: string; role: 'ADMIN' | 'MEMBER'; invitedById: string | null; contactAccessScope: 'ASSIGNED_ONLY' | 'LOCATION_WIDE' }[];
     };
     calendars: Calendar[];
     isAdmin: boolean;
     isCurrentUser: boolean;
+    activeLocation: { id: string; name: string | null };
+    removalMembers: { id: string; email: string; name: string }[];
+    hasOtherMembership: boolean;
 }
 
 function getDisplayName(user: { firstName?: string | null; lastName?: string | null; email: string }): string {
@@ -51,13 +54,13 @@ function getInitials(user: { firstName?: string | null; lastName?: string | null
     return user.email[0].toUpperCase();
 }
 
-export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: TeamMemberCardProps) {
+export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, activeLocation, removalMembers, hasOtherMembership }: TeamMemberCardProps) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [selectedCalendar, setSelectedCalendar] = useState(user.ghlCalendarId || "none");
     const [showManagement, setShowManagement] = useState(false);
 
-    const roleData = user.locationRoles?.[0];
+    const roleData = user.locationRoles?.find((entry) => entry.locationId === activeLocation.id);
     const role = roleData?.role || 'MEMBER';
     const isProfileComplete = !!(user.firstName && user.lastName);
 
@@ -194,7 +197,20 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser }: Team
                     </div>
                 </div>
                 {isAdmin && <AssignmentRecovery sourceEmail={user.email} />}
-                {isAdmin && !isCurrentUser && <OffboardingPreview sourceEmail={user.email} />}
+                {isAdmin && !isCurrentUser && roleData && (
+                    <div className="flex items-center justify-between rounded-md border border-red-200 p-3">
+                        <div>
+                            <p className="text-sm font-medium">Location access</p>
+                            <p className="text-xs text-muted-foreground">Remove this member without deleting their User identity.</p>
+                        </div>
+                        <RemoveUserDialog
+                            source={{ id: user.id, email: user.email, name: getDisplayName(user) }}
+                            activeLocation={activeLocation}
+                            members={removalMembers}
+                            hasOtherMembership={hasOtherMembership}
+                        />
+                    </div>
+                )}
             </CardContent>}
         </Card>
     );

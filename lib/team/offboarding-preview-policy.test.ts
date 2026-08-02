@@ -4,6 +4,7 @@ import {
   assertOffboardingPair,
   normalizeOffboardingEmail,
   requireExactPreviewIdentity,
+  requirePreviewIdentityById,
   resolveStrictAdminLocation,
   type PreviewIdentity,
 } from './offboarding-preview-policy';
@@ -73,6 +74,40 @@ test('source and successor must be different internal identities', () => {
   assert.doesNotThrow(() => assertOffboardingPair(identity(), identity({
     id: 'user_successor', email: 'successor@example.com', clerkId: 'clerk_successor',
   })));
+});
+
+test('ID intent resolves one active local member and its canonical Clerk identity', () => {
+  const resolved = requirePreviewIdentityById({
+    label: 'Source',
+    userId: 'user_source',
+    localMatches: [identity()],
+    clerkIdentity: { id: 'clerk_source', emails: ['SOURCE@example.com'] },
+    activeLocationId: 'loc_active',
+  });
+  assert.equal(resolved.id, 'user_source');
+  assert.equal(resolved.email, 'source@example.com');
+});
+
+test('ID intent rejects missing, stale, disconnected, foreign, and mismatched identities', () => {
+  const base = {
+    label: 'Successor' as const,
+    userId: 'user_source',
+    localMatches: [identity()],
+    clerkIdentity: { id: 'clerk_source', emails: ['source@example.com'] },
+    activeLocationId: 'loc_active',
+  };
+  assert.throws(() => requirePreviewIdentityById({ ...base, localMatches: [] }), /exactly one local User/);
+  assert.throws(() => requirePreviewIdentityById({ ...base, clerkIdentity: null }), /do not agree/);
+  assert.throws(() => requirePreviewIdentityById({ ...base, clerkIdentity: { id: 'stale_clerk', emails: ['source@example.com'] } }), /do not agree/);
+  assert.throws(() => requirePreviewIdentityById({ ...base, clerkIdentity: { id: 'clerk_source', emails: ['changed@example.com'] } }), /canonical email/);
+  assert.throws(() => requirePreviewIdentityById({
+    ...base,
+    localMatches: [identity({ memberships: [{ locationId: 'loc_active', locationName: 'Active', role: 'MEMBER', connected: false }] })],
+  }), /not an active member/);
+  assert.throws(() => requirePreviewIdentityById({
+    ...base,
+    localMatches: [identity({ memberships: [{ locationId: 'loc_foreign', locationName: 'Foreign', role: 'MEMBER', connected: true }] })],
+  }), /not an active member/);
 });
 
 test('other memberships remain present for preview reporting', () => {

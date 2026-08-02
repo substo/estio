@@ -20,6 +20,8 @@ test("execution re-previews and accepts no client location, role, IDs, or counts
   assert.match(execution, /confirmationPhrase !== requiredOffboardingPhrase\(token\.mode/);
   assert.match(execution, /preview\.fingerprint !== token\.previewFingerprint/);
   assert.doesNotMatch(execution, /input\.(locationId|sourceUserId|successorUserId|counts|role|isAdmin)/);
+  assert.match(execution, /sourceUserId: token\.sourceUserId/);
+  assert.match(execution, /successorUserId: token\.successorUserId/);
 });
 
 test("one transaction transfers only active responsibilities and retains the User", () => {
@@ -57,6 +59,7 @@ test("KEEP_ASSIGNED performs no responsibility assignment mutation but removes m
 });
 
 test("last-admin, other-membership, private-state, audit, and provider ordering are guarded", () => {
+  assert.match(execution, /actor\.id === token\.sourceUserId/);
   assert.match(execution, /activeAdminCount <= 1/);
   assert.match(execution, /TransactionIsolationLevel\.Serializable/);
   assert.match(execution, /error\.code === 'P2034'[\s\S]*fresh preview/);
