@@ -1,0 +1,55 @@
+{
+	# Unknown customer domains use on-demand TLS only after the application
+	# confirms that the hostname belongs to a configured tenant.
+	on_demand_tls {
+		ask http://localhost:3002/api/verify-domain
+	}
+}
+
+# Canonical application host. The deploy script replaces the blue/green app
+# port in this file before atomically installing it on the server.
+estio.co {
+	# IDX_DEVICE_TUNNEL_BEGIN
+	handle_path /device-tunnel/* {
+		reverse_proxy 127.0.0.1:3220
+	}
+	# IDX_DEVICE_TUNNEL_END
+
+	# IDX_VIEWING_RELAY_BEGIN
+	handle_path /viewings-live-relay/* {
+		reverse_proxy 127.0.0.1:8788
+	}
+	# IDX_VIEWING_RELAY_END
+
+	reverse_proxy localhost:3002
+}
+
+# Keep a single, non-www canonical origin for SEO, cookies, OAuth callbacks,
+# and Clerk. Listing this host explicitly also gives Caddy ownership of its TLS
+# certificate instead of sending it through the tenant on-demand TLS gate.
+www.estio.co {
+	redir https://estio.co{uri} 308
+}
+
+# Avoid an extra http://www -> https://www -> https://estio.co hop when a
+# request reaches the origin directly. Cloudflare should mirror this redirect
+# at the edge for the normal proxied path.
+http://www.estio.co {
+	redir https://estio.co{uri} 308
+}
+
+# Approved tenant/custom domains are upgraded to HTTPS, then handled by the
+# on-demand TLS site below.
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+:443 {
+	@ip_request header Host 138.199.214.117
+	abort @ip_request
+
+	tls {
+		on_demand
+	}
+	reverse_proxy localhost:3002
+}

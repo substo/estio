@@ -50,6 +50,11 @@ CURRENT_DEPLOY_TOKEN_FILE="$DEPLOY_STATE_DIR/current-deploy-token"
 
 echo "🚀 Starting LOCAL BUILD deployment to estio.co..."
 
+if [ ! -s Caddyfile ]; then
+    echo "❌ Caddyfile is missing or empty; refusing a deployment that cannot reproduce the public routing configuration."
+    exit 1
+fi
+
 # AUTOMATED BACKUP
 ./scripts/backup.sh
 
@@ -410,57 +415,25 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     # Keep symlink aligned with active release directory for operational visibility.
     ln -sfn "\$TARGET_DIR" "\$SYMLINK_PATH"
 
-    # Update Caddy upstream to point at target color port, then reload gracefully.
-    if [ -f /etc/caddy/Caddyfile ]; then
+    # Render the source-controlled Caddyfile for the target color, validate it,
+    # then install it atomically. This prevents production-only routing drift.
+    if [ -f "\$TARGET_DIR/Caddyfile" ]; then
         PREVIOUS_CADDY_PORT=\$(grep -Eo 'reverse_proxy[[:space:]]+localhost:(3001|3002)' /etc/caddy/Caddyfile | head -n1 | sed -E 's/.*:([0-9]+)/\\1/' || true)
+        CADDY_CANDIDATE="/etc/caddy/Caddyfile.candidate.\$DEPLOY_TOKEN"
+        cp "\$TARGET_DIR/Caddyfile" "\$CADDY_CANDIDATE"
+        sed -E -i "s#localhost:(3001|3002)#localhost:\$TARGET_PORT#g" "\$CADDY_CANDIDATE"
+        sed -E -i "s#127\\.0\\.0\\.1:8788#127.0.0.1:\$VIEWING_RELAY_PORT#g" "\$CADDY_CANDIDATE"
+        sed -E -i "s#127\\.0\\.0\\.1:3220#127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT#g" "\$CADDY_CANDIDATE"
+
+        caddy fmt --overwrite "\$CADDY_CANDIDATE"
+        caddy validate --config "\$CADDY_CANDIDATE" --adapter caddyfile
         cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.\$(date +%Y%m%d%H%M%S)"
-
-        if ! grep -q 'IDX_VIEWING_RELAY_BEGIN' /etc/caddy/Caddyfile; then
-            awk -v relay_port="\$VIEWING_RELAY_PORT" '
-                BEGIN { inserted = 0 }
-                {
-                    print \$0
-                    if (!inserted && \$0 ~ /^estio\.co[[:space:]]*\{[[:space:]]*$/) {
-                        print "    # IDX_VIEWING_RELAY_BEGIN"
-                        print "    handle_path /viewings-live-relay/* {"
-                        print "        reverse_proxy 127.0.0.1:" relay_port
-                        print "    }"
-                        print "    # IDX_VIEWING_RELAY_END"
-                        print ""
-                        inserted = 1
-                    }
-                }
-            ' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile
-            echo "🔌 Added viewing relay websocket route to Caddy (port \$VIEWING_RELAY_PORT)."
-        fi
-
-        if ! grep -q 'IDX_DEVICE_TUNNEL_BEGIN' /etc/caddy/Caddyfile; then
-            awk -v tunnel_port="\$DEVICE_TUNNEL_GATEWAY_PORT" '
-                BEGIN { inserted = 0 }
-                {
-                    print \$0
-                    if (!inserted && \$0 ~ /^estio\.co[[:space:]]*\{[[:space:]]*$/) {
-                        print "    # IDX_DEVICE_TUNNEL_BEGIN"
-                        print "    handle_path /device-tunnel/* {"
-                        print "        reverse_proxy 127.0.0.1:" tunnel_port
-                        print "    }"
-                        print "    # IDX_DEVICE_TUNNEL_END"
-                        print ""
-                        inserted = 1
-                    }
-                }
-            ' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.tmp && mv /etc/caddy/Caddyfile.tmp /etc/caddy/Caddyfile
-            echo "🔐 Added Android device tunnel websocket route to Caddy (port \$DEVICE_TUNNEL_GATEWAY_PORT)."
-        fi
-
-        sed -E -i "s#localhost:(3001|3002)#localhost:\$TARGET_PORT#g" /etc/caddy/Caddyfile
-        sed -E -i "s#reverse_proxy[[:space:]]+localhost([[:space:]]|$)#reverse_proxy localhost:\$TARGET_PORT\\\\1#g" /etc/caddy/Caddyfile
-
-        caddy validate --config /etc/caddy/Caddyfile
+        mv "\$CADDY_CANDIDATE" /etc/caddy/Caddyfile
         systemctl reload caddy || systemctl restart caddy
         echo "🌐 Caddy now routes to localhost:\$TARGET_PORT"
     else
-        echo "⚠️  /etc/caddy/Caddyfile not found; skipping proxy switch"
+        echo "❌ Source-controlled Caddyfile not found in \$TARGET_DIR"
+        exit 1
     fi
 
     echo "🩺 Running post-switch soak checks for \$SWITCH_SOAK_SECONDS seconds..."
