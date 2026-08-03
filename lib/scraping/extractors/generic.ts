@@ -1,23 +1,23 @@
 import { RawListing } from '../listing-scraper';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import db from '@/lib/db';
+import { resolveLocationGoogleAiApiKey } from '@/lib/ai/location-google-key';
+import { resolveAiModelDefault } from '@/lib/ai/fetch-models';
 
 /**
  * Generic AI Extractor Strategy
  * Falls back to sending raw HTML/Text to Gemini to extract JSON matching RawListing.
  * We fetch the default site config for the model.
  */
-export async function extractGenericAI(content: string, url: string, customInstructions: string): Promise<RawListing[]> {
+export async function extractGenericAI(content: string, url: string, customInstructions: string, locationId: string): Promise<RawListing[]> {
     console.log(`[GenericAIExtractor] Processing with AI extraction...`);
 
-    // Fetch site config for API Keys
-    const siteConfig = await db.siteConfig.findFirst();
-    if (!siteConfig || !siteConfig.googleAiApiKey) {
+    const apiKey = await resolveLocationGoogleAiApiKey(locationId);
+    if (!apiKey) {
         throw new Error('Google AI API Key not configured in Site Settings.');
     }
 
-    const genAI = new GoogleGenerativeAI(siteConfig.googleAiApiKey);
-    const model = genAI.getGenerativeModel({ model: siteConfig.googleAiModelExtraction || 'gemini-1.5-flash' });
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: await resolveAiModelDefault(locationId, 'extraction') || 'gemini-1.5-flash' });
 
     // Strip HTML to reduce token footprint massively
     // Simple regex strip (cheerio is better but regex is faster for AI text prep)

@@ -58,17 +58,24 @@ function extractLatestInboundMessageFromHistory(conversationHistory: string): st
  */
 export async function orchestrate(input: OrchestratorInput): Promise<OrchestratorResult> {
     const trace = await startTrace(input.conversationId, "orchestrator");
+    const contactData = await db.contact.findFirst({
+        where: {
+            OR: [{ id: input.contactId }, { ghlContactId: input.contactId }]
+        },
+        include: { location: { include: { siteConfig: true } } }
+    });
+    const locationId = contactData?.locationId;
 
     // ── STEP 1: Classify Intent ──
     const classifySpan = await startSpan(trace, "Classify Intent", "thought");
-    const classification = await classifyIntent(input.message, input.conversationHistory);
+    const classification = await classifyIntent(input.message, input.conversationHistory, locationId);
     await endSpan(classifySpan.spanId, classifySpan.startTime, "success", {
         output: `Intent: ${classification.intent} (Risk: ${classification.risk})`
     });
 
     // ── STEP 2: Analyze Sentiment ──
     const sentimentSpan = await startSpan(trace, "Analyze Sentiment", "thought");
-    const sentiment = await analyzeSentiment(input.message);
+    const sentiment = await analyzeSentiment(input.message, locationId);
     await endSpan(sentimentSpan.spanId, sentimentSpan.startTime, "success", {
         output: `Sentiment: ${sentiment.emotion}, Readiness: ${sentiment.buyerReadiness}`
     });
@@ -78,12 +85,6 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
 
     // ── STEP 4: Route to Skill ──
     let skillResult: any = null;
-    const contactData = await db.contact.findFirst({
-        where: {
-            OR: [{ id: input.contactId }, { ghlContactId: input.contactId }]
-        },
-        include: { location: { include: { siteConfig: true } } }
-    });
     const latestInboundText = extractLatestInboundMessageFromHistory(input.conversationHistory) || input.message;
     const languageResolution = resolveCommunicationLanguage({
         latestInboundText,
@@ -211,6 +212,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
             {
                 expectedLanguage: languageResolution.expectedLanguage,
                 latestInboundMessage: latestInboundText,
+                locationId,
             }
         );
         await endSpan(reflexionSpan.spanId, reflexionSpan.startTime, "success", {

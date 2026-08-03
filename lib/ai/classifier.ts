@@ -35,7 +35,8 @@ export interface ClassificationResult {
  */
 export async function classifyIntent(
     message: string,
-    conversationContext?: string
+    conversationContext?: string,
+    locationId?: string
 ): Promise<ClassificationResult> {
     const normalizedMessage = message.toLowerCase();
     const normalizedContext = (conversationContext || "").toLowerCase();
@@ -122,7 +123,7 @@ export async function classifyIntent(
         : `${CLASSIFIER_PROMPT}\n\nMessage to classify:\n"${message}"`;
 
     try {
-        const response = await callLLM(model, prompt);
+        const response = await callLLM(model, prompt, undefined, { locationId });
         const intentName = response.trim().toUpperCase() as IntentType;
 
         const intentConfig = INTENTS[intentName] ?? INTENTS.UNKNOWN;

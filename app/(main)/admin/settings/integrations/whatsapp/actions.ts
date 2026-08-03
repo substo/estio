@@ -832,7 +832,7 @@ export async function generateWhatsAppTemplateDrafts(input: {
     language?: string | null;
     model?: string | null;
 }) {
-    await resolveAdminContext(input.locationId || null);
+    const context = await resolveAdminContext(input.locationId || null);
     const intent = String(input.intent || "first contact").trim();
     const language = String(input.language || "en_US").trim();
     const notes = String(input.notes || "").trim();
@@ -852,6 +852,8 @@ export async function generateWhatsAppTemplateDrafts(input: {
         jsonMode: true,
         temperature: 0.4,
         maxOutputTokens: 3000,
+        locationId: context.location.id,
+        executionMode: "interactive",
     });
     let parsed: any;
     try {

@@ -4,6 +4,7 @@ import { getConversations, getMessages, getConversation, sendMessage, getMessage
 import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
 import db from "@/lib/db";
+import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { seedConversationFromContactLeadText } from "@/lib/conversations/bootstrap";
 import { generateMultiContextDraft } from "@/lib/ai/context-builder";
@@ -693,6 +694,7 @@ async function runMessageTranslationLLM(args: {
     sourceText: string;
     targetLanguage: string;
     modelOverride?: string;
+    locationId: string;
 }) {
     const modelId = String(args.modelOverride || "").trim() || MESSAGE_TRANSLATION_MODEL;
     const systemPrompt = [
@@ -712,7 +714,13 @@ async function runMessageTranslationLLM(args: {
         modelId,
         systemPrompt,
         userPrompt,
-        { jsonMode: false, temperature: 0, maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS }
+        {
+            jsonMode: false,
+            temperature: 0,
+            maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS,
+            locationId: args.locationId,
+            executionMode: "interactive",
+        }
     );
     const detectedSourceLanguage = normalizeReplyLanguage(detectLanguageFromText(args.sourceText));
 
@@ -762,6 +770,7 @@ async function runReplyTranslationLLM(args: {
             temperature: 0,
             maxOutputTokens: REPLY_TRANSLATION_MAX_OUTPUT_TOKENS,
             locationId: args.locationId,
+            executionMode: "interactive",
         }
     );
 
@@ -5812,6 +5821,7 @@ export async function generateAIDraft(
         draftLanguage: options?.draftLanguage || undefined,
         channel: options?.channel || undefined,
         outputLength: normalizeDraftOutputLength(options?.outputLength),
+        executionMode: "interactive",
     });
     logAIDraftTiming("generateAIDraft_legacy_end", {
         conversationId,
@@ -5953,6 +5963,7 @@ export async function generateComposerAIDraft(
         draftLanguage: options?.draftLanguage || undefined,
         channel: options?.channel || undefined,
         outputLength: normalizeDraftOutputLength(options?.outputLength),
+        executionMode: "interactive",
     });
     logAIDraftTiming("generateComposerAIDraft_legacy_end", {
         conversationId,
@@ -6182,6 +6193,7 @@ export async function translateSelectedText(
             sourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
+            locationId: location.id,
         });
 
         await securelyRecordConversationAiUsage({
@@ -6290,6 +6302,7 @@ export async function translateConversationMessage(
             sourceText,
             targetLanguage: resolvedTargetLanguage,
             modelOverride: translationModel,
+            locationId: location.id,
         });
         const modelMs = Date.now() - modelStartedAt;
         await recordConversationLanguageEvidence({
@@ -6573,6 +6586,7 @@ export async function translateConversationThread(
                     sourceText: row.sourceText,
                     targetLanguage: resolvedTargetLanguage,
                     modelOverride: translationModel,
+                    locationId: location.id,
                 });
 
                 const stored = await (db as any).messageTranslationCache.upsert({
@@ -11394,6 +11408,7 @@ interface LeadAnalysisTrace {
     end: number;
     model: string;
     provider?: string;
+    fundingScope?: "user_chatgpt" | "location_chatgpt" | "location_openai" | "location_gemini" | "estio_global";
     thoughtSummary: string;
     llmRequest: {
         model: string;
@@ -11572,6 +11587,7 @@ async function persistLeadAnalysisTraceRecord(args: {
 
     await securelyRecordAiUsage({
         locationId,
+        userId: await resolveAuthenticatedDbUserId(),
         resourceType: "conversation",
         resourceId: conversationId,
         featureArea: "conversational_ai",
@@ -11580,11 +11596,13 @@ async function persistLeadAnalysisTraceRecord(args: {
         model: trace.model,
         inputTokens: trace.promptTokens,
         outputTokens: trace.completionTokens,
+        fundingScope: trace.fundingScope,
+        executionMode: "interactive",
         metadata: {
             traceId: trace.traceId,
             source: "paste_lead",
             costEstimate: estimatedCost,
-            costAuthority: trace.provider === "chatgpt_subscription" ? "subscription_zero_cost" : "estimated",
+            costAuthority: trace.provider === "chatgpt_subscription" ? "subscription_limits" : "estimated",
         },
     });
 }
@@ -11692,6 +11710,7 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
                 maxOutputTokens: NOTE_IMPROVEMENT_MAX_OUTPUT_TOKENS[noteType],
                 thinkingBudget: 0,
                 locationId: location.id,
+                executionMode: "interactive",
             }
         );
         const latencyMs = Date.now() - startedAt;
@@ -11791,6 +11810,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
         const { text: rawSummary, usage, provider } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, {
             temperature: 0.2,
             locationId: location.id,
+            executionMode: "interactive",
         });
         const latencyMs = Date.now() - startedAt;
         const normalizedSummary = normalizeSingleLine(rawSummary, "Contacted lead and captured conversation update.");
@@ -11919,7 +11939,7 @@ export async function suggestTasksFromSelection(conversationId: string, selected
             modelId,
             prompt,
             undefined,
-            { jsonMode: true, temperature: 0.2, locationId: location.id }
+            { jsonMode: true, temperature: 0.2, locationId: location.id, executionMode: "interactive" }
         );
         const latencyMs = Date.now() - startedAt;
 
@@ -12463,6 +12483,7 @@ export async function runCustomSelectionPrompt(
         const { text: rawOutput, usage, provider } = await callLLMWithMetadata(modelId, systemPrompt, undefined, {
             temperature: 0.25,
             locationId: location.id,
+            executionMode: "interactive",
         });
         const latencyMs = Date.now() - startedAt;
         const output = normalizeSingleLine(rawOutput, "No output generated.").slice(0, MAX_CUSTOM_OUTPUT_LENGTH);
@@ -12660,6 +12681,7 @@ async function parseLeadFromTextInternal(
 
         let finalModelId = initialModelId;
         let finalProvider = "google_gemini";
+        let finalFundingScope: LeadAnalysisTrace["fundingScope"] = "location_gemini";
         let finalJsonStr = "";
         let finalUsage: any = null;
         let finalParsed: any = null;
@@ -12675,18 +12697,20 @@ async function parseLeadFromTextInternal(
             
             try {
                 start = Date.now();
-                const { text: jsonStr, usage, provider } = await callLLMWithMetadata(currentModelId, prompt, undefined, {
+                const { text: jsonStr, usage, provider, fundingScope } = await callLLMWithMetadata(currentModelId, prompt, undefined, {
                     jsonMode: true,
                     temperature: 0,
                     maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
                     thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
                     locationId: location.id,
+                    executionMode: "interactive",
                 });
                 end = Date.now();
 
                 finalJsonStr = jsonStr;
                 finalUsage = usage;
                 finalProvider = provider;
+                finalFundingScope = fundingScope;
 
                 finalParsed = parseJsonObjectFromModelOutput(jsonStr);
                 finalResult = LeadParsingSchema.parse(finalParsed);
@@ -12730,6 +12754,7 @@ async function parseLeadFromTextInternal(
             end,
             model: modelId,
             provider: finalProvider,
+            fundingScope: finalFundingScope,
             thoughtSummary: `Lead Analysis (${modelId}):\n- Extracted structured data from normalized text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
             llmRequest: {
                 model: modelId,
@@ -13917,7 +13942,7 @@ ${trimmedText}
             modelId,
             systemPrompt,
             promptText,
-            { jsonMode: true, temperature: 0.2, locationId: location.id }
+            { jsonMode: true, temperature: 0.2, locationId: location.id, executionMode: "interactive" }
         );
         const latencyMs = Date.now() - startMs;
 

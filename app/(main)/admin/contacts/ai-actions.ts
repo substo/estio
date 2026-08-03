@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache';
 import { currentUser } from '@clerk/nextjs/server';
 import { callLLM } from '@/lib/ai/llm';
 import { getModelForTask } from '@/lib/ai/model-router';
+import { getLocationContext } from '@/lib/auth/location-context';
+import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 
 /**
  * Analyze a contact's conversation history and extract outreach details.
@@ -13,9 +15,15 @@ export async function analyzeContactAction(contactId: string, locationId: string
     try {
         const user = await currentUser();
         if (!user) return { success: false, message: "Unauthorized" };
+        const activeLocation = await getLocationContext();
+        if (
+            !activeLocation?.id
+            || (locationId && locationId !== activeLocation.id)
+            || !await verifyUserHasAccessToLocation(user.id, activeLocation.id)
+        ) return { success: false, message: "Unauthorized" };
 
-        const contact = await db.contact.findUnique({
-            where: { id: contactId },
+        const contact = await db.contact.findFirst({
+            where: { id: contactId, locationId: activeLocation.id },
             include: {
                 conversations: {
                     include: { messages: { orderBy: { createdAt: 'asc' }, take: 50 } }
@@ -54,7 +62,11 @@ Analyze this conversation and return a JSON object with:
 
 Return valid JSON only.`;
 
-        const response = await callLLM(model, prompt, undefined, { jsonMode: true });
+        const response = await callLLM(model, prompt, undefined, {
+            jsonMode: true,
+            locationId: activeLocation.id,
+            executionMode: "interactive",
+        });
         const data = JSON.parse(response);
 
         // Update contact requirements if extracted

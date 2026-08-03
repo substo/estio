@@ -40,6 +40,7 @@ export async function reflectOnDraft(
     options?: {
         expectedLanguage?: string | null;
         latestInboundMessage?: string | null;
+        locationId?: string | null;
     }
 ): Promise<string> {
     const model = getModelForTask("draft_reply"); // Standard tier used for critic
@@ -60,7 +61,7 @@ ${communicationContract}
             : "");
 
     try {
-        const response = await callLLM(model, prompt, undefined, { jsonMode: true });
+        const response = await callLLM(model, prompt, undefined, { jsonMode: true, locationId: options?.locationId || undefined });
         const result = JSON.parse(response);
 
         if (result.score >= 8) {

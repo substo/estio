@@ -56,7 +56,7 @@ test("callLLMWithMetadata routes openai-prefixed models through Responses API", 
             "openai:gpt-test",
             "System instructions",
             "User input",
-            { temperature: 0.2, maxOutputTokens: 64, jsonMode: true }
+            { temperature: 0.2, maxOutputTokens: 64, jsonMode: true, allowEstioGlobal: true }
         );
 
         assert.equal(result.text, "hello from openai");
@@ -101,6 +101,7 @@ test("OpenAI JSON mode uses a strict schema when one is supplied", async () => {
     try {
         await callLLMWithMetadata("openai:gpt-test", "System", "Input", {
             jsonMode: true,
+            allowEstioGlobal: true,
             jsonSchemaName: "test_response",
             jsonSchema: {
                 type: "object",
@@ -133,7 +134,7 @@ test("callLLMWithMetadata fails before calling OpenAI when no key is configured"
     try {
         await assert.rejects(
             () => callLLMWithMetadata("openai:gpt-test", "System instructions", "User input"),
-            /No OpenAI API key configured\. Add a personal or organization OpenAI key in Settings > Integrations > OpenAI\./
+            /No authorized OpenAI API connection is configured for this location\./
         );
         assert.equal(fetchCalls, 0);
     } finally {

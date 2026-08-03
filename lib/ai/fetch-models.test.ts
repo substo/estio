@@ -153,6 +153,26 @@ test("buildAiModelPickerDefaultsResult ignores unavailable OpenAI text default",
     assert.equal(state.defaults.draft, GEMINI_DRAFT_FAST_DEFAULT);
 });
 
+test("configured models missing from discovery stay selected but are marked unavailable", () => {
+    const missing = "chatgpt_subscription:gpt-saved";
+    const state = buildAiModelPickerDefaultsResult(
+        [{ value: GEMINI_FLASH_LATEST_ALIAS, label: "Gemini Flash Latest" }],
+        [],
+        {
+            general: missing,
+            draft: GEMINI_FLASH_LATEST_ALIAS,
+            extraction: GEMINI_FLASH_LATEST_ALIAS,
+            design: GEMINI_FLASH_LATEST_ALIAS,
+            imageGeneration: GEMINI_IMAGE_FAST_DEFAULT,
+            transcription: GEMINI_DRAFT_FAST_DEFAULT,
+            translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
+        }
+    );
+    const preserved = state.models.find((model) => model.value === missing);
+    assert.ok(preserved);
+    assert.match(preserved.label, /currently unavailable/);
+});
+
 test("buildAiDraftModelPickerStateResult prefers available OpenAI default", () => {
     const state = buildAiDraftModelPickerStateResult(
         [

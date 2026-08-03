@@ -1,9 +1,9 @@
 import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
-import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { DEFAULT_REPLY_LANGUAGE } from "@/lib/ai/reply-language-options";
 import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
-import { getLocationContext } from "@/lib/auth/location-context";
+import { resolveIntegrationAdminContext } from "@/app/(main)/admin/settings/integrations/admin-context";
 import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
@@ -94,21 +94,17 @@ function buildAiInitialData({
     };
 }
 
-export default async function AiSettingsPage(props: { searchParams: Promise<{ locationId?: string }> }) {
-    const searchParams = await props.searchParams;
-    const cookieStore = await cookies();
-
-    // Try to get location from Context Helper first (User Metadata/DB)
-    const contextLocation = await getLocationContext();
-    const locationId = searchParams.locationId ||
-        contextLocation?.id ||
-        cookieStore.get("crm_location_id")?.value;
-
-    if (!locationId) {
-        return <div>No location context found.</div>;
+export default async function AiSettingsPage() {
+    let context: Awaited<ReturnType<typeof resolveIntegrationAdminContext>>;
+    try {
+        context = await resolveIntegrationAdminContext();
+    } catch {
+        redirect("/sign-in");
     }
+    const locationId = context.locationId;
 
-    const [siteConfig, aiDoc, hasGoogleAiApiKey] = await Promise.all([
+    const localUser = await db.user.findUnique({ where: { clerkId: context.userId }, select: { id: true } });
+    const [siteConfig, aiDoc, hasGoogleAiApiKey, hasOpenAiApiKey, locationIntegrations, personalChatGpt, hasLocationChatGptCredential, hasPersonalChatGptCredential] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -123,6 +119,34 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             domain: SETTINGS_DOMAINS.LOCATION_AI,
             secretKey: SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY,
         }).catch(() => false),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_AI,
+            secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
+        }).catch(() => false),
+        settingsService.getDocument<any>({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+        }).catch(() => null),
+        localUser?.id ? settingsService.getDocument<any>({
+            scopeType: "USER",
+            scopeId: localUser.id,
+            domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+        }).catch(() => null) : Promise.resolve(null),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN,
+        }).catch(() => false),
+        localUser?.id ? settingsService.hasSecret({
+            scopeType: "USER",
+            scopeId: localUser.id,
+            domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE,
+        }).catch(() => false) : Promise.resolve(false),
     ]);
 
     const initialData = buildAiInitialData({ aiDoc, siteConfig });
@@ -140,6 +164,33 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
             initialData?.googleAiModelExtraction || initialData?.googleAiModel
         ),
     };
+    const geminiConnected = hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey);
+    const locationChatGptConnected = locationIntegrations?.payload?.chatGptSubscription?.enabled === true
+        && locationIntegrations?.payload?.chatGptSubscription?.health === "connected"
+        && hasLocationChatGptCredential;
+    const personalChatGptConnected = personalChatGpt?.payload?.enabled === true
+        && personalChatGpt?.payload?.health === "connected"
+        && Boolean(personalChatGpt?.payload?.verifiedAt)
+        && hasPersonalChatGptCredential;
+    const configuredPrimaryModel = String(initialData?.googleAiModel || "").trim();
+    const primaryProvider = configuredPrimaryModel.startsWith("openai:")
+        ? "OpenAI API"
+        : configuredPrimaryModel.startsWith("chatgpt_subscription:")
+            ? "ChatGPT subscription (Codex)"
+            : geminiConnected
+                ? "Google Gemini"
+                : hasOpenAiApiKey
+                    ? "OpenAI API"
+                    : locationChatGptConnected
+                        ? "ChatGPT subscription (Codex)"
+                        : "Not configured";
+    const fallbackProvider = primaryProvider !== "Google Gemini" && geminiConnected
+        ? "Google Gemini"
+        : primaryProvider !== "OpenAI API" && hasOpenAiApiKey
+            ? "OpenAI API"
+            : primaryProvider !== "ChatGPT subscription (Codex)" && locationChatGptConnected
+                ? "ChatGPT subscription (Codex)"
+                : "None";
 
     return (
         <div className="p-6 max-w-4xl space-y-6">
@@ -156,6 +207,14 @@ export default async function AiSettingsPage(props: { searchParams: Promise<{ lo
                     locationId={locationId}
                     settingsVersion={settingsVersion}
                     hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
+                    connectionSummary={{
+                        primaryProvider,
+                        fallbackProvider,
+                        gemini: geminiConnected,
+                        openAi: hasOpenAiApiKey,
+                        locationChatGpt: locationChatGptConnected,
+                        personalChatGpt: personalChatGptConnected,
+                    }}
                     runtimeSummary={enrichedRuntimeSummary}
                 />
             </div>

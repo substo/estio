@@ -6,6 +6,8 @@ import {
     GEMINI_FLASH_STABLE_FALLBACK,
 } from "@/lib/ai/models";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 import { isChatGptSubscriptionModelId } from "@/lib/ai/chatgpt-subscription";
 import { validateAction } from "@/lib/ai/policy";
 import { appendAiStreamText, selectAiStreamFinalText } from "@/lib/ai/stream-text";
@@ -57,6 +59,7 @@ interface CoordinationContext {
     latencyMode?: "fast" | "full";
     outputLength?: DraftOutputLength;
     minimumOutputTokens?: number;
+    executionMode?: "interactive" | "background";
 }
 
 import { buildUnavailableProviderCostEstimate, calculateRunCost } from "@/lib/ai/pricing";
@@ -760,7 +763,7 @@ export async function generateDraft(context: CoordinationContext) {
             where: { locationId: context.locationId }
         });
         const configAny = siteConfig as any;
-        const apiKey = configAny?.googleAiApiKey || process.env.GOOGLE_API_KEY;
+        const apiKey = await resolveLocationGoogleAiApiKey(context.locationId);
         const brandVoice = typeof configAny?.brandVoice === "string" ? configAny.brandVoice.trim() : "";
         const websiteDomain = typeof configAny?.domain === "string" && configAny.domain.trim()
             ? configAny.domain.trim()
@@ -1349,6 +1352,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             response: any;
             rawText: string;
             provider: DraftGenerationProvider;
+            fundingScope?: "user_chatgpt" | "location_chatgpt" | "location_openai" | "location_gemini" | "estio_global";
             usage?: {
                 promptTokens: number;
                 completionTokens: number;
@@ -1368,6 +1372,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                     temperature: 0.2,
                     maxOutputTokens,
                     locationId: context.locationId,
+                    executionMode: context.executionMode || "background",
                 }
             );
             if (context.stream && typeof context.onToken === "function") {
@@ -1379,6 +1384,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 response: null,
                 rawText: openAiResult.text,
                 provider: openAiResult.provider,
+                fundingScope: openAiResult.fundingScope,
                 usage: {
                     promptTokens: openAiResult.usage.promptTokens,
                     completionTokens: openAiResult.usage.completionTokens,
@@ -1393,6 +1399,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 generationResult = {
                     ...await generateWithModel(actualModelName),
                     provider: "google_gemini",
+                    fundingScope: "location_gemini",
                 };
             } catch (error) {
                 const canRetryWithPinnedFlash = shouldRetryGeminiDraftWithPinnedFallback(actualModelName, error);
@@ -1410,6 +1417,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 generationResult = {
                     ...await generateWithModel(actualModelName),
                     provider: "google_gemini",
+                    fundingScope: "location_gemini",
                 };
             }
         }
@@ -1576,6 +1584,9 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 model: actualModelName,
                 inputTokens: promptTokens,
                 outputTokens: completionTokens,
+                userId: context.executionMode === "interactive" ? await resolveAuthenticatedDbUserId() : null,
+                fundingScope: generationResult.fundingScope,
+                executionMode: context.executionMode || "background",
             });
         }
 

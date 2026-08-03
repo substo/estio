@@ -284,7 +284,7 @@ export class ListingScraperService {
                             }
                         } else if (task.extractionMode === 'ai_extraction') {
                             const { extractGenericAI } = await import('./extractors/generic');
-                            rawListings = await extractGenericAI(content, currentUrl, task.aiInstructions || '');
+                            rawListings = await extractGenericAI(content, currentUrl, task.aiInstructions || '', task.locationId);
                             nextPageUrl = undefined;
                         } else {
                             console.warn(`[ListingScraper] No extractor configured for platform ${task.connection.platform}`);
@@ -1070,7 +1070,7 @@ export class ListingScraperService {
                 : null
         ) as Record<string, string> | null;
 
-        const relevanceDecision = await classifyListingRelevance(listing, existingRawAttributes);
+        const relevanceDecision = await classifyListingRelevance(listing, existingRawAttributes, { locationId });
         const relevanceAttributes = buildListingRelevanceRawAttributes(relevanceDecision);
         const shouldAttachProspect = relevanceDecision.isRealEstate || Boolean(task.targetProspectId) || Boolean(existingListing?.prospectLeadId);
 

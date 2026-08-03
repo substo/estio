@@ -199,6 +199,7 @@ export async function POST(req: NextRequest) {
                     minimumOutputTokens,
                     stream: true,
                     latencyMode: "fast",
+                    executionMode: "interactive",
                     onToken: (chunk) => {
                         if (!chunk) return;
                         if (firstChunkMs === null) {

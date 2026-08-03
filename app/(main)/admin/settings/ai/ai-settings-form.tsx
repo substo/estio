@@ -8,7 +8,12 @@ import {
 } from "./actions";
 import { Input } from "@/components/ui/input";
 import { DEFAULT_REPLY_LANGUAGE, REPLY_LANGUAGE_OPTIONS } from "@/lib/ai/reply-language-options";
-import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK, GOOGLE_AI_MODELS } from "@/lib/ai/models";
+import {
+    GEMINI_FLASH_LITE_LATEST_ALIAS,
+    GEMINI_FLASH_LATEST_ALIAS,
+    GEMINI_FLASH_STABLE_FALLBACK,
+    GOOGLE_AI_MODELS,
+} from "@/lib/ai/models";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -317,7 +322,7 @@ function AiModelSelect({
             <select
                 id={id}
                 name={name}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 value={selectedValue}
                 onChange={(e) => onChange(e.target.value)}
             >
@@ -439,7 +444,7 @@ function ModelSelectionSection({
                 <select
                     id="defaultReplyLanguage"
                     name="defaultReplyLanguage"
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     defaultValue={String(initialData?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE)}
                 >
                     {REPLY_LANGUAGE_OPTIONS.map((language) => (
@@ -650,7 +655,7 @@ function LeadIntelligenceSection({
                     <select
                         id="leadIntelligenceMode"
                         name="leadIntelligenceMode"
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                        className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                         defaultValue={leadMode}
                     >
                         <option value="off">Off</option>
@@ -671,7 +676,7 @@ function LeadIntelligenceSection({
                             <select
                                 id="contactProfileVerificationModel"
                                 name="contactProfileVerificationModel"
-                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                                 value={selectedContactVerificationModel}
                                 onChange={(event) => onContactProfileVerificationModelChange(event.target.value)}
                             >
@@ -689,7 +694,7 @@ function LeadIntelligenceSection({
                             <select
                                 id="requirementsIntelligenceModel"
                                 name="requirementsIntelligenceModel"
-                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                                className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                                 defaultValue={selectedRequirementModel}
                             >
                                 {requirementOptions.map((model) => (
@@ -723,29 +728,29 @@ function LeadIntelligenceSection({
                             ) : null}
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            <Button type="button" size="sm" className="h-9 text-xs" disabled={runningAnyContactClassification} onClick={onVerifyContactsNow}>
+                            <Button type="button" size="sm" className="min-h-11 text-xs" disabled={runningAnyContactClassification} onClick={onVerifyContactsNow}>
                                 {activeContactClassificationRun || runningVerifyContactsNow ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
                                 Verify Contacts Now
                             </Button>
                             {activeContactClassificationRun ? (
-                                <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onPauseContactClassification}>
+                                <Button type="button" variant="outline" size="sm" className="min-h-11 text-xs" onClick={onPauseContactClassification}>
                                     <Pause className="mr-1.5 h-3.5 w-3.5" />
                                     Pause
                                 </Button>
                             ) : null}
                             {pausedContactClassificationRun ? (
                                 <>
-                                    <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onResumeContactClassification}>
+                                    <Button type="button" variant="outline" size="sm" className="min-h-11 text-xs" onClick={onResumeContactClassification}>
                                         <Play className="mr-1.5 h-3.5 w-3.5" />
                                         Resume
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onCancelContactClassification}>
+                                    <Button type="button" variant="outline" size="sm" className="min-h-11 text-xs" onClick={onCancelContactClassification}>
                                         <X className="mr-1.5 h-3.5 w-3.5" />
                                         Cancel
                                     </Button>
                                 </>
                             ) : activeContactClassificationRun ? (
-                                <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={onCancelContactClassification}>
+                                <Button type="button" variant="outline" size="sm" className="min-h-11 text-xs" onClick={onCancelContactClassification}>
                                     <X className="mr-1.5 h-3.5 w-3.5" />
                                     Cancel
                                 </Button>
@@ -785,7 +790,7 @@ function LeadIntelligenceSection({
                             <div className="text-[10px] text-muted-foreground">Updates approved buyer/renter requirements from new contact messages.</div>
                             <div className="text-[10px] text-muted-foreground">Last run: {formatDateLabel(requirementsLastRun?.finishedAt)}</div>
                         </div>
-                        <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={runningLeadIntelligence} onClick={onRunRequirementsScan}>
+                        <Button type="button" variant="outline" size="sm" className="min-h-11 text-xs" disabled={runningLeadIntelligence} onClick={onRunRequirementsScan}>
                             {runningLeadIntelligence ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
                             Run Requirement Updates
                         </Button>
@@ -875,7 +880,7 @@ function AudioTranscriptPolicySection({ initialData }: { initialData: AiSettings
                 <select
                     id="whatsappTranscriptRetentionDays"
                     name="whatsappTranscriptRetentionDays"
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                     defaultValue={String(initialData?.whatsappTranscriptRetentionDays || 90)}
                 >
                     <option value="30">30 days</option>
@@ -894,7 +899,7 @@ function AudioTranscriptPolicySection({ initialData }: { initialData: AiSettings
                 <select
                     id="whatsappTranscriptVisibility"
                     name="whatsappTranscriptVisibility"
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                     defaultValue={String(initialData?.whatsappTranscriptVisibility || "team")}
                 >
                     <option value="team">Team members</option>
@@ -939,7 +944,7 @@ function OptionalModelSelect({
             <select
                 id={id}
                 name={name}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                 defaultValue={selectedValue}
             >
                 <option value="">Use default model</option>
@@ -981,7 +986,7 @@ function ViewingSessionPolicySection({
                     <select
                         id="viewingSessionRetentionDays"
                         name="viewingSessionRetentionDays"
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                        className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                         defaultValue={String(initialData?.viewingSessionRetentionDays || 90)}
                     >
                         <option value="30">30 days</option>
@@ -997,7 +1002,7 @@ function ViewingSessionPolicySection({
                     <select
                         id="viewingSessionTranscriptVisibility"
                         name="viewingSessionTranscriptVisibility"
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                        className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
                         defaultValue={String(initialData?.viewingSessionTranscriptVisibility || "team")}
                     >
                         <option value="team">Team members</option>
@@ -1420,49 +1425,6 @@ function BrandVoiceResearchSection({
     );
 }
 
-function ApiKeysSection({
-    hasGoogleAiApiKey,
-}: {
-    hasGoogleAiApiKey: boolean;
-}) {
-    return (
-        <div className="space-y-4">
-            <h3 className="text-lg font-medium">API Keys</h3>
-            <div className="grid gap-4">
-                <div className="grid gap-2">
-                    <Label htmlFor="googleAiApiKey">Google Gemini AI API Key</Label>
-                    <Input
-                        id="googleAiApiKey"
-                        name="googleAiApiKey"
-                        type="password"
-                        placeholder="AIza..."
-                    />
-                    <p className="text-sm text-muted-foreground">
-                        Required for AI content generation features. Existing keys are encrypted at rest and are never returned in plaintext.
-                    </p>
-                    {hasGoogleAiApiKey && (
-                        <div className="flex items-center gap-2 text-xs text-emerald-700">
-                            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                            API key is configured.
-                        </div>
-                    )}
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <input
-                            type="checkbox"
-                            name="clearGoogleAiApiKey"
-                            className="h-3.5 w-3.5 rounded border-gray-300 text-red-600"
-                        />
-                        Clear saved API key
-                    </label>
-                </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-                OpenAI and ChatGPT subscription settings are managed from Settings &gt; Integrations &gt; OpenAI.
-            </p>
-        </div>
-    );
-}
-
 function AiConfigurationHeader() {
     return (
         <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-6 relative overflow-hidden">
@@ -1475,7 +1437,7 @@ function AiConfigurationHeader() {
                     <h3 className="text-lg font-bold">AI Configuration</h3>
                 </div>
                 <p className="text-sm text-indigo-600/80 max-w-lg">
-                    Configure the brains behind your agent. Set up your API keys and choose the models that power different parts of the system.
+                    Choose simple location defaults for AI behavior. Connections and billing are managed under Integrations.
                 </p>
             </div>
         </div>
@@ -1487,12 +1449,21 @@ export function AiSettingsForm({
     locationId,
     settingsVersion,
     hasGoogleAiApiKey,
+    connectionSummary,
     runtimeSummary,
 }: {
     initialData: AiSettingsInitialData;
     locationId: string;
     settingsVersion: number;
     hasGoogleAiApiKey: boolean;
+    connectionSummary: {
+        primaryProvider: string;
+        fallbackProvider: string;
+        gemini: boolean;
+        openAi: boolean;
+        locationChatGpt: boolean;
+        personalChatGpt: boolean;
+    };
     runtimeSummary?: AiRuntimeSummary | null;
 }) {
     const [state, action] = useActionState(updateAiSettings, initialState);
@@ -1539,6 +1510,7 @@ export function AiSettingsForm({
     const [googleAiModelTranslation, setGoogleAiModelTranslation] = useState(
         getInitialModelValue(initialData, ["googleAiModelTranslation"], GEMINI_FLASH_LITE_LATEST_ALIAS)
     );
+    const [aiPreset, setAiPreset] = useState(String(initialData?.aiPreset || "balanced"));
     const [contactProfileVerificationModel, setContactProfileVerificationModel] = useState(
         String(initialData?.contactProfileVerification?.model || initialData?.googleAiModelExtraction || initialData?.googleAiModel || GEMINI_FLASH_LATEST_ALIAS)
     );
@@ -1556,6 +1528,45 @@ export function AiSettingsForm({
     const hasConfiguredTranscriptionModel = hasInitialModelValue(initialData, "googleAiModelTranscription");
     const hasConfiguredTranslationModel = hasInitialModelValue(initialData, "googleAiModelTranslation");
     const modelOptions = availableModels.length > 0 ? availableModels : GOOGLE_AI_MODELS;
+
+    const applyAiPreset = (preset: string) => {
+        setAiPreset(preset);
+        if (preset === "custom") return;
+
+        const models = preset === "lowest_cost"
+            ? {
+                general: GEMINI_FLASH_LITE_LATEST_ALIAS,
+                draft: GEMINI_FLASH_LITE_LATEST_ALIAS,
+                extraction: GEMINI_FLASH_LITE_LATEST_ALIAS,
+                design: GEMINI_FLASH_LITE_LATEST_ALIAS,
+                transcription: GEMINI_FLASH_STABLE_FALLBACK,
+                translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
+            }
+            : preset === "best_quality"
+                ? {
+                    general: "gemini-2.5-pro",
+                    draft: "gemini-2.5-pro",
+                    extraction: "gemini-2.5-pro",
+                    design: "gemini-2.5-pro",
+                    transcription: GEMINI_FLASH_STABLE_FALLBACK,
+                    translation: GEMINI_FLASH_LATEST_ALIAS,
+                }
+                : {
+                    general: GEMINI_FLASH_LATEST_ALIAS,
+                    draft: GEMINI_FLASH_LATEST_ALIAS,
+                    extraction: GEMINI_FLASH_LATEST_ALIAS,
+                    design: GEMINI_FLASH_LATEST_ALIAS,
+                    transcription: GEMINI_FLASH_STABLE_FALLBACK,
+                    translation: GEMINI_FLASH_LITE_LATEST_ALIAS,
+                };
+        setGoogleAiModel(models.general);
+        setGoogleAiModelDraft(models.draft);
+        setGoogleAiModelExtraction(models.extraction);
+        setGoogleAiModelDesign(models.design);
+        setGoogleAiModelTranscription(models.transcription);
+        setGoogleAiModelTranslation(models.translation);
+        setContactProfileVerificationModel(models.extraction);
+    };
 
     function updateContactClassificationQueue(status: ContactClassificationQueueStatus | null | undefined) {
         setContactClassificationQueue(status || null);
@@ -1791,17 +1802,54 @@ export function AiSettingsForm({
         <div className="space-y-8">
             <AiConfigurationHeader />
 
+            <section className="rounded-lg border p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-medium">Connection summary</h3>
+                    <a href="/admin/settings/integrations" className="text-sm font-medium text-primary underline">Manage AI connections</a>
+                </div>
+                <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                    <div><dt className="text-muted-foreground">Primary location provider</dt><dd className="font-medium">{connectionSummary.primaryProvider}</dd></div>
+                    <div><dt className="text-muted-foreground">Fallback provider</dt><dd className="font-medium">{connectionSummary.fallbackProvider}</dd></div>
+                    <div><dt className="text-muted-foreground">Google Gemini</dt><dd>{connectionSummary.gemini ? "Connected" : "Not connected"}</dd></div>
+                    <div><dt className="text-muted-foreground">OpenAI API</dt><dd>{connectionSummary.openAi ? "Connected" : "Not connected"}</dd></div>
+                    <div><dt className="text-muted-foreground">Location ChatGPT (Codex)</dt><dd>{connectionSummary.locationChatGpt ? "Available" : "Not connected"}</dd></div>
+                    <div><dt className="text-muted-foreground">My ChatGPT (Codex)</dt><dd>{connectionSummary.personalChatGpt ? "Connected" : "Not connected"}</dd></div>
+                </dl>
+            </section>
+
             <form action={action} className="space-y-8">
                 <input type="hidden" name="locationId" value={locationId} />
                 <input type="hidden" name="settingsVersion" value={String(settingsVersion)} />
 
                 <input type="hidden" name="openAiTextModel" value={String(initialData?.openAiTextModel || "")} />
 
-                <ApiKeysSection hasGoogleAiApiKey={hasGoogleAiApiKey} />
+                <section className="space-y-3 rounded-lg border p-4">
+                    <h3 className="font-medium">Location-wide preset</h3>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        {[
+                            ["balanced", "Balanced", "Recommended"],
+                            ["lowest_cost", "Lowest cost", "Favor efficient models"],
+                            ["best_quality", "Best quality", "Favor stronger models"],
+                            ["custom", "Custom", "Use advanced choices"],
+                        ].map(([value, label, description]) => (
+                            <label key={value} className="flex min-h-11 cursor-pointer gap-3 rounded-md border p-3 focus-within:ring-2 focus-within:ring-ring">
+                                <input
+                                    type="radio"
+                                    name="aiPreset"
+                                    value={value}
+                                    checked={aiPreset === value}
+                                    onChange={() => applyAiPreset(value)}
+                                />
+                                <span><span className="block text-sm font-medium">{label}</span><span className="block text-xs text-muted-foreground">{description}</span></span>
+                            </label>
+                        ))}
+                    </div>
+                </section>
 
-                <Separator />
-
-                <ModelConfigurationSection
+                <details className="rounded-lg border p-4">
+                    <summary className="cursor-pointer font-medium">Advanced model settings</summary>
+                    <div className="mt-5">
+                    <ModelConfigurationSection
                     initialData={initialData}
                     modelOptions={modelOptions}
                     googleAiModel={googleAiModel}
@@ -1822,35 +1870,46 @@ export function AiSettingsForm({
                     runningVerifyContactsNow={runningVerifyContactsNow}
                     onGeneralModelChange={(value) => {
                         hasUserSelectedGeneralModelRef.current = true;
+                        setAiPreset("custom");
                         setGoogleAiModel(value);
                     }}
                     onDraftModelChange={(value) => {
                         hasUserSelectedDraftModelRef.current = true;
+                        setAiPreset("custom");
                         setGoogleAiModelDraft(value);
                     }}
                     onExtractionModelChange={(value) => {
                         hasUserSelectedExtractionModelRef.current = true;
+                        setAiPreset("custom");
                         setGoogleAiModelExtraction(value);
                     }}
                     onDesignModelChange={(value) => {
                         hasUserSelectedDesignModelRef.current = true;
+                        setAiPreset("custom");
                         setGoogleAiModelDesign(value);
                     }}
                     onTranscriptionModelChange={(value) => {
                         hasUserSelectedTranscriptionModelRef.current = true;
+                        setAiPreset("custom");
                         setGoogleAiModelTranscription(value);
                     }}
                     onTranslationModelChange={(value) => {
                         hasUserSelectedTranslationModelRef.current = true;
+                        setAiPreset("custom");
                         setGoogleAiModelTranslation(value);
                     }}
-                    onContactProfileVerificationModelChange={setContactProfileVerificationModel}
+                    onContactProfileVerificationModelChange={(value) => {
+                        setAiPreset("custom");
+                        setContactProfileVerificationModel(value);
+                    }}
                     onRunRequirementsScan={runRequirementsScan}
                     onVerifyContactsNow={verifyContactsNow}
                     onPauseContactClassification={pauseContactClassification}
                     onResumeContactClassification={resumeContactClassification}
                     onCancelContactClassification={cancelContactClassification}
-                />
+                    />
+                    </div>
+                </details>
 
                 <Separator />
 

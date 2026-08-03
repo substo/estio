@@ -129,9 +129,6 @@ export function getModelCapabilities(model: AiModelDescriptor): AiModelCapabilit
     if (isOpenAiTextModel(model) || isChatGptSubscriptionTextModel(model)) {
         capabilities.add("text");
         capabilities.add("json");
-        if (isChatGptSubscriptionTextModel(model)) {
-            capabilities.add("vision");
-        }
         capabilities.add("streaming");
         return [...capabilities];
     }

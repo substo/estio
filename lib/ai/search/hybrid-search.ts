@@ -2,6 +2,7 @@
 import db from "@/lib/db";
 import { generateEmbedding } from "@/lib/ai/embeddings";
 import { Property, Prisma } from "@prisma/client";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 export interface SearchParams {
     // Structured filters
@@ -72,14 +73,7 @@ export async function hybridPropertySearch(
     let semanticResults: { property: Property, similarity: number }[] = [];
 
     if (params.naturalLanguageQuery) {
-        // Resolve API key (env -> SiteConfig) for embedding generation
-        let apiKey = process.env.GOOGLE_API_KEY;
-        if (!apiKey) {
-            const siteConfig = await db.siteConfig.findFirst({
-                where: { googleAiApiKey: { not: null } }
-            });
-            if (siteConfig?.googleAiApiKey) apiKey = siteConfig.googleAiApiKey;
-        }
+        const apiKey = await resolveLocationGoogleAiApiKey(params.locationId);
         const queryEmbedding = await generateEmbedding(params.naturalLanguageQuery, apiKey);
 
         if (queryEmbedding.length > 0) {

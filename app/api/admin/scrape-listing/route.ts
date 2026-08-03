@@ -889,7 +889,8 @@ async function upsertListingData(
             whatsappPhone: data.whatsappPhone,
             rawAttributes: data.rawAttributes,
         },
-        existingRawAttributes
+        existingRawAttributes,
+        { locationId }
     );
     const relevanceAttributes = buildListingRelevanceRawAttributes(relevanceDecision);
     const mergedRawAttributes = {

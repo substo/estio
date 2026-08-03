@@ -9,6 +9,7 @@ import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { requireAuthenticatedLocationContext } from "@/lib/properties/active-location-access";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 
 // --- INTERFACES ---
@@ -109,7 +110,7 @@ export async function extractPropertyDataWithAI(
     const siteConfig = await db.siteConfig.findUnique({ where: { locationId: targetLocationId } });
     const configAny = siteConfig as any;
 
-    const apiKey = configAny?.googleAiApiKey || process.env.GOOGLE_API_KEY || "";
+    const apiKey = await resolveLocationGoogleAiApiKey(targetLocationId) || "";
     const model = modelOverride || await resolveAiModelDefault(targetLocationId, "extraction") || DEFAULT_MODEL;
 
     // --- STAGE 1: VISION (The "Eyes") ---

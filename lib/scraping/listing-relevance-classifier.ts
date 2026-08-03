@@ -23,6 +23,7 @@ export interface ListingRelevanceDecision {
 export interface ClassifyListingRelevanceOptions {
     forceReclassify?: boolean;
     disableAI?: boolean;
+    locationId?: string;
 }
 
 const RELEVANCE_VERSION = 'v2';
@@ -330,9 +331,9 @@ function parseAIRelevanceResponse(text: string): {
 
 async function classifyWithAI(
     listing: RawListing,
-    options: Pick<ClassifyListingRelevanceOptions, 'disableAI'> = {}
+    options: Pick<ClassifyListingRelevanceOptions, 'disableAI' | 'locationId'> = {}
 ): Promise<AIClassificationAttemptResult> {
-    if (options.disableAI) {
+    if (options.disableAI || !options.locationId) {
         return {
             decision: null,
             attempts: 0,
@@ -376,7 +377,7 @@ Rules:
                     model,
                     systemPrompt,
                     JSON.stringify(payload),
-                    { jsonMode: true, temperature: 0.1, maxOutputTokens: 220 }
+                    { jsonMode: true, temperature: 0.1, maxOutputTokens: 220, locationId: options.locationId }
                 ),
                 15_000,
             );
@@ -434,6 +435,7 @@ export async function classifyListingRelevance(
 
     const aiAttempt = await classifyWithAI(listing, {
         disableAI: options.disableAI,
+        locationId: options.locationId,
     });
     if (aiAttempt.decision) return aiAttempt.decision;
 

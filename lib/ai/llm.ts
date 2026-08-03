@@ -1,15 +1,16 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import db from "@/lib/db";
 import {
     OPENAI_MODEL_VALUE_PREFIX,
     resolveOpenAiApiKey,
     stripOpenAiModelPrefix,
 } from "@/lib/ai/openai-models";
 import {
+    callPreferredPersonalChatGptWithMetadata,
     callChatGptSubscriptionWithMetadata,
     isChatGptSubscriptionModelId,
 } from "@/lib/ai/chatgpt-subscription";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { resolveEstioGlobalGoogleAiApiKey, resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 
 interface CallLLMOptions {
     jsonMode?: boolean;
@@ -19,6 +20,8 @@ interface CallLLMOptions {
     maxOutputTokens?: number;
     thinkingBudget?: number;
     locationId?: string;
+    allowEstioGlobal?: boolean;
+    executionMode?: "interactive" | "background";
 }
 
 type LLMUsage = {
@@ -36,6 +39,8 @@ type LLMResultWithMetadata = {
     provider: "google_gemini" | "openai" | "chatgpt_subscription";
     model: string;
     usage: LLMUsage;
+    fundingScope: "user_chatgpt" | "location_chatgpt" | "location_openai" | "location_gemini" | "estio_global";
+    executionMode: "interactive" | "background";
 };
 
 export function buildGenerationConfig(options: CallLLMOptions): Record<string, unknown> {
@@ -144,9 +149,11 @@ async function callOpenAIWithMetadata(
     userContent?: string,
     options: CallLLMOptions = {}
 ): Promise<LLMResultWithMetadata> {
-    const apiKey = await resolveOpenAiApiKey(options.locationId);
+    const apiKey = await resolveOpenAiApiKey(options.locationId, {
+        allowEstioGlobal: options.allowEstioGlobal === true,
+    });
     if (!apiKey) {
-        throw new Error("No OpenAI API key configured. Add a personal or organization OpenAI key in Settings > Integrations > OpenAI.");
+        throw new Error("No authorized OpenAI API connection is configured for this location.");
     }
 
     const requestBody = buildOpenAiRequestBody(modelId, systemPrompt, userContent, options);
@@ -161,8 +168,8 @@ async function callOpenAIWithMetadata(
 
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-        const message = payload?.error?.message || `${response.status} ${response.statusText}`;
-        throw new Error(`OpenAI request failed: ${message}`);
+        console.warn("[OpenAI] Request failed", { status: response.status, model: stripOpenAiModelPrefix(modelId) });
+        throw new Error("The OpenAI connection could not complete this request. Test the connection in Settings → Integrations.");
     }
 
     const text = extractOpenAiOutputText(payload);
@@ -188,6 +195,8 @@ async function callOpenAIWithMetadata(
             cachedContentTokens: readNestedUsageCount(usage, "input_tokens_details", "cached_tokens"),
             raw: JSON.stringify(usage),
         },
+        fundingScope: options.locationId ? "location_openai" : "estio_global",
+        executionMode: options.executionMode || "background",
     };
 }
 
@@ -201,6 +210,20 @@ export async function callLLM(
     userContent?: string,
     options: CallLLMOptions = {}
 ): Promise<string> {
+    const authenticatedUserId = options.executionMode === "interactive"
+        ? await resolveAuthenticatedDbUserId() || undefined
+        : undefined;
+    if (!isChatGptSubscriptionModelId(modelId) && options.executionMode === "interactive") {
+        const personal = await callPreferredPersonalChatGptWithMetadata(systemPrompt, userContent, {
+            jsonSchema: options.jsonSchema,
+            executionContext: {
+                executionMode: "interactive",
+                locationId: options.locationId,
+                userId: authenticatedUserId,
+            },
+        });
+        if (personal) return personal.text;
+    }
     if (isOpenAiModelId(modelId)) {
         const result = await callOpenAIWithMetadata(modelId, systemPrompt, userContent, options);
         return result.text;
@@ -208,25 +231,21 @@ export async function callLLM(
     if (isChatGptSubscriptionModelId(modelId)) {
         const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
             jsonSchema: options.jsonSchema,
+            executionContext: {
+                executionMode: options.executionMode || "background",
+                locationId: options.locationId,
+                userId: authenticatedUserId,
+                allowEstioGlobal: options.allowEstioGlobal,
+            },
         });
         return result.text;
     }
 
-    // 1. Get API Key (try Env first, then DB config)
-    // In a real app we might pass locationId to get specific config
-    // For now, we default to env or generic site config if needed
-    let apiKey = options.locationId
+    const apiKey = options.locationId
         ? await resolveLocationGoogleAiApiKey(options.locationId)
-        : process.env.GOOGLE_API_KEY;
-
-    if (!apiKey) {
-        // Fallback: try to find ANY site config with a key
-        // This is a bit hacky but works for single-tenant or simplified contexts
-        const config = await db.siteConfig.findFirst({
-            where: { googleAiApiKey: { not: null } }
-        });
-        apiKey = config?.googleAiApiKey || undefined;
-    }
+        : options.allowEstioGlobal === true
+            ? resolveEstioGlobalGoogleAiApiKey()
+            : null;
 
     if (!apiKey) throw new Error("No AI API Key found");
 
@@ -257,12 +276,49 @@ export async function callLLMWithMetadata(
     userContent?: string,
     options: CallLLMOptions = {}
 ): Promise<LLMResultWithMetadata> {
+    const authenticatedUserId = options.executionMode === "interactive"
+        ? await resolveAuthenticatedDbUserId() || undefined
+        : undefined;
+    if (!isChatGptSubscriptionModelId(modelId) && options.executionMode === "interactive") {
+        const personal = await callPreferredPersonalChatGptWithMetadata(systemPrompt, userContent, {
+            jsonSchema: options.jsonSchema,
+            executionContext: {
+                executionMode: "interactive",
+                locationId: options.locationId,
+                userId: authenticatedUserId,
+            },
+        });
+        if (personal) {
+            return {
+                text: personal.text,
+                provider: "chatgpt_subscription",
+                model: personal.model,
+                usage: {
+                    promptTokens: personal.usage.promptTokens,
+                    completionTokens: personal.usage.completionTokens,
+                    totalTokens: personal.usage.totalTokens,
+                    thoughtsTokens: 0,
+                    toolUsePromptTokens: 0,
+                    cachedContentTokens: 0,
+                    raw: personal.usage.raw,
+                },
+                fundingScope: personal.fundingScope,
+                executionMode: "interactive",
+            };
+        }
+    }
     if (isOpenAiModelId(modelId)) {
         return callOpenAIWithMetadata(modelId, systemPrompt, userContent, options);
     }
     if (isChatGptSubscriptionModelId(modelId)) {
         const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
             jsonSchema: options.jsonSchema,
+            executionContext: {
+                executionMode: options.executionMode || "background",
+                locationId: options.locationId,
+                userId: authenticatedUserId,
+                allowEstioGlobal: options.allowEstioGlobal,
+            },
         });
         return {
             text: result.text,
@@ -277,19 +333,16 @@ export async function callLLMWithMetadata(
                 cachedContentTokens: 0,
                 raw: result.usage.raw,
             },
+            fundingScope: result.fundingScope,
+            executionMode: options.executionMode || "background",
         };
     }
 
-    // 1. Get API Key
-    let apiKey = options.locationId
+    const apiKey = options.locationId
         ? await resolveLocationGoogleAiApiKey(options.locationId)
-        : process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-        const config = await db.siteConfig.findFirst({
-            where: { googleAiApiKey: { not: null } }
-        });
-        apiKey = config?.googleAiApiKey || undefined;
-    }
+        : options.allowEstioGlobal === true
+            ? resolveEstioGlobalGoogleAiApiKey()
+            : null;
     if (!apiKey) throw new Error("No AI API Key found");
 
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -323,6 +376,8 @@ export async function callLLMWithMetadata(
             toolUsePromptTokens: readUsage("toolUsePromptTokenCount"),
             cachedContentTokens: readUsage("cachedContentTokenCount"),
             raw: JSON.stringify(usageMeta)
-        }
+        },
+        fundingScope: options.locationId ? "location_gemini" : "estio_global",
+        executionMode: options.executionMode || "background",
     };
 }

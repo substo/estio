@@ -16,6 +16,7 @@ import { collectDealConversationReferences, resolveDealConversationRefs, syncDea
 import { getActiveContactsAccess, type ActiveContactsAccess } from "@/lib/contacts/active-location-access";
 import { buildConversationVisibilityWhere } from "@/lib/conversations/contact-assignment-access";
 import { buildDealManageWhere, buildDealVisibilityWhere } from "@/lib/deals/assignment-access";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 type DealTimelineWindow = {
     oldestCursor: string | null;
@@ -356,10 +357,7 @@ export async function runDealAgentAction(dealId: string, message: string, histor
     });
     if (!deal) throw new Error("Deal not found");
 
-    // Init Agent
-    // Get API Key from siteConfig or env
-    const siteConfig = await db.siteConfig.findUnique({ where: { locationId: location.id } });
-    const apiKey = (siteConfig as any)?.googleAiApiKey || process.env.GOOGLE_API_KEY;
+    const apiKey = await resolveLocationGoogleAiApiKey(location.id);
 
     if (!apiKey) throw new Error("AI not configured");
 

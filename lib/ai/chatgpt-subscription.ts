@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
-import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
+import { buildIsolatedCodexEnvironment } from "@/lib/ai/codex-environment";
 
 export const CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX = "chatgpt_subscription:";
 export const CHATGPT_SUBSCRIPTION_DEFAULT_MODEL = "gpt-5.4-mini";
@@ -38,7 +39,7 @@ export const CHATGPT_SUBSCRIPTION_IMAGE_MODELS: ChatGptSubscriptionModelOption[]
     {
         value: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_IMAGE_MODEL}`,
         label: "ChatGPT Subscription GPT Image 2",
-        description: "Experimental Codex/ChatGPT subscription-backed image generation",
+        description: "Codex/ChatGPT subscription-backed image generation",
     },
 ];
 
@@ -53,7 +54,49 @@ export type ChatGptSubscriptionResult = {
     text: string;
     model: string;
     usage: ChatGptSubscriptionUsage;
+    fundingScope: ChatGptFundingScope;
 };
+
+export type ChatGptFundingScope = "user_chatgpt" | "location_chatgpt" | "estio_global";
+export type ChatGptExecutionMode = "interactive" | "background";
+
+export type ChatGptExecutionContext = {
+    executionMode: ChatGptExecutionMode;
+    locationId?: string | null;
+    userId?: string | null;
+    allowEstioGlobal?: boolean;
+};
+
+type ResolvedChatGptCredential = {
+    fundingScope: ChatGptFundingScope;
+    defaultTextModel?: string | null;
+    accessToken?: string | null;
+    authCache?: string | null;
+    persistAuthCache?: (authCache: string) => Promise<void>;
+    markUnhealthy?: () => Promise<void>;
+};
+
+export function chooseChatGptFundingScope(input: {
+    executionMode: ChatGptExecutionMode;
+    personalAvailable: boolean;
+    locationAvailable: boolean;
+    globalAvailable: boolean;
+}): ChatGptFundingScope | null {
+    if (input.executionMode === "interactive" && input.personalAvailable) return "user_chatgpt";
+    if (input.locationAvailable) return "location_chatgpt";
+    if (input.globalAvailable) return "estio_global";
+    return null;
+}
+
+export function isEligibleLocationChatGptConnection(connection: any): boolean {
+    const credentialKind = String(connection?.credentialKind || "");
+    const eligibility = String(connection?.eligibility || "");
+    return connection?.enabled === true
+        && ["workspace_access_token", "enterprise_access_token"].includes(credentialKind)
+        && ["business_or_enterprise_automation", "workspace_automation", "enterprise_automation"].includes(eligibility)
+        && connection?.health === "connected"
+        && Boolean(connection?.verifiedAt);
+}
 
 export type ChatGptSubscriptionImageTextResult = ChatGptSubscriptionResult;
 
@@ -69,18 +112,6 @@ export type ChatGptSubscriptionConnectionStatus = {
     };
 };
 
-export type ChatGptSubscriptionSetupGuide = {
-    transportEnabled: boolean;
-    codexCliPath: string;
-    codexCwd: string;
-    transportEnvVar: string;
-    requiredTransportValue: string;
-    deviceAuthCommand: string;
-    statusCommand: string;
-    accessTokenCommand: string;
-    notes: string[];
-};
-
 type CodexCliRunner = (
     command: string,
     args: string[],
@@ -91,7 +122,7 @@ type CodexCliCommand = {
     command: string;
     args: string[];
     env: NodeJS.ProcessEnv;
-    authMode: "access_token" | "codex_login_cache";
+    authMode: "access_token" | "isolated_auth_cache";
 };
 
 function runCodexCli(command: string, args: string[], options: Parameters<typeof execFile>[2]): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
@@ -135,7 +166,7 @@ export function resolveChatGptSubscriptionDefaultModel(configured?: string | nul
         : `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_DEFAULT_MODEL}`;
 }
 
-async function resolveUserChatGptSubscriptionAccessToken(userId: string): Promise<string | null> {
+async function resolveUserChatGptSubscriptionCredential(userId: string): Promise<ResolvedChatGptCredential | null> {
     const normalizedUserId = String(userId || "").trim();
     if (!normalizedUserId) return null;
 
@@ -144,28 +175,205 @@ async function resolveUserChatGptSubscriptionAccessToken(userId: string): Promis
         scopeId: normalizedUserId,
         domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
     }).catch(() => null);
-    if (doc?.payload?.enabled !== true) return null;
+    if (
+        doc?.payload?.enabled !== true
+        || doc.payload.preferMyConnection !== true
+        || doc.payload.credentialKind !== "managed_chatgpt"
+        || doc.payload.health !== "connected"
+        || !doc.payload.verifiedAt
+    ) return null;
 
-    return await settingsService.getSecret({
+    const authCache = await settingsService.getSecret({
         scopeType: "USER",
         scopeId: normalizedUserId,
         domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+        secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE,
+    }).catch(() => null);
+    if (!authCache) return null;
+
+    return {
+        fundingScope: "user_chatgpt",
+        defaultTextModel: String(doc.payload.defaultTextModel || "").trim() || null,
+        authCache,
+        persistAuthCache: async (nextAuthCache) => {
+            const current = await settingsService.getDocument<any>({
+                scopeType: "USER",
+                scopeId: normalizedUserId,
+                domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+            });
+            if (
+                !current
+                || current.payload?.enabled !== true
+                || current.payload?.credentialKind !== "managed_chatgpt"
+                || current.payload?.health !== "connected"
+            ) return;
+            await db.$transaction(async (tx) => {
+                await settingsService.setSecret({
+                    scopeType: "USER",
+                    scopeId: normalizedUserId,
+                    domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+                    secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE,
+                    plaintext: nextAuthCache,
+                    actorUserId: normalizedUserId,
+                    tx,
+                });
+                await settingsService.upsertDocument({
+                    scopeType: "USER",
+                    scopeId: normalizedUserId,
+                    domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+                    payload: { ...(current.payload || {}), verifiedAt: new Date().toISOString() },
+                    actorUserId: normalizedUserId,
+                    expectedVersion: current.version,
+                    schemaVersion: 1,
+                    tx,
+                });
+            });
+        },
+        markUnhealthy: async () => {
+            const current = await settingsService.getDocument<any>({
+                scopeType: "USER",
+                scopeId: normalizedUserId,
+                domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+            });
+            if (!current || current.payload?.enabled !== true) return;
+            await settingsService.upsertDocument({
+                scopeType: "USER",
+                scopeId: normalizedUserId,
+                domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+                payload: { ...(current.payload || {}), health: "needs_attention" },
+                actorUserId: normalizedUserId,
+                expectedVersion: current.version,
+                schemaVersion: 1,
+            });
+        },
+    };
+}
+
+async function resolveLocationChatGptSubscriptionCredential(locationId: string): Promise<ResolvedChatGptCredential | null> {
+    const normalizedLocationId = String(locationId || "").trim();
+    if (!normalizedLocationId) return null;
+    const doc = await settingsService.getDocument<any>({
+        scopeType: "LOCATION",
+        scopeId: normalizedLocationId,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+    }).catch(() => null);
+    const connection = doc?.payload?.chatGptSubscription;
+    if (!isEligibleLocationChatGptConnection(connection)) return null;
+
+    const accessToken = await settingsService.getSecret({
+        scopeType: "LOCATION",
+        scopeId: normalizedLocationId,
+        domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
         secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN,
     }).catch(() => null);
+    return accessToken ? {
+        fundingScope: "location_chatgpt",
+        accessToken,
+        markUnhealthy: async () => {
+            const current = await settingsService.getDocument<any>({
+                scopeType: "LOCATION",
+                scopeId: normalizedLocationId,
+                domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            });
+            if (!current || current.payload?.chatGptSubscription?.enabled !== true) return;
+            await settingsService.upsertDocument({
+                scopeType: "LOCATION",
+                scopeId: normalizedLocationId,
+                domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+                payload: {
+                    ...(current.payload || {}),
+                    chatGptSubscription: {
+                        ...(current.payload?.chatGptSubscription || {}),
+                        health: "needs_attention",
+                    },
+                },
+                expectedVersion: current.version,
+                schemaVersion: 1,
+            });
+        },
+    } : null;
 }
 
-export async function resolveChatGptSubscriptionAccessToken(): Promise<string | null> {
-    const userId = await resolveAuthenticatedDbUserId();
-    if (userId) {
-        const userToken = await resolveUserChatGptSubscriptionAccessToken(userId);
-        if (userToken) return userToken;
+export async function resolveChatGptSubscriptionCredential(
+    context: ChatGptExecutionContext
+): Promise<ResolvedChatGptCredential | null> {
+    const interactiveUserId = context.executionMode === "interactive"
+        ? String(context.userId || "").trim()
+        : "";
+    const normalizedLocationId = String(context.locationId || "").trim();
+    if (interactiveUserId) {
+        if (!normalizedLocationId) return null;
+        const membership = await db.user.findFirst({
+            where: { id: interactiveUserId, locations: { some: { id: normalizedLocationId } } },
+            select: { id: true },
+        });
+        // Reject a foreign or guessed location before reading any scoped secret.
+        if (!membership) return null;
     }
 
-    return String(process.env.CODEX_ACCESS_TOKEN || "").trim() || null;
+    const personal = interactiveUserId
+        ? await resolveUserChatGptSubscriptionCredential(interactiveUserId)
+        : null;
+    const location = normalizedLocationId
+        ? await resolveLocationChatGptSubscriptionCredential(normalizedLocationId)
+        : null;
+    const globalToken = context.allowEstioGlobal === true
+        ? String(process.env.ESTIO_GLOBAL_CODEX_ACCESS_TOKEN || "").trim()
+        : "";
+    const scope = chooseChatGptFundingScope({
+        executionMode: context.executionMode,
+        personalAvailable: Boolean(personal),
+        locationAvailable: Boolean(location),
+        globalAvailable: Boolean(globalToken),
+    });
+    if (scope === "user_chatgpt") return personal;
+    if (scope === "location_chatgpt") return location;
+    if (scope === "estio_global") return { fundingScope: scope, accessToken: globalToken };
+    return null;
 }
 
-export async function hasChatGptSubscriptionAuth(): Promise<boolean> {
-    return isChatGptSubscriptionTransportEnabled();
+export async function callPreferredPersonalChatGptWithMetadata(
+    systemPrompt: string,
+    userContent: string | undefined,
+    options: {
+        executionContext: ChatGptExecutionContext;
+        jsonSchema?: Record<string, unknown> | null;
+        runner?: CodexCliRunner;
+    }
+): Promise<ChatGptSubscriptionResult | null> {
+    const context = options.executionContext;
+    const userId = String(context.userId || "").trim();
+    const locationId = String(context.locationId || "").trim();
+    if (context.executionMode !== "interactive" || !userId || !locationId || !isChatGptSubscriptionTransportEnabled()) {
+        return null;
+    }
+    const membership = await db.user.findFirst({
+        where: { id: userId, locations: { some: { id: locationId } } },
+        select: { id: true },
+    });
+    if (!membership) return null;
+    const credential = await resolveUserChatGptSubscriptionCredential(userId);
+    if (!credential?.authCache) return null;
+
+    return callChatGptSubscriptionWithMetadata(
+        credential.defaultTextModel || `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_DEFAULT_MODEL}`,
+        systemPrompt,
+        userContent,
+        {
+            authCache: credential.authCache,
+            persistAuthCache: credential.persistAuthCache,
+            markUnhealthy: credential.markUnhealthy,
+            jsonSchema: options.jsonSchema,
+            runner: options.runner,
+        }
+    );
+}
+
+export async function hasChatGptSubscriptionAuth(locationId?: string): Promise<boolean> {
+    if (!isChatGptSubscriptionTransportEnabled()) return false;
+    const normalizedLocationId = String(locationId || "").trim();
+    if (!normalizedLocationId) return false;
+    return Boolean(await resolveLocationChatGptSubscriptionCredential(normalizedLocationId));
 }
 
 export async function getChatGptSubscriptionModelPickerState(configured?: string | null): Promise<{
@@ -208,18 +416,17 @@ export function buildCodexCliCommand(args: {
     outputFile: string;
     outputSchemaFile?: string | null;
     accessToken?: string | null;
+    codexHome: string;
 }): CodexCliCommand {
     const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
     const model = stripChatGptSubscriptionModelPrefix(args.model) || CHATGPT_SUBSCRIPTION_DEFAULT_MODEL;
     const cwd = String(process.env.CHATGPT_SUBSCRIPTION_CODEX_CWD || tmpdir()).trim() || tmpdir();
 
     const accessToken = String(args.accessToken || "").trim();
-    const env = { ...process.env };
-    if (accessToken) {
-        env.CODEX_ACCESS_TOKEN = accessToken;
-    } else {
-        delete env.CODEX_ACCESS_TOKEN;
-    }
+    const env = buildIsolatedCodexEnvironment({
+        codexHome: args.codexHome,
+        accessToken,
+    });
 
     const commandArgs = [
         "--ask-for-approval",
@@ -244,35 +451,12 @@ export function buildCodexCliCommand(args: {
         command,
         args: commandArgs,
         env,
-        authMode: accessToken ? "access_token" : "codex_login_cache",
+        authMode: accessToken ? "access_token" : "isolated_auth_cache",
     };
 }
 
 export function isChatGptSubscriptionTransportEnabled(): boolean {
     return String(process.env.CHATGPT_SUBSCRIPTION_TRANSPORT || "").trim().toLowerCase() === "codex_cli";
-}
-
-export function getChatGptSubscriptionSetupGuide(): ChatGptSubscriptionSetupGuide {
-    const codexCliPath = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
-    const codexCwd = String(process.env.CHATGPT_SUBSCRIPTION_CODEX_CWD || tmpdir()).trim() || tmpdir();
-
-    return {
-        transportEnabled: isChatGptSubscriptionTransportEnabled(),
-        codexCliPath,
-        codexCwd,
-        transportEnvVar: "CHATGPT_SUBSCRIPTION_TRANSPORT",
-        requiredTransportValue: "codex_cli",
-        deviceAuthCommand: `${codexCliPath} login --device-auth`,
-        statusCommand: `${codexCliPath} login status`,
-        accessTokenCommand: `printf '%s' "$CODEX_ACCESS_TOKEN" | ${codexCliPath} login --with-access-token`,
-        notes: [
-            "Run device auth on the trusted server or runner that will execute subscription-backed text generation.",
-            "Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli before starting the Estio app process.",
-            "If the runner has a valid Codex login cache, Estio can use that cache without a separate access token.",
-            "For non-interactive deployments, create a Codex access token in a supported ChatGPT workspace and store it as CODEX_ACCESS_TOKEN or as the encrypted per-user token in this profile.",
-            "After setup, use Sign in with ChatGPT on the OpenAI integration page to run a real tiny Codex request through the same runtime path and enable the integration.",
-        ],
-    };
 }
 
 export async function callChatGptSubscriptionWithMetadata(
@@ -281,16 +465,39 @@ export async function callChatGptSubscriptionWithMetadata(
     userContent?: string,
     options: {
         accessToken?: string | null;
+        authCache?: string | null;
+        executionContext?: ChatGptExecutionContext;
+        persistAuthCache?: (authCache: string) => Promise<void>;
+        markUnhealthy?: () => Promise<void>;
         runner?: CodexCliRunner;
         jsonSchema?: Record<string, unknown> | null;
     } = {}
 ): Promise<ChatGptSubscriptionResult> {
     if (!isChatGptSubscriptionTransportEnabled()) {
-        throw new Error("ChatGPT subscription transport is disabled. Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli on a trusted server with Codex CLI installed.");
+        throw new Error("ChatGPT subscription is currently unavailable. Ask a location admin to check the connection.");
     }
 
-    const accessToken = String(options.accessToken || await resolveChatGptSubscriptionAccessToken() || "").trim();
+    const explicitCredential = options.accessToken || options.authCache
+        ? {
+            fundingScope: "user_chatgpt" as ChatGptFundingScope,
+            accessToken: options.accessToken,
+            authCache: options.authCache,
+            persistAuthCache: options.persistAuthCache,
+            markUnhealthy: options.markUnhealthy,
+        }
+        : options.executionContext
+            ? await resolveChatGptSubscriptionCredential(options.executionContext)
+            : null;
+    if (!explicitCredential) {
+        throw new Error("No authorized ChatGPT subscription connection is available for this request.");
+    }
+    const accessToken = String(explicitCredential.accessToken || "").trim();
     const tempDir = await mkdtemp(path.join(tmpdir(), "estio-chatgpt-subscription-"));
+    const codexHome = path.join(tempDir, "codex-home");
+    await mkdir(codexHome, { recursive: true, mode: 0o700 });
+    if (explicitCredential.authCache) {
+        await writeFile(path.join(codexHome, "auth.json"), explicitCredential.authCache, { encoding: "utf8", mode: 0o600 });
+    }
     const outputFile = path.join(tempDir, "last-message.txt");
     const outputSchemaFile = options.jsonSchema ? path.join(tempDir, "output-schema.json") : null;
     const prompt = buildCodexTextPrompt(systemPrompt, userContent);
@@ -303,6 +510,7 @@ export async function callChatGptSubscriptionWithMetadata(
         outputFile,
         outputSchemaFile,
         accessToken,
+        codexHome,
     });
 
     try {
@@ -319,9 +527,16 @@ export async function callChatGptSubscriptionWithMetadata(
 
         const promptTokens = Math.ceil(prompt.length / 4);
         const completionTokens = Math.ceil(text.length / 4);
+        if (explicitCredential.authCache && explicitCredential.persistAuthCache) {
+            const refreshed = await readFile(path.join(codexHome, "auth.json"), "utf8").catch(() => null);
+            if (refreshed && refreshed !== explicitCredential.authCache) {
+                await explicitCredential.persistAuthCache(refreshed);
+            }
+        }
         return {
             text,
             model: stripChatGptSubscriptionModelPrefix(modelId),
+            fundingScope: explicitCredential.fundingScope,
             usage: {
                 promptTokens,
                 completionTokens,
@@ -333,6 +548,9 @@ export async function callChatGptSubscriptionWithMetadata(
                 }),
             },
         };
+    } catch (error) {
+        await explicitCredential.markUnhealthy?.().catch(() => undefined);
+        throw new Error("The ChatGPT connection needs attention. Reconnect it or use the location provider.", { cause: error });
     } finally {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -345,7 +563,7 @@ export async function callChatGptSubscriptionWithImageMetadata(
     options: { accessToken?: string | null; runner?: CodexCliRunner } = {}
 ): Promise<ChatGptSubscriptionImageTextResult> {
     if (!isChatGptSubscriptionTransportEnabled()) {
-        throw new Error("ChatGPT subscription transport is disabled. Set CHATGPT_SUBSCRIPTION_TRANSPORT=codex_cli on a trusted server with Codex CLI installed.");
+        throw new Error("ChatGPT subscription is currently unavailable. Ask a location admin to check the connection.");
     }
 
     const imageBytes = Buffer.from(String(image.base64 || ""), "base64");
@@ -353,19 +571,17 @@ export async function callChatGptSubscriptionWithImageMetadata(
         throw new Error("Source image is empty.");
     }
 
-    const accessToken = String(options.accessToken || await resolveChatGptSubscriptionAccessToken() || "").trim();
+    const accessToken = String(options.accessToken || "").trim();
+    if (!accessToken) {
+        throw new Error("ChatGPT subscription image execution requires an explicit authorized credential.");
+    }
     const tempDir = await mkdtemp(path.join(tmpdir(), "estio-chatgpt-subscription-image-"));
     const imageFile = path.join(tempDir, String(image.mimeType || "").includes("png") ? "source-image.png" : "source-image.jpg");
     const outputFile = path.join(tempDir, "last-message.txt");
     const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
     const model = stripChatGptSubscriptionModelPrefix(modelId) || CHATGPT_SUBSCRIPTION_DEFAULT_MODEL;
     const cwd = String(process.env.CHATGPT_SUBSCRIPTION_CODEX_CWD || tempDir).trim() || tempDir;
-    const env = { ...process.env };
-    if (accessToken) {
-        env.CODEX_ACCESS_TOKEN = accessToken;
-    } else {
-        delete env.CODEX_ACCESS_TOKEN;
-    }
+    const env = buildIsolatedCodexEnvironment({ codexHome: tempDir, accessToken });
 
     try {
         await writeFile(imageFile, imageBytes);
@@ -403,6 +619,7 @@ export async function callChatGptSubscriptionWithImageMetadata(
         return {
             text,
             model,
+            fundingScope: "user_chatgpt",
             usage: {
                 promptTokens,
                 completionTokens,
@@ -415,6 +632,8 @@ export async function callChatGptSubscriptionWithImageMetadata(
                 }),
             },
         };
+    } catch (error) {
+        throw new Error("The ChatGPT connection could not complete this image request.", { cause: error });
     } finally {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }

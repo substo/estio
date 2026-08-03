@@ -2,7 +2,6 @@ import { unstable_cache } from "next/cache";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { AI_PROVIDER_CATALOG_CACHE_TAG } from "@/lib/ai/provider-cache";
-import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 import { getStoredProviderModelOptions } from "@/lib/ai/provider-model-catalog";
 
 export const OPENAI_MODEL_VALUE_PREFIX = "openai:";
@@ -162,7 +161,8 @@ export function ensureOpenAiModelOption(
     return [
         {
             value,
-            label: labelOpenAiModel(stripOpenAiModelPrefix(value)),
+            label: `${labelOpenAiModel(stripOpenAiModelPrefix(value))} (currently unavailable)`,
+            description: "Saved selection preserved; reconnect OpenAI or choose another compatible model.",
         },
         ...models,
     ];
@@ -170,13 +170,8 @@ export function ensureOpenAiModelOption(
 
 export async function resolveOpenAiApiKey(
     locationId?: string,
-    options: { includeAuthenticatedUser?: boolean } = {}
+    options: { allowEstioGlobal?: boolean } = {}
 ): Promise<string | null> {
-    if (options.includeAuthenticatedUser !== false) {
-        const userSecret = await resolveAuthenticatedUserOpenAiApiKey();
-        if (userSecret) return userSecret;
-    }
-
     if (locationId) {
         const locationSecret = await settingsService.getSecret({
             scopeType: "LOCATION",
@@ -187,40 +182,15 @@ export async function resolveOpenAiApiKey(
         if (locationSecret) return locationSecret;
     }
 
-    return String(process.env.OPENAI_API_KEY || "").trim() || null;
-}
-
-async function resolveAuthenticatedUserOpenAiApiKey(): Promise<string | null> {
-    try {
-        const userId = await resolveAuthenticatedDbUserId();
-        return userId ? resolveUserOpenAiApiKey(userId) : null;
-    } catch {
-        return null;
-    }
+    return options.allowEstioGlobal === true
+        ? String(process.env.OPENAI_API_KEY || "").trim() || null
+        : null;
 }
 
 export async function hasOpenAiApiKey(locationId?: string): Promise<boolean> {
     return Boolean(await resolveOpenAiApiKey(locationId));
 }
 
-async function resolveUserOpenAiApiKey(userId: string): Promise<string | null> {
-    const normalizedUserId = String(userId || "").trim();
-    if (!normalizedUserId) return null;
-
-    const doc = await settingsService.getDocument<any>({
-        scopeType: "USER",
-        scopeId: normalizedUserId,
-        domain: SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS,
-    }).catch(() => null);
-    if (doc?.payload?.enabled !== true) return null;
-
-    return await settingsService.getSecret({
-        scopeType: "USER",
-        scopeId: normalizedUserId,
-        domain: SETTINGS_DOMAINS.USER_OPENAI_INTEGRATIONS,
-        secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
-    }).catch(() => null);
-}
 
 export async function fetchOpenAiModels(apiKey: string): Promise<OpenAiModelsResponse["data"] | null> {
     const response = await fetch("https://api.openai.com/v1/models", {
@@ -292,7 +262,7 @@ export const getAvailableOpenAiTextModels = unstable_cache(
                 return sortOpenAiModels(dedupeModelOptions(storedModels));
             }
 
-            const apiKey = await resolveOpenAiApiKey(locationId, { includeAuthenticatedUser: false });
+            const apiKey = await resolveOpenAiApiKey(locationId);
             if (!apiKey) return FALLBACK_OPENAI_TEXT_MODELS;
 
             const models = await fetchOpenAiModels(apiKey);
@@ -381,26 +351,14 @@ export const getAvailableOpenAiImageModels = unstable_cache(
     { revalidate: 60 * 60 * 24, tags: [AI_PROVIDER_CATALOG_CACHE_TAG] }
 );
 
-export async function getOpenAiTextModelPickerState(locationId?: string): Promise<{
-    models: OpenAiModelOption[];
-    defaultModel: string;
-}>;
 export async function getOpenAiTextModelPickerState(
-    locationId?: string,
-    options: { includeAuthenticatedUser?: boolean } = {}
+    locationId?: string
 ): Promise<{
     models: OpenAiModelOption[];
     defaultModel: string;
 }> {
-    const includeAuthenticatedUser = options.includeAuthenticatedUser !== false;
-    const userId = includeAuthenticatedUser ? await resolveAuthenticatedDbUserId() : null;
-    const userKey = userId ? await resolveUserOpenAiApiKey(userId) : null;
-    const models = userId && userKey
-        ? await getAvailableOpenAiTextModelsForUser(userId)
-        : await getAvailableOpenAiTextModels(locationId);
-    const preferredModel = userId && userKey
-        ? await resolveUserOpenAiDefaultModel(userId)
-        : await resolveLocationOpenAiDefaultModel(locationId);
+    const models = await getAvailableOpenAiTextModels(locationId);
+    const preferredModel = await resolveLocationOpenAiDefaultModel(locationId);
     const defaultModel = resolveOpenAiDefaultModelFromOptions(models, preferredModel);
     const pickerModels = ensureOpenAiModelOption(models, preferredModel || defaultModel);
 

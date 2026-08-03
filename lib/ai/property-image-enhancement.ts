@@ -1,7 +1,3 @@
-import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { z } from "zod";
 import type {
     ImageOutputIntent,
@@ -19,12 +15,6 @@ import {
 } from "@/lib/ai/property-image-enhancement-prompt";
 import { resolvePropertyImageRoomType } from "@/lib/ai/property-image-room-types";
 import { stripOpenAiModelPrefix } from "@/lib/ai/openai-models";
-import {
-    callChatGptSubscriptionWithImageMetadata,
-    isChatGptSubscriptionImageGenerationEnabled,
-    resolveChatGptSubscriptionAccessToken,
-    stripChatGptSubscriptionModelPrefix,
-} from "@/lib/ai/chatgpt-subscription";
 
 export {
     buildAnalysisPrompt,
@@ -531,31 +521,8 @@ export async function analyzeImageForEnhancementWithChatGptSubscription(input: A
     model: string;
     usageMetadata?: GeminiGenerateContentResponse["usageMetadata"];
 }> {
-    const model = requireSelectedModel(input.model, "analysis");
-    const prompt = [
-        "Analyze the attached property listing photo.",
-        "Return strict JSON only. Do not include markdown fences or commentary.",
-        buildAnalysisPrompt({
-            priorPrompt: input.priorPrompt,
-            userInstructions: input.userInstructions,
-        }),
-    ].join("\n\n");
-    const result = await callChatGptSubscriptionWithImageMetadata(model, prompt, {
-        base64: input.sourceImageBase64,
-        mimeType: input.sourceImageMimeType || DEFAULT_IMAGE_MIME_TYPE,
-    });
-
-    const parsedJson = parseJsonObjectFromModelText(result.text);
-    const analysis = normalizeImageEnhancementAnalysis(parsedJson);
-    return {
-        analysis,
-        model: result.model,
-        usageMetadata: {
-            promptTokenCount: result.usage.promptTokens,
-            candidatesTokenCount: result.usage.completionTokens,
-            totalTokenCount: result.usage.totalTokens,
-        },
-    };
+    void input;
+    throw new Error("ChatGPT subscription image analysis is not supported. Use a compatible location API model.");
 }
 
 function normalizeActionLog(lines: string[]): string[] {
@@ -727,119 +694,9 @@ export async function generateEnhancedImageWithOpenAi(input: GenerateEnhancedIma
     };
 }
 
-function runCodexImageCommand(command: string, args: string[], options: Parameters<typeof execFile>[2]): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const child = execFile(command, args, options, (error, _stdout, stderr) => {
-            if (error) {
-                reject(Object.assign(error, { stderr }));
-                return;
-            }
-            resolve();
-        });
-        child.stdin?.end();
-    });
-}
-
 export async function generateEnhancedImageWithChatGptSubscription(
     input: GenerateEnhancedImageWithChatGptSubscriptionInput
 ): Promise<GenerateEnhancedImageResult> {
-    if (!isChatGptSubscriptionImageGenerationEnabled()) {
-        throw new Error("ChatGPT subscription image generation is not supported by Codex with a ChatGPT account. Use Gemini image generation with the location Google AI key or an OpenAI API image model.");
-    }
-
-    const model = requireSelectedModel(stripChatGptSubscriptionModelPrefix(input.model), "generation");
-    const prompt = buildGenerationPrompt({
-        analysis: input.analysis,
-        selectedFixIds: input.selectedFixIds,
-        removedDetectedElementIds: input.removedDetectedElementIds,
-        aggression: input.aggression,
-        priorPrompt: input.priorPrompt,
-        userInstructions: input.userInstructions,
-        outputIntent: input.outputIntent,
-    });
-    const reusablePrompt = buildReusablePromptContext({
-        analysis: input.analysis,
-        selectedFixIds: input.selectedFixIds,
-        removedDetectedElementIds: input.removedDetectedElementIds,
-        aggression: input.aggression,
-        userInstructions: input.userInstructions,
-        outputIntent: input.outputIntent,
-    });
-
-    const sourceBytes = Buffer.from(input.sourceImageBase64, "base64");
-    if (!sourceBytes.length) {
-        throw new Error("Source image is empty.");
-    }
-
-    const tempDir = await mkdtemp(path.join(tmpdir(), "estio-chatgpt-image-"));
-    const sourceFile = path.join(tempDir, input.sourceImageMimeType?.includes("png") ? "source-image.png" : "source-image.jpg");
-    const outputFile = path.join(tempDir, "generated.png");
-    const lastMessageFile = path.join(tempDir, "last-message.txt");
-    const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
-    const accessToken = String(await resolveChatGptSubscriptionAccessToken() || "").trim();
-    const env = { ...process.env };
-    if (accessToken) env.CODEX_ACCESS_TOKEN = accessToken;
-    else delete env.CODEX_ACCESS_TOKEN;
-
-    const codexPrompt = [
-        "$imagegen",
-        "Edit the attached property listing photo using the instructions below.",
-        `Save the final generated image as a PNG file at this exact path: ${outputFile}`,
-        "Do not edit repository files. Do not return only a text description.",
-        "",
-        prompt,
-    ].join("\n");
-
-    try {
-        await writeFile(sourceFile, sourceBytes);
-        await runCodexImageCommand(command, [
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--ephemeral",
-            "--ignore-rules",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "workspace-write",
-            "-C",
-            tempDir,
-            "-m",
-            model,
-            "-i",
-            sourceFile,
-            "--output-last-message",
-            lastMessageFile,
-            codexPrompt,
-        ], {
-            env,
-            maxBuffer: 1024 * 1024 * 4,
-            timeout: Number(process.env.CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS || 180000),
-        });
-
-        const output = await readFile(outputFile).catch(() => null);
-        if (!output?.length) {
-            throw new Error("ChatGPT subscription image generation did not produce an image artifact. Use OpenAI GPT Image 2 through the API path for reliable programmatic image enhancement.");
-        }
-
-        const lastMessage = await readFile(lastMessageFile, "utf8").catch(() => "");
-        const removedElements = getRemovedDetectedElements(input.analysis, input.removedDetectedElementIds || []);
-        const fallbackActionLog = input.analysis.actionLogDraft.length > 0
-            ? input.analysis.actionLogDraft
-            : [
-                ...getSelectedFixes(input.analysis, input.selectedFixIds).map((fix) => fix.label),
-                ...removedElements.map((element) => `Remove ${element.label}`),
-            ];
-
-        return {
-            imageBase64: output.toString("base64"),
-            mimeType: "image/png",
-            actionLog: normalizeActionLog([lastMessage, ...fallbackActionLog]),
-            finalPrompt: prompt,
-            reusablePrompt,
-            model,
-            usageMetadata: undefined,
-        };
-    } finally {
-        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-    }
+    void input;
+    throw new Error("ChatGPT subscription image generation is not supported. Use Gemini or an OpenAI API image model configured for this location.");
 }

@@ -24,6 +24,10 @@ export async function resolveLocationGoogleAiApiKey(locationId: string): Promise
     });
     if (siteConfig?.googleAiApiKey?.trim()) return siteConfig.googleAiApiKey.trim();
 
-    const envKey = String(process.env.GOOGLE_API_KEY || "").trim();
-    return envKey || null;
+    return null;
+}
+
+/** Deliberately named Estio-wide fallback; location resolution never reads it. */
+export function resolveEstioGlobalGoogleAiApiKey(): string | null {
+    return String(process.env.GOOGLE_API_KEY || "").trim() || null;
 }

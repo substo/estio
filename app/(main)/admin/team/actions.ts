@@ -623,6 +623,20 @@ export async function executeTransferResponsibilities(input: {
                     tx.googleContactDirectoryState.deleteMany({ where: { userId: token.sourceUserId } }),
                     tx.googleContactDirectoryEntry.deleteMany({ where: { userId: token.sourceUserId } }),
                     tx.webPushSubscription.deleteMany({ where: { userId: token.sourceUserId } }),
+                    tx.settingsSecret.deleteMany({
+                        where: {
+                            scopeType: 'USER',
+                            scopeId: token.sourceUserId,
+                            domain: 'user.integrations.chatgpt_subscription',
+                        },
+                    }),
+                    tx.settingsDocument.deleteMany({
+                        where: {
+                            scopeType: 'USER',
+                            scopeId: token.sourceUserId,
+                            domain: 'user.integrations.chatgpt_subscription',
+                        },
+                    }),
                     tx.gmailSyncOutbox.updateMany({
                     where: { userId: token.sourceUserId, status: { in: ['pending', 'processing', 'failed'] } },
                     data: { status: 'disabled', processedAt: now, lockedAt: null, lockedBy: null, lastError: 'Disabled by user offboarding' },

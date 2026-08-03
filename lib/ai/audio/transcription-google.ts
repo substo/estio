@@ -4,6 +4,7 @@ import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { getWhatsAppMediaObjectBytes, parseR2Uri } from "@/lib/whatsapp/media-r2";
 import { processTranscriptPropertyFeedback } from "@/lib/property-match-campaigns/feedback-service";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 const AUDIO_TRANSCRIPTION_DEFAULT_MODEL = GEMINI_FLASH_STABLE_FALLBACK || "gemini-2.5-flash";
 const AUDIO_TRANSCRIPTION_PROMPT =
@@ -58,14 +59,7 @@ export async function resolveGoogleTranscriptionModelForLocation(locationId: str
 }
 
 async function getLocationTranscriptionConfig(locationId: string): Promise<LocationTranscriptionConfig> {
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            googleAiApiKey: true,
-        },
-    });
-
-    const apiKey = String(siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY || "").trim();
+    const apiKey = await resolveLocationGoogleAiApiKey(locationId);
     if (!apiKey) {
         throw new Error("No Google AI API key configured for this location.");
     }

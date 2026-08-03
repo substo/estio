@@ -609,7 +609,7 @@ Write the final message the agent should send now.`;
             params.modelId,
             synthesisSystemPrompt,
             synthesisUserPrompt,
-            { jsonMode: false }
+            { jsonMode: false, locationId: params.context.locationId }
         );
         return { draft: text?.trim() || params.initialDraft || null, usage };
     } catch (e) {
@@ -774,7 +774,7 @@ You must respond with valid JSON:
             modelId,
             systemPrompt,
             userPrompt,
-            { jsonMode: true }
+            { jsonMode: true, locationId: context.locationId }
         );
 
         const parsed = JSON.parse(response);

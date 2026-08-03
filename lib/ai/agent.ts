@@ -13,6 +13,7 @@ import { retrieveContext } from "./memory";
 import { shouldUsePTC } from "./ptc/config";
 import { getPtcSystemPrompt } from "./prompts/ptc-instructions";
 import { buildDealProtectiveCommunicationContract } from "./prompts/communication-policy";
+import { resolveLocationGoogleAiApiKey } from "./location-google-key";
 
 const PLANNER_SYSTEM_PROMPT = `
 You are the Estio Real Estate Planner. Your job is to break down a high-level "Ultimate Goal" into a concrete, sequential checklist of tasks.
@@ -99,8 +100,7 @@ export interface AgentTask {
 // --- Planner Function ---
 export async function generateAgentPlan(contactId: string, locationId: string, history: string, goal: string): Promise<{ success: boolean, plan?: AgentTask[], thought?: string, usage?: any }> {
     try {
-        const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
-        const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
+        const apiKey = await resolveLocationGoogleAiApiKey(locationId);
         if (!apiKey) throw new Error("No AI API Key");
 
         // Prepare Model
@@ -138,8 +138,7 @@ HISTORY: ${history}
 // --- Executor Function ---
 export async function executeAgentTask(contactId: string, locationId: string, history: string, currentTask: AgentTask, allTasks: AgentTask[]) {
     try {
-        const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
-        const apiKey = siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY;
+        const apiKey = await resolveLocationGoogleAiApiKey(locationId);
         if (!apiKey) throw new Error("No AI API Key");
 
         const genAI = new GoogleGenerativeAI(apiKey);

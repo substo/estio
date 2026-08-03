@@ -49,7 +49,7 @@ export async function compactContext(
     // Check if we have a cached summary that's still valid
     const conversation = await db.conversation.findUnique({
         where: { id: conversationId },
-        select: { contextSummary: true, lastSummarizedAt: true },
+        select: { contextSummary: true, lastSummarizedAt: true, locationId: true },
     });
 
     const oldMessages = messages.slice(0, -maxRecentMessages);
@@ -69,7 +69,7 @@ export async function compactContext(
     }
 
     // Generate new summary
-    const summary = await summarizeConversation(oldMessages);
+    const summary = await summarizeConversation(oldMessages, conversation?.locationId);
 
     // Cache the summary
     await db.conversation.update({
@@ -88,7 +88,8 @@ export async function compactContext(
  * Uses a cheap/fast model to keep costs low.
  */
 async function summarizeConversation(
-    messages: { direction: string; body: string | null; createdAt: Date }[]
+    messages: { direction: string; body: string | null; createdAt: Date }[],
+    locationId?: string,
 ): Promise<string> {
     const { callLLM } = await import("../llm");
     const { getModelForTask } = await import("../model-router");
@@ -113,6 +114,7 @@ Keep the summary concise but complete. Use bullet points.`;
         const modelId = getModelForTask("intent_classification");
         const result = await callLLM(modelId, systemPrompt, userContent, {
             temperature: 0.3,
+            locationId,
         });
         return result ?? "";
     } catch (error) {

@@ -21,6 +21,7 @@ export interface ClassificationSampleListing {
 }
 
 export interface ClassificationInput {
+    locationId?: string;
     name?: string | null;
     description?: string | null;
     listingCount?: number | null;
@@ -341,6 +342,7 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
         const aiResult = await callLLMWithMetadata(model, CLASSIFICATION_PROMPT, userContent, {
             jsonMode: true,
             temperature: 0.1,
+            locationId: input.locationId,
         });
 
         if (aiResult.text) {
@@ -415,7 +417,7 @@ export async function classifyAndUpdateProspect(
     }
 
     const model = getModelForTask('prospect_classification');
-    const result = await classifyProspect(input);
+    const result = await classifyProspect({ ...input, locationId });
 
     // Only auto-set sellerType if confidence is >= 70
     const shouldAutoSet = result.confidenceScore >= 70;

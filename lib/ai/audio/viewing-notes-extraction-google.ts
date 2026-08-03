@@ -5,6 +5,7 @@ import db from "@/lib/db";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 const VIEWING_NOTES_DEFAULT_MODEL = GEMINI_FLASH_STABLE_FALLBACK || "gemini-2.5-flash";
 
@@ -74,13 +75,12 @@ async function getLocationExtractionConfig(locationId: string): Promise<Location
     const siteConfig = await db.siteConfig.findUnique({
         where: { locationId },
         select: {
-            googleAiApiKey: true,
             googleAiModelExtraction: true,
             googleAiModelTranscription: true,
         } as any,
     });
 
-    const apiKey = String(siteConfig?.googleAiApiKey || process.env.GOOGLE_API_KEY || "").trim();
+    const apiKey = await resolveLocationGoogleAiApiKey(locationId);
     if (!apiKey) {
         throw new Error("No Google AI API key configured for this location.");
     }

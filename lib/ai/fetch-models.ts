@@ -14,6 +14,7 @@ import {
 import { buildPropertyImageModelCatalog } from "./model-capabilities";
 import { getStoredProviderModelOptions } from "@/lib/ai/provider-model-catalog";
 import { unstable_cache } from "next/cache";
+import { resolveEstioGlobalGoogleAiApiKey, resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 export interface ModelOption {
     value: string;
@@ -46,16 +47,9 @@ export interface ModelsApiResponse {
 export type ApiModel = NonNullable<ModelsApiResponse["models"]>[number];
 
 async function getGoogleAiApiKey(locationId?: string): Promise<string | undefined> {
-    let apiKey = process.env.GOOGLE_API_KEY;
-
-    if (!locationId) return apiKey;
-
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: { googleAiApiKey: true }
-    });
-
-    return siteConfig?.googleAiApiKey || apiKey;
+    return (locationId
+        ? await resolveLocationGoogleAiApiKey(locationId)
+        : resolveEstioGlobalGoogleAiApiKey()) || undefined;
 }
 
 function mapCuratedLabel(modelId: string): string | undefined {
@@ -437,7 +431,7 @@ export async function getAiDraftModelPickerState(locationId?: string): Promise<{
     const { getChatGptSubscriptionModelPickerState, hasChatGptSubscriptionAuth } = await import("@/lib/ai/chatgpt-subscription");
     const [openAiAvailable, chatGptSubscriptionAvailable] = await Promise.all([
         hasOpenAiApiKey(locationId),
-        hasChatGptSubscriptionAuth(),
+        hasChatGptSubscriptionAuth(locationId),
     ]);
     if (!openAiAvailable && !chatGptSubscriptionAvailable) {
         return googleState;
@@ -515,16 +509,26 @@ export function buildAiModelPickerDefaultsResult(
         }
         : defaults;
 
+    const availableValues = new Set([...pickerModels, ...openAiModels].map((model) => model.value));
+    const configuredOption = (value: string) => {
+        const available = availableValues.has(value);
+        const baseLabel = mapCuratedLabel(value) || value;
+        return {
+            value,
+            label: available ? baseLabel : `${baseLabel} (currently unavailable)`,
+            description: available ? undefined : "Saved selection preserved; reconnect the provider or choose another compatible model.",
+        };
+    };
     const models = dedupeModelOptions([
         ...pickerModels,
         ...openAiModels,
-        { value: resolvedDefaults.general, label: mapCuratedLabel(resolvedDefaults.general) || resolvedDefaults.general },
-        { value: resolvedDefaults.draft, label: mapCuratedLabel(resolvedDefaults.draft) || resolvedDefaults.draft },
-        { value: resolvedDefaults.extraction, label: mapCuratedLabel(resolvedDefaults.extraction) || resolvedDefaults.extraction },
-        { value: resolvedDefaults.design, label: mapCuratedLabel(resolvedDefaults.design) || resolvedDefaults.design },
-        { value: resolvedDefaults.imageGeneration, label: mapCuratedLabel(resolvedDefaults.imageGeneration) || resolvedDefaults.imageGeneration },
-        { value: resolvedDefaults.transcription, label: mapCuratedLabel(resolvedDefaults.transcription) || resolvedDefaults.transcription },
-        { value: resolvedDefaults.translation, label: mapCuratedLabel(resolvedDefaults.translation) || resolvedDefaults.translation },
+        configuredOption(resolvedDefaults.general),
+        configuredOption(resolvedDefaults.draft),
+        configuredOption(resolvedDefaults.extraction),
+        configuredOption(resolvedDefaults.design),
+        configuredOption(resolvedDefaults.imageGeneration),
+        configuredOption(resolvedDefaults.transcription),
+        configuredOption(resolvedDefaults.translation),
     ]);
 
     return {
@@ -547,7 +551,7 @@ export async function getAiModelPickerDefaults(locationId?: string): Promise<{
     } = await import("@/lib/ai/chatgpt-subscription");
     const [openAiAvailable, chatGptSubscriptionAvailable] = await Promise.all([
         hasOpenAiApiKey(locationId),
-        hasChatGptSubscriptionAuth(),
+        hasChatGptSubscriptionAuth(locationId),
     ]);
     const [openAiState, openAiImageState, chatGptSubscriptionState, chatGptSubscriptionImageState] = await Promise.all([
         openAiAvailable

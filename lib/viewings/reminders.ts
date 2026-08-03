@@ -612,6 +612,7 @@ async function maybePolishReminderDraft(
                 temperature: 0.2,
                 maxOutputTokens: 260,
                 thinkingBudget: 0,
+                locationId: locationId || undefined,
             }
         );
         const normalized = String(polished || "").trim();

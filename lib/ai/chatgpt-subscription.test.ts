@@ -7,8 +7,9 @@ import {
     buildCodexCliCommand,
     buildCodexTextPrompt,
     callChatGptSubscriptionWithMetadata,
-    getChatGptSubscriptionSetupGuide,
+    chooseChatGptFundingScope,
     hasChatGptSubscriptionAuth,
+    isEligibleLocationChatGptConnection,
     isChatGptSubscriptionModelId,
     resolveChatGptSubscriptionDefaultModel,
     stripChatGptSubscriptionModelPrefix,
@@ -35,6 +36,7 @@ test("buildCodexCliCommand uses locked-down noninteractive Codex execution", () 
             prompt: "Generate a short reply",
             outputFile: "/tmp/out.txt",
             accessToken: "codex-token",
+            codexHome: "/tmp/codex-home",
         });
 
         assert.equal(command.command, "/usr/local/bin/codex-test");
@@ -60,7 +62,7 @@ test("buildCodexCliCommand uses locked-down noninteractive Codex execution", () 
     }
 });
 
-test("buildCodexCliCommand can rely on Codex login cache without access token", () => {
+test("buildCodexCliCommand strips ambient credentials when an isolated cache is selected", () => {
     const originalToken = process.env.CODEX_ACCESS_TOKEN;
     process.env.CODEX_ACCESS_TOKEN = "ambient-token";
 
@@ -69,9 +71,10 @@ test("buildCodexCliCommand can rely on Codex login cache without access token", 
             model: `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}gpt-5.4-mini`,
             prompt: "Generate a short reply",
             outputFile: "/tmp/out.txt",
+            codexHome: "/tmp/codex-home",
         });
 
-        assert.equal(command.authMode, "codex_login_cache");
+        assert.equal(command.authMode, "isolated_auth_cache");
         assert.equal(command.env.CODEX_ACCESS_TOKEN, undefined);
         assert.equal(command.args.includes("--output-last-message"), true);
     } finally {
@@ -86,6 +89,7 @@ test("buildCodexCliCommand passes a strict output schema to Codex", () => {
         prompt: "Return JSON",
         outputFile: "/tmp/out.txt",
         outputSchemaFile: "/tmp/schema.json",
+        codexHome: "/tmp/codex-home",
     });
 
     const schemaIndex = command.args.indexOf("--output-schema");
@@ -100,29 +104,7 @@ test("buildCodexTextPrompt forbids filesystem/tool behavior", () => {
     assert.match(prompt, /User input:\nWrite a reply\./);
 });
 
-test("getChatGptSubscriptionSetupGuide reports Codex auth commands and transport flag", () => {
-    const originalTransport = process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
-    const originalCliPath = process.env.CODEX_CLI_PATH;
-    process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = "codex_cli";
-    process.env.CODEX_CLI_PATH = "/opt/codex";
-
-    try {
-        const guide = getChatGptSubscriptionSetupGuide();
-        assert.equal(guide.transportEnabled, true);
-        assert.equal(guide.transportEnvVar, "CHATGPT_SUBSCRIPTION_TRANSPORT");
-        assert.equal(guide.requiredTransportValue, "codex_cli");
-        assert.equal(guide.deviceAuthCommand, "/opt/codex login --device-auth");
-        assert.equal(guide.statusCommand, "/opt/codex login status");
-        assert.match(guide.accessTokenCommand, /login --with-access-token/);
-    } finally {
-        if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
-        else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;
-        if (originalCliPath === undefined) delete process.env.CODEX_CLI_PATH;
-        else process.env.CODEX_CLI_PATH = originalCliPath;
-    }
-});
-
-test("hasChatGptSubscriptionAuth requires enabled server transport", async () => {
+test("hasChatGptSubscriptionAuth rejects transport-only availability without a location connection", async () => {
     const originalTransport = process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
 
     try {
@@ -130,7 +112,7 @@ test("hasChatGptSubscriptionAuth requires enabled server transport", async () =>
         assert.equal(await hasChatGptSubscriptionAuth(), false);
 
         process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = "codex_cli";
-        assert.equal(await hasChatGptSubscriptionAuth(), true);
+        assert.equal(await hasChatGptSubscriptionAuth(), false);
     } finally {
         if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
         else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;
@@ -146,7 +128,7 @@ test("callChatGptSubscriptionWithMetadata requires explicit transport opt-in", a
             () => callChatGptSubscriptionWithMetadata("chatgpt_subscription:gpt-5.4-mini", "System", "Input", {
                 accessToken: "token",
             }),
-            /ChatGPT subscription transport is disabled/
+            /ChatGPT subscription is currently unavailable/
         );
     } finally {
         if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
@@ -220,33 +202,46 @@ test("callChatGptSubscriptionWithMetadata writes and uses the supplied JSON sche
     }
 });
 
-test("callChatGptSubscriptionWithMetadata supports device-auth Codex login cache", async () => {
+test("callChatGptSubscriptionWithMetadata never falls back to an ambient Codex login cache", async () => {
     const originalTransport = process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
+    const originalToken = process.env.CODEX_ACCESS_TOKEN;
     process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = "codex_cli";
 
     try {
-        const calls: Array<{ env?: NodeJS.ProcessEnv }> = [];
-        const result = await callChatGptSubscriptionWithMetadata(
-            "chatgpt_subscription:gpt-5.4-mini",
-            "System",
-            "Input",
-            {
-                runner: async (_command: string, args: string[], options: any) => {
-                    calls.push({ env: options?.env });
-                    const outputIndex = args.indexOf("--output-last-message") + 1;
-                    await writeFile(args[outputIndex], "cache auth answer", "utf8");
-                    return { stdout: "", stderr: "" } as any;
-                },
-            }
+        process.env.CODEX_ACCESS_TOKEN = "ambient-token";
+        await assert.rejects(
+            () => callChatGptSubscriptionWithMetadata("chatgpt_subscription:gpt-5.4-mini", "System", "Input"),
+            /No authorized ChatGPT subscription connection/
         );
-
-        assert.equal(calls.length, 1);
-        assert.equal(calls[0].env?.CODEX_ACCESS_TOKEN, undefined);
-        assert.equal(result.text, "cache auth answer");
     } finally {
         if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
         else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;
+        if (originalToken === undefined) delete process.env.CODEX_ACCESS_TOKEN;
+        else process.env.CODEX_ACCESS_TOKEN = originalToken;
     }
+});
+
+test("provider precedence is deterministic and background work never selects personal credentials", () => {
+    assert.equal(chooseChatGptFundingScope({ executionMode: "interactive", personalAvailable: true, locationAvailable: true, globalAvailable: true }), "user_chatgpt");
+    assert.equal(chooseChatGptFundingScope({ executionMode: "interactive", personalAvailable: false, locationAvailable: true, globalAvailable: true }), "location_chatgpt");
+    assert.equal(chooseChatGptFundingScope({ executionMode: "background", personalAvailable: true, locationAvailable: true, globalAvailable: true }), "location_chatgpt");
+    assert.equal(chooseChatGptFundingScope({ executionMode: "background", personalAvailable: true, locationAvailable: false, globalAvailable: true }), "estio_global");
+    assert.equal(chooseChatGptFundingScope({ executionMode: "interactive", personalAvailable: false, locationAvailable: false, globalAvailable: false }), null);
+});
+
+test("only verified Business or Enterprise workspace automation credentials qualify as a location ChatGPT connection", () => {
+    const eligible = {
+        enabled: true,
+        credentialKind: "workspace_access_token",
+        eligibility: "business_or_enterprise_automation",
+        health: "connected",
+        verifiedAt: "2026-08-03T00:00:00.000Z",
+    };
+    assert.equal(isEligibleLocationChatGptConnection(eligible), true);
+    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, credentialKind: "enterprise_access_token", eligibility: "enterprise_automation" }), true);
+    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, credentialKind: "managed_chatgpt" }), false);
+    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, health: "needs_attention" }), false);
+    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, verifiedAt: null }), false);
 });
 
 test("validateChatGptSubscriptionConnection reports success through the same transport", async () => {
@@ -275,7 +270,7 @@ test("validateChatGptSubscriptionConnection reports success through the same tra
     }
 });
 
-test("validateChatGptSubscriptionConnection reports disabled transport clearly", async () => {
+test("validateChatGptSubscriptionConnection reports unavailable transport without deployment instructions", async () => {
     const originalTransport = process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
     delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
 
@@ -285,7 +280,8 @@ test("validateChatGptSubscriptionConnection reports disabled transport clearly",
         });
 
         assert.equal(status.ok, false);
-        assert.match(status.message, /transport is disabled/);
+        assert.match(status.message, /currently unavailable/);
+        assert.doesNotMatch(status.message, /environment|CHATGPT_SUBSCRIPTION_TRANSPORT|server path/i);
     } finally {
         if (originalTransport === undefined) delete process.env.CHATGPT_SUBSCRIPTION_TRANSPORT;
         else process.env.CHATGPT_SUBSCRIPTION_TRANSPORT = originalTransport;

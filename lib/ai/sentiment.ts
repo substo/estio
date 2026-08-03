@@ -26,7 +26,7 @@ Rules:
 
 Message: "{message}"`;
 
-export async function analyzeSentiment(message: string): Promise<SentimentResult> {
+export async function analyzeSentiment(message: string, locationId?: string): Promise<SentimentResult> {
     const model = getModelForTask("sentiment_analysis"); // Will default to Flash if not in map, but we'll update router next
 
     try {
@@ -34,7 +34,7 @@ export async function analyzeSentiment(message: string): Promise<SentimentResult
             model,
             SENTIMENT_PROMPT.replace("{message}", message),
             undefined,
-            { jsonMode: true }
+            { jsonMode: true, locationId }
         );
         return JSON.parse(response);
     } catch (error) {

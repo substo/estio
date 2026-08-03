@@ -24,7 +24,6 @@ import {
 import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
-    SETTINGS_SECRET_KEYS,
     isSettingsDualWriteLegacyEnabled,
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
@@ -199,6 +198,9 @@ export async function updateAiSettings(
         const draftModel = String(formData.get("googleAiModelDraft") || "").trim() || generalModel;
         const payload = {
             ...existingPayload,
+            aiPreset: ["balanced", "lowest_cost", "best_quality", "custom"].includes(String(formData.get("aiPreset") || ""))
+                ? String(formData.get("aiPreset"))
+                : "balanced",
             googleAiModel: generalModel,
             googleAiModelDraft: draftModel,
             googleAiModelExtraction: formData.get("googleAiModelExtraction") as string || GEMINI_FLASH_LATEST_ALIAS,
@@ -256,58 +258,11 @@ export async function updateAiSettings(
             schemaVersion: 1,
         });
 
-        const clearGoogleAiApiKey = formData.get("clearGoogleAiApiKey") === "on";
-        const googleAiApiKey = String(formData.get("googleAiApiKey") || "").trim();
-        const clearOpenAiApiKey = formData.get("clearOpenAiApiKey") === "on";
-        const openAiApiKey = String(formData.get("openAiApiKey") || "").trim();
-        let legacySecretAction: "keep" | "clear" | "set" = "keep";
-
-        if (clearGoogleAiApiKey) {
-            await settingsService.clearSecret({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_AI,
-                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY,
-                actorUserId: localUser?.id,
-            });
-            legacySecretAction = "clear";
-        } else if (googleAiApiKey) {
-            await settingsService.setSecret({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_AI,
-                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY,
-                plaintext: googleAiApiKey,
-                actorUserId: localUser?.id,
-            });
-            legacySecretAction = "set";
-        }
-
-        if (clearOpenAiApiKey) {
-            await settingsService.clearSecret({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_AI,
-                secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
-                actorUserId: localUser?.id,
-            });
-        } else if (openAiApiKey) {
-            await settingsService.setSecret({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_AI,
-                secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
-                plaintext: openAiApiKey,
-                actorUserId: localUser?.id,
-            });
-        }
-
         if (isSettingsDualWriteLegacyEnabled()) {
             await db.siteConfig.upsert({
                 where: { locationId },
                 create: {
                     locationId,
-                    googleAiApiKey: legacySecretAction === "set" ? googleAiApiKey : null,
                     googleAiModel: payload.googleAiModel,
                     googleAiModelExtraction: payload.googleAiModelExtraction,
                     googleAiModelDesign: payload.googleAiModelDesign,
@@ -328,8 +283,6 @@ export async function updateAiSettings(
                     outreachConfig: payload.outreachConfig,
                 },
                 update: {
-                    ...(legacySecretAction === "set" ? { googleAiApiKey } : {}),
-                    ...(legacySecretAction === "clear" ? { googleAiApiKey: null } : {}),
                     googleAiModel: payload.googleAiModel,
                     googleAiModelExtraction: payload.googleAiModelExtraction,
                     googleAiModelDesign: payload.googleAiModelDesign,
@@ -409,7 +362,7 @@ export async function getOpenAiTextModelPickerStateAction(locationId: string) {
     }
 
     const { getOpenAiTextModelPickerState } = await import("@/lib/ai/openai-models");
-    return getOpenAiTextModelPickerState(authorization.locationId, { includeAuthenticatedUser: false });
+    return getOpenAiTextModelPickerState(authorization.locationId);
 }
 
 export async function runAiRuntimeNowAction(

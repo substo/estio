@@ -103,6 +103,7 @@ const publicSiteSchema = z.object({
 }).passthrough();
 
 const aiSchema = z.object({
+    aiPreset: z.enum(["balanced", "lowest_cost", "best_quality", "custom"]).default("balanced"),
     googleAiModel: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelDraft: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
     googleAiModelExtraction: z.string().trim().min(1).default(GEMINI_FLASH_LATEST_ALIAS),
@@ -217,6 +218,12 @@ const userOpenAiSchema = z.object({
 
 const userChatGptSubscriptionSchema = z.object({
     enabled: z.boolean().default(false),
+    preferMyConnection: z.boolean().default(false),
+    credentialKind: z.enum(["managed_chatgpt"]).nullable().optional(),
+    emailMasked: nullableTrimmedString,
+    planType: nullableTrimmedString,
+    verifiedAt: nullableTrimmedString,
+    health: z.enum(["connected", "needs_attention", "disconnected"]).default("disconnected"),
     defaultTextModel: nullableTrimmedString,
 }).passthrough();
 

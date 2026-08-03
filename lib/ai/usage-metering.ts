@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { calculateAiCost } from "./pricing-engine";
 import { resolveAiUsageAttribution } from "./usage-attribution-policy";
+import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 
 export interface RecordAiUsageInput {
     locationId: string;
@@ -16,6 +17,20 @@ export interface RecordAiUsageInput {
     outputTokenType?: "text" | "image";
     quantity?: number;
     metadata?: Record<string, unknown>;
+    fundingScope?: AiFundingScope;
+    executionMode?: "interactive" | "background";
+}
+
+export type AiFundingScope = "user_chatgpt" | "location_chatgpt" | "location_openai" | "location_gemini" | "estio_global";
+
+export function resolveAiFundingScope(provider: string, requested?: AiFundingScope): AiFundingScope {
+    if (requested) return requested;
+    if (provider === "google_gemini") return "location_gemini";
+    if (provider === "openai" || provider === "openai_api") return "location_openai";
+    if (provider === "chatgpt_subscription") {
+        throw new Error("ChatGPT usage requires an explicit funding scope.");
+    }
+    return "estio_global";
 }
 
 export interface RecordConversationAiUsageInput {
@@ -28,6 +43,8 @@ export interface RecordConversationAiUsageInput {
     outputTokens?: number | null;
     userId?: string | null;
     metadata?: Record<string, unknown>;
+    fundingScope?: AiFundingScope;
+    executionMode?: "interactive" | "background";
 }
 
 /**
@@ -44,9 +61,17 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
         const inputTokens = Math.max(0, input.inputTokens || 0);
         const outputTokens = Math.max(0, input.outputTokens || 0);
         const totalTokens = inputTokens + outputTokens;
+        const inferredAuthenticatedUserId = input.userId === undefined
+            ? await resolveAuthenticatedDbUserId()
+            : null;
+        const requestedUserId = input.userId === undefined
+            ? inferredAuthenticatedUserId
+            : input.userId;
+        const executionMode = input.executionMode
+            || (inferredAuthenticatedUserId ? "interactive" : "background");
         const attributedUserId = await resolveAiUsageAttribution({
             locationId: input.locationId,
-            requestedDbUserId: input.userId,
+            requestedDbUserId: requestedUserId,
             findUserInLocation: (dbUserId, locationId) => db.user.findFirst({
                 where: { id: dbUserId, locations: { some: { id: locationId } } },
                 select: { id: true },
@@ -63,6 +88,7 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
             quantity: input.quantity,
         });
 
+        const fundingScope = resolveAiFundingScope(input.provider, input.fundingScope);
         await db.aiUsage.create({
             data: {
                 locationId: input.locationId,
@@ -77,7 +103,12 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
                 outputTokens,
                 totalTokens,
                 estimatedCostUsd,
-                metadata: (input.metadata || {}) as any,
+                metadata: {
+                    ...(input.metadata || {}),
+                    fundingScope,
+                    executionMode,
+                    initiatingUserId: attributedUserId,
+                } as any,
             },
         });
     } catch (error) {
@@ -98,5 +129,9 @@ export async function securelyRecordConversationAiUsage(input: RecordConversatio
         inputTokens: input.inputTokens || 0,
         outputTokens: input.outputTokens || 0,
         metadata: input.metadata,
+        fundingScope: input.fundingScope
+            || (input.provider === "chatgpt_subscription" ? input.metadata?.fundingScope as AiFundingScope : undefined),
+        executionMode: input.executionMode
+            || (input.metadata?.executionMode === "interactive" ? "interactive" : undefined),
     });
 }
