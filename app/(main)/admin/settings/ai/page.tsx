@@ -104,7 +104,7 @@ export default async function AiSettingsPage() {
     const locationId = context.locationId;
 
     const localUser = await db.user.findUnique({ where: { clerkId: context.userId }, select: { id: true } });
-    const [siteConfig, aiDoc, hasGoogleAiApiKey, hasOpenAiApiKey, locationIntegrations, personalChatGpt, hasLocationChatGptCredential, hasPersonalChatGptCredential] = await Promise.all([
+    const [siteConfig, aiDoc, hasGoogleAiApiKey, hasOpenAiApiKey, locationIntegrations, personalChatGpt, hasLocationAccessToken, hasLocationAuthCache, hasPersonalChatGptCredential] = await Promise.all([
         db.siteConfig.findUnique({
             where: { locationId },
         }),
@@ -141,6 +141,12 @@ export default async function AiSettingsPage() {
             domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
             secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN,
         }).catch(() => false),
+        settingsService.hasSecret({
+            scopeType: "LOCATION",
+            scopeId: locationId,
+            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
+            secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE,
+        }).catch(() => false),
         localUser?.id ? settingsService.hasSecret({
             scopeType: "USER",
             scopeId: localUser.id,
@@ -165,6 +171,7 @@ export default async function AiSettingsPage() {
         ),
     };
     const geminiConnected = hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey);
+    const hasLocationChatGptCredential = hasLocationAccessToken || hasLocationAuthCache;
     const locationChatGptConnected = locationIntegrations?.payload?.chatGptSubscription?.enabled === true
         && locationIntegrations?.payload?.chatGptSubscription?.health === "connected"
         && hasLocationChatGptCredential;

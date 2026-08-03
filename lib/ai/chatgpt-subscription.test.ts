@@ -229,7 +229,7 @@ test("provider precedence is deterministic and background work never selects per
     assert.equal(chooseChatGptFundingScope({ executionMode: "interactive", personalAvailable: false, locationAvailable: false, globalAvailable: false }), null);
 });
 
-test("only verified Business or Enterprise workspace automation credentials qualify as a location ChatGPT connection", () => {
+test("verified workspace tokens and location-owned managed subscriptions qualify as location connections", () => {
     const eligible = {
         enabled: true,
         credentialKind: "workspace_access_token",
@@ -239,7 +239,8 @@ test("only verified Business or Enterprise workspace automation credentials qual
     };
     assert.equal(isEligibleLocationChatGptConnection(eligible), true);
     assert.equal(isEligibleLocationChatGptConnection({ ...eligible, credentialKind: "enterprise_access_token", eligibility: "enterprise_automation" }), true);
-    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, credentialKind: "managed_chatgpt" }), false);
+    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, credentialKind: "managed_chatgpt", eligibility: "location_owned_subscription" }), true);
+    assert.equal(isEligibleLocationChatGptConnection({ ...eligible, credentialKind: "managed_chatgpt", eligibility: null }), false);
     assert.equal(isEligibleLocationChatGptConnection({ ...eligible, health: "needs_attention" }), false);
     assert.equal(isEligibleLocationChatGptConnection({ ...eligible, verifiedAt: null }), false);
 });

@@ -4,7 +4,6 @@ import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { verifyUserHasAccessToLocation, verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import {
-    acceptCodexDeviceAuthAsPersonal,
     cancelCodexDeviceAuth,
     disconnectCodexConnection,
     readCodexDeviceAuth,
@@ -74,17 +73,6 @@ export async function POST(request: Request) {
         if (operation === "cancel") {
             const cancelled = await cancelCodexDeviceAuth(String(body.attemptId || ""), context.userId, context.locationId, scope);
             return NextResponse.json({ success: cancelled });
-        }
-        if (operation === "save_personal" && scope === "LOCATION") {
-            const attempt = await acceptCodexDeviceAuthAsPersonal({
-                attemptId: String(body.attemptId || ""),
-                actorUserId: context.userId,
-                locationId: context.locationId,
-            });
-            if (!attempt) {
-                return NextResponse.json({ success: false, error: "This personal sign-in offer expired or was already used." }, { status: 409 });
-            }
-            return NextResponse.json({ success: attempt.state === "connected", attempt }, { status: attempt.state === "connected" ? 200 : 409 });
         }
         if (operation === "preference" && scope === "USER") {
             const existing = await settingsService.getDocument<any>({

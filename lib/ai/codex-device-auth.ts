@@ -11,7 +11,7 @@ import { settingsService } from "@/lib/settings/service";
 import { buildIsolatedCodexEnvironment } from "@/lib/ai/codex-environment";
 
 export type CodexConnectionScope = "USER" | "LOCATION";
-export type CodexDeviceAuthState = "waiting" | "connected" | "expired" | "cancelled" | "failed" | "personal_only";
+export type CodexDeviceAuthState = "waiting" | "connected" | "expired" | "cancelled" | "failed";
 
 export type SafeCodexDeviceAttempt = {
     attemptId: string;
@@ -40,8 +40,6 @@ type Attempt = SafeCodexDeviceAttempt & {
     timeout: NodeJS.Timeout;
     rateLimitTimeout?: NodeJS.Timeout;
     pendingAccount?: any;
-    pendingPersonalAuthCache?: string;
-    pendingUsageLimits?: SafeChatGptUsageLimits | null;
 };
 
 const ATTEMPT_TTL_MS = 10 * 60 * 1000;
@@ -92,11 +90,6 @@ export function maskChatGptIdentity(email?: string | null): string | null {
     return `${local.slice(0, 1)}***@${normalized.slice(at + 1)}`;
 }
 
-/** Managed browser/device sessions are user credentials, regardless of plan label. */
-export function isManagedDeviceLoginEligibleForLocationSharing(): false {
-    return false;
-}
-
 export function matchesCodexAttemptOwner(
     owner: { actorUserId: string; locationId: string; scope: CodexConnectionScope },
     request: { actorUserId: string; locationId: string; scope: CodexConnectionScope }
@@ -123,28 +116,8 @@ export function canConsumeCodexDeviceAttempt(input: {
         && expiresAt > (input.now ?? Date.now());
 }
 
-export function canAcceptCodexPersonalOffer(input: {
-    scope: CodexConnectionScope;
-    state: CodexDeviceAuthState;
-    handled: boolean;
-    expiresAt: string;
-    hasCredential: boolean;
-    now?: number;
-}): boolean {
-    const expiresAt = Date.parse(input.expiresAt);
-    return input.scope === "LOCATION"
-        && input.state === "personal_only"
-        && input.handled
-        && input.hasCredential
-        && Number.isFinite(expiresAt)
-        && expiresAt > (input.now ?? Date.now());
-}
-
 function canCancelAttempt(attempt: Attempt): boolean {
-    return canConsumeCodexDeviceAttempt(attempt) || canAcceptCodexPersonalOffer({
-        ...attempt,
-        hasCredential: Boolean(attempt.pendingPersonalAuthCache),
-    });
+    return canConsumeCodexDeviceAttempt(attempt);
 }
 
 function safeLimitWindow(value: any) {
@@ -181,22 +154,17 @@ function send(attempt: Attempt, message: unknown) {
     if (!attempt.process.killed) attempt.process.stdin.write(`${JSON.stringify(message)}\n`);
 }
 
-async function cleanup(attempt: Attempt, options: { retainPersonalOffer?: boolean } = {}) {
+async function cleanup(attempt: Attempt) {
     clearTimeout(attempt.timeout);
     if (attempt.rateLimitTimeout) clearTimeout(attempt.rateLimitTimeout);
     delete attempt.userCode;
     if (!attempt.process.killed) attempt.process.kill("SIGTERM");
     await clearPendingAttemptMarker(attempt);
     await rm(attempt.homeDir, { recursive: true, force: true }).catch(() => undefined);
-    const retentionMs = options.retainPersonalOffer
-        ? Math.max(0, Date.parse(attempt.expiresAt) - Date.now())
-        : TERMINAL_RESULT_RETENTION_MS;
     setTimeout(() => {
-        delete attempt.pendingPersonalAuthCache;
         delete attempt.pendingAccount;
-        delete attempt.pendingUsageLimits;
         registry.delete(attempt.attemptId);
-    }, retentionMs);
+    }, TERMINAL_RESULT_RETENTION_MS);
 }
 
 async function isStillAuthorized(attempt: Attempt): Promise<boolean> {
@@ -230,16 +198,6 @@ async function completeLogin(attempt: Attempt, account: any, usageLimits: SafeCh
         return;
     }
 
-    if (attempt.scope === "LOCATION" || isManagedDeviceLoginEligibleForLocationSharing()) {
-        attempt.pendingPersonalAuthCache = authCache;
-        attempt.pendingAccount = account;
-        attempt.pendingUsageLimits = usageLimits;
-        attempt.state = "personal_only";
-        attempt.message = "This browser sign-in is personal and cannot be shared with a location. You can save it as your private connection instead.";
-        await cleanup(attempt, { retainPersonalOffer: true });
-        return;
-    }
-
     const scope = settingsScope(attempt);
     const existing = await settingsService.getDocument<any>(scope).catch(() => null);
     if (!existing || existing.payload?.pendingDeviceAttemptId !== attempt.attemptId) {
@@ -259,7 +217,21 @@ async function completeLogin(attempt: Attempt, account: any, usageLimits: SafeCh
             });
             await settingsService.upsertDocument({
                 ...scope,
-                payload: {
+                payload: attempt.scope === "LOCATION" ? {
+                    ...(existing.payload || {}),
+                    pendingDeviceAttemptId: null,
+                    chatGptSubscription: {
+                        ...(existing.payload?.chatGptSubscription || {}),
+                        enabled: true,
+                        credentialKind: "managed_chatgpt",
+                        eligibility: "location_owned_subscription",
+                        identityMasked: maskChatGptIdentity(account?.email),
+                        planType: String(account?.planType || "").trim() || null,
+                        verifiedAt: new Date().toISOString(),
+                        health: "connected",
+                        usageLimits,
+                    },
+                } : {
                     ...(existing.payload || {}),
                     pendingDeviceAttemptId: null,
                     enabled: true,
@@ -284,7 +256,9 @@ async function completeLogin(attempt: Attempt, account: any, usageLimits: SafeCh
         return;
     }
     attempt.state = "connected";
-    attempt.message = "Your ChatGPT subscription is connected.";
+    attempt.message = attempt.scope === "LOCATION"
+        ? "The ChatGPT subscription is connected for this location."
+        : "Your ChatGPT subscription is connected.";
     delete attempt.userCode;
     await cleanup(attempt);
 }
@@ -428,84 +402,10 @@ export async function cancelCodexDeviceAuth(attemptId: string, actorUserId: stri
     attempt.handled = true;
     attempt.state = "cancelled";
     attempt.message = "ChatGPT sign-in was cancelled.";
-    delete attempt.pendingPersonalAuthCache;
     delete attempt.pendingAccount;
-    delete attempt.pendingUsageLimits;
     if (attempt.loginId) send(attempt, { method: "account/login/cancel", id: 5, params: { loginId: attempt.loginId } });
     await cleanup(attempt);
     return true;
-}
-
-export async function acceptCodexDeviceAuthAsPersonal(input: {
-    attemptId: string;
-    actorUserId: string;
-    locationId: string;
-}): Promise<SafeCodexDeviceAttempt | null> {
-    const attempt = registry.get(String(input.attemptId || ""));
-    if (
-        !attempt
-        || !matchesCodexAttemptOwner(attempt, { ...input, scope: "LOCATION" })
-        || !canAcceptCodexPersonalOffer({ ...attempt, hasCredential: Boolean(attempt.pendingPersonalAuthCache) })
-    ) return null;
-
-    // Claim the credential before awaiting so two requests cannot consume it.
-    const authCache = attempt.pendingPersonalAuthCache!;
-    const account = attempt.pendingAccount;
-    const usageLimits = attempt.pendingUsageLimits ?? null;
-    delete attempt.pendingPersonalAuthCache;
-    delete attempt.pendingAccount;
-    delete attempt.pendingUsageLimits;
-
-    if (!await isStillAuthorized(attempt)) {
-        attempt.state = "failed";
-        attempt.message = "Your access changed before the personal connection was saved. Start again.";
-        await cleanup(attempt);
-        return safe(attempt);
-    }
-
-    const scope = {
-        scopeType: "USER" as const,
-        scopeId: input.actorUserId,
-        domain: SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
-    };
-    const existing = await settingsService.getDocument<any>(scope).catch(() => null);
-    try {
-        await db.$transaction(async (tx) => {
-            await settingsService.setSecret({
-                ...scope,
-                secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE,
-                plaintext: authCache,
-                actorUserId: input.actorUserId,
-                tx,
-            });
-            await settingsService.upsertDocument({
-                ...scope,
-                payload: {
-                    ...(existing?.payload || {}),
-                    pendingDeviceAttemptId: null,
-                    enabled: true,
-                    preferMyConnection: existing?.payload?.preferMyConnection === true,
-                    credentialKind: "managed_chatgpt",
-                    emailMasked: maskChatGptIdentity(account?.email),
-                    planType: String(account?.planType || "").trim() || null,
-                    verifiedAt: new Date().toISOString(),
-                    health: "connected",
-                    usageLimits,
-                },
-                actorUserId: input.actorUserId,
-                expectedVersion: existing?.version ?? 0,
-                schemaVersion: 1,
-                tx,
-            });
-        });
-        attempt.state = "connected";
-        attempt.message = "Saved as your private ChatGPT connection. It was not shared with the location.";
-    } catch {
-        attempt.state = "failed";
-        attempt.message = "Your personal connection changed before this sign-in was saved. Start again.";
-    }
-    await cleanup(attempt);
-    return safe(attempt);
 }
 
 export async function cancelCodexDeviceAuthForOwner(input: {
@@ -529,10 +429,6 @@ export async function disconnectCodexConnection(input: {
     await cancelCodexDeviceAuthForOwner(input);
     const scopeId = input.scope === "USER" ? input.actorUserId : input.locationId;
     const scope = settingsScope({ scope: input.scope, scopeId } as Pick<Attempt, "scope" | "scopeId">);
-    const secretKey = input.scope === "USER"
-        ? SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE
-        : SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN;
-
     await db.$transaction(async (tx) => {
         const existing = await tx.settingsDocument.findUnique({
             where: {
@@ -545,10 +441,18 @@ export async function disconnectCodexConnection(input: {
         });
         await settingsService.clearSecret({
             ...scope,
-            secretKey,
+            secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE,
             actorUserId: input.actorUserId,
             tx,
         });
+        if (input.scope === "LOCATION") {
+            await settingsService.clearSecret({
+                ...scope,
+                secretKey: SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN,
+                actorUserId: input.actorUserId,
+                tx,
+            });
+        }
         const existingPayload = existing?.payload && typeof existing.payload === "object" && !Array.isArray(existing.payload)
             ? existing.payload as Record<string, any>
             : {};

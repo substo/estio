@@ -96,28 +96,9 @@ export function ChatGptConnectionPanel({
         }
     }
 
-    async function saveAsPersonal() {
-        if (!attempt) return;
-        setBusy(true); setMessage("");
-        try {
-            const response = await fetch("/api/admin/settings/integrations/chatgpt-subscription/device", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ operation: "save_personal", scope: "LOCATION", attemptId: attempt.attemptId }),
-            });
-            const body = await response.json().catch(() => ({}));
-            if (body.attempt) setAttempt(body.attempt);
-            if (!response.ok) setMessage(body.error || body.attempt?.message || "Could not save your personal connection.");
-        } catch {
-            setMessage("Could not save your personal connection. Try again.");
-        } finally {
-            setBusy(false);
-        }
-    }
-
     async function closeDialog(open: boolean) {
         setDialogOpen(open);
-        if (!open && (attempt?.state === "waiting" || attempt?.state === "personal_only")) {
+        if (!open && attempt?.state === "waiting") {
             await fetch("/api/admin/settings/integrations/chatgpt-subscription/device", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "cancel", scope, attemptId: attempt.attemptId }) });
         }
         if (!open && attempt?.state === "connected") window.location.reload();
@@ -136,7 +117,7 @@ export function ChatGptConnectionPanel({
             <Switch id="prefer-personal" checked={preferred} onCheckedChange={setPreference} />
         </div>}
         {canManage && <div className="flex flex-wrap gap-3">
-            <Button onClick={start} disabled={busy} className="min-h-11">{connected ? "Replace connection" : scope === "LOCATION" ? "Check browser account" : "Connect"}</Button>
+            <Button onClick={start} disabled={busy} className="min-h-11">{connected ? "Replace connection" : "Connect"}</Button>
             {connected && <Button onClick={disconnect} disabled={busy} variant="outline" className="min-h-11">Disconnect</Button>}
         </div>}
         <div aria-live="polite" role="status" className="text-sm text-muted-foreground">{message}</div>
@@ -144,8 +125,8 @@ export function ChatGptConnectionPanel({
         <Dialog open={dialogOpen} onOpenChange={closeDialog}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Connect ChatGPT subscription (Codex)</DialogTitle>
-                    <DialogDescription>Open ChatGPT, sign in, and enter the one-time code. Estio never sends your ChatGPT tokens to this browser.</DialogDescription>
+                    <DialogTitle>{scope === "LOCATION" ? "Connect location ChatGPT subscription" : "Connect my ChatGPT subscription"} (Codex)</DialogTitle>
+                    <DialogDescription>Open ChatGPT, sign in, and enter the one-time code. Estio stores the connection encrypted on the server and never sends ChatGPT tokens to this browser.</DialogDescription>
                 </DialogHeader>
                 <div aria-live="polite" role="status" className="space-y-4">
                     {attempt?.state === "waiting" && <>
@@ -164,11 +145,6 @@ export function ChatGptConnectionPanel({
                         <p className="text-sm text-muted-foreground">Waiting for ChatGPT…</p>
                     </>}
                     {attempt?.state !== "waiting" && <p className={attempt?.state === "connected" ? "text-emerald-700" : "text-destructive"}>{attempt?.message || "Sign-in finished."}</p>}
-                    {attempt?.state === "personal_only" && (
-                        <Button type="button" variant="outline" className="min-h-11" disabled={busy} onClick={saveAsPersonal}>
-                            Save as my connection
-                        </Button>
-                    )}
                 </div>
             </DialogContent>
         </Dialog>
