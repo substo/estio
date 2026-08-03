@@ -30,6 +30,13 @@ type RemoveUserDialogProps = {
     hasOtherMembership: boolean;
 };
 
+function presentRemovalError(error: string): string {
+    if (/local User and Clerk identity do not agree|identity does not match|Clerk identity/i.test(error)) {
+        return 'This member or the selected new assignee has an account-linking problem. Repair their Estio sign-in before removing the member.';
+    }
+    return error;
+}
+
 export function RemoveUserDialog({ source, activeLocation, members, hasOtherMembership }: RemoveUserDialogProps) {
     const router = useRouter();
     const fieldId = useId();
@@ -55,12 +62,13 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
         setLoading(true);
         setExecutionResult(null);
         try {
-            setResult(await previewTransferResponsibilities({
+            const nextResult = await previewTransferResponsibilities({
                 sourceUserId: source.id,
                 successorUserId: mode === 'TRANSFER' ? successorUserId : undefined,
                 mode,
                 suspendClerkGlobally,
-            }));
+            });
+            setResult(nextResult.success ? nextResult : { success: false, error: presentRemovalError(nextResult.error) });
         } catch {
             setResult({ success: false, error: 'Unable to build the removal preview' });
         } finally {
@@ -113,9 +121,9 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
                 }}
             >
                 <DialogHeader>
-                    <DialogTitle ref={titleRef} tabIndex={-1}>Remove from location</DialogTitle>
+                    <DialogTitle ref={titleRef} tabIndex={-1}>Remove {source.name} from {activeLocation.name || 'this location'}</DialogTitle>
                     <DialogDescription>
-                        Remove this member&apos;s access to the active location without deleting their User identity or rewriting history.
+                        They will lose access to this location. Choose what happens to their assigned work before you confirm.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -126,7 +134,7 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
 
                 <form onSubmit={handlePreview} className="space-y-5">
                     <fieldset className="space-y-3" disabled={loading || executing}>
-                        <legend className="text-sm font-medium">Active responsibility handling</legend>
+                        <legend className="text-sm font-medium">What should happen to their assigned work?</legend>
                         <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
                             <input
                                 type="radio"
@@ -136,7 +144,7 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
                                 onChange={() => { setMode('TRANSFER'); invalidatePreview(); }}
                                 className="mt-1"
                             />
-                            <span><strong>Transfer active work</strong> <span className="text-muted-foreground">(recommended)</span><br />Move active responsibilities in place to a successor. Conversation access follows transferred contacts.</span>
+                            <span><strong>Assign it to another team member</strong> <span className="text-muted-foreground">(recommended)</span><br />Contacts, open deals, tasks and upcoming viewings will move to the person you choose. Existing records and messages are not copied.</span>
                         </label>
                         <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
                             <input
@@ -147,13 +155,13 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
                                 onChange={() => { setMode('KEEP_ASSIGNED'); invalidatePreview(); }}
                                 className="mt-1"
                             />
-                            <span><strong>Leave assigned to inactive user</strong> <span className="text-muted-foreground">(advanced)</span><br />Keep responsibility rows unchanged for later use with Assignment Recovery.</span>
+                            <span><strong>Keep it assigned to this member</strong><br />Their access will be removed, but their current assignments will stay unchanged. Administrators can still view and reassign the work later.</span>
                         </label>
                     </fieldset>
 
                     {mode === 'TRANSFER' && (
                         <div className="space-y-2">
-                            <Label htmlFor={`${fieldId}-successor`}>Successor</Label>
+                            <Label htmlFor={`${fieldId}-successor`}>Assign work to</Label>
                             <select
                                 id={`${fieldId}-successor`}
                                 value={successorUserId}
@@ -179,16 +187,16 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
                                 onChange={(event) => { setSuspendClerkGlobally(event.target.checked); invalidatePreview(); }}
                                 className="mt-1"
                             />
-                            <span><strong>Retire global login</strong><br />Separately revoke Clerk sessions and ban this login after local removal. This does not delete the local User.</span>
+                            <span><strong>Also disable this person&apos;s Estio login everywhere</strong><br />End their current sessions and block future sign-ins. Their name and email stay in activity history.</span>
                         </label>
                         <p className="mt-2 text-xs text-muted-foreground">
-                            {hasOtherMembership ? 'Unavailable because this user has another location membership.' : 'Optional and unchecked by default.'}
+                            {hasOtherMembership ? 'Unavailable because this person still belongs to another location.' : 'Optional. Leave unchecked to remove access from this location only.'}
                         </p>
                     </div>
 
                     <Button type="submit" disabled={loading || executing || (mode === 'TRANSFER' && !successorUserId)} className="w-full">
                         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
-                        {loading ? 'Generating read-only preview…' : 'Generate removal preview'}
+                        {loading ? 'Preparing review…' : 'Review removal'}
                     </Button>
                 </form>
 
@@ -198,26 +206,26 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
                     <div className="space-y-5" aria-live="polite">
                         <section aria-labelledby={`${fieldId}-work-summary`}>
                             <h3 id={`${fieldId}-work-summary`} className="font-semibold">
-                                {preview.mode === 'TRANSFER' ? 'Active work to transfer' : 'Active work left assigned'}
+                                {preview.mode === 'TRANSFER' ? 'Work that will be reassigned' : 'Work that will stay assigned'}
                             </h3>
                             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                                <li>{preview.counts.assignedContacts} assigned contacts; {preview.counts.inheritedConversations} inherited conversations follow contact access</li>
-                                <li>{preview.counts.activeAssignedDeals} active deals</li>
+                                <li>{preview.counts.assignedContacts} contacts and {preview.counts.inheritedConversations} related conversations</li>
+                                <li>{preview.counts.activeAssignedDeals} open deals</li>
                                 <li>{preview.counts.openTasks} open tasks</li>
-                                <li>{preview.counts.nonTerminalViewingSessions} non-terminal viewing sessions</li>
-                                <li>{preview.counts.futureActionableViewings} future actionable viewings</li>
+                                <li>{preview.counts.nonTerminalViewingSessions} active viewing sessions</li>
+                                <li>{preview.counts.futureActionableViewings} upcoming viewings</li>
                             </ul>
                         </section>
 
                         <div className="grid gap-4 sm:grid-cols-2">
                             <section aria-labelledby={`${fieldId}-unchanged`}>
-                                <h3 id={`${fieldId}-unchanged`} className="font-semibold">Shared records unchanged</h3>
+                                <h3 id={`${fieldId}-unchanged`} className="font-semibold">Location records that stay unchanged</h3>
                                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                                     {preview.unchangedShared.map((item) => <li key={item.label}>{item.label}: {item.count}</li>)}
                                 </ul>
                             </section>
                             <section aria-labelledby={`${fieldId}-history`}>
-                                <h3 id={`${fieldId}-history`} className="font-semibold">Historical attribution preserved</h3>
+                                <h3 id={`${fieldId}-history`} className="font-semibold">Past activity that keeps this member&apos;s name</h3>
                                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                                     {preview.preservedAttribution.map((item) => <li key={item.label}>{item.label}: {item.count}</li>)}
                                 </ul>
@@ -225,7 +233,7 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
                         </div>
 
                         <section aria-labelledby={`${fieldId}-private`}>
-                            <h3 id={`${fieldId}-private`} className="font-semibold">Private state is never transferred</h3>
+                            <h3 id={`${fieldId}-private`} className="font-semibold">Personal connections</h3>
                             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                                 {preview.privateState.map((item) => <li key={item.label}>{item.label}: {item.disposition}</li>)}
                             </ul>
@@ -233,12 +241,12 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
 
                         {preview.blockingConditions.length > 0 ? (
                             <section className="rounded-md border border-amber-300 bg-amber-50 p-3" aria-labelledby={`${fieldId}-blocking`}>
-                                <h3 id={`${fieldId}-blocking`} className="flex items-center gap-2 font-semibold text-amber-950"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Blocking conditions</h3>
+                                <h3 id={`${fieldId}-blocking`} className="flex items-center gap-2 font-semibold text-amber-950"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Removal cannot continue</h3>
                                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-950">
                                     {preview.blockingConditions.map((condition) => <li key={condition}>{condition}</li>)}
                                 </ul>
                             </section>
-                        ) : <p className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">No blocking conditions were found.</p>}
+                        ) : <p className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900">This removal is ready for confirmation.</p>}
 
                         <details className="rounded-md border p-3 text-sm">
                             <summary className="cursor-pointer font-medium">View details</summary>
@@ -258,15 +266,15 @@ export function RemoveUserDialog({ source, activeLocation, members, hasOtherMemb
 
                         {preview.confirmationToken && preview.blockingConditions.length === 0 ? (
                             <form onSubmit={handleExecute} className="space-y-4 rounded-md border border-red-300 bg-red-50 p-4" aria-labelledby={`${fieldId}-confirmation`}>
-                                <h3 id={`${fieldId}-confirmation`} className="font-semibold text-red-950">Explicit final confirmation</h3>
+                                <h3 id={`${fieldId}-confirmation`} className="font-semibold text-red-950">Confirm removal</h3>
                                 <p className="text-sm text-red-950">Type exactly: <code>{preview.confirmationPhrase}</code></p>
                                 <Label htmlFor={`${fieldId}-phrase`} className="text-red-950">Confirmation phrase</Label>
                                 <Input id={`${fieldId}-phrase`} name="confirmationPhrase" required autoComplete="off" disabled={executing} />
                                 <label className="flex items-start gap-3 text-sm text-red-950">
                                     <input name="acknowledgeNoHistoricalRewrite" type="checkbox" required disabled={executing} className="mt-1" />
                                     <span>{preview.mode === 'TRANSFER'
-                                        ? 'I confirm active responsibilities will transfer without rewriting historical actors or duplicating records.'
-                                        : 'I confirm assignments will remain on the retained inactive User without copying or rewriting records.'}</span>
+                                        ? 'I understand the current work listed above will be reassigned. Existing records, messages and past activity will not be copied or changed.'
+                                        : 'I understand this member will lose access, but the current work listed above will remain assigned to them.'}</span>
                                 </label>
                                 <Button type="submit" variant="destructive" disabled={executing} className="w-full">
                                     {executing && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}

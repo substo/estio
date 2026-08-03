@@ -64,7 +64,7 @@ test('private credentials are classified but never rendered or returned', () => 
   assert.match(preview, /googleAccessToken/);
   assert.match(preview, /outlookSessionCookies/);
   assert.doesNotMatch(component, /googleAccessToken|googleRefreshToken|outlookAccessToken|outlookRefreshToken|crmPassword/);
-  assert.match(component, /Private state is never transferred/);
+  assert.match(component, /Personal connections/);
 });
 
 test('confirmation UI is accessible and execution requires explicit phrase and acknowledgement', () => {
@@ -74,13 +74,13 @@ test('confirmation UI is accessible and execution requires explicit phrase and a
   assert.match(component, /aria-live="polite"/);
   assert.match(component, /role="alert"/);
   assert.match(component, /aria-busy=\{loading \|\| executing\}/);
-  assert.match(component, /Explicit final confirmation/);
+  assert.match(component, /Confirm removal/);
   assert.match(component, /confirmationPhrase/);
   assert.match(component, /acknowledgeNoHistoricalRewrite/);
-  assert.match(component, /Transfer active work/);
-  assert.match(component, /Leave assigned to inactive user/);
+  assert.match(component, /Assign it to another team member/);
+  assert.match(component, /Keep it assigned to this member/);
   assert.match(component, /Remove from location/);
-  assert.match(component, /Retire global login/);
+  assert.match(component, /disable this person&apos;s Estio login everywhere/);
   assert.match(component, /disabled=\{hasOtherMembership \|\| loading \|\| executing\}/);
   assert.match(component, /Execution blocked until every condition is resolved/);
 });
@@ -89,6 +89,8 @@ test('offboarding is bound to the selected Team member instead of a standalone e
   assert.match(memberCard, /Manage user/);
   assert.match(memberCard, /!isCurrentUser &&/);
   assert.match(memberCard, /<RemoveUserDialog/);
+  assert.match(memberCard, /Remove from this location/);
+  assert.doesNotMatch(memberCard, /AssignmentRecovery|Recover legacy assignments/);
   assert.match(memberCard, /source=\{\{ id: user\.id, email: user\.email/);
   assert.match(teamPage, /removalMembers=\{removalMembers\}/);
   assert.match(component, /sourceUserId: source\.id/);

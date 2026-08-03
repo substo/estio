@@ -17,7 +17,6 @@ import { CreateCalendarDialog } from './create-calendar-dialog';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { RemoveUserDialog } from './offboarding-preview';
-import { AssignmentRecovery } from './assignment-recovery';
 
 interface Calendar {
     id: string;
@@ -141,6 +140,20 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                 </div>
             </CardHeader>
             {showManagement && <CardContent id={`team-user-management-${user.id}`} className="space-y-4 border-t pt-4">
+                {isAdmin && !isCurrentUser && roleData && (
+                    <div className="flex flex-col gap-3 rounded-md border border-red-200 bg-red-50/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p className="text-sm font-medium">Remove from this location</p>
+                            <p className="text-xs text-muted-foreground">Choose what happens to this member&apos;s assigned work, review the changes, then confirm.</p>
+                        </div>
+                        <RemoveUserDialog
+                            source={{ id: user.id, email: user.email, name: getDisplayName(user) }}
+                            activeLocation={activeLocation}
+                            members={removalMembers}
+                            hasOtherMembership={hasOtherMembership}
+                        />
+                    </div>
+                )}
                 {isAdmin && role === 'MEMBER' && (
                     <form action={updateMemberContactAccess} className="mb-4 flex items-end gap-2 rounded-md border p-3">
                         <input type="hidden" name="userId" value={user.id} />
@@ -196,21 +209,6 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                         />
                     </div>
                 </div>
-                {isAdmin && <AssignmentRecovery sourceEmail={user.email} />}
-                {isAdmin && !isCurrentUser && roleData && (
-                    <div className="flex items-center justify-between rounded-md border border-red-200 p-3">
-                        <div>
-                            <p className="text-sm font-medium">Location access</p>
-                            <p className="text-xs text-muted-foreground">Remove this member without deleting their User identity.</p>
-                        </div>
-                        <RemoveUserDialog
-                            source={{ id: user.id, email: user.email, name: getDisplayName(user) }}
-                            activeLocation={activeLocation}
-                            members={removalMembers}
-                            hasOtherMembership={hasOtherMembership}
-                        />
-                    </div>
-                )}
             </CardContent>}
         </Card>
     );
