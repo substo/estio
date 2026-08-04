@@ -34,10 +34,12 @@ export function AdminShellLayout({
   children,
   logoUrl,
   lightUrl,
+  currentLocationName,
 }: {
   children: ReactNode
   logoUrl?: string
   lightUrl?: string
+  currentLocationName: string
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const layoutPolicy = useResolvedAdminLayoutPolicy()
@@ -79,7 +81,7 @@ export function AdminShellLayout({
           appSurface={appSurface}
           onCollapsedChange={handleSidebarCollapsedChange}
         />
-        <DashboardTopNav appSurface={appSurface}>{children}</DashboardTopNav>
+        <DashboardTopNav appSurface={appSurface} currentLocationName={currentLocationName}>{children}</DashboardTopNav>
       </AdminLayoutPolicyProvider>
     </div>
   )

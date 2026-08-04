@@ -60,6 +60,7 @@ model Location {
   contactRequirementProposals   ContactRequirementProposal[]
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
   userNotifications             UserNotification[]
+  locationSessionActivities     LocationSessionActivity[]
   taskReminderJobs              TaskReminderJob[]
   scheduledMessages             ScheduledMessage[]
   scrapingConnections           ScrapingConnection[]
@@ -232,6 +233,7 @@ model User {
   updatedContactTasks          ContactTask[]               @relation("ContactTaskUpdatedByUser")
   webPushSubscriptions         WebPushSubscription[]
   userNotifications            UserNotification[]
+  locationSessionActivities    LocationSessionActivity[]
   taskReminderJobs             TaskReminderJob[]
   taskReminderPreference       UserTaskReminderPreference?
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")
@@ -1152,6 +1154,23 @@ model UserLocationRole {
 
   @@unique([userId, locationId])
   @@index([locationId, role])
+}
+
+model LocationSessionActivity {
+  id             String   @id @default(cuid())
+  locationId     String
+  userId         String
+  clerkSessionId String
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, clerkSessionId])
+  @@index([locationId, lastSeenAt])
 }
 
 model UserOffboardingAudit {

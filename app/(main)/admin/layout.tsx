@@ -6,6 +6,7 @@ import { redirect } from "next/navigation"
 import { headers } from "next/headers"
 import { OnboardingWrapper } from "@/components/onboarding-wrapper"
 import { AnalyticsTracker } from "@/components/analytics/analytics-tracker"
+import { LocationPresenceTracker } from "./_components/location-presence-tracker"
 
 import db from "@/lib/db"
 
@@ -53,7 +54,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       phone: true,
       locations: {
         take: 1,
-        select: { id: true }
+        select: { id: true, name: true }
       }
     }
   });
@@ -101,7 +102,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <>
       <AdminSidebarPreferenceScript />
-      <AdminShellLayout logoUrl={logoUrl} lightUrl={lightUrl}>
+      <LocationPresenceTracker />
+      <AdminShellLayout
+        logoUrl={logoUrl}
+        lightUrl={lightUrl}
+        currentLocationName={userWithLocations.locations[0]?.name || "Unnamed location"}
+      >
         <AdminContentFrame>
           <Suspense fallback={null}>
             <AnalyticsTracker eventName="admin_page_view" />

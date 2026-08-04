@@ -15,7 +15,7 @@ import { AdminNavigationGroups } from "./admin-navigation"
 import { cn } from "@/lib/utils"
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
 
-export default function DashboardTopNav({ children, appSurface = false }: { children: ReactNode; appSurface?: boolean }) {
+export default function DashboardTopNav({ children, appSurface = false, currentLocationName }: { children: ReactNode; appSurface?: boolean; currentLocationName: string }) {
   return (
     <div
       data-admin-top-nav={appSurface ? "app-surface" : "default"}
@@ -61,6 +61,9 @@ export default function DashboardTopNav({ children, appSurface = false }: { chil
             </div>
           </SheetContent>
         </Sheet>
+        <p className="min-w-0 truncate text-xs text-muted-foreground sm:text-sm">
+          Current location: <span className="font-medium text-foreground">{currentLocationName}</span>
+        </p>
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
           <div className="hidden sm:flex">
             <QuickAssistStartButton

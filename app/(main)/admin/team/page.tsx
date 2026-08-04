@@ -7,6 +7,7 @@ import { getGHLCalendars } from "./actions";
 import { checkGHLSMTPStatus } from "@/lib/ghl/email";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
 import { resolveStrictAdminLocation, type PreviewIdentity } from "@/lib/team/offboarding-preview-policy";
+import { AccessSessionsSection } from "./_components/access-sessions-section";
 
 export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string; removalAudit?: string; cleanupWarning?: string }> }) {
     const resolvedSearchParams = await searchParams;
@@ -77,6 +78,26 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
     }
 
     const users = location.users || [];
+    const latestActivities = await db.locationSessionActivity.groupBy({
+        by: ['userId'],
+        where: { locationId },
+        _max: { lastSeenAt: true },
+    });
+    const lastSeenByUser = new Map(latestActivities.map((entry) => [entry.userId, entry._max.lastSeenAt]));
+    const recentlyActiveAfter = Date.now() - 15 * 60 * 1000;
+    const accessMembers = users.flatMap((user) => {
+        const membership = user.locationRoles.find((entry) => entry.locationId === locationId);
+        if (!membership) return [];
+        const lastSeenAt = lastSeenByUser.get(user.id) || null;
+        return [{
+            id: user.id,
+            name: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unnamed User',
+            email: user.email,
+            role: membership.role,
+            lastSeenAt: lastSeenAt?.toISOString() || null,
+            recentlyActive: Boolean(lastSeenAt && lastSeenAt.getTime() >= recentlyActiveAfter),
+        }];
+    });
     const removalMembers = users
         .filter((user) => user.locationRoles.some((entry) => entry.locationId === locationId))
         .map((user) => ({
@@ -94,17 +115,24 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
         : { isConfigured: false };
 
     // Fetch pending invitations
-    const client = await clerkClient();
-    const invitations = await client.invitations.getInvitationList({ status: 'pending' });
-    const locationInvitations = invitations.data
-        .filter((inv: any) => inv.publicMetadata?.locationId === locationId)
-        .map((inv: any) => ({
-            id: inv.id,
-            emailAddress: inv.emailAddress,
-            status: inv.status,
-            createdAt: inv.createdAt,
-            publicMetadata: inv.publicMetadata,
-        }));
+    let locationInvitations: Array<{
+        id: string; emailAddress: string; status: string; createdAt: number; publicMetadata: { role?: string };
+    }> = [];
+    try {
+        const client = await clerkClient();
+        const invitations = await client.invitations.getInvitationList({ status: 'pending' });
+        locationInvitations = invitations.data
+            .filter((inv: any) => inv.publicMetadata?.locationId === locationId)
+            .map((inv: any) => ({
+                id: inv.id,
+                emailAddress: inv.emailAddress,
+                status: inv.status,
+                createdAt: inv.createdAt,
+                publicMetadata: inv.publicMetadata,
+            }));
+    } catch (error) {
+        console.warn('[TeamPage] Clerk invitations are temporarily unavailable.', error);
+    }
 
     const isAdmin = true;
 
@@ -154,6 +182,8 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
                 )}
 
                 <PendingInvitationsList invitations={locationInvitations} isAdmin={isAdmin} />
+
+                <AccessSessionsSection members={accessMembers} />
 
                 {users.length === 0 && (
                     <div className="border rounded-lg p-8 text-center text-gray-500">
