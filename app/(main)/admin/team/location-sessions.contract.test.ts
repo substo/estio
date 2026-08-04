@@ -14,3 +14,8 @@ test("Team access and sessions remain location-filtered and Clerk failures are i
   assert.match(service, /where: \{ userId: targetUserId, locationId \}/);
   assert.doesNotMatch(service, /ipAddress:\s*session/);
 });
+
+test("location activity timestamps tolerate server and browser timezone differences", () => {
+  const component = fs.readFileSync(path.join(process.cwd(), "app/(main)/admin/team/_components/access-sessions-section.tsx"), "utf8");
+  assert.equal((component.match(/suppressHydrationWarning/g) || []).length, 3);
+});

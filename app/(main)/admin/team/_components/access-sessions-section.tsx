@@ -70,8 +70,8 @@ function SessionView({ userId }: { userId: string }) {
               <div><span className="text-muted-foreground">Device</span><p>{session.deviceType}</p></div>
               <div><span className="text-muted-foreground">Browser</span><p>{session.browser}</p></div>
               <div><span className="text-muted-foreground">Approximate location</span><p>{session.city}, {session.country}</p></div>
-              <div><span className="text-muted-foreground">First access to this location</span><p>{formatDate(session.firstSeenAt)}</p></div>
-              <div><span className="text-muted-foreground">Last activity</span><p>{formatDate(session.lastSeenAt)}</p></div>
+              <div><span className="text-muted-foreground">First access to this location</span><p suppressHydrationWarning>{formatDate(session.firstSeenAt)}</p></div>
+              <div><span className="text-muted-foreground">Last activity</span><p suppressHydrationWarning>{formatDate(session.lastSeenAt)}</p></div>
               <div><span className="text-muted-foreground">Clerk session status</span><p>{session.status === "active" ? "Active sign-in" : session.status}</p></div>
             </div>
           ))}
@@ -104,7 +104,7 @@ export function AccessSessionsSection({ members }: { members: AccessMember[] }) 
             <div className="text-sm">
               {member.lastSeenAt ? (
                 <>
-                  <p>{formatDate(member.lastSeenAt)}</p>
+                  <p suppressHydrationWarning>{formatDate(member.lastSeenAt)}</p>
                   {member.recentlyActive && <p className="font-medium text-green-700">Recently active</p>}
                 </>
               ) : <p className="text-muted-foreground">No recorded activity</p>}
