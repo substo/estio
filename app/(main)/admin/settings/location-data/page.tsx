@@ -2,6 +2,7 @@ import db from '@/lib/db';
 import { getActiveContactsAccess } from '@/lib/contacts/active-location-access';
 import { selectLocationRows } from '@/lib/location-backup/service';
 import { buildLocationClearPreview, LOCATION_CLEAR_MODELS } from '@/lib/location-clear/preview';
+import { ResetAnalyticsCard } from './reset-analytics-card';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,12 @@ export default async function LocationDataPage() {
     [...selected.entries()].map(([model, rows]) => [model, rows.size]),
   );
   const preview = buildLocationClearPreview(rowCounts);
+  const [events, sessions, visitors, dailyRollups] = await Promise.all([
+    db.analyticsEvent.count({ where: { locationId: location.id } }),
+    db.analyticsSession.count({ where: { locationId: location.id } }),
+    db.analyticsVisitor.count({ where: { locationId: location.id } }),
+    db.analyticsDailyRollup.count({ where: { locationId: location.id } }),
+  ]);
 
   return (
     <main className="mx-auto max-w-4xl space-y-6 p-6">
@@ -33,8 +40,10 @@ export default async function LocationDataPage() {
       </div>
 
       <div role="status" className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-        Preview only. No erase action or mutation endpoint exists. Users, access, settings, domains, and integrations remain unchanged.
+        The full location-data preview remains read-only. The separate analytics reset below affects analytics records only. Users, access, settings, domains, and integrations remain unchanged.
       </div>
+
+      <ResetAnalyticsCard counts={{ events, sessions, visitors, dailyRollups }} />
 
       <section className="rounded-lg border p-4" aria-labelledby="erase-preview-heading">
         <div className="flex items-baseline justify-between gap-4">
