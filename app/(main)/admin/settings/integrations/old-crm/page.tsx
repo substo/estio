@@ -12,7 +12,6 @@ import {
     RefreshCw,
     Route,
     Save,
-    Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,15 +24,17 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
     analyzeLeadSchema,
+    clearOldCrmSettingsSection,
     getCrmSettings,
     getLeadSources,
     saveCrmCredentials,
     saveLeadSchema,
     saveLegacyCrmLeadEmailSettings,
-    resetOldCrmSettings,
 } from "../../crm/actions";
+import type { OldCrmSettingsSection } from "@/lib/crm/clear-old-crm-settings";
 import { analyzeCrmSchema, saveCrmSchema } from "../../../properties/import/actions";
 import { LeadSourceManager } from "../../crm/_components/lead-source-manager";
+import { ClearSettingsButton } from "./_components/clear-settings-button";
 
 type CrmSettingsFormValues = {
     locationId: string;
@@ -125,7 +126,6 @@ function FormHint({ children }: { children: React.ReactNode }) {
 export default function OldCrmIntegrationPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingLegacyLeadEmail, setIsSavingLegacyLeadEmail] = useState(false);
-    const [isResetting, setIsResetting] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isLeadAnalyzing, setIsLeadAnalyzing] = useState(false);
     const [schema, setSchema] = useState<any>(null);
@@ -249,30 +249,24 @@ export default function OldCrmIntegrationPage() {
         }
     }
 
-    async function onResetOldCrmSettings() {
-        const confirmed = window.confirm(
-            "Clear all Old CRM settings for this location and your saved Old CRM username/password? Imported contacts, properties, and other business records will not be deleted."
-        );
-        if (!confirmed) return;
-
-        setIsResetting(true);
+    async function onClearSection(section: OldCrmSettingsSection, label: string) {
         try {
-            const result = await resetOldCrmSettings();
+            const result = await clearOldCrmSettingsSection(section);
             if (!result?.success) {
-                toast.error(result?.error || "Failed to clear Old CRM settings");
-                return;
+                toast.error(result?.error || `Failed to clear ${label.toLowerCase()}`);
+                return false;
             }
 
             const settings = await getCrmSettings();
             if (settings) setDefaultValues(normalizeCrmSettings(settings));
-            setSchema(null);
-            setLeadAnalysisResult(null);
-            toast.success("Old CRM settings cleared");
+            if (section === "PROPERTY_SCHEMA") setSchema(null);
+            if (section === "LEAD_SCHEMA") setLeadAnalysisResult(null);
+            toast.success(`${label} cleared`);
+            return true;
         } catch (error) {
             console.error(error);
-            toast.error("Failed to clear Old CRM settings");
-        } finally {
-            setIsResetting(false);
+            toast.error(`Failed to clear ${label.toLowerCase()}`);
+            return false;
         }
     }
 
@@ -414,6 +408,7 @@ export default function OldCrmIntegrationPage() {
                                     id="publicListingUrlMode"
                                     name="publicListingUrlMode"
                                     defaultValue={defaultValues.publicListingUrlMode}
+                                    key={`public-mode-${defaultValues.publicListingUrlMode}`}
                                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 >
                                     <option value="ESTIO">Use Estio public listing URLs</option>
@@ -428,6 +423,7 @@ export default function OldCrmIntegrationPage() {
                                     id="legacyPublicListingUrlPattern"
                                     name="legacyPublicListingUrlPattern"
                                     defaultValue={defaultValues.legacyPublicListingUrlPattern}
+                                    key={`public-pattern-${defaultValues.legacyPublicListingUrlPattern}`}
                                     placeholder="https://www.downtowncyprus.com/properties/{slug}"
                                 />
                                 <FormHint>
@@ -436,7 +432,17 @@ export default function OldCrmIntegrationPage() {
                             </div>
                         </div>
 
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-2">
+                            <ClearSettingsButton
+                                title="Clear connection and link settings?"
+                                items={[
+                                    "Old CRM admin URL and property, lead, and public-link patterns",
+                                    "Your saved Old CRM username and password",
+                                    "Customer listing links return to Estio mode",
+                                ]}
+                                onClear={() => onClearSection("CONNECTION", "Connection and link settings")}
+                                disabled={isSaving}
+                            />
                             <Button type="submit" disabled={isSaving}>
                                 <Save className="mr-2 h-4 w-4" />
                                 {isSaving ? "Saving..." : "Save Connection And Link Settings"}
@@ -445,27 +451,6 @@ export default function OldCrmIntegrationPage() {
                     </CardContent>
                 </Card>
             </form>
-
-            <Card className="border-destructive/40">
-                <CardHeader>
-                    <div className="flex items-start gap-3">
-                        <SectionIcon icon={Trash2} />
-                        <div>
-                            <CardTitle>Clear Old CRM Settings</CardTitle>
-                            <CardDescription>
-                                Remove this location&apos;s Old CRM URLs, schemas, and lead-email settings, plus your saved Old CRM username and password.
-                                Imported contacts, properties, and other business records are not deleted.
-                            </CardDescription>
-                        </div>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <Button type="button" variant="destructive" onClick={onResetOldCrmSettings} disabled={isResetting}>
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        {isResetting ? "Clearing..." : "Clear Old CRM Settings"}
-                    </Button>
-                </CardContent>
-            </Card>
 
             <Card>
                 <CardHeader>
@@ -587,7 +572,17 @@ export default function OldCrmIntegrationPage() {
                             </label>
                         </div>
 
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-2">
+                            <ClearSettingsButton
+                                title="Clear lead-email settings?"
+                                items={[
+                                    "Sender email and domain rules",
+                                    "Subject matching patterns",
+                                    "Pinning and automation options",
+                                ]}
+                                onClear={() => onClearSection("LEAD_EMAIL", "Lead-email settings")}
+                                disabled={isSavingLegacyLeadEmail}
+                            />
                             <Button type="submit" disabled={isSavingLegacyLeadEmail}>
                                 <Save className="mr-2 h-4 w-4" />
                                 {isSavingLegacyLeadEmail ? "Saving..." : "Save Lead Email Settings"}
@@ -621,28 +616,36 @@ export default function OldCrmIntegrationPage() {
                                 <div className="max-h-72 overflow-y-auto rounded-md bg-muted p-4 text-xs font-mono">
                                     <pre>{JSON.stringify(schema, null, 2)}</pre>
                                 </div>
-                                <Button
-                                    onClick={async () => {
-                                        setIsAnalyzing(true);
-                                        try {
-                                            const result = await saveCrmSchema(schema);
-                                            if (result.success) {
-                                                toast.success("Schema saved successfully");
-                                            } else {
-                                                toast.error("Failed to save schema");
+                                <div className="flex flex-wrap gap-2">
+                                    <ClearSettingsButton
+                                        title="Clear the property import schema?"
+                                        items={["The saved Old CRM property-field schema"]}
+                                        onClear={() => onClearSection("PROPERTY_SCHEMA", "Property schema")}
+                                        disabled={isAnalyzing}
+                                    />
+                                    <Button
+                                        onClick={async () => {
+                                            setIsAnalyzing(true);
+                                            try {
+                                                const result = await saveCrmSchema(schema);
+                                                if (result.success) {
+                                                    toast.success("Schema saved successfully");
+                                                } else {
+                                                    toast.error("Failed to save schema");
+                                                }
+                                            } catch (e) {
+                                                toast.error("Error saving schema");
+                                            } finally {
+                                                setIsAnalyzing(false);
                                             }
-                                        } catch (e) {
-                                            toast.error("Error saving schema");
-                                        } finally {
-                                            setIsAnalyzing(false);
-                                        }
-                                    }}
-                                    variant="secondary"
-                                    disabled={isAnalyzing}
-                                >
-                                    <Save className="mr-2 h-4 w-4" />
-                                    Save Property Schema
-                                </Button>
+                                        }}
+                                        variant="secondary"
+                                        disabled={isAnalyzing}
+                                    >
+                                        <Save className="mr-2 h-4 w-4" />
+                                        Save Property Schema
+                                    </Button>
+                                </div>
                             </div>
                         )}
                     </CardContent>
@@ -681,34 +684,42 @@ export default function OldCrmIntegrationPage() {
                                 <div className="max-h-96 overflow-y-auto rounded-md bg-muted p-4 text-xs font-mono">
                                     <pre>{JSON.stringify(leadAnalysisResult, null, 2)}</pre>
                                 </div>
-                                <Button
-                                    onClick={async () => {
-                                        setIsLeadAnalyzing(true);
-                                        try {
-                                            const result = await saveLeadSchema(leadAnalysisResult, defaultValues.locationId || null);
-                                            if (result.success) {
-                                                toast.success("Lead schema saved successfully");
-                                                if (typeof result.version === "number") {
-                                                    setDefaultValues((prev) => ({
-                                                        ...prev,
-                                                        settingsVersion: result.version,
-                                                    }));
+                                <div className="flex flex-wrap gap-2">
+                                    <ClearSettingsButton
+                                        title="Clear the lead import schema?"
+                                        items={["The saved Old CRM lead-field schema"]}
+                                        onClear={() => onClearSection("LEAD_SCHEMA", "Lead schema")}
+                                        disabled={isLeadAnalyzing}
+                                    />
+                                    <Button
+                                        onClick={async () => {
+                                            setIsLeadAnalyzing(true);
+                                            try {
+                                                const result = await saveLeadSchema(leadAnalysisResult, defaultValues.locationId || null);
+                                                if (result.success) {
+                                                    toast.success("Lead schema saved successfully");
+                                                    if (typeof result.version === "number") {
+                                                        setDefaultValues((prev) => ({
+                                                            ...prev,
+                                                            settingsVersion: result.version,
+                                                        }));
+                                                    }
+                                                } else {
+                                                    toast.error("Failed to save lead schema: " + result.error);
                                                 }
-                                            } else {
-                                                toast.error("Failed to save lead schema: " + result.error);
+                                            } catch (e) {
+                                                toast.error("Error saving lead schema");
+                                            } finally {
+                                                setIsLeadAnalyzing(false);
                                             }
-                                        } catch (e) {
-                                            toast.error("Error saving lead schema");
-                                        } finally {
-                                            setIsLeadAnalyzing(false);
-                                        }
-                                    }}
-                                    variant="secondary"
-                                    disabled={isLeadAnalyzing}
-                                >
-                                    <Save className="mr-2 h-4 w-4" />
-                                    Save Lead Schema
-                                </Button>
+                                        }}
+                                        variant="secondary"
+                                        disabled={isLeadAnalyzing}
+                                    >
+                                        <Save className="mr-2 h-4 w-4" />
+                                        Save Lead Schema
+                                    </Button>
+                                </div>
                             </div>
                         )}
                     </CardContent>

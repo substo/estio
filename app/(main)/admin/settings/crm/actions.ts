@@ -16,7 +16,11 @@ import {
     isSettingsParityCheckEnabled,
 } from '@/lib/settings/constants';
 import { SettingsVersionConflictError } from '@/lib/settings/errors';
-import { clearOldCrmSettings } from '@/lib/crm/clear-old-crm-settings';
+import {
+    buildOldCrmSectionClearPlan,
+    isOldCrmSettingsSection,
+    type OldCrmSettingsSection,
+} from '@/lib/crm/clear-old-crm-settings';
 
 const MASKED_SECRET = "********";
 
@@ -394,19 +398,72 @@ export async function saveCrmCredentials(data: any) {
     }
 }
 
-export async function resetOldCrmSettings() {
+export async function clearOldCrmSettingsSection(section: OldCrmSettingsSection) {
     try {
+        if (!isOldCrmSettingsSection(section)) {
+            return { success: false, error: "Unknown Old CRM settings section" };
+        }
+
         const context = await resolveAdminContext();
-        await clearOldCrmSettings({
-            locationId: context.locationId,
-            localUserId: context.localUserId,
+        const [locationDoc, userDoc] = await Promise.all([
+            getLocationCrmDocument(context.locationId),
+            section === "CONNECTION" ? getUserCrmDocument(context.localUserId) : Promise.resolve(null),
+        ]);
+        const plan = buildOldCrmSectionClearPlan(locationDoc?.payload || {}, section);
+
+        const saved = await db.$transaction(async (tx) => {
+            const savedLocation = await settingsService.upsertDocument({
+                scopeType: "LOCATION",
+                scopeId: context.locationId,
+                domain: SETTINGS_DOMAINS.LOCATION_CRM,
+                payload: plan.locationPayload,
+                actorUserId: context.localUserId,
+                expectedVersion: locationDoc?.version ?? 0,
+                schemaVersion: 1,
+                tx,
+            });
+
+            await tx.location.update({
+                where: { id: context.locationId },
+                data: plan.legacyLocationData,
+            });
+
+            if (plan.clearUserCredentials) {
+                await settingsService.upsertDocument({
+                    scopeType: "USER",
+                    scopeId: context.localUserId,
+                    domain: SETTINGS_DOMAINS.USER_CRM,
+                    payload: { ...(userDoc?.payload || {}), crmUsername: null },
+                    actorUserId: context.localUserId,
+                    expectedVersion: userDoc?.version ?? 0,
+                    schemaVersion: 1,
+                    tx,
+                });
+                await settingsService.clearSecret({
+                    scopeType: "USER",
+                    scopeId: context.localUserId,
+                    domain: SETTINGS_DOMAINS.USER_CRM,
+                    secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
+                    actorUserId: context.localUserId,
+                    tx,
+                });
+                await tx.user.update({
+                    where: { id: context.localUserId },
+                    data: { crmUsername: null, crmPassword: null },
+                });
+            }
+
+            return savedLocation;
         });
 
         revalidateOldCrmSettingsPaths();
-        return { success: true };
+        return { success: true, settingsVersion: saved.version };
     } catch (error) {
-        console.error("Failed to clear Old CRM settings:", error);
-        return { success: false, error: "Failed to clear Old CRM settings" };
+        if (error instanceof SettingsVersionConflictError) {
+            return { success: false, error: "Settings changed. Refresh the page and try again." };
+        }
+        console.error("Failed to clear Old CRM settings section:", error);
+        return { success: false, error: "Failed to clear these settings" };
     }
 }
 
