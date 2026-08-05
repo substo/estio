@@ -43,18 +43,18 @@ test("the legacy removal API fails closed and confirmed execution is the only me
   assert.match(legacy, /Direct removal is disabled/);
   assert.doesNotMatch(legacy, /db\.|removeGHL|revalidatePath/);
   assert.doesNotMatch(teamComponents, /removeUserFromLocation|Remove team member/);
-  const removalMatches = actions.match(/userLocationRole\.delete\(/g) || [];
+  const removalMatches = actions.match(/userLocationRole\.deleteMany\(/g) || [];
   const disconnectMatches = actions.match(/locations:\s*\{\s*disconnect:/g) || [];
   assert.equal(removalMatches.length, 1);
   assert.equal(disconnectMatches.length, 1);
-  assert.match(execution, /userLocationRole\.delete/);
+  assert.match(execution, /userLocationRole\.deleteMany/);
 });
 
 test("KEEP_ASSIGNED performs no responsibility assignment mutation but removes membership and retains identity", () => {
   assert.match(responsibilities, /input\.mode === 'KEEP_ASSIGNED'/);
   assert.match(responsibilities, /contacts: 0, deals: 0, tasks: 0, viewingSessions: 0, futureViewings: 0/);
   assert.match(execution, /user\.update\([\s\S]*locations: \{ disconnect:/);
-  assert.match(execution, /userLocationRole\.delete/);
+  assert.match(execution, /userLocationRole\.deleteMany/);
   assert.doesNotMatch(execution, /email: null|user\.delete/);
 });
 

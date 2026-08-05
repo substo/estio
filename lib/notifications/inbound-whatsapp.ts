@@ -101,6 +101,7 @@ export async function notifyLocationUsersOfInboundWhatsAppMessage(args: {
         if (flags.notificationSse) {
             await publishNotificationRealtimeEvent({
                 userId,
+                locationId,
                 type: "notification.created",
                 payload: {
                     notificationId: notification.id,
@@ -108,6 +109,7 @@ export async function notifyLocationUsersOfInboundWhatsAppMessage(args: {
                     body: notification.body,
                     deepLinkUrl: notification.deepLinkUrl,
                     type: notification.type,
+                    locationId,
                     conversationId,
                     createdAt: notification.createdAt.toISOString(),
                 },

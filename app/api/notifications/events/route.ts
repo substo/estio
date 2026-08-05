@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import db from '@/lib/db';
 import { getNotificationFeatureFlags } from '@/lib/notifications/feature-flags';
+import { getActiveContactsAccess } from '@/lib/contacts/active-location-access';
 import {
   getNotificationEventsChannel,
   getNotificationRealtimeEventsSince,
@@ -18,17 +17,9 @@ const REDIS_CONNECTION = {
 const HEARTBEAT_INTERVAL_MS = 20_000;
 
 export async function GET(req: NextRequest) {
-  const { userId: clerkUserId } = await auth();
-  if (!clerkUserId) {
+  const access = await getActiveContactsAccess();
+  if (!access) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const user = await db.user.findUnique({
-    where: { clerkId: clerkUserId },
-    select: { id: true },
-  });
-  if (!user?.id) {
-    return NextResponse.json({ success: false, error: 'User not found' }, { status: 401 });
   }
 
   const flags = getNotificationFeatureFlags();
@@ -36,7 +27,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Realtime notifications disabled by feature flag' }, { status: 503 });
   }
 
-  const channel = getNotificationEventsChannel(user.id);
+  const channel = getNotificationEventsChannel(access.internalUserId, access.locationId);
   const encoder = new TextEncoder();
   let cancelCleanup: (() => Promise<void>) | null = null;
 
@@ -123,7 +114,8 @@ export async function GET(req: NextRequest) {
         const lastEventId = req.headers.get('last-event-id');
         if (lastEventId) {
           const replay = await getNotificationRealtimeEventsSince({
-            userId: user.id,
+            userId: access.internalUserId,
+            locationId: access.locationId,
             lastEventId,
             limit: 200,
           });
@@ -133,7 +125,8 @@ export async function GET(req: NextRequest) {
         }
 
         sendEvent('connected', {
-          userId: user.id,
+          userId: access.internalUserId,
+          locationId: access.locationId,
           channel,
           lastEventId: lastEventId || null,
           ts: new Date().toISOString(),

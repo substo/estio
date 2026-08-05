@@ -22,8 +22,21 @@ import {
 import { UserPlus, Loader2 } from 'lucide-react';
 import { inviteUserToLocation } from '../actions';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
-export function InviteUserDialog() {
+type InviteUserDialogProps = {
+    initialEmail?: string;
+    triggerLabel?: string;
+    title?: string;
+    description?: string;
+};
+
+export function InviteUserDialog({
+    initialEmail = '',
+    triggerLabel = 'Invite User',
+    title = 'Invite Team Member',
+    description = 'Invite a new user to access this location. Existing Estio accounts are restored without sending another invitation.',
+}: InviteUserDialogProps = {}) {
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -40,6 +53,7 @@ export function InviteUserDialog() {
         setLoading(false);
 
         if (result.success) {
+            toast.success(result.message || 'Team access updated');
             setOpen(false);
             router.refresh();
         } else {
@@ -52,14 +66,14 @@ export function InviteUserDialog() {
             <DialogTrigger asChild>
                 <Button>
                     <UserPlus className="h-4 w-4 mr-2" />
-                    Invite User
+                    {triggerLabel}
                 </Button>
             </DialogTrigger>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Invite Team Member</DialogTitle>
+                    <DialogTitle>{title}</DialogTitle>
                     <DialogDescription>
-                        Invite a new user to access this location. They will receive an email to set up their account.
+                        {description}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -71,6 +85,7 @@ export function InviteUserDialog() {
                             name="email"
                             type="email"
                             placeholder="user@example.com"
+                            defaultValue={initialEmail}
                             required
                         />
                     </div>

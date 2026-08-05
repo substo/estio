@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   assertOffboardingPair,
   normalizeOffboardingEmail,
+  requireOffboardingSourceById,
   requireExactPreviewIdentity,
   requirePreviewIdentityById,
   resolveStrictAdminLocation,
@@ -86,6 +87,32 @@ test('ID intent resolves one active local member and its canonical Clerk identit
   });
   assert.equal(resolved.id, 'user_source');
   assert.equal(resolved.email, 'source@example.com');
+});
+
+test('offboarding source accepts an exact connected legacy User without a role or live Clerk identity', () => {
+  const resolved = requireOffboardingSourceById({
+    userId: 'user_source',
+    localMatches: [identity({
+      clerkId: 'stale_clerk',
+      memberships: [{ locationId: 'loc_active', locationName: 'Active', role: null, connected: true }],
+    })],
+    clerkIdentity: null,
+    activeLocationId: 'loc_active',
+  });
+  assert.equal(resolved.id, 'user_source');
+  assert.equal(resolved.clerkId, null);
+});
+
+test('offboarding source still rejects foreign connections and mismatched live Clerk identities', () => {
+  assert.throws(() => requireOffboardingSourceById({
+    userId: 'user_source', localMatches: [identity({
+      memberships: [{ locationId: 'loc_other', locationName: 'Other', role: null, connected: true }],
+    })], clerkIdentity: null, activeLocationId: 'loc_active',
+  }), /not connected/);
+  assert.throws(() => requireOffboardingSourceById({
+    userId: 'user_source', localMatches: [identity()],
+    clerkIdentity: { id: 'other_clerk', emails: ['source@example.com'] }, activeLocationId: 'loc_active',
+  }), /do not agree/);
 });
 
 test('ID intent rejects missing, stale, disconnected, foreign, and mismatched identities', () => {

@@ -17,6 +17,7 @@ import { CreateCalendarDialog } from './create-calendar-dialog';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { RemoveUserDialog } from './offboarding-preview';
+import { InviteUserDialog } from './invite-user-dialog';
 
 interface Calendar {
     id: string;
@@ -60,7 +61,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
     const [showManagement, setShowManagement] = useState(false);
 
     const roleData = user.locationRoles?.find((entry) => entry.locationId === activeLocation.id);
-    const role = roleData?.role || 'MEMBER';
+    const role = roleData?.role || null;
     const isProfileComplete = !!(user.firstName && user.lastName);
 
     const handleCalendarChange = async (value: string) => {
@@ -103,6 +104,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                             {getDisplayName(user)}
                             {isCurrentUser && <Badge variant="outline" className="text-xs">You</Badge>}
                             {role === 'ADMIN' && <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-none text-xs">Admin</Badge>}
+                            {!roleData && <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Access setup incomplete</Badge>}
                             {!isProfileComplete && <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-none text-xs">Profile Incomplete</Badge>}
                         </CardTitle>
                         <div className="text-sm text-muted-foreground">{user.email}</div>
@@ -121,7 +123,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                         Manage user
                         {showManagement ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
                     </Button>
-                    {showManagement && isAdmin && !isCurrentUser && (
+                    {showManagement && isAdmin && !isCurrentUser && roleData && (
                         <Select
                             value={role}
                             onValueChange={(val: 'ADMIN' | 'MEMBER') => handleRoleChange(val)}
@@ -140,11 +142,27 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                 </div>
             </CardHeader>
             {showManagement && <CardContent id={`team-user-management-${user.id}`} className="space-y-4 border-t pt-4">
-                {isAdmin && !isCurrentUser && roleData && (
+                {isAdmin && !isCurrentUser && !roleData && (
+                    <div className="flex flex-col gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between" role="status">
+                        <div>
+                            <p className="text-sm font-medium text-amber-950">Restore this member&apos;s access</p>
+                            <p className="text-xs text-amber-900">Reconnect an existing Estio account or send a new Clerk invitation if no account exists.</p>
+                        </div>
+                        <InviteUserDialog
+                            initialEmail={user.email}
+                            triggerLabel="Restore access"
+                            title="Restore team access"
+                            description="Estio will reconnect an existing verified account. If none exists, Clerk will send an invitation email."
+                        />
+                    </div>
+                )}
+                {isAdmin && !isCurrentUser && (
                     <div className="flex flex-col gap-3 rounded-md border border-red-200 bg-red-50/40 p-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <p className="text-sm font-medium">Remove from this location</p>
-                            <p className="text-xs text-muted-foreground">Choose what happens to this member&apos;s assigned work, review the changes, then confirm.</p>
+                            <p className="text-xs text-muted-foreground">{roleData
+                                ? 'Choose what happens to this member\'s assigned work, review the changes, then confirm.'
+                                : 'This legacy member is connected without a valid role. Review their assigned work, then remove the stale location access.'}</p>
                         </div>
                         <RemoveUserDialog
                             source={{ id: user.id, email: user.email, name: getDisplayName(user) }}
@@ -154,7 +172,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                         />
                     </div>
                 )}
-                {isAdmin && role === 'MEMBER' && (
+                {isAdmin && roleData && role === 'MEMBER' && (
                     <form action={updateMemberContactAccess} className="mb-4 flex items-end gap-2 rounded-md border p-3">
                         <input type="hidden" name="userId" value={user.id} />
                         <div className="space-y-1">

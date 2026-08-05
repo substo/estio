@@ -74,3 +74,13 @@ test("signed intent binds mode, global retirement choice, and deterministic prev
   assert.ok(token);
   assert.deepEqual(verifyOffboardingConfirmationToken(token!, keepPayload.issuedAt + 1), keepPayload);
 });
+
+test("location-only confirmation supports a source whose Clerk identity no longer exists", () => {
+  process.env.OFFBOARDING_CONFIRMATION_SECRET = "0123456789abcdef0123456789abcdef";
+  const orphanPayload = { ...payload, sourceClerkId: null, suspendClerkGlobally: false };
+  const token = createOffboardingConfirmationToken(orphanPayload);
+  assert.ok(token);
+  assert.deepEqual(verifyOffboardingConfirmationToken(token!, orphanPayload.issuedAt + 1), orphanPayload);
+  const invalidGlobalToken = createOffboardingConfirmationToken({ ...orphanPayload, suspendClerkGlobally: true });
+  assert.throws(() => verifyOffboardingConfirmationToken(invalidGlobalToken!, orphanPayload.issuedAt + 1), /Invalid/);
+});

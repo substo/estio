@@ -91,6 +91,10 @@ test('offboarding is bound to the selected Team member instead of a standalone e
   assert.match(memberCard, /<RemoveUserDialog/);
   assert.match(memberCard, /Remove from this location/);
   assert.doesNotMatch(memberCard, /AssignmentRecovery|Recover legacy assignments/);
+  assert.match(memberCard, /isAdmin && !isCurrentUser && \(/);
+  assert.match(memberCard, /Access setup incomplete/);
+  assert.match(memberCard, /Restore access/);
+  assert.match(memberCard, /initialEmail=\{user\.email\}/);
   assert.match(memberCard, /source=\{\{ id: user\.id, email: user\.email/);
   assert.match(teamPage, /removalMembers=\{removalMembers\}/);
   assert.match(component, /sourceUserId: source\.id/);

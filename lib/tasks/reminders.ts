@@ -400,6 +400,7 @@ async function deliverInAppNotification(job: ReminderJobRecord, notification: Aw
   if (flags.notificationSse && existing?.status !== 'delivered') {
     await publishNotificationRealtimeEvent({
       userId: job.userId,
+      locationId: job.locationId,
       type: 'notification.created',
       payload: {
         notificationId: notification.id,
@@ -407,6 +408,7 @@ async function deliverInAppNotification(job: ReminderJobRecord, notification: Aw
         body: notification.body,
         deepLinkUrl: notification.deepLinkUrl,
         type: notification.type,
+        locationId: job.locationId,
         taskId: notification.taskId,
         createdAt: notification.createdAt.toISOString(),
       },

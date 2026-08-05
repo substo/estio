@@ -16,6 +16,7 @@ export type NotificationRealtimeEventEnvelope = {
   id: string;
   ts: string;
   userId: string;
+  locationId: string;
   type: string;
   payloadVersion: number;
   payload: Record<string, unknown>;
@@ -23,6 +24,7 @@ export type NotificationRealtimeEventEnvelope = {
 
 type PublishNotificationRealtimeEventInput = {
   userId: string;
+  locationId: string;
   type: string;
   payload?: Record<string, unknown>;
 };
@@ -45,12 +47,12 @@ async function getPublisher() {
   }
 }
 
-export function getNotificationEventsChannel(userId: string) {
-  return `${CHANNEL_PREFIX}${userId}`;
+export function getNotificationEventsChannel(userId: string, locationId: string) {
+  return `${CHANNEL_PREFIX}${userId}:location:${locationId}`;
 }
 
-export function getNotificationEventsHistoryKey(userId: string) {
-  return `${HISTORY_PREFIX}${userId}`;
+export function getNotificationEventsHistoryKey(userId: string, locationId: string) {
+  return `${HISTORY_PREFIX}${userId}:location:${locationId}`;
 }
 
 function parseNotificationRealtimeEventEnvelope(raw: string): NotificationRealtimeEventEnvelope | null {
@@ -64,6 +66,7 @@ function parseNotificationRealtimeEventEnvelope(raw: string): NotificationRealti
       id,
       ts: parsed.ts ? String(parsed.ts) : new Date(0).toISOString(),
       userId: parsed.userId ? String(parsed.userId) : '',
+      locationId: parsed.locationId ? String(parsed.locationId) : '',
       type: parsed.type ? String(parsed.type) : 'notification.created',
       payloadVersion: Number(parsed.payloadVersion || 1),
       payload: parsed.payload && typeof parsed.payload === 'object' ? parsed.payload : {},
@@ -94,18 +97,20 @@ export function selectNotificationRealtimeReplayEvents(
 
 export async function getNotificationRealtimeEventsSince(args: {
   userId: string;
+  locationId: string;
   lastEventId?: string | null;
   limit?: number;
 }) {
   const userId = String(args.userId || '').trim();
+  const locationId = String(args.locationId || '').trim();
   const lastEventId = String(args.lastEventId || '').trim();
-  if (!userId || !lastEventId) return [];
+  if (!userId || !locationId || !lastEventId) return [];
 
   const limit = Math.min(Math.max(Number(args.limit || 200), 1), HISTORY_MAX_EVENTS);
 
   try {
     const publisher = await getPublisher();
-    const rows = await publisher.lrange(getNotificationEventsHistoryKey(userId), -HISTORY_MAX_EVENTS, -1);
+    const rows = await publisher.lrange(getNotificationEventsHistoryKey(userId, locationId), -HISTORY_MAX_EVENTS, -1);
     if (!Array.isArray(rows) || rows.length === 0) return [];
 
     const envelopes: NotificationRealtimeEventEnvelope[] = [];
@@ -125,12 +130,14 @@ export async function getNotificationRealtimeEventsSince(args: {
 
 export async function publishNotificationRealtimeEvent(input: PublishNotificationRealtimeEventInput) {
   const userId = String(input.userId || '').trim();
-  if (!userId) return null;
+  const locationId = String(input.locationId || '').trim();
+  if (!userId || !locationId) return null;
 
   const envelope: NotificationRealtimeEventEnvelope = {
     id: randomUUID(),
     ts: new Date().toISOString(),
     userId,
+    locationId,
     type: String(input.type || 'notification.created'),
     payloadVersion: 1,
     payload: input.payload || {},
@@ -141,9 +148,9 @@ export async function publishNotificationRealtimeEvent(input: PublishNotificatio
     const serialized = JSON.stringify(envelope);
     await publisher
       .multi()
-      .rpush(getNotificationEventsHistoryKey(userId), serialized)
-      .ltrim(getNotificationEventsHistoryKey(userId), -HISTORY_MAX_EVENTS, -1)
-      .publish(getNotificationEventsChannel(userId), serialized)
+      .rpush(getNotificationEventsHistoryKey(userId, locationId), serialized)
+      .ltrim(getNotificationEventsHistoryKey(userId, locationId), -HISTORY_MAX_EVENTS, -1)
+      .publish(getNotificationEventsChannel(userId, locationId), serialized)
       .exec();
     return envelope;
   } catch (error) {

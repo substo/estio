@@ -33,6 +33,13 @@ test('invitation revoke, resend, and replacement are location-bound', () => {
   assert.match(action('resendInvitation', 'updateUserRole'), /invitation\.publicMetadata\?\.locationId !== locationId/);
 });
 
+test('restoring an existing Clerk identity updates the local reference and new invitations request email delivery', () => {
+  assert.match(actions, /user = await db\.user\.update\([\s\S]*data: \{ clerkId: clerkUsers\.data\[0\]\.id \}/);
+  assert.match(actions, /Existing Estio account restored\. No invitation email was needed/);
+  assert.match(actions, /createInvitation\([\s\S]*notify: true/);
+  assert.match(actions, /Clerk was asked to send the access email/);
+});
+
 test('contact access redirects render accessible feedback', () => {
   assert.match(page, /contactAccessResult/);
   assert.match(page, /role=\{contactAccessResult === 'updated' \? 'status' : 'alert'\}/);

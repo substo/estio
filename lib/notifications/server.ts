@@ -5,6 +5,8 @@ import { getRuntimeNotificationFeatureFlags } from '@/lib/notifications/runtime-
 import { isTaskDeadlineNotificationStale } from '@/lib/notifications/task-deadline-state';
 import { DEFAULT_TASK_REMINDER_OFFSETS_MINUTES, normalizeReminderOffsets } from '@/lib/tasks/reminder-config';
 import { rebuildTaskReminderJobsForAssignee } from '@/lib/tasks/reminders';
+import { getActiveContactsAccess } from '@/lib/contacts/active-location-access';
+import { buildUserNotificationLocationWhere } from '@/lib/notifications/location-scope';
 
 function trimToNull(value: unknown) {
   const trimmed = String(value || '').trim();
@@ -35,10 +37,22 @@ export async function getCurrentDbUserIdOrThrow() {
   return user.id;
 }
 
-async function pruneStaleTaskDeadlineNotificationsForUser(userId: string) {
+async function getCurrentNotificationAccessOrThrow() {
+  const access = await getActiveContactsAccess();
+  if (!access) {
+    throw new Error('Unauthorized');
+  }
+
+  return {
+    userId: access.internalUserId,
+    locationId: access.locationId,
+  };
+}
+
+async function pruneStaleTaskDeadlineNotificationsForUser(userId: string, locationId: string) {
   const notifications = await db.userNotification.findMany({
     where: {
-      userId,
+      ...buildUserNotificationLocationWhere(userId, locationId),
       type: 'task_deadline',
     },
     select: {
@@ -75,7 +89,7 @@ async function pruneStaleTaskDeadlineNotificationsForUser(userId: string) {
 
   await db.userNotification.deleteMany({
     where: {
-      userId,
+      ...buildUserNotificationLocationWhere(userId, locationId),
       id: {
         in: staleIds,
       },
@@ -89,23 +103,23 @@ export async function getCurrentUserNotificationSnapshot(options?: {
   limit?: number;
   unreadOnly?: boolean;
 }) {
-  const dbUserId = await getCurrentDbUserIdOrThrow();
+  const access = await getCurrentNotificationAccessOrThrow();
   const flags = getRuntimeNotificationFeatureFlags();
   const take = Math.min(Math.max(Number(options?.limit || 20), 1), 100);
   const unreadOnly = !!options?.unreadOnly;
 
-  await pruneStaleTaskDeadlineNotificationsForUser(dbUserId);
+  await pruneStaleTaskDeadlineNotificationsForUser(access.userId, access.locationId);
 
   const [unreadCount, notifications] = await Promise.all([
     db.userNotification.count({
       where: {
-        userId: dbUserId,
+        ...buildUserNotificationLocationWhere(access.userId, access.locationId),
         readAt: null,
       },
     }),
     db.userNotification.findMany({
       where: {
-        userId: dbUserId,
+        ...buildUserNotificationLocationWhere(access.userId, access.locationId),
         ...(unreadOnly ? { readAt: null } : {}),
       },
       orderBy: [
@@ -159,7 +173,7 @@ export async function getCurrentUserNotificationSnapshot(options?: {
 }
 
 export async function markUserNotificationRead(notificationId: string, options?: { clicked?: boolean }) {
-  const dbUserId = await getCurrentDbUserIdOrThrow();
+  const access = await getCurrentNotificationAccessOrThrow();
   const id = String(notificationId || '').trim();
   if (!id) {
     return { success: false as const, error: 'Notification ID is required' };
@@ -168,7 +182,7 @@ export async function markUserNotificationRead(notificationId: string, options?:
   const updated = await db.userNotification.updateMany({
     where: {
       id,
-      userId: dbUserId,
+      ...buildUserNotificationLocationWhere(access.userId, access.locationId),
     },
     data: {
       readAt: new Date(),
@@ -180,10 +194,10 @@ export async function markUserNotificationRead(notificationId: string, options?:
 }
 
 export async function markAllUserNotificationsRead() {
-  const dbUserId = await getCurrentDbUserIdOrThrow();
+  const access = await getCurrentNotificationAccessOrThrow();
   const updated = await db.userNotification.updateMany({
     where: {
-      userId: dbUserId,
+      ...buildUserNotificationLocationWhere(access.userId, access.locationId),
       readAt: null,
     },
     data: {

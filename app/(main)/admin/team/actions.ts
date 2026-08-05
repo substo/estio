@@ -12,6 +12,7 @@ import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import {
     assertOffboardingPair,
     normalizeOffboardingEmail,
+    requireOffboardingSourceById,
     requireExactPreviewIdentity,
     requirePreviewIdentityById,
     resolveStrictAdminLocation,
@@ -50,7 +51,7 @@ type OffboardingPreview = {
     mode: OffboardingMode;
     suspendClerkGlobally: boolean;
     activeLocation: { id: string; name: string | null };
-    source: PreviewIdentity & { clerkId: string };
+    source: PreviewIdentity;
     successor: (PreviewIdentity & { clerkId: string }) | null;
     counts: OffboardingResponsibilityCounts;
     unchangedShared: { label: string; count: number }[];
@@ -362,12 +363,17 @@ export async function previewTransferResponsibilities(input: {
         const localIdentities = localRecords.map(toPreviewIdentity);
         const sourceLocal = localIdentities.find((identity) => identity.id === sourceUserId);
         const successorLocal = localIdentities.find((identity) => identity.id === successorUserId);
-        if (!sourceLocal?.clerkId) throw new Error('Source local User and Clerk identity do not agree');
+        if (!sourceLocal) throw new Error('Source must resolve to exactly one local User');
         if (input.mode === 'TRANSFER' && !successorLocal?.clerkId) throw new Error('Successor local User and Clerk identity do not agree');
 
         const clerk = await clerkClient();
         const [sourceClerkUser, successorClerkUser] = await Promise.all([
-            clerk.users.getUser(sourceLocal.clerkId),
+            sourceLocal.clerkId
+                ? clerk.users.getUser(sourceLocal.clerkId).catch((error: any) => {
+                    if (error?.status === 404) return null;
+                    throw error;
+                })
+                : Promise.resolve(null),
             input.mode === 'TRANSFER' && successorLocal?.clerkId
                 ? clerk.users.getUser(successorLocal.clerkId)
                 : Promise.resolve(null),
@@ -376,8 +382,8 @@ export async function previewTransferResponsibilities(input: {
             id: user.id,
             emails: user.emailAddresses.map((entry) => entry.emailAddress),
         }) : null;
-        const source = requirePreviewIdentityById({
-            label: 'Source', userId: sourceUserId, localMatches: localIdentities,
+        const source = requireOffboardingSourceById({
+            userId: sourceUserId, localMatches: localIdentities,
             clerkIdentity: toClerkIdentity(sourceClerkUser), activeLocationId: locationId,
         });
         const successor = input.mode === 'TRANSFER' ? requirePreviewIdentityById({
@@ -420,6 +426,8 @@ export async function previewTransferResponsibilities(input: {
                 ? ['Source is the final active ADMIN for this location'] : []),
             ...(input.suspendClerkGlobally && otherMemberships.length
                 ? ['Global identity retirement is unavailable while the source has other location memberships'] : []),
+            ...(input.suspendClerkGlobally && !source.clerkId
+                ? ['Global login cannot be disabled because this local User no longer has a matching Clerk identity'] : []),
             ...(!isOffboardingExecutionConfigured() ? ['OFFBOARDING_CONFIRMATION_SECRET is not configured'] : []),
         ];
 
@@ -542,9 +550,10 @@ export async function executeTransferResponsibilities(input: {
 
         const now = new Date();
         localCommit = await db.$transaction(async (tx) => {
-            const [actorRole, sourceRole, successorRole, activeAdminCount, otherRoleCount, otherConnectionCount] = await Promise.all([
+            const [actorRole, sourceConnection, sourceRole, successorRole, activeAdminCount, otherRoleCount, otherConnectionCount] = await Promise.all([
                 tx.userLocationRole.findFirst({ where: { userId: actor.id, locationId: token.locationId, role: 'ADMIN', user: { locations: { some: { id: token.locationId } } } }, select: { id: true } }),
-                tx.userLocationRole.findFirst({ where: { userId: token.sourceUserId, locationId: token.locationId, user: { locations: { some: { id: token.locationId } } } }, select: { id: true, role: true } }),
+                tx.user.findFirst({ where: { id: token.sourceUserId, locations: { some: { id: token.locationId } } }, select: { id: true } }),
+                tx.userLocationRole.findFirst({ where: { userId: token.sourceUserId, locationId: token.locationId }, select: { id: true, role: true } }),
                 token.successorUserId
                     ? tx.userLocationRole.findFirst({ where: { userId: token.successorUserId, locationId: token.locationId, user: { locations: { some: { id: token.locationId } } } }, select: { id: true } })
                     : Promise.resolve(null),
@@ -552,9 +561,9 @@ export async function executeTransferResponsibilities(input: {
                 tx.userLocationRole.count({ where: { userId: token.sourceUserId, locationId: { not: token.locationId } } }),
                 tx.location.count({ where: { id: { not: token.locationId }, users: { some: { id: token.sourceUserId } } } }),
             ]);
-            if (!actorRole || !sourceRole || (token.mode === 'TRANSFER' && !successorRole)) throw new Error('Active membership changed; build a new preview');
+            if (!actorRole || !sourceConnection || (token.mode === 'TRANSFER' && !successorRole)) throw new Error('Active membership changed; build a new preview');
             if (actor.id === token.sourceUserId) throw new Error('You cannot remove yourself from the active location');
-            if (sourceRole.role === 'ADMIN' && activeAdminCount <= 1) throw new Error('Source is the final active ADMIN');
+            if (sourceRole?.role === 'ADMIN' && activeAdminCount <= 1) throw new Error('Source is the final active ADMIN');
             const hasOtherMembership = otherRoleCount > 0 || otherConnectionCount > 0;
             if (token.suspendClerkGlobally && hasOtherMembership) {
                 throw new Error('Global identity retirement is unavailable while other memberships exist');
@@ -656,7 +665,7 @@ export async function executeTransferResponsibilities(input: {
                         locations: { disconnect: { id: token.locationId } },
                     },
                 }),
-                tx.userLocationRole.delete({ where: { id: sourceRole.id } }),
+                tx.userLocationRole.deleteMany({ where: { userId: token.sourceUserId, locationId: token.locationId } }),
             ]);
 
             const audit = await tx.userOffboardingAudit.create({
@@ -839,7 +848,7 @@ export async function inviteUserToLocation(formData: FormData) {
                     if (clerkUsers.data.length > 0) {
                         clerkUserExists = true;
                         // Correction: Update our DB with the new Clerk ID so we don't have this issue again
-                        await db.user.update({
+                        user = await db.user.update({
                             where: { id: user.id },
                             data: { clerkId: clerkUsers.data[0].id }
                         });
@@ -914,7 +923,7 @@ export async function inviteUserToLocation(formData: FormData) {
                 }
 
                 revalidatePath('/admin/team');
-                return { success: true, message: 'User added to team immediately.' };
+                return { success: true, message: 'Existing Estio account restored. No invitation email was needed.' };
             }
 
             // If we get here, User is in DB but NOT in Clerk (Zombie). 
@@ -997,6 +1006,7 @@ export async function inviteUserToLocation(formData: FormData) {
         await client.invitations.createInvitation({
             emailAddress: normalizedEmail,
             redirectUrl: redirectUrl,
+            notify: true,
             publicMetadata: {
                 locationId,
                 ghlLocationId: location?.ghlLocationId || "", // Correctly use GHL Location ID
@@ -1008,7 +1018,7 @@ export async function inviteUserToLocation(formData: FormData) {
         });
 
         revalidatePath('/admin/team');
-        return { success: true, message: 'Invitation sent!' };
+        return { success: true, message: 'Invitation created. Clerk was asked to send the access email.' };
 
     } catch (error: any) {
         console.error('[Team] Failed to invite user:', error);

@@ -18,7 +18,7 @@ export type OffboardingConfirmationPayload = {
   locationId: string;
   sourceUserId: string;
   successorUserId: string | null;
-  sourceClerkId: string;
+  sourceClerkId: string | null;
   successorClerkId: string | null;
   sourceEmail: string;
   successorEmail: string | null;
@@ -86,7 +86,9 @@ export function verifyOffboardingConfirmationToken(token: string, now = Date.now
   const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as OffboardingConfirmationPayload;
   const validMode = payload.mode === "TRANSFER" || payload.mode === "KEEP_ASSIGNED";
   const validSuccessor = payload.mode === "KEEP_ASSIGNED" || Boolean(payload.successorUserId && payload.successorClerkId && payload.successorEmail);
-  if (!payload.confirmationId || !payload.actorUserId || !payload.locationId || !payload.sourceUserId || !payload.sourceClerkId || !validMode || !validSuccessor || typeof payload.suspendClerkGlobally !== "boolean" || !payload.previewFingerprint || !Number.isFinite(Date.parse(payload.responsibilityCutoff))) {
+  const validSourceClerk = payload.sourceClerkId === null || (typeof payload.sourceClerkId === "string" && payload.sourceClerkId.length > 0);
+  const validGlobalSuspension = payload.suspendClerkGlobally === false || Boolean(payload.sourceClerkId);
+  if (!payload.confirmationId || !payload.actorUserId || !payload.locationId || !payload.sourceUserId || !validSourceClerk || !validMode || !validSuccessor || typeof payload.suspendClerkGlobally !== "boolean" || !validGlobalSuspension || !payload.previewFingerprint || !Number.isFinite(Date.parse(payload.responsibilityCutoff))) {
     throw new Error("Invalid confirmation token");
   }
   if (!Number.isFinite(payload.issuedAt) || now - payload.issuedAt > MAX_AGE_MS || payload.issuedAt > now + 60_000) {
