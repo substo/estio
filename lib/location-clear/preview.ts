@@ -1,18 +1,25 @@
 export type LocationClearGroup = {
   key: string;
   label: string;
+  details: readonly string[];
   models: readonly string[];
 };
 
 export const LOCATION_CLEAR_GROUPS: readonly LocationClearGroup[] = [
   {
     key: 'usage',
-    label: 'Dashboard analytics and user-attributed AI usage',
+    label: 'Reports and AI usage',
+    details: ['Website and admin activity reports', 'AI usage history'],
     models: ['AiUsage', 'AnalyticsVisitor', 'AnalyticsSession', 'AnalyticsEvent', 'AnalyticsDailyRollup'],
   },
   {
     key: 'contacts',
-    label: 'Contacts and dependent operational history',
+    label: 'Contacts and customer work',
+    details: [
+      'Contacts',
+      'Conversations and messages',
+      'Deals, tasks, offers, documents, and viewing history',
+    ],
     models: [
       'Contact', 'ContactLanguage', 'ContactHistory', 'Conversation',
       'ConversationParticipant', 'Message', 'MessageAttachment', 'MessageTranscript',
@@ -26,22 +33,30 @@ export const LOCATION_CLEAR_GROUPS: readonly LocationClearGroup[] = [
   },
   {
     key: 'prospects',
-    label: 'Prospects and scraped prospect listings',
+    label: 'Prospecting',
+    details: ['Prospects and discovered property listings'],
     models: ['ProspectLead', 'ScrapedListing'],
   },
   {
     key: 'companies',
-    label: 'Companies and company relationships',
+    label: 'Companies',
+    details: ['Companies and their contact/property relationships'],
     models: ['Company', 'ContactCompanyRole', 'CompanyPropertyRole'],
   },
   {
     key: 'projects',
     label: 'Projects',
+    details: ['Property developments and projects'],
     models: ['Project'],
   },
   {
     key: 'properties',
-    label: 'Properties, media, feeds, and property activity',
+    label: 'Properties and listing activity',
+    details: [
+      'Properties and listing details',
+      'Media references',
+      'Property feeds, translations, print drafts, and saved activity',
+    ],
     models: [
       'Property', 'PropertyPrintDraft', 'PropertyTranslation', 'PropertyMedia',
       'PropertyImagePromptProfile', 'ContactPropertyRole', 'SwipeSession',
@@ -53,23 +68,19 @@ export const LOCATION_CLEAR_GROUPS: readonly LocationClearGroup[] = [
 export const LOCATION_CLEAR_MODELS = LOCATION_CLEAR_GROUPS.flatMap((group) => group.models);
 
 export const LOCATION_CLEAR_RETAINED = [
-  'The Location record, name, and identity',
-  'Users, memberships, roles, Clerk identities, and sessions',
-  'Domains, site configuration, secrets, and provider credentials',
-  'Public pages, blog posts, lead-source configuration, AI prompts, and knowledge',
-  'OAuth and inbox sync state, notifications, audits, and runtime configuration',
-] as const;
-
-export const LOCATION_CLEAR_EXTERNAL = [
-  'Supabase Storage, Cloudflare Images, R2, and other binary objects referenced by URLs',
-  'Copies held by GoHighLevel, Google, Microsoft, WhatsApp, or other providers',
-  'Active feeds, scraping, sync jobs, and provider webhooks can recreate cleared records',
+  'Location name and account identity',
+  'Team members, permissions, and sign-in access',
+  'Website domains, pages, branding, and navigation',
+  'Connected-service settings and credentials',
+  'AI settings and prompts',
+  'Notifications and administrative history',
 ] as const;
 
 export function buildLocationClearPreview(rowCounts: Record<string, number>) {
   const groups = LOCATION_CLEAR_GROUPS.map((group) => ({
     key: group.key,
     label: group.label,
+    details: [...group.details],
     count: group.models.reduce((sum, model) => sum + (rowCounts[model] || 0), 0),
     models: group.models.map((model) => ({ model, count: rowCounts[model] || 0 })),
   }));
@@ -77,7 +88,6 @@ export function buildLocationClearPreview(rowCounts: Record<string, number>) {
     totalRows: groups.reduce((sum, group) => sum + group.count, 0),
     groups,
     retained: [...LOCATION_CLEAR_RETAINED],
-    external: [...LOCATION_CLEAR_EXTERNAL],
   };
 }
 

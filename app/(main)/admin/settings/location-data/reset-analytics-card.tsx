@@ -46,7 +46,7 @@ export function ResetAnalyticsCard({ counts }: { counts: AnalyticsDeletedCounts 
     <section className="rounded-lg border border-red-300 bg-red-50 p-4" aria-labelledby="analytics-data-heading">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
         <div>
-          <h2 id="analytics-data-heading" className="text-lg font-semibold text-red-950">Analytics data</h2>
+          <h2 id="analytics-data-heading" className="text-lg font-semibold text-red-950">Analytics history</h2>
           <p className="mt-1 text-sm text-red-900">Deletes visitor, session, event, and reporting history for this location.</p>
           <p className="mt-1 text-sm text-red-900">Analytics collection resumes immediately, so new activity may appear after the reset.</p>
         </div>

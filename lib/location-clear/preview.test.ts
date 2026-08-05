@@ -17,10 +17,17 @@ test('preview totals are derived from server row counts', () => {
   assert.equal(preview.groups.find((group) => group.key === 'usage')?.count, 5);
 });
 
-test('preview explicitly reports retained and external data', () => {
+test('preview uses user-facing categories and reports retained account data', () => {
   const preview = buildLocationClearPreview({});
-  assert.ok(preview.retained.some((entry) => entry.includes('Users, memberships, roles')));
-  assert.ok(preview.external.some((entry) => entry.includes('Cloudflare Images')));
-  assert.ok(preview.external.some((entry) => entry.includes('WhatsApp')));
-  assert.ok(preview.external.some((entry) => entry.includes('recreate cleared records')));
+  assert.deepEqual(preview.groups.map((group) => group.label), [
+    'Reports and AI usage',
+    'Contacts and customer work',
+    'Prospecting',
+    'Companies',
+    'Projects',
+    'Properties and listing activity',
+  ]);
+  assert.ok(preview.groups.find((group) => group.key === 'properties')?.details.includes('Media references'));
+  assert.ok(preview.retained.includes('Team members, permissions, and sign-in access'));
+  assert.ok(preview.retained.includes('Connected-service settings and credentials'));
 });
