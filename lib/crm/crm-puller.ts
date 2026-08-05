@@ -603,7 +603,7 @@ export async function pullPropertyFromCrmWithContext(context: PullPropertyFromCr
         }
 
         extractedData.images = processedImages;
-        await registerTemporaryMediaAssets(processedImages);
+        await registerTemporaryMediaAssets(locationId, processedImages);
 
         // Clean up text
         if (extractedData.title) extractedData.title = extractedData.title.trim();

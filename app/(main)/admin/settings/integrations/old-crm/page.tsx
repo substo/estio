@@ -12,6 +12,7 @@ import {
     RefreshCw,
     Route,
     Save,
+    Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
     saveCrmCredentials,
     saveLeadSchema,
     saveLegacyCrmLeadEmailSettings,
+    resetOldCrmSettings,
 } from "../../crm/actions";
 import { analyzeCrmSchema, saveCrmSchema } from "../../../properties/import/actions";
 import { LeadSourceManager } from "../../crm/_components/lead-source-manager";
@@ -56,7 +58,7 @@ type CrmSettingsFormValues = {
 const DEFAULT_CRM_SETTINGS: CrmSettingsFormValues = {
     locationId: "",
     settingsVersion: 0,
-    crmUrl: "https://www.downtowncyprus.com/admin",
+    crmUrl: "",
     crmUsername: "",
     crmPassword: "",
     hasCrmPassword: false,
@@ -65,30 +67,30 @@ const DEFAULT_CRM_SETTINGS: CrmSettingsFormValues = {
     publicListingUrlMode: "ESTIO",
     legacyPublicListingUrlPattern: "",
     legacyCrmLeadEmailEnabled: false,
-    legacyCrmLeadEmailSenders: "info@downtowncyprus.com",
-    legacyCrmLeadEmailSenderDomains: "mg.downtowncyprus.com",
-    legacyCrmLeadEmailSubjectPatterns: "You have been assigned a new lead!\nYou need to follow up on a lead!",
+    legacyCrmLeadEmailSenders: "",
+    legacyCrmLeadEmailSenderDomains: "",
+    legacyCrmLeadEmailSubjectPatterns: "",
     legacyCrmLeadEmailPinConversation: true,
     legacyCrmLeadEmailAutoProcess: false,
     legacyCrmLeadEmailAutoDraftFirstContact: false,
 };
 
 function listToTextareaValue(value: unknown, fallback: string) {
-    return Array.isArray(value) ? value.join("\n") || fallback : fallback;
+    return Array.isArray(value) ? value.join("\n") : fallback;
 }
 
 function normalizeCrmSettings(settings: any): CrmSettingsFormValues {
     return {
         locationId: settings.locationId || DEFAULT_CRM_SETTINGS.locationId,
         settingsVersion: Number(settings.settingsVersion || DEFAULT_CRM_SETTINGS.settingsVersion),
-        crmUrl: settings.crmUrl || DEFAULT_CRM_SETTINGS.crmUrl,
-        crmUsername: settings.crmUsername || DEFAULT_CRM_SETTINGS.crmUsername,
+        crmUrl: settings.crmUrl ?? DEFAULT_CRM_SETTINGS.crmUrl,
+        crmUsername: settings.crmUsername ?? DEFAULT_CRM_SETTINGS.crmUsername,
         crmPassword: "",
         hasCrmPassword: Boolean(settings.hasCrmPassword),
-        crmEditUrlPattern: settings.crmEditUrlPattern || DEFAULT_CRM_SETTINGS.crmEditUrlPattern,
-        crmLeadUrlPattern: settings.crmLeadUrlPattern || DEFAULT_CRM_SETTINGS.crmLeadUrlPattern,
-        publicListingUrlMode: settings.publicListingUrlMode || DEFAULT_CRM_SETTINGS.publicListingUrlMode,
-        legacyPublicListingUrlPattern: settings.legacyPublicListingUrlPattern || DEFAULT_CRM_SETTINGS.legacyPublicListingUrlPattern,
+        crmEditUrlPattern: settings.crmEditUrlPattern ?? DEFAULT_CRM_SETTINGS.crmEditUrlPattern,
+        crmLeadUrlPattern: settings.crmLeadUrlPattern ?? DEFAULT_CRM_SETTINGS.crmLeadUrlPattern,
+        publicListingUrlMode: settings.publicListingUrlMode ?? DEFAULT_CRM_SETTINGS.publicListingUrlMode,
+        legacyPublicListingUrlPattern: settings.legacyPublicListingUrlPattern ?? DEFAULT_CRM_SETTINGS.legacyPublicListingUrlPattern,
         legacyCrmLeadEmailEnabled: !!settings.legacyCrmLeadEmailEnabled,
         legacyCrmLeadEmailSenders: listToTextareaValue(
             settings.legacyCrmLeadEmailSenders,
@@ -123,6 +125,7 @@ function FormHint({ children }: { children: React.ReactNode }) {
 export default function OldCrmIntegrationPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingLegacyLeadEmail, setIsSavingLegacyLeadEmail] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isLeadAnalyzing, setIsLeadAnalyzing] = useState(false);
     const [schema, setSchema] = useState<any>(null);
@@ -246,6 +249,33 @@ export default function OldCrmIntegrationPage() {
         }
     }
 
+    async function onResetOldCrmSettings() {
+        const confirmed = window.confirm(
+            "Clear all Old CRM settings for this location and your saved Old CRM username/password? Imported contacts, properties, and other business records will not be deleted."
+        );
+        if (!confirmed) return;
+
+        setIsResetting(true);
+        try {
+            const result = await resetOldCrmSettings();
+            if (!result?.success) {
+                toast.error(result?.error || "Failed to clear Old CRM settings");
+                return;
+            }
+
+            const settings = await getCrmSettings();
+            if (settings) setDefaultValues(normalizeCrmSettings(settings));
+            setSchema(null);
+            setLeadAnalysisResult(null);
+            toast.success("Old CRM settings cleared");
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to clear Old CRM settings");
+        } finally {
+            setIsResetting(false);
+        }
+    }
+
     const legacyModeEnabled = defaultValues.publicListingUrlMode === "LEGACY_EXTERNAL";
 
     return (
@@ -296,7 +326,6 @@ export default function OldCrmIntegrationPage() {
                                     defaultValue={defaultValues.crmUrl}
                                     key={defaultValues.crmUrl}
                                     placeholder="https://www.downtowncyprus.com/admin"
-                                    required
                                 />
                             </div>
                             <div className="space-y-2">
@@ -307,7 +336,6 @@ export default function OldCrmIntegrationPage() {
                                     defaultValue={defaultValues.crmUsername}
                                     key={`user-${defaultValues.crmUsername}`}
                                     placeholder="admin"
-                                    required
                                 />
                             </div>
                             <div className="space-y-2">
@@ -417,6 +445,27 @@ export default function OldCrmIntegrationPage() {
                     </CardContent>
                 </Card>
             </form>
+
+            <Card className="border-destructive/40">
+                <CardHeader>
+                    <div className="flex items-start gap-3">
+                        <SectionIcon icon={Trash2} />
+                        <div>
+                            <CardTitle>Clear Old CRM Settings</CardTitle>
+                            <CardDescription>
+                                Remove this location&apos;s Old CRM URLs, schemas, and lead-email settings, plus your saved Old CRM username and password.
+                                Imported contacts, properties, and other business records are not deleted.
+                            </CardDescription>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <Button type="button" variant="destructive" onClick={onResetOldCrmSettings} disabled={isResetting}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {isResetting ? "Clearing..." : "Clear Old CRM Settings"}
+                    </Button>
+                </CardContent>
+            </Card>
 
             <Card>
                 <CardHeader>

@@ -1,7 +1,6 @@
 "use server";
 
-import { currentUser } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 import {
   listSoftDeletedAssets,
   purgeExpiredMediaAssets,
@@ -9,21 +8,23 @@ import {
   MEDIA_ASSET_RETENTION_DAYS,
 } from "@/lib/media/media-assets";
 
-async function ensureMediaLocationAccess(locationId: string) {
-  const user = await currentUser();
-  if (!user) throw new Error("Unauthorized");
-
-  const hasAccess = await verifyUserHasAccessToLocation(user.id, locationId);
-  if (!hasAccess) throw new Error("Unauthorized: Access Denied");
+async function requireMediaAdminLocation() {
+  const access = await getActiveContactsAccess();
+  if (!access || access.role !== "ADMIN") throw new Error("Unauthorized: ADMIN access required");
+  return access.locationId;
 }
 
 /**
  * Lists all soft-deleted (trashed) media assets for the admin UI.
  */
-export async function listTrashedMediaAction(locationId: string) {
-  await ensureMediaLocationAccess(locationId);
+export async function listTrashedMediaAction() {
+  const locationId = await requireMediaAdminLocation();
 
-  const { assets, total } = await listSoftDeletedAssets({ take: 100 });
+  const { assets, total, expiredTotal } = await listSoftDeletedAssets({
+    locationId,
+    take: 100,
+    retentionDays: MEDIA_ASSET_RETENTION_DAYS,
+  });
 
   return {
     assets: assets.map((a) => ({
@@ -40,6 +41,7 @@ export async function listTrashedMediaAction(locationId: string) {
         : null,
     })),
     total,
+    expiredTotal,
     retentionDays: MEDIA_ASSET_RETENTION_DAYS,
   };
 }
@@ -48,10 +50,10 @@ export async function listTrashedMediaAction(locationId: string) {
  * Purges all soft-deleted assets that have passed the retention period.
  * Calls Cloudflare API to delete the physical file, then removes DB record.
  */
-export async function purgeExpiredMediaAction(locationId: string) {
-  await ensureMediaLocationAccess(locationId);
+export async function purgeExpiredMediaAction() {
+  const locationId = await requireMediaAdminLocation();
 
-  const result = await purgeExpiredMediaAssets();
+  const result = await purgeExpiredMediaAssets(locationId);
 
   return {
     success: true,
@@ -63,12 +65,11 @@ export async function purgeExpiredMediaAction(locationId: string) {
  * Restores a soft-deleted media asset back to ACTIVE status.
  */
 export async function restoreMediaAssetAction(
-  locationId: string,
   cloudflareImageId: string
 ) {
-  await ensureMediaLocationAccess(locationId);
+  const locationId = await requireMediaAdminLocation();
 
-  await restoreMediaAsset(cloudflareImageId);
+  await restoreMediaAsset(locationId, cloudflareImageId);
 
   return { success: true };
 }

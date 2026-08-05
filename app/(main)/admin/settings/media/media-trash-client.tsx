@@ -20,9 +20,10 @@ interface TrashedAsset {
   expiresAt: string | null;
 }
 
-export function MediaTrashClient({ locationId }: { locationId: string }) {
+export function MediaTrashClient() {
   const [assets, setAssets] = useState<TrashedAsset[]>([]);
   const [total, setTotal] = useState(0);
+  const [expiredTotal, setExpiredTotal] = useState(0);
   const [retentionDays, setRetentionDays] = useState(30);
   const [loading, setLoading] = useState(true);
   const [purging, setPurging] = useState(false);
@@ -31,9 +32,10 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
   const loadAssets = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await listTrashedMediaAction(locationId);
+      const result = await listTrashedMediaAction();
       setAssets(result.assets);
       setTotal(result.total);
+      setExpiredTotal(result.expiredTotal);
       setRetentionDays(result.retentionDays);
     } catch (err: any) {
       toast.error("Failed to load trashed media", {
@@ -42,17 +44,14 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [locationId]);
+  }, []);
 
   useEffect(() => {
     loadAssets();
   }, [loadAssets]);
 
   const handlePurge = async () => {
-    const expired = assets.filter(
-      (a) => a.expiresAt && new Date(a.expiresAt) <= new Date()
-    );
-    if (expired.length === 0) {
+    if (expiredTotal === 0) {
       toast.info("No expired assets", {
         description: `All trashed images are still within the ${retentionDays}-day retention period.`,
       });
@@ -61,7 +60,7 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
 
     if (
       !confirm(
-        `This will permanently delete ${expired.length} image(s) from Cloudflare that have passed the ${retentionDays}-day retention period. This action cannot be undone.\n\nContinue?`
+        `This will permanently delete up to ${Math.min(expiredTotal, 100)} of ${expiredTotal} expired image(s) from this location. This action cannot be undone.\n\nContinue?`
       )
     ) {
       return;
@@ -69,7 +68,7 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
 
     setPurging(true);
     try {
-      const result = await purgeExpiredMediaAction(locationId);
+      const result = await purgeExpiredMediaAction();
       toast.success(`Purged ${result.purgedCount} image(s)`, {
         description:
           result.failedCount > 0
@@ -87,7 +86,7 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
   const handleRestore = async (cloudflareImageId: string) => {
     setRestoringId(cloudflareImageId);
     try {
-      await restoreMediaAssetAction(locationId, cloudflareImageId);
+      await restoreMediaAssetAction(cloudflareImageId);
       toast.success("Image restored", {
         description:
           "The image has been marked as active. You can now re-attach it to a property.",
@@ -99,10 +98,6 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
       setRestoringId(null);
     }
   };
-
-  const expiredCount = assets.filter(
-    (a) => a.expiresAt && new Date(a.expiresAt) <= new Date()
-  ).length;
 
   return (
     <div className="space-y-6">
@@ -132,9 +127,9 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
             variant="destructive"
             size="sm"
             onClick={handlePurge}
-            disabled={purging || loading || expiredCount === 0}
+            disabled={purging || loading || expiredTotal === 0}
           >
-            {purging ? "Purging..." : `Empty Trash (${expiredCount} expired)`}
+            {purging ? "Purging..." : `Purge expired (${expiredTotal})`}
           </Button>
         </div>
       </div>
@@ -146,13 +141,13 @@ export function MediaTrashClient({ locationId }: { locationId: string }) {
             <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" />
             <span>{total} trashed</span>
           </div>
-          {expiredCount > 0 && (
+          {expiredTotal > 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
               <AlertTriangle className="h-3.5 w-3.5" />
-              <span>{expiredCount} expired</span>
+              <span>{expiredTotal} expired</span>
             </div>
           )}
-          {total > 0 && expiredCount === 0 && (
+          {total > 0 && expiredTotal === 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-50 border border-green-200 text-green-700">
               <CheckCircle className="h-3.5 w-3.5" />
               <span>All within retention period</span>

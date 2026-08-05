@@ -450,7 +450,7 @@ export async function deletePropertyAction(propertyId: string, requestedLocation
             .map(m => m.cloudflareImageId)
             .filter((id): id is string => !!id);
         if (cfIdsToCheck.length > 0) {
-            await softDeleteOrphanedAssets(cfIdsToCheck);
+            await softDeleteOrphanedAssets(locationId, cfIdsToCheck);
         }
 
         console.log(`Successfully deleted property ${propertyId}`);

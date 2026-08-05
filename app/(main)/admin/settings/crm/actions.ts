@@ -16,6 +16,7 @@ import {
     isSettingsParityCheckEnabled,
 } from '@/lib/settings/constants';
 import { SettingsVersionConflictError } from '@/lib/settings/errors';
+import { clearOldCrmSettings } from '@/lib/crm/clear-old-crm-settings';
 
 const MASKED_SECRET = "********";
 
@@ -285,19 +286,15 @@ export async function saveCrmCredentials(data: any) {
         const clearCrmPassword = parseCheckbox(data.clearCrmPassword);
         const shouldUpdatePassword = crmPasswordInput.length > 0 && crmPasswordInput !== MASKED_SECRET;
 
-        if (!crmUsername) {
-            throw new Error("Missing username");
-        }
-
         const existingLocationDoc = await getLocationCrmDocument(context.locationId);
         const existingLocationPayload = existingLocationDoc?.payload || {};
         const locationPayload = {
             ...existingLocationPayload,
-            crmUrl: data.crmUrl || null,
-            crmEditUrlPattern: data.crmEditUrlPattern || null,
-            crmLeadUrlPattern: data.crmLeadUrlPattern || null,
+            crmUrl: String(data.crmUrl || "").trim() || null,
+            crmEditUrlPattern: String(data.crmEditUrlPattern || "").trim() || null,
+            crmLeadUrlPattern: String(data.crmLeadUrlPattern || "").trim() || null,
             publicListingUrlMode: data.publicListingUrlMode === "LEGACY_EXTERNAL" ? "LEGACY_EXTERNAL" : "ESTIO",
-            legacyPublicListingUrlPattern: data.legacyPublicListingUrlPattern || null,
+            legacyPublicListingUrlPattern: String(data.legacyPublicListingUrlPattern || "").trim() || null,
             crmSchema: existingLocationPayload.crmSchema || null,
             crmLeadSchema: existingLocationPayload.crmLeadSchema || null,
             legacyCrmLeadEmailEnabled: existingLocationPayload.legacyCrmLeadEmailEnabled ?? false,
@@ -323,7 +320,7 @@ export async function saveCrmCredentials(data: any) {
             scopeType: "USER",
             scopeId: context.localUserId,
             domain: SETTINGS_DOMAINS.USER_CRM,
-            payload: { crmUsername },
+            payload: { crmUsername: crmUsername || null },
             actorUserId: context.localUserId,
             schemaVersion: 1,
         });
@@ -351,7 +348,7 @@ export async function saveCrmCredentials(data: any) {
             await db.user.update({
                 where: { id: context.localUserId },
                 data: {
-                    crmUsername,
+                    crmUsername: crmUsername || null,
                     ...(shouldUpdatePassword ? { crmPassword: crmPasswordInput } : {}),
                     ...(clearCrmPassword ? { crmPassword: null } : {}),
                 }
@@ -360,9 +357,9 @@ export async function saveCrmCredentials(data: any) {
             await db.location.update({
                 where: { id: context.locationId },
                 data: {
-                    crmUrl: locationPayload.crmUrl || undefined,
-                    crmEditUrlPattern: locationPayload.crmEditUrlPattern || undefined,
-                    crmLeadUrlPattern: locationPayload.crmLeadUrlPattern || undefined,
+                    crmUrl: locationPayload.crmUrl,
+                    crmEditUrlPattern: locationPayload.crmEditUrlPattern,
+                    crmLeadUrlPattern: locationPayload.crmLeadUrlPattern,
                     publicListingUrlMode: locationPayload.publicListingUrlMode,
                     legacyPublicListingUrlPattern: locationPayload.legacyPublicListingUrlPattern || null,
                 }
@@ -381,7 +378,7 @@ export async function saveCrmCredentials(data: any) {
                 scopeType: "USER",
                 scopeId: context.localUserId,
                 domain: SETTINGS_DOMAINS.USER_CRM,
-                legacyPayload: { crmUsername },
+                legacyPayload: { crmUsername: crmUsername || null },
                 actorUserId: context.localUserId,
             });
         }
@@ -394,6 +391,22 @@ export async function saveCrmCredentials(data: any) {
         }
         console.error("Failed to save credentials:", error);
         return { success: false, error: "Failed to save credentials" };
+    }
+}
+
+export async function resetOldCrmSettings() {
+    try {
+        const context = await resolveAdminContext();
+        await clearOldCrmSettings({
+            locationId: context.locationId,
+            localUserId: context.localUserId,
+        });
+
+        revalidateOldCrmSettingsPaths();
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to clear Old CRM settings:", error);
+        return { success: false, error: "Failed to clear Old CRM settings" };
     }
 }
 

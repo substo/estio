@@ -409,10 +409,10 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                 })),
             });
         }
-        await ensureMediaAssets(validatedMediaItems);
+        await ensureMediaAssets(input.location.id, validatedMediaItems);
         const removedCfIds = computeRemovedCloudflareIds(oldMedia, validatedMediaItems);
         if (removedCfIds.length > 0) {
-            await softDeleteOrphanedAssets(removedCfIds);
+            await softDeleteOrphanedAssets(input.location.id, removedCfIds);
         }
     } else {
         const existing = await db.property.findFirst({
@@ -451,10 +451,10 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                 });
             }
 
-            await ensureMediaAssets(validatedMediaItems);
+            await ensureMediaAssets(input.location.id, validatedMediaItems);
             const removedOverwriteCfIds = computeRemovedCloudflareIds(oldOverwriteMedia, validatedMediaItems);
             if (removedOverwriteCfIds.length > 0) {
-                await softDeleteOrphanedAssets(removedOverwriteCfIds);
+                await softDeleteOrphanedAssets(input.location.id, removedOverwriteCfIds);
             }
         } else {
             property = await db.property.create({
@@ -473,7 +473,7 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
                 } as any,
             });
 
-            await ensureMediaAssets(validatedMediaItems);
+            await ensureMediaAssets(input.location.id, validatedMediaItems);
         }
     }
 

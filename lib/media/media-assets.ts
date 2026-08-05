@@ -17,6 +17,23 @@ import { MediaAssetStatus } from "@prisma/client";
 /** Default retention period before a soft-deleted asset can be purged (days). */
 export const MEDIA_ASSET_RETENTION_DAYS = 30;
 
+function requireLocationId(locationId: string): string {
+  const normalized = String(locationId || "").trim();
+  if (!normalized) throw new Error("Media location is required");
+  return normalized;
+}
+
+async function assertAssetsAvailableToLocation(locationId: string, cloudflareImageIds: string[]) {
+  const foreign = await db.mediaAsset.findFirst({
+    where: {
+      cloudflareImageId: { in: cloudflareImageIds },
+      NOT: { locationId },
+    },
+    select: { id: true },
+  });
+  if (foreign) throw new Error("Media asset belongs to another location");
+}
+
 // ─────────────────────────  Ensure / Register  ──────────────────
 
 /**
@@ -25,13 +42,16 @@ export const MEDIA_ASSET_RETENTION_DAYS = 30;
  * re-attached, it is reactivated.
  */
 export async function ensureMediaAssets(
+  locationId: string,
   mediaItems: { url: string; cloudflareImageId?: string | null }[]
 ): Promise<void> {
+  const ownerLocationId = requireLocationId(locationId);
   const cfIds = mediaItems
     .map((m) => m.cloudflareImageId)
     .filter((id): id is string => !!id);
 
   if (cfIds.length === 0) return;
+  await assertAssetsAvailableToLocation(ownerLocationId, cfIds);
 
   for (const cfId of cfIds) {
     const matchingItem = mediaItems.find(
@@ -40,11 +60,13 @@ export async function ensureMediaAssets(
     await db.mediaAsset.upsert({
       where: { cloudflareImageId: cfId },
       create: {
+        locationId: ownerLocationId,
         cloudflareImageId: cfId,
         url: matchingItem?.url ?? "",
         status: MediaAssetStatus.ACTIVE,
       },
       update: {
+        locationId: ownerLocationId,
         // Re-activate if it was previously soft-deleted
         status: MediaAssetStatus.ACTIVE,
         deletedAt: null,
@@ -60,13 +82,16 @@ export async function ensureMediaAssets(
  * the normal media trash purge.
  */
 export async function registerTemporaryMediaAssets(
+  locationId: string,
   mediaItems: { url: string; cloudflareImageId?: string | null }[]
 ): Promise<void> {
+  const ownerLocationId = requireLocationId(locationId);
   const cfIds = mediaItems
     .map((m) => m.cloudflareImageId)
     .filter((id): id is string => !!id);
 
   if (cfIds.length === 0) return;
+  await assertAssetsAvailableToLocation(ownerLocationId, cfIds);
 
   for (const cfId of cfIds) {
     const matchingItem = mediaItems.find(
@@ -75,12 +100,14 @@ export async function registerTemporaryMediaAssets(
     await db.mediaAsset.upsert({
       where: { cloudflareImageId: cfId },
       create: {
+        locationId: ownerLocationId,
         cloudflareImageId: cfId,
         url: matchingItem?.url ?? "",
         status: MediaAssetStatus.SOFT_DELETED,
         deletedAt: new Date(),
       },
       update: {
+        locationId: ownerLocationId,
         url: matchingItem?.url ?? "",
         status: MediaAssetStatus.SOFT_DELETED,
         deletedAt: new Date(),
@@ -101,9 +128,12 @@ export async function registerTemporaryMediaAssets(
  *                              the current property during this save.
  */
 export async function softDeleteOrphanedAssets(
+  locationId: string,
   removedCloudflareIds: string[]
 ): Promise<{ softDeleted: string[] }> {
+  const ownerLocationId = requireLocationId(locationId);
   const softDeleted: string[] = [];
+  await assertAssetsAvailableToLocation(ownerLocationId, removedCloudflareIds);
 
   for (const cfId of removedCloudflareIds) {
     // Count how many PropertyMedia rows still reference this image
@@ -116,12 +146,14 @@ export async function softDeleteOrphanedAssets(
       await db.mediaAsset.upsert({
         where: { cloudflareImageId: cfId },
         create: {
+          locationId: ownerLocationId,
           cloudflareImageId: cfId,
           url: "",
           status: MediaAssetStatus.SOFT_DELETED,
           deletedAt: new Date(),
         },
         update: {
+          locationId: ownerLocationId,
           status: MediaAssetStatus.SOFT_DELETED,
           deletedAt: new Date(),
         },
@@ -176,17 +208,20 @@ export function computeRemovedCloudflareIds(
  * @returns Stats about the operation.
  */
 export async function purgeExpiredMediaAssets(
+  locationId: string,
   retentionDays: number = MEDIA_ASSET_RETENTION_DAYS
 ): Promise<{
   purgedCount: number;
   failedCount: number;
   errors: { cloudflareImageId: string; error: string }[];
 }> {
+  const ownerLocationId = requireLocationId(locationId);
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - retentionDays);
 
   const expired = await db.mediaAsset.findMany({
     where: {
+      locationId: ownerLocationId,
       status: MediaAssetStatus.SOFT_DELETED,
       deletedAt: { lte: cutoff },
     },
@@ -230,38 +265,53 @@ export async function purgeExpiredMediaAssets(
 /**
  * Returns soft-deleted MediaAssets for the admin "Trash" view.
  */
-export async function listSoftDeletedAssets(options?: {
+export async function listSoftDeletedAssets(options: {
+  locationId: string;
   take?: number;
   skip?: number;
+  retentionDays?: number;
 }): Promise<{
   assets: Awaited<ReturnType<typeof db.mediaAsset.findMany>>;
   total: number;
+  expiredTotal: number;
 }> {
-  const [assets, total] = await Promise.all([
+  const ownerLocationId = requireLocationId(options.locationId);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - (options.retentionDays ?? MEDIA_ASSET_RETENTION_DAYS));
+  const [assets, total, expiredTotal] = await Promise.all([
     db.mediaAsset.findMany({
-      where: { status: MediaAssetStatus.SOFT_DELETED },
+      where: { locationId: ownerLocationId, status: MediaAssetStatus.SOFT_DELETED },
       orderBy: { deletedAt: "asc" },
       take: options?.take ?? 50,
       skip: options?.skip ?? 0,
     }),
     db.mediaAsset.count({
-      where: { status: MediaAssetStatus.SOFT_DELETED },
+      where: { locationId: ownerLocationId, status: MediaAssetStatus.SOFT_DELETED },
+    }),
+    db.mediaAsset.count({
+      where: {
+        locationId: ownerLocationId,
+        status: MediaAssetStatus.SOFT_DELETED,
+        deletedAt: { lte: cutoff },
+      },
     }),
   ]);
 
-  return { assets, total };
+  return { assets, total, expiredTotal };
 }
 
 /**
  * Restores a soft-deleted asset back to ACTIVE status.
  */
-export async function restoreMediaAsset(cloudflareImageId: string): Promise<void> {
-  await db.mediaAsset.update({
-    where: { cloudflareImageId },
+export async function restoreMediaAsset(locationId: string, cloudflareImageId: string): Promise<void> {
+  const ownerLocationId = requireLocationId(locationId);
+  const updated = await db.mediaAsset.updateMany({
+    where: { locationId: ownerLocationId, cloudflareImageId },
     data: {
       status: MediaAssetStatus.ACTIVE,
       deletedAt: null,
     },
   });
+  if (updated.count !== 1) throw new Error("Media asset is unavailable for this location");
   console.log(`[MediaAssets] Restored asset ${cloudflareImageId}`);
 }
