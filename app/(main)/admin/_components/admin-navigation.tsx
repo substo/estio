@@ -6,7 +6,6 @@ import type { LucideIcon } from "lucide-react"
 import {
   BriefcaseBusiness,
   Building2,
-  BarChart3,
   House,
   Inbox,
   LayoutDashboard,
@@ -50,12 +49,6 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         label: "Conversations",
         icon: MessagesSquare,
         activePath: (pathname) => pathname.includes("/admin/conversations"),
-      },
-      {
-        href: "/admin/analytics",
-        label: "Analytics",
-        icon: BarChart3,
-        activePath: (pathname) => pathname.includes("/admin/analytics"),
       },
       {
         href: "/admin/viewings/sessions",
