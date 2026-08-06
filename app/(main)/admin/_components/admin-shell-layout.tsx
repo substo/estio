@@ -39,6 +39,7 @@ export function AdminShellLayout({
   activeLocation,
   availableLocations,
   platformLoginLocations,
+  showPlatformAdministration,
   impersonation,
 }: {
   children: ReactNode
@@ -47,6 +48,7 @@ export function AdminShellLayout({
   activeLocation: { id: string; name: string | null }
   availableLocations: Array<{ id: string; name: string | null }>
   platformLoginLocations: PlatformLocationLoginOption[] | null
+  showPlatformAdministration: boolean
   impersonation: ImpersonationBannerData | null
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -89,9 +91,10 @@ export function AdminShellLayout({
           logoUrl={logoUrl}
           lightUrl={lightUrl}
           appSurface={appSurface}
+          showPlatformAdministration={showPlatformAdministration}
           onCollapsedChange={handleSidebarCollapsedChange}
         />
-        <DashboardTopNav appSurface={appSurface} activeLocation={activeLocation} availableLocations={availableLocations} platformLoginLocations={platformLoginLocations}>{children}</DashboardTopNav>
+        <DashboardTopNav appSurface={appSurface} activeLocation={activeLocation} availableLocations={availableLocations} platformLoginLocations={platformLoginLocations} showPlatformAdministration={showPlatformAdministration}>{children}</DashboardTopNav>
       </AdminLayoutPolicyProvider>
       </div>
     </>

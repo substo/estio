@@ -14,6 +14,7 @@ import {
   PanelsTopLeft,
   Radar,
   Radio,
+  ShieldCheck,
   SlidersHorizontal,
   SquareMenu,
   UsersRound,
@@ -140,6 +141,16 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   },
 ]
 
+const PLATFORM_NAV_GROUP: AdminNavGroup = {
+  label: "Platform",
+  items: [{
+    href: "/platform",
+    label: "Platform overview",
+    icon: ShieldCheck,
+    activePath: (pathname) => pathname.startsWith("/platform"),
+  }],
+}
+
 function AdminNavIcon({
   icon: Icon,
   active,
@@ -224,13 +235,22 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
   )
 }
 
-export function AdminNavigationGroups({ variant = "desktop", collapsed = false }: { variant?: "desktop" | "mobile"; collapsed?: boolean }) {
+export function AdminNavigationGroups({
+  variant = "desktop",
+  collapsed = false,
+  showPlatformAdministration = false,
+}: {
+  variant?: "desktop" | "mobile"
+  collapsed?: boolean
+  showPlatformAdministration?: boolean
+}) {
   const compact = variant === "desktop" && collapsed
+  const groups = showPlatformAdministration ? [...ADMIN_NAV_GROUPS, PLATFORM_NAV_GROUP] : ADMIN_NAV_GROUPS
 
   return (
     <TooltipProvider delayDuration={150}>
       <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-3.5 text-sm" : "space-y-4 px-3 text-sm")}>
-        {ADMIN_NAV_GROUPS.map((group, index) => (
+        {groups.map((group, index) => (
           <div key={group.label || `primary-${index}`} className={clsx(compact ? "space-y-1.5" : "space-y-1")}>
             {group.label && (
               <h4

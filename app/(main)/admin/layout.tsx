@@ -45,6 +45,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         activeLocation={{ id: location.id, name: location.name }}
         availableLocations={resolution.availableLocations}
         platformLoginLocations={platformLoginLocations}
+        showPlatformAdministration={Boolean(platformAdmin)}
         impersonation={impersonation ? {
           targetName: impersonation.targetName,
           targetEmail: impersonation.targetEmail,

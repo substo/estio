@@ -12,12 +12,14 @@ export default function DashboardSideBar({
   logoUrl,
   lightUrl,
   appSurface = false,
+  showPlatformAdministration = false,
   onCollapsedChange,
 }: {
   collapsed: boolean
   logoUrl?: string
   lightUrl?: string
   appSurface?: boolean
+  showPlatformAdministration?: boolean
   onCollapsedChange: (collapsed: boolean) => void
 }) {
   const ToggleIcon = collapsed ? ChevronRight : ChevronLeft
@@ -42,7 +44,7 @@ export default function DashboardSideBar({
           />
         </div>
         <div className="flex-1 overflow-auto py-3">
-          <AdminNavigationGroups collapsed={collapsed} />
+          <AdminNavigationGroups collapsed={collapsed} showPlatformAdministration={showPlatformAdministration} />
         </div>
       </div>
       <TooltipProvider delayDuration={150}>

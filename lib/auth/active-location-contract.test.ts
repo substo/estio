@@ -7,6 +7,7 @@ const read = (file: string) => fs.readFileSync(path.join(process.cwd(), file), "
 const resolver = read("lib/auth/active-location.ts");
 const layout = read("app/(main)/admin/layout.tsx");
 const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
+const adminNavigation = read("app/(main)/admin/_components/admin-navigation.tsx");
 const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/platform/page.tsx");
@@ -60,7 +61,13 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.match(platformLocationSwitcher, /Log in/);
   assert.match(platformLocationSwitcher, /!selectedLocation\.isPlatformMaster/);
   assert.doesNotMatch(platformLocationOptions, /conversation|message|contact|credential|apiKey|ipAddress/);
-  assert.match(platformPage, /redirect\("\/admin"\)/);
+  assert.match(platformPage, /Platform overview/);
+  assert.match(platformPage, /db\.location\.findMany/);
+  assert.match(platformPage, /db\.userLocationRole\.count/);
+  assert.match(platformPage, /db\.locationSessionActivity\.groupBy/);
+  assert.match(adminNavigation, /showPlatformAdministration/);
+  assert.match(adminNavigation, /href: "\/platform"/);
+  assert.match(layout, /showPlatformAdministration=\{Boolean\(platformAdmin\)\}/);
 });
 
 test("active-location writes accept the public origin behind the reverse proxy", () => {

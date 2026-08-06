@@ -18,12 +18,13 @@ import { ActiveLocationSwitcher } from "./active-location-switcher"
 import { PlatformLocationLoginSwitcher } from "./platform-location-login-switcher"
 import type { PlatformLocationLoginOption } from "@/lib/auth/platform-location-options"
 
-export default function DashboardTopNav({ children, appSurface = false, activeLocation, availableLocations, platformLoginLocations }: {
+export default function DashboardTopNav({ children, appSurface = false, activeLocation, availableLocations, platformLoginLocations, showPlatformAdministration }: {
   children: ReactNode
   appSurface?: boolean
   activeLocation: { id: string; name: string | null }
   availableLocations: Array<{ id: string; name: string | null }>
   platformLoginLocations: PlatformLocationLoginOption[] | null
+  showPlatformAdministration: boolean
 }) {
   return (
     <div
@@ -66,7 +67,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
                   icon="languages"
                 />
               </div>
-              <AdminNavigationGroups variant="mobile" />
+              <AdminNavigationGroups variant="mobile" showPlatformAdministration={showPlatformAdministration} />
             </div>
           </SheetContent>
         </Sheet>
