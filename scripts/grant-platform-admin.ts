@@ -1,9 +1,26 @@
-import { config } from "dotenv";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { loadEnvFile } from "node:process";
 import { normalizePlatformAdminEmail, resolvePlatformAdminBootstrap } from "../lib/auth/platform-bootstrap-policy";
 
-config({ path: path.resolve(process.cwd(), ".env.local") });
-config({ path: path.resolve(process.cwd(), ".env") });
+const envFileArg = process.argv.find((value) => value.startsWith("--env-file="))?.slice("--env-file=".length);
+const apply = process.argv.includes("--apply");
+const expectedClerkId = process.argv.find((value) => value.startsWith("--expected-clerk-id="))?.slice("--expected-clerk-id=".length);
+
+if (apply && !envFileArg) {
+  throw new Error("--apply requires an explicit --env-file to prevent cross-instance Clerk identity changes");
+}
+
+const envFiles = envFileArg ? [envFileArg] : [".env.local", ".env"];
+for (const candidate of envFiles) {
+  const resolvedPath = path.resolve(process.cwd(), candidate);
+  if (!existsSync(resolvedPath)) {
+    if (envFileArg) throw new Error(`Environment file not found: ${resolvedPath}`);
+    continue;
+  }
+  loadEnvFile(resolvedPath);
+}
 
 let disconnectDatabase: (() => Promise<void>) | null = null;
 
@@ -14,9 +31,8 @@ async function main() {
   ]);
   disconnectDatabase = () => db.$disconnect();
   const emailArg = process.argv.find((value) => value.startsWith("--email="))?.slice("--email=".length) || "";
-  const apply = process.argv.includes("--apply");
   const email = normalizePlatformAdminEmail(emailArg);
-  if (!email) throw new Error("Usage: npx tsx scripts/grant-platform-admin.ts --email=user@example.com [--apply]");
+  if (!email) throw new Error("Usage: npx tsx scripts/grant-platform-admin.ts --email=user@example.com [--env-file=.env] [--expected-clerk-id=user_...] [--apply]");
 
   const [localMatches, clerkResponse] = await Promise.all([
     db.user.findMany({
@@ -38,8 +54,14 @@ async function main() {
     localClerkId: resolved.local.clerkId,
     resolvedClerkId: resolved.clerk.id,
     currentPlatformRole: resolved.local.platformRole,
+    environmentFile: envFileArg || "development defaults",
+    clerkKeyFingerprint: createHash("sha256").update(process.env.CLERK_SECRET_KEY || "missing").digest("hex").slice(0, 12),
     action: apply ? "apply" : "dry-run",
   }, null, 2));
+
+  if (apply && (!expectedClerkId || expectedClerkId !== resolved.clerk.id)) {
+    throw new Error("--apply requires --expected-clerk-id to exactly match the reviewed Clerk identity");
+  }
 
   if (resolved.alreadyGranted) {
     console.log("PLATFORM_ADMIN is already granted; no mutation needed.");

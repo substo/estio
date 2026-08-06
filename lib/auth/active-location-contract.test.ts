@@ -12,6 +12,7 @@ const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/platform/page.tsx");
 const dashboardEntry = read("app/(main)/dashboard/page.tsx");
 const publicNavbar = read("components/wrapper/navbar.tsx");
+const platformBootstrapScript = read("scripts/grant-platform-admin.ts");
 
 test("resolver uses immutable Clerk mapping and local connection-role intersection", () => {
   assert.match(resolver, /where: \{ clerkId: clerkUserId \}/);
@@ -51,4 +52,12 @@ test("public dashboard entry sends platform administrators to the platform conso
   assert.doesNotMatch(dashboardEntry, /email|publicMetadata|cookie/);
   assert.doesNotMatch(publicNavbar, /href="\/admin"/);
   assert.match(publicNavbar, /href="\/dashboard"/);
+});
+
+test("platform bootstrap apply is pinned to an explicit Clerk environment and reviewed identity", () => {
+  assert.doesNotMatch(platformBootstrapScript, /from "dotenv"/);
+  assert.match(platformBootstrapScript, /loadEnvFile/);
+  assert.match(platformBootstrapScript, /--apply requires an explicit --env-file/);
+  assert.match(platformBootstrapScript, /--expected-clerk-id/);
+  assert.match(platformBootstrapScript, /clerkKeyFingerprint/);
 });
