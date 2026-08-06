@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractImpersonationClaim, identitiesAgree } from "./impersonation-policy";
+import { describeImpersonationStartError, extractImpersonationClaim, identitiesAgree } from "./impersonation-policy";
 
 test("actor claim requires actor, audit, and location identifiers", () => {
   assert.deepEqual(extractImpersonationClaim({ sub: "actor", auditId: "audit", locationId: "location" }), {
@@ -10,6 +10,12 @@ test("actor claim requires actor, audit, and location identifiers", () => {
     actorClerkId: "actor", auditId: "audit", locationId: "location",
   });
   assert.equal(extractImpersonationClaim({ sub: "actor", auditId: "audit" }), null);
+});
+
+test("Clerk impersonation errors expose the actionable API detail", () => {
+  assert.equal(describeImpersonationStartError({
+    errors: [{ code: "impersonation_limit_exceeded", message: "Limit", longMessage: "Plan limit reached (5/5)." }],
+  }), "Plan limit reached (5/5).");
 });
 
 test("identity agreement needs immutable Clerk ID and normalized email equality", () => {

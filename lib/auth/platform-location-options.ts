@@ -6,7 +6,7 @@ export type PlatformLocationLoginOption = {
   id: string;
   name: string;
   isPlatformMaster: boolean;
-  members: Array<{ id: string; name: string; email: string }>;
+  members: Array<{ id: string; name: string; email: string; canImpersonate: boolean }>;
 };
 
 export async function listPlatformLocationLoginOptions(platformAdminUserId: string): Promise<PlatformLocationLoginOption[]> {
@@ -18,7 +18,6 @@ export async function listPlatformLocationLoginOptions(platformAdminUserId: stri
     db.userLocationRole.findMany({
       where: {
         user: {
-          id: { not: platformAdminUserId },
           clerkId: { not: null },
         },
       },
@@ -47,6 +46,7 @@ export async function listPlatformLocationLoginOptions(platformAdminUserId: stri
       id: membership.user.id,
       email: membership.user.email,
       name: [membership.user.firstName, membership.user.lastName].filter(Boolean).join(" ") || membership.user.email,
+      canImpersonate: membership.user.id !== platformAdminUserId,
     });
     membersByLocation.set(membership.locationId, members);
   }

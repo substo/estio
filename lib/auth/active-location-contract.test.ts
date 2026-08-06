@@ -53,6 +53,7 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.match(layout, /AdminShellLayout/);
   assert.doesNotMatch(layout, /MasterLoginPage/);
   assert.match(platformLocationOptions, /user\.locations\.some/);
+  assert.match(platformLocationOptions, /canImpersonate: membership\.user\.id !== platformAdminUserId/);
   assert.match(platformLocationSwitcher, /aria-label="Choose location"/);
   assert.match(platformLocationSwitcher, /aria-label="Choose user"/);
   assert.match(platformLocationSwitcher, /DropdownMenuRadioGroup/);

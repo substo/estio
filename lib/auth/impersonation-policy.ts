@@ -30,3 +30,13 @@ export function identitiesAgree(input: {
     && localEmail === clerkEmail
   );
 }
+
+export function describeImpersonationStartError(error: unknown): string {
+  const clerkErrors = error && typeof error === "object" && "errors" in error
+    ? (error as { errors?: Array<{ code?: unknown; message?: unknown; longMessage?: unknown }> }).errors
+    : undefined;
+  const clerkError = clerkErrors?.find((entry) => String(entry.code || "").trim()) ?? clerkErrors?.[0];
+  const detailedMessage = String(clerkError?.longMessage || clerkError?.message || "").trim();
+  if (detailedMessage) return detailedMessage;
+  return error instanceof Error && error.message.trim() ? error.message : "Unable to log in as this user.";
+}

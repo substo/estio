@@ -2,7 +2,8 @@ import "server-only";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import db from "@/lib/db";
-import { extractImpersonationClaim, identitiesAgree, type ActorClaim } from "@/lib/auth/impersonation-policy";
+import { APP_URL } from "@/lib/app-config";
+import { describeImpersonationStartError, extractImpersonationClaim, identitiesAgree, type ActorClaim } from "@/lib/auth/impersonation-policy";
 
 export const ACTOR_TOKEN_TTL_SECONDS = 5 * 60;
 export const IMPERSONATION_SESSION_MAX_SECONDS = 8 * 60 * 60;
@@ -100,17 +101,18 @@ export async function startImpersonation(input: { targetUserId: string; location
       sessionMaxDurationInSeconds: IMPERSONATION_SESSION_MAX_SECONDS,
     });
     actorTokenId = actorToken.id;
-    if (!actorToken.url) throw new Error("Clerk did not return a master login URL.");
+    if (!actorToken.token) throw new Error("Clerk did not return a master login ticket.");
     await db.impersonationAudit.update({ where: { id: audit.id }, data: { clerkActorTokenId: actorToken.id } });
 
-    const launchUrl = new URL(actorToken.url);
+    const launchUrl = new URL("/sign-in", APP_URL);
+    launchUrl.searchParams.set("__clerk_ticket", actorToken.token);
     launchUrl.searchParams.set("redirect_url", "/admin");
     return { auditId: audit.id, launchUrl: launchUrl.toString(), expiresAt: tokenExpiresAt.toISOString() };
   } catch (error) {
     if (actorTokenId) await clerk.actorTokens.revoke(actorTokenId).catch(() => undefined);
     await db.impersonationAudit.update({
       where: { id: audit.id },
-      data: { status: "FAILED", endedAt: new Date(), endReason: "Actor token creation failed" },
+      data: { status: "FAILED", endedAt: new Date(), endReason: describeImpersonationStartError(error).slice(0, 500) },
     }).catch(() => undefined);
     throw error;
   }

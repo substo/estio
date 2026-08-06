@@ -32,7 +32,7 @@ export function PlatformLocationLoginSwitcher({
   function selectLocation(locationId: string) {
     const location = locations.find((candidate) => candidate.id === locationId);
     setSelectedLocationId(locationId);
-    setTargetUserId(location?.isPlatformMaster ? "" : location?.members[0]?.id || "");
+    setTargetUserId(location?.isPlatformMaster ? "" : location?.members.find((member) => member.canImpersonate)?.id || "");
     setError("");
   }
 
@@ -89,7 +89,7 @@ export function PlatformLocationLoginSwitcher({
                 type="button"
                 variant="outline"
                 aria-label="Choose user"
-                disabled={busy || selectedLocation.members.length === 0}
+                disabled={busy || !selectedLocation.members.some((member) => member.canImpersonate)}
                 className="h-9 min-w-0 max-w-[8rem] gap-1 px-2 text-sm sm:max-w-[15rem]"
               >
                 <span className="truncate">{targetUser?.name || "No users"}</span>
@@ -99,9 +99,9 @@ export function PlatformLocationLoginSwitcher({
             <DropdownMenuContent align="start" className="min-w-[15rem] max-w-[calc(100vw-1.5rem)]">
               <DropdownMenuRadioGroup value={targetUserId} onValueChange={setTargetUserId}>
                 {selectedLocation.members.map((member) => (
-                  <DropdownMenuRadioItem key={member.id} value={member.id} disabled={busy} className="min-h-10">
+                  <DropdownMenuRadioItem key={member.id} value={member.id} disabled={busy || !member.canImpersonate} className="min-h-10">
                     <span className="min-w-0">
-                      <span className="block truncate">{member.name}</span>
+                      <span className="block truncate">{member.name}{member.canImpersonate ? "" : " (current platform administrator)"}</span>
                       <span className="block truncate text-xs text-muted-foreground">{member.email}</span>
                     </span>
                   </DropdownMenuRadioItem>

@@ -40,10 +40,15 @@ test("server and client detect actor state, show a banner, and provide an exit",
   assert.match(banner, /\/api\/platform\/impersonation\/end/);
 });
 
-test("Clerk owns one-time ticket consumption for actor-token sign in", () => {
+test("the local one-time ticket handoff signs out the actor before consuming the ticket once", () => {
   const signInPage = read("app/(main)/(auth)/sign-in/[[...sign-in]]/page.tsx");
-  assert.match(signInPage, /<SignIn \/>/);
-  assert.doesNotMatch(signInPage, /useSignIn|strategy: "ticket"|__clerk_ticket|signIn\.create/);
+  const service = read("lib/auth/impersonation.ts");
+  assert.match(service, /new URL\("\/sign-in", APP_URL\)/);
+  assert.match(service, /actorToken\.token/);
+  assert.match(signInPage, /ticketAttempted/);
+  assert.match(signInPage, /clerk\.signOut\(\{ redirectUrl: ticketUrl \}\)/);
+  assert.match(signInPage, /signIn\.create\(\{ strategy: "ticket", ticket \}\)/);
+  assert.match(signInPage, /window\.location\.replace\(redirectUrl\)/);
 });
 
 test("master login is direct, does not require a support reason, and allows normal user actions", () => {
