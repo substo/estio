@@ -40,7 +40,7 @@ test("server and client detect actor state, show a banner, and provide an exit",
 
 test("master login is direct, does not require a support reason, and allows normal user actions", () => {
   const service = read("lib/auth/impersonation.ts");
-  const form = read("app/(main)/admin/_components/master-login-form.tsx");
+  const form = read("app/(main)/admin/_components/platform-location-login-switcher.tsx");
   const middleware = read("middleware.ts");
   assert.match(service, /MASTER_LOGIN_AUDIT_REASON = "Master user login"/);
   assert.match(service, /IMPERSONATION_SESSION_MAX_SECONDS = 8 \* 60 \* 60/);

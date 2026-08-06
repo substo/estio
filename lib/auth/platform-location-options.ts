@@ -1,11 +1,19 @@
-import db from "@/lib/db";
-import { MasterLoginForm } from "./master-login-form";
+import "server-only";
 
-export async function MasterLoginPage({ platformAdminUserId }: { platformAdminUserId: string }) {
+import db from "@/lib/db";
+
+export type PlatformLocationLoginOption = {
+  id: string;
+  name: string;
+  isPlatformMaster: boolean;
+  members: Array<{ id: string; name: string; email: string }>;
+};
+
+export async function listPlatformLocationLoginOptions(platformAdminUserId: string): Promise<PlatformLocationLoginOption[]> {
   const [locations, membershipRoles] = await Promise.all([
     db.location.findMany({
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-      select: { id: true, name: true },
+      orderBy: [{ isPlatformMaster: "desc" }, { name: "asc" }, { id: "asc" }],
+      select: { id: true, name: true, isPlatformMaster: true },
     }),
     db.userLocationRole.findMany({
       where: {
@@ -30,7 +38,7 @@ export async function MasterLoginPage({ platformAdminUserId }: { platformAdminUs
     }),
   ]);
 
-  const membersByLocation = new Map<string, Array<{ id: string; name: string; email: string }>>();
+  const membersByLocation = new Map<string, PlatformLocationLoginOption["members"]>();
   for (const membership of membershipRoles) {
     if (!membership.user.locations.some((location) => location.id === membership.locationId)) continue;
     const members = membersByLocation.get(membership.locationId) || [];
@@ -43,17 +51,10 @@ export async function MasterLoginPage({ platformAdminUserId }: { platformAdminUs
     membersByLocation.set(membership.locationId, members);
   }
 
-  return (
-    <main className="mx-auto max-w-2xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Master login</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Choose a location, then choose the user you want to log in as.</p>
-      </div>
-      <MasterLoginForm locations={locations.map((location) => ({
-        id: location.id,
-        name: location.name || "Unnamed location",
-        members: membersByLocation.get(location.id) || [],
-      }))} />
-    </main>
-  );
+  return locations.map((location) => ({
+    id: location.id,
+    name: location.name || "Unnamed location",
+    isPlatformMaster: location.isPlatformMaster,
+    members: membersByLocation.get(location.id) || [],
+  }));
 }

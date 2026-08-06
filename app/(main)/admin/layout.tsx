@@ -11,14 +11,10 @@ import db from "@/lib/db";
 import { getCurrentImpersonationContext } from "@/lib/auth/impersonation";
 import { auth } from "@clerk/nextjs/server";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
-import { MasterLoginPage } from "./_components/master-login-page";
+import { listPlatformLocationLoginOptions } from "@/lib/auth/platform-location-options";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const platformAdmin = await getPlatformAdminContext();
-  if (platformAdmin) {
-    return <MasterLoginPage platformAdminUserId={platformAdmin.internalUserId} />;
-  }
-
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect("/sign-in");
   if (resolution.status === "selection_required") redirect("/select-location");
@@ -33,7 +29,10 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const { location, user } = resolution;
   const impersonation = await getCurrentImpersonationContext();
   const needsOnboarding = !user.firstName || !user.lastName;
-  const siteConfig = await db.siteConfig.findUnique({ where: { locationId: location.id }, select: { theme: true } });
+  const [siteConfig, platformLoginLocations] = await Promise.all([
+    db.siteConfig.findUnique({ where: { locationId: location.id }, select: { theme: true } }),
+    platformAdmin ? listPlatformLocationLoginOptions(platformAdmin.internalUserId) : Promise.resolve(null),
+  ]);
   const theme = siteConfig?.theme as { logo?: { url?: string; lightUrl?: string } } | null;
 
   return (
@@ -45,7 +44,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         lightUrl={theme?.logo?.lightUrl}
         activeLocation={{ id: location.id, name: location.name }}
         availableLocations={resolution.availableLocations}
-        isPlatformAdmin={user.platformRole === "PLATFORM_ADMIN"}
+        platformLoginLocations={platformLoginLocations}
         impersonation={impersonation ? {
           targetName: impersonation.targetName,
           targetEmail: impersonation.targetEmail,

@@ -10,11 +10,12 @@ const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
 const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/platform/page.tsx");
-const masterLoginPage = read("app/(main)/admin/_components/master-login-page.tsx");
-const masterLoginForm = read("app/(main)/admin/_components/master-login-form.tsx");
+const platformLocationOptions = read("lib/auth/platform-location-options.ts");
+const platformLocationSwitcher = read("app/(main)/admin/_components/platform-location-login-switcher.tsx");
 const dashboardEntry = read("app/(main)/dashboard/page.tsx");
 const publicNavbar = read("components/wrapper/navbar.tsx");
 const platformBootstrapScript = read("scripts/grant-platform-admin.ts");
+const platformMasterProvisioner = read("scripts/provision-platform-master-location.ts");
 
 test("resolver uses immutable Clerk mapping and local connection-role intersection", () => {
   assert.match(resolver, /where: \{ clerkId: clerkUserId \}/);
@@ -45,13 +46,15 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.doesNotMatch(platformAccess, /email|locations|cookie|metadata/);
   assert.match(platformAccess, /!userId \|\| actor/);
   assert.match(layout, /getPlatformAdminContext/);
-  assert.match(layout, /MasterLoginPage/);
-  assert.match(masterLoginPage, /Master login/);
-  assert.match(masterLoginPage, /user\.locations\.some/);
-  assert.match(masterLoginForm, /master-location/);
-  assert.match(masterLoginForm, /master-user/);
-  assert.match(masterLoginForm, /Log in as user/);
-  assert.doesNotMatch(masterLoginPage, /conversation|message|contact|credential|apiKey|ipAddress/);
+  assert.match(layout, /listPlatformLocationLoginOptions/);
+  assert.match(layout, /AdminShellLayout/);
+  assert.doesNotMatch(layout, /MasterLoginPage/);
+  assert.match(platformLocationOptions, /user\.locations\.some/);
+  assert.match(platformLocationSwitcher, /platform-location-login/);
+  assert.match(platformLocationSwitcher, /platform-user-login/);
+  assert.match(platformLocationSwitcher, /Log in/);
+  assert.match(platformLocationSwitcher, /!selectedLocation\.isPlatformMaster/);
+  assert.doesNotMatch(platformLocationOptions, /conversation|message|contact|credential|apiKey|ipAddress/);
   assert.match(platformPage, /redirect\("\/admin"\)/);
 });
 
@@ -68,4 +71,9 @@ test("platform bootstrap apply is pinned to an explicit Clerk environment and re
   assert.match(platformBootstrapScript, /--apply requires an explicit --env-file/);
   assert.match(platformBootstrapScript, /--expected-clerk-id/);
   assert.match(platformBootstrapScript, /clerkKeyFingerprint/);
+  assert.match(platformMasterProvisioner, /--apply requires an explicit --env-file/);
+  assert.match(platformMasterProvisioner, /isPlatformMaster: true/);
+  assert.match(platformMasterProvisioner, /role: "ADMIN"/);
+  assert.match(platformMasterProvisioner, /contactAccessScope: "LOCATION_WIDE"/);
+  assert.match(platformMasterProvisioner, /siteConfig\.upsert/);
 });

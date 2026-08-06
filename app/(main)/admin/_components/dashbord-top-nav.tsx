@@ -15,13 +15,15 @@ import { AdminNavigationGroups } from "./admin-navigation"
 import { cn } from "@/lib/utils"
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
 import { ActiveLocationSwitcher } from "./active-location-switcher"
+import { PlatformLocationLoginSwitcher } from "./platform-location-login-switcher"
+import type { PlatformLocationLoginOption } from "@/lib/auth/platform-location-options"
 
-export default function DashboardTopNav({ children, appSurface = false, activeLocation, availableLocations, isPlatformAdmin }: {
+export default function DashboardTopNav({ children, appSurface = false, activeLocation, availableLocations, platformLoginLocations }: {
   children: ReactNode
   appSurface?: boolean
   activeLocation: { id: string; name: string | null }
   availableLocations: Array<{ id: string; name: string | null }>
-  isPlatformAdmin: boolean
+  platformLoginLocations: PlatformLocationLoginOption[] | null
 }) {
   return (
     <div
@@ -64,14 +66,16 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
                   icon="languages"
                 />
               </div>
-              {isPlatformAdmin ? <Link href="/platform" className="mt-4 flex min-h-10 items-center rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Platform administration</Link> : null}
               <AdminNavigationGroups variant="mobile" />
             </div>
           </SheetContent>
         </Sheet>
-        {availableLocations.length > 1 ? <ActiveLocationSwitcher activeLocationId={activeLocation.id} locations={availableLocations} /> : null}
+        {platformLoginLocations ? (
+          <PlatformLocationLoginSwitcher activeLocationId={activeLocation.id} locations={platformLoginLocations} />
+        ) : availableLocations.length > 1 ? (
+          <ActiveLocationSwitcher activeLocationId={activeLocation.id} locations={availableLocations} />
+        ) : null}
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
-          {isPlatformAdmin ? <Link href="/platform" className="hidden min-h-10 items-center rounded-md px-2 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex">Platform administration</Link> : null}
           <div className="hidden sm:flex">
             <QuickAssistStartButton
               label="Quick Assist"

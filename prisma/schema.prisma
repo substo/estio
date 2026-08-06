@@ -12,6 +12,7 @@ model Location {
   id                            String                         @id @default(cuid())
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
+  isPlatformMaster              Boolean                        @default(false)
   ghlAgencyId                   String?                        @unique
   ghlLocationId                 String?                        @unique
   ghlInstallId                  String?                        @unique
