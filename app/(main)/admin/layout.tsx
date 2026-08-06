@@ -10,8 +10,15 @@ import { resolveActiveLocation } from "@/lib/auth/active-location";
 import db from "@/lib/db";
 import { getCurrentImpersonationContext } from "@/lib/auth/impersonation";
 import { auth } from "@clerk/nextjs/server";
+import { getPlatformAdminContext } from "@/lib/auth/platform-access";
+import { MasterLoginPage } from "./_components/master-login-page";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  const platformAdmin = await getPlatformAdminContext();
+  if (platformAdmin) {
+    return <MasterLoginPage platformAdminUserId={platformAdmin.internalUserId} />;
+  }
+
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect("/sign-in");
   if (resolution.status === "selection_required") redirect("/select-location");

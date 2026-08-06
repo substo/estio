@@ -10,7 +10,8 @@ const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
 const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/platform/page.tsx");
-const masterLoginForm = read("app/(main)/platform/_components/master-login-form.tsx");
+const masterLoginPage = read("app/(main)/admin/_components/master-login-page.tsx");
+const masterLoginForm = read("app/(main)/admin/_components/master-login-form.tsx");
 const dashboardEntry = read("app/(main)/dashboard/page.tsx");
 const publicNavbar = read("components/wrapper/navbar.tsx");
 const platformBootstrapScript = read("scripts/grant-platform-admin.ts");
@@ -42,17 +43,20 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.match(platformAccess, /where: \{ clerkId: userId \}/);
   assert.match(platformAccess, /platformRole !== "PLATFORM_ADMIN"/);
   assert.doesNotMatch(platformAccess, /email|locations|cookie|metadata/);
-  assert.match(platformPage, /Master login/);
-  assert.match(platformPage, /user\.locations\.some/);
+  assert.match(platformAccess, /!userId \|\| actor/);
+  assert.match(layout, /getPlatformAdminContext/);
+  assert.match(layout, /MasterLoginPage/);
+  assert.match(masterLoginPage, /Master login/);
+  assert.match(masterLoginPage, /user\.locations\.some/);
   assert.match(masterLoginForm, /master-location/);
   assert.match(masterLoginForm, /master-user/);
   assert.match(masterLoginForm, /Log in as user/);
-  assert.doesNotMatch(platformPage, /conversation|message|contact|credential|apiKey|ipAddress/);
+  assert.doesNotMatch(masterLoginPage, /conversation|message|contact|credential|apiKey|ipAddress/);
+  assert.match(platformPage, /redirect\("\/admin"\)/);
 });
 
-test("public dashboard entry sends platform administrators to the platform console", () => {
-  assert.match(dashboardEntry, /getPlatformAdminContext/);
-  assert.match(dashboardEntry, /\? "\/platform" : "\/admin"/);
+test("public dashboard entry sends every authenticated user to admin", () => {
+  assert.match(dashboardEntry, /redirect\("\/admin"\)/);
   assert.doesNotMatch(dashboardEntry, /email|publicMetadata|cookie/);
   assert.doesNotMatch(publicNavbar, /href="\/admin"/);
   assert.match(publicNavbar, /href="\/dashboard"/);

@@ -7,10 +7,8 @@ import { Label } from "@/components/ui/label";
 type Member = { id: string; name: string; email: string };
 type LocationOption = { id: string; name: string; members: Member[] };
 
-export function MasterLoginForm({ locations, initialLocationId }: { locations: LocationOption[]; initialLocationId?: string }) {
-  const initialLocation = locations.find((location) => location.id === initialLocationId)
-    || locations.find((location) => location.members.length > 0)
-    || locations[0];
+export function MasterLoginForm({ locations }: { locations: LocationOption[] }) {
+  const initialLocation = locations.find((location) => location.members.length > 0) || locations[0];
   const [locationId, setLocationId] = useState(initialLocation?.id || "");
   const selectedLocation = useMemo(
     () => locations.find((location) => location.id === locationId) || locations[0],
