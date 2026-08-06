@@ -456,7 +456,7 @@ To overcome this, we implemented a **Real-Time Streaming QR Code** flow:
 4. **Cloudflare Turnstile Bypass:** 
    - Bazaraki protects the post-scan redirect with Cloudflare. Normal Playwright/Puppeteer will hit a "Verify you are human" block and fail to capture the `sessionid`.
    - **Solution:** We process the login using `playwright-extra` and `puppeteer-extra-plugin-stealth`. This completely evades Turnstile, allowing the backend redirect to complete naturally.
-   - **Webpack Build Fix:** Because `puppeteer-extra` utilizes dynamic `require()` statements, Vercel/Next.js will fail to build. You **must** add `playwright-extra` and `puppeteer-extra-plugin-stealth` to `serverExternalPackages` in `next.config.js`.
+   - **Next.js Build Fix:** Because `puppeteer-extra` utilizes dynamic `require()` statements, the server bundle can fail to build. You **must** add `playwright-extra` and `puppeteer-extra-plugin-stealth` to `serverExternalPackages` in `next.config.js`.
 5. **Session Capture:** Once navigated away from `/login/`, the `context.storageState()` is extracted and saved directly to the database in `ScrapingCredential`. 
 
 **Required Dependencies:**

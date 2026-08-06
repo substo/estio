@@ -5,7 +5,7 @@ import stealth from 'puppeteer-extra-plugin-stealth';
 import db from '@/lib/db';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 
-export const maxDuration = 120; // Allow Vercel to run up to 2 mins for WhatsApp approval
+export const maxDuration = 120; // Allow enough time for the browser approval flow.
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {

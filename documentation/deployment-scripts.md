@@ -1,5 +1,7 @@
 # Deployment Scripts
 
+Estio is a Next.js application hosted on a self-managed Hetzner server. Caddy owns TLS and reverse proxying, Cloudflare provides DNS and edge proxying, and Namecheap is the registrar. Vercel is not part of the deployment architecture.
+
 ## Standard Deploy
 
 Use `deploy-local-build.sh` for production deploys. The script builds locally, uploads the target release, runs the configured Prisma schema sync mode, switches traffic, and keeps the WhatsApp Web Bridge worker as the only linked-device WhatsApp runtime.
@@ -9,6 +11,8 @@ Evolution containers are no longer part of deployment.
 Redis is still an app dependency for queues and realtime. Standard deploys expect Redis on `127.0.0.1:6379`; when Docker is available and nothing else owns that port, deploy keeps a neutral `estio-redis` container running.
 
 Use `scripts/ops/audit-retired-evolution-runtime.sh` for one-off decommission audits. It is intentionally not part of standard deploys.
+
+Production schedules are installed with `scripts/install-cron.sh`; see `documentation/scheduled-jobs.md` for the complete inventory.
 
 ## WhatsApp Runtime Checks
 

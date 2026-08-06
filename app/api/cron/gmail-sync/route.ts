@@ -8,8 +8,8 @@ import { verifyCronAuthorization } from '@/lib/cron/auth';
 /**
  * Gmail Sync Cron Job
  * 
- * This endpoint is designed to be called by Vercel Cron or an external scheduler (e.g., cron-job.org)
- * every 5 minutes as a fallback for real-time Pub/Sub notifications.
+ * This endpoint is called by the production server scheduler as a fallback for
+ * real-time Pub/Sub notifications.
  * 
  * Best Practice: "Belt and Suspenders"
  * - Primary: Real-time Pub/Sub (instant, ~2s latency)
@@ -21,7 +21,7 @@ import { verifyCronAuthorization } from '@/lib/cron/auth';
  */
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // 5 minutes max (Vercel Pro limit)
+export const maxDuration = 300;
 
 const guard = new CronGuard('gmail-sync');
 

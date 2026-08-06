@@ -197,21 +197,11 @@ To prevent the database from growing indefinitely, a background job automaticall
 - **Concurrency**: Uses an atomic local lock plus a token-owned Redis lock. The purge fails closed when distributed locking is unavailable.
 
 ### Configuration
-Ensure `CRON_SECRET` is set in your `.env` and Vercel project settings.
+Ensure `CRON_SECRET` is set in the application environment and production crontab.
 The optional `CONVERSATION_TRASH_PURGE_BATCH_SIZE` and `CONVERSATION_TRASH_PURGE_MAX_BATCHES` settings control bounded work per invocation; values are clamped server-side.
 `REDIS_HOST` and `REDIS_PORT` must point to shared Redis for distributed exclusion. The route returns `503` and performs no deletion if that lock infrastructure is unavailable.
 
-```json
-// vercel.json
-{
-  "crons": [
-    {
-      "path": "/api/cron/purge-trash",
-      "schedule": "0 0 * * *"
-    }
-  ]
-}
-```
+The Hetzner schedule is installed by `scripts/install-cron.sh`. See `documentation/scheduled-jobs.md` for the authoritative schedule inventory.
 
 ## API Actions (`actions.ts`)
 

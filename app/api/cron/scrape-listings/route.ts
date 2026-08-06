@@ -3,11 +3,11 @@ import db from '@/lib/db';
 import { scrapingQueue } from '@/lib/queue/scraping-queue';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Max duration for Vercel/NextJS to enqueue jobs
+export const maxDuration = 60;
 
 export async function GET(req: Request) {
     try {
-        // 1. Verify Vercel Cron Secret for Authorization
+        // 1. Verify the shared scheduler secret.
         const authHeader = req.headers.get('authorization');
         const expectedSecret = process.env.CRON_SECRET;
 

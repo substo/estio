@@ -132,8 +132,8 @@ This route intentionally does **not** scrape or invent OpenAI token-rate pricing
 
 Deployment scheduling:
 
-- Vercel: `vercel.json` runs `/api/cron/ai-provider-catalog` daily at `17 3 * * *`.
-- Server crontab: `scripts/install-cron.sh` installs `scripts/cron-ai-provider-catalog.sh` on the same daily cadence.
+- Hetzner crontab: `scripts/install-cron.sh` installs `scripts/cron-ai-provider-catalog.sh` daily at `17 3 * * *`.
+- See `documentation/scheduled-jobs.md` for the authoritative production schedule inventory.
 
 Important aliases/constants:
 

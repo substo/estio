@@ -181,7 +181,7 @@ To enable this feature, you must configure a project in the Google Cloud Console
 8.  **Copy** the `Client ID` and `Client Secret`.
 
 ### Phase 4: Env Config
-Add these to your `.env` and `.env.local` (and Vercel/Server env):
+Add these to your local environment files and the Hetzner application environment:
 
 ```env
 GOOGLE_CLIENT_ID=your_client_id_here
