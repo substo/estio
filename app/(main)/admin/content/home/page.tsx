@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { HomePageForm } from "./home-page-form";
 import { redirect } from "next/navigation";
@@ -11,10 +11,7 @@ type HomeSectionConfig = {
 };
 
 export default async function AdminHomePage() {
-    const { userId } = await auth();
-    if (!userId) return null;
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    const orgId = (await getLocationContext())?.id;
 
     if (!orgId) return <div>Organization not found</div>;
 

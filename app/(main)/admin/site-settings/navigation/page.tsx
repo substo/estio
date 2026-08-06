@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { MenuBuilder } from "./_components/menu-builder";
 import { FooterBioEditor } from "./_components/footer-bio-editor";
@@ -10,14 +9,10 @@ import { PublicListingToggle } from "./_components/public-listing-toggle";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
 import { getLocationContext } from "@/lib/auth/location-context";
-import { cookies } from "next/headers";
 
 export default async function NavigationSettingsPage() {
-    const { userId } = await auth();
-    if (!userId) return null;
-    const cookieStore = await cookies();
     const contextLocation = await getLocationContext();
-    const orgId = contextLocation?.id || cookieStore.get("crm_location_id")?.value || null;
+    const orgId = contextLocation?.id || null;
 
     if (!orgId) return null;
 

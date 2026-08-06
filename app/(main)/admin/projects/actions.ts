@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { Project } from "@prisma/client";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
+import { getLocationContext } from "@/lib/auth/location-context";
 
 export type ActionState = {
     message: string;
@@ -38,7 +39,7 @@ export async function upsertProjectAction(prevState: ActionState, formData: Form
         };
     }
 
-    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
+    const hasAccess = (await getLocationContext())?.id === locationId && await verifyUserHasAccessToLocation(userId, locationId);
     if (!hasAccess) {
         return {
             success: false,

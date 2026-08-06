@@ -1,21 +1,14 @@
 import db from "@/lib/db";
 import { SiteSettingsForm } from "./site-settings-form";
-import { cookies } from "next/headers";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
 import { listPublicSiteDomains } from "@/lib/public-site-domains/service";
 import { PublicSiteDomainManager } from "./public-site-domain-manager";
 
-export default async function SiteSettingsPage(props: { searchParams: Promise<{ locationId?: string }> }) {
-    const searchParams = await props.searchParams;
-    const cookieStore = await cookies();
-
-    // Try to get location from Context Helper first (User Metadata/DB)
+export default async function SiteSettingsPage() {
     const contextLocation = await getLocationContext();
-    const locationId = searchParams.locationId ||
-        contextLocation?.id ||
-        cookieStore.get("crm_location_id")?.value;
+    const locationId = contextLocation?.id;
 
     if (!locationId) {
         return <div>No location context found.</div>;

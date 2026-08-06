@@ -14,6 +14,7 @@ import {
 import { SettingsVersionConflictError } from "@/lib/settings/errors";
 import { clearLocationMarketContextCache } from "@/lib/locations/market-context";
 import { parseLocationMarketProfileSettings } from "@/lib/locations/market-profile-settings";
+import { getLocationContext } from "@/lib/auth/location-context";
 
 interface SiteSettingsState {
     message?: string;
@@ -43,6 +44,7 @@ export async function updateSiteSettings(
     if (!locationId) {
         return { message: "Location ID is missing" };
     }
+    if ((await getLocationContext())?.id !== locationId) return { message: "Active location mismatch" };
 
     const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
     if (!isAdmin) {

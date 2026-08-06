@@ -1,13 +1,8 @@
 import db from "@/lib/db";
-import { getLocationById } from "@/lib/location";
-import { cookies } from "next/headers";
-import { auth } from "@clerk/nextjs/server";
-import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { ProjectDialog } from "./_components/project-dialog";
 import { listProjects } from "@/lib/projects/repository";
 import { ProjectFilters } from "./_components/project-filters";
-import { redirect } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -20,56 +15,11 @@ export default async function ProjectsPage(props: {
     }>
 }) {
     const searchParams = await props.searchParams;
-    const cookieStore = await cookies();
-    let locationId = searchParams.locationId || cookieStore.get("crm_location_id")?.value;
-
-    if (!locationId) {
-        const locationContext = await getLocationContext();
-        if (locationContext) {
-            locationId = locationContext.id;
-        }
-    }
-
-    if (!locationId) {
+    const location = await getLocationContext();
+    if (!location) {
         return <div>No location context found.</div>;
     }
-
-    const { userId } = await auth();
-    if (!userId) {
-        return <div>Unauthorized</div>;
-    }
-
-    const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);
-    if (!hasAccess) {
-        // Fallback: Check if user has ANY valid location and redirect there
-        const user = await db.user.findUnique({
-            where: { clerkId: userId },
-            include: { locations: { take: 1 } }
-        });
-
-        if (user?.locations?.[0]) {
-            const validLocationId = user.locations[0].id;
-
-            if (validLocationId !== locationId) {
-                redirect(`/admin/projects?locationId=${validLocationId}`);
-            } else {
-                console.error(`[ProjectsPage] LOOP DETECTED: User ${userId} has access to ${validLocationId} in DB but verifyUserHasAccessToLocation returned false. Not redirecting.`);
-            }
-        }
-
-        return (
-            <div className="p-6 text-center">
-                <h2 className="text-xl font-bold text-red-600">Unauthorized Access</h2>
-                <p className="mt-2 text-gray-600">You do not have access to the requested location ({locationId}).</p>
-                <p className="text-sm text-gray-500">Please contact support if you believe this is an error.</p>
-            </div>
-        );
-    }
-
-    const location = await getLocationById(locationId);
-    if (!location) {
-        return <div>Location not found.</div>;
-    }
+    const locationId = location.id;
 
     // Parse search params
     const q = searchParams.q || undefined;

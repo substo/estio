@@ -6,8 +6,8 @@ import { PendingInvitationsList } from "./_components/pending-invitations-list";
 import { getGHLCalendars } from "./actions";
 import { checkGHLSMTPStatus } from "@/lib/ghl/email";
 import { isGhlIntegrationEnabled } from "@/lib/ghl/integration-gate";
-import { resolveStrictAdminLocation, type PreviewIdentity } from "@/lib/team/offboarding-preview-policy";
 import { AccessSessionsSection } from "./_components/access-sessions-section";
+import { resolveActiveLocation } from "@/lib/auth/active-location";
 
 export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string; removalAudit?: string; cleanupWarning?: string }> }) {
     const resolvedSearchParams = await searchParams;
@@ -15,39 +15,11 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
     const removalAudit = resolvedSearchParams?.removalAudit;
     const cleanupWarning = resolvedSearchParams?.cleanupWarning === '1';
     const { userId: clerkUserId } = await auth();
-    if (!clerkUserId) {
-        return <div className="p-6">Unauthorized</div>;
+    const active = await resolveActiveLocation();
+    if (!clerkUserId || active.status !== "authorized" || !active.location || active.role !== "ADMIN") {
+        return <div className="p-6">A current ADMIN role for the active location is required.</div>;
     }
-
-    const actor = await db.user.findUnique({
-        where: { clerkId: clerkUserId },
-        select: {
-            id: true, email: true, clerkId: true, firstName: true, lastName: true,
-            locations: { select: { id: true, name: true } },
-            locationRoles: { select: { locationId: true, role: true, location: { select: { name: true } } } },
-        },
-    });
-    const connectedIds = new Set(actor?.locations.map((entry) => entry.id) || []);
-    const actorIdentity: PreviewIdentity | null = actor ? {
-        id: actor.id,
-        email: actor.email,
-        clerkId: actor.clerkId,
-        firstName: actor.firstName,
-        lastName: actor.lastName,
-        memberships: actor.locationRoles.map((entry) => ({
-            locationId: entry.locationId,
-            locationName: entry.location.name,
-            role: entry.role,
-            connected: connectedIds.has(entry.locationId),
-        })),
-    } : null;
-    let activeMembership;
-    try {
-        activeMembership = resolveStrictAdminLocation(actorIdentity);
-    } catch {
-        return <div className="p-6">A current, unambiguous ADMIN role is required.</div>;
-    }
-    const locationId = activeMembership.locationId;
+    const locationId = active.location.id;
 
     // Get location with users
     const location = await db.location.findUnique({

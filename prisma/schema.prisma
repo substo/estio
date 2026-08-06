@@ -61,6 +61,7 @@ model Location {
   legacyCrmLeadEmailProcessings LegacyCrmLeadEmailProcessing[]
   userNotifications             UserNotification[]
   locationSessionActivities     LocationSessionActivity[]
+  impersonationAudits           ImpersonationAudit[]
   taskReminderJobs              TaskReminderJob[]
   scheduledMessages             ScheduledMessage[]
   scrapingConnections           ScrapingConnection[]
@@ -213,6 +214,7 @@ model User {
   ghlUserId     String?
   ghlCalendarId String?
   timeZone      String? // IANA timezone, e.g. "Europe/Nicosia"
+  platformRole  PlatformRole @default(STANDARD)
 
   // CRM Credentials (User-specific login)
   crmUsername String?
@@ -235,6 +237,8 @@ model User {
   webPushSubscriptions         WebPushSubscription[]
   userNotifications            UserNotification[]
   locationSessionActivities    LocationSessionActivity[]
+  impersonationsStarted        ImpersonationAudit[] @relation("ImpersonationActor")
+  impersonationsReceived       ImpersonationAudit[] @relation("ImpersonationTarget")
   taskReminderJobs             TaskReminderJob[]
   taskReminderPreference       UserTaskReminderPreference?
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")
@@ -1036,6 +1040,19 @@ enum UserRole {
   MEMBER // Standard access
 }
 
+enum PlatformRole {
+  STANDARD
+  PLATFORM_ADMIN
+}
+
+enum ImpersonationAuditStatus {
+  PENDING
+  ACTIVE
+  ENDED
+  FAILED
+  EXPIRED
+}
+
 enum ContactAccessScope {
   ASSIGNED_ONLY
   LOCATION_WIDE
@@ -1172,6 +1189,36 @@ model LocationSessionActivity {
 
   @@unique([locationId, clerkSessionId])
   @@index([locationId, lastSeenAt])
+}
+
+model ImpersonationAudit {
+  id                    String                   @id @default(cuid())
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  actorUserId           String
+  targetUserId          String
+  actorClerkId          String
+  targetClerkId         String
+  locationId            String
+  reason                String                   @db.Text
+  status                ImpersonationAuditStatus @default(PENDING)
+  clerkActorTokenId     String?                  @unique
+  tokenExpiresAt        DateTime
+  sessionExpiresAt      DateTime
+  activatedAt           DateTime?
+  endedAt               DateTime?
+  revokedAt             DateTime?
+  targetSessionId       String?
+  endReason             String?
+
+  actor   User     @relation("ImpersonationActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  target  User     @relation("ImpersonationTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([status, sessionExpiresAt])
 }
 
 model UserOffboardingAudit {

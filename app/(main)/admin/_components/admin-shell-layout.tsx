@@ -5,6 +5,7 @@ import DashboardSideBar from "./dashboard-side-bar"
 import DashboardTopNav from "./dashbord-top-nav"
 import { AdminLayoutPolicyProvider, useResolvedAdminLayoutPolicy } from "./admin-layout-policy"
 import { cn } from "@/lib/utils"
+import { ImpersonationBanner, type ImpersonationBannerData } from "./impersonation-banner"
 
 const SIDEBAR_STORAGE_KEY = "admin-sidebar-collapsed"
 const EXPANDED_SIDEBAR_WIDTH = "160px"
@@ -34,12 +35,18 @@ export function AdminShellLayout({
   children,
   logoUrl,
   lightUrl,
-  currentLocationName,
+  activeLocation,
+  availableLocations,
+  isPlatformAdmin,
+  impersonation,
 }: {
   children: ReactNode
   logoUrl?: string
   lightUrl?: string
-  currentLocationName: string
+  activeLocation: { id: string; name: string | null }
+  availableLocations: Array<{ id: string; name: string | null }>
+  isPlatformAdmin: boolean
+  impersonation: ImpersonationBannerData | null
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const layoutPolicy = useResolvedAdminLayoutPolicy()
@@ -66,7 +73,9 @@ export function AdminShellLayout({
   }
 
   return (
-    <div
+    <>
+      {impersonation ? <ImpersonationBanner context={impersonation} /> : null}
+      <div
       data-admin-shell-layout={appSurface ? "app-surface" : "default"}
       className={cn(
         "grid w-full lg:[grid-template-columns:var(--admin-sidebar-width,160px)_minmax(0,1fr)]",
@@ -81,8 +90,9 @@ export function AdminShellLayout({
           appSurface={appSurface}
           onCollapsedChange={handleSidebarCollapsedChange}
         />
-        <DashboardTopNav appSurface={appSurface} currentLocationName={currentLocationName}>{children}</DashboardTopNav>
+        <DashboardTopNav appSurface={appSurface} activeLocation={activeLocation} availableLocations={availableLocations} isPlatformAdmin={isPlatformAdmin}>{children}</DashboardTopNav>
       </AdminLayoutPolicyProvider>
-    </div>
+      </div>
+    </>
   )
 }

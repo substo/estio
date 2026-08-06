@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,10 +9,7 @@ import Image from "next/image";
 import { getImageDeliveryUrl } from "@/lib/cloudflareImages";
 
 export default async function PostsListPage() {
-    const { userId } = await auth();
-    if (!userId) return null;
-    const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-    const orgId = user?.locations[0]?.id;
+    const orgId = (await getLocationContext())?.id;
 
     if (!orgId) return null;
 

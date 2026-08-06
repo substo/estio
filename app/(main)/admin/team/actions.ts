@@ -15,7 +15,6 @@ import {
     requireOffboardingSourceById,
     requireExactPreviewIdentity,
     requirePreviewIdentityById,
-    resolveStrictAdminLocation,
     type ClerkIdentity,
     type PreviewIdentity,
 } from '@/lib/team/offboarding-preview-policy';
@@ -44,6 +43,7 @@ import {
     verifyAssignmentRecoveryToken,
     type AssignmentRecoveryCounts,
 } from '@/lib/team/assignment-recovery';
+import { resolveActiveLocation } from '@/lib/auth/active-location';
 
 type OffboardingPreview = {
     asOf: string;
@@ -70,23 +70,11 @@ export type OffboardingPreviewResult =
     | { success: false; error: string };
 
 async function getCurrentLocationId(): Promise<string> {
-    const { userId: clerkUserId } = await auth();
-    if (!clerkUserId) throw new Error('Unauthorized');
-
-    const actor = await db.user.findUnique({
-        where: { clerkId: clerkUserId },
-        select: {
-            locationRoles: {
-                where: { role: 'ADMIN' },
-                select: { locationId: true, location: { select: { users: { where: { clerkId: clerkUserId }, select: { id: true } } } } },
-            },
-        },
-    });
-    const activeAdminLocations = (actor?.locationRoles || []).filter((entry) => entry.location.users.length === 1);
-    if (activeAdminLocations.length !== 1) {
-        throw new Error('A single authoritative ADMIN location is required');
+    const resolution = await resolveActiveLocation();
+    if (resolution.status !== 'authorized' || !resolution.location || resolution.role !== 'ADMIN') {
+        throw new Error('A current ADMIN role for the active location is required');
     }
-    return activeAdminLocations[0].locationId;
+    return resolution.location.id;
 }
 
 async function requireAdminRole(locationId: string): Promise<string> {
@@ -167,8 +155,9 @@ export async function previewAssignmentRecovery(input: { sourceEmail: string }):
         const { userId: actorClerkId } = await auth();
         if (!actorClerkId) throw new Error('Unauthorized');
         const actorRecord = await db.user.findUnique({ where: { clerkId: actorClerkId }, select: previewIdentitySelect });
-        const activeMembership = resolveStrictAdminLocation(actorRecord ? toPreviewIdentity(actorRecord) : null);
-        const locationId = activeMembership.locationId;
+        const locationId = await getCurrentLocationId();
+        const activeMembership = actorRecord ? toPreviewIdentity(actorRecord).memberships.find((entry) => entry.locationId === locationId) : null;
+        if (!activeMembership?.connected || activeMembership.role !== 'ADMIN') throw new Error('Administrator access required');
         const targetEmail = normalizeOffboardingEmail(input.sourceEmail || '');
         if (!targetEmail) throw new Error('Target email is required');
 
@@ -346,8 +335,9 @@ export async function previewTransferResponsibilities(input: {
             where: { clerkId: actorClerkId },
             select: previewIdentitySelect,
         });
-        const activeMembership = resolveStrictAdminLocation(actorRecord ? toPreviewIdentity(actorRecord) : null);
-        const locationId = activeMembership.locationId;
+        const locationId = await getCurrentLocationId();
+        const activeMembership = actorRecord ? toPreviewIdentity(actorRecord).memberships.find((entry) => entry.locationId === locationId) : null;
+        if (!activeMembership?.connected || activeMembership.role !== 'ADMIN') throw new Error('Administrator access required');
         const sourceUserId = String(input.sourceUserId || '').trim();
         const successorUserId = String(input.successorUserId || '').trim();
         if (!['TRANSFER', 'KEEP_ASSIGNED'].includes(input.mode)) throw new Error('A valid offboarding mode is required');
@@ -829,6 +819,7 @@ export async function inviteUserToLocation(formData: FormData) {
         const client = await clerkClient();
 
         if (user) {
+            const activeTargetLocation = user.locations.find((location) => location.id === locationId);
             // User exists in DB. Check if they exist in Clerk (REAL user vs ZOMBIE user)
             // If they were deleted from Clerk but remain in our DB, we should NOT just link them.
             // We should treat it as a new invitation.
@@ -1143,7 +1134,7 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
                         publicMetadata: {
                             ghlRole: newRole === 'ADMIN' ? 'admin' : 'user',
                             locationId,
-                            ghlLocationId: user.locations[0]?.ghlLocationId || '',
+                            ghlLocationId: activeTargetLocation?.ghlLocationId || '',
                         }
                     });
                     console.log(`[Team] Updated Clerk role for ${user.email} to ${newRole}`);
@@ -1153,7 +1144,7 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
             }
 
             // Sync GHL User
-            if (isGhlIntegrationEnabled() && user.ghlUserId && user.locations[0]?.ghlLocationId) {
+            if (isGhlIntegrationEnabled() && user.ghlUserId && activeTargetLocation?.ghlLocationId) {
                 try {
                     const { updateGHLUser } = await import('@/lib/ghl/users');
                     // Note: Update user endpoint might not support changing role directly in all GHL versions,
@@ -1268,7 +1259,7 @@ export async function createGHLCalendarForUser(
 
         if (!user) return { success: false, message: 'User not found' };
 
-        const ghlLocationId = user.locations[0]?.ghlLocationId;
+        const ghlLocationId = user.locations.find((location) => location.id === activeLocationId)?.ghlLocationId;
         if (!ghlLocationId) return { success: false, message: 'User has no GHL Location' };
 
         if (!user.ghlUserId) {

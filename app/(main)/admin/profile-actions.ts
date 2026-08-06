@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { updateGHLUser } from '@/lib/ghl/users';
 import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from '@/lib/viewings/datetime';
+import { getLocationContext } from '@/lib/auth/location-context';
 
 export async function completeUserProfile(formData: FormData) {
     const { userId: clerkUserId } = await auth();
@@ -33,6 +34,8 @@ export async function completeUserProfile(formData: FormData) {
     }
 
     try {
+        const activeLocation = await getLocationContext();
+        if (!activeLocation) return { success: false, error: 'No active location' };
         // 1. Update local DB
         const user = await db.user.update({
             where: { clerkId: clerkUserId },
@@ -45,10 +48,10 @@ export async function completeUserProfile(formData: FormData) {
             },
             include: {
                 locationRoles: {
+                    where: { locationId: activeLocation.id },
                     include: {
                         location: true
-                    },
-                    take: 1 // Just need one to get auth context
+                    }
                 }
             }
         });
@@ -67,8 +70,8 @@ export async function completeUserProfile(formData: FormData) {
 
         // 3. Sync to GHL
         if (isGhlIntegrationEnabled() && user.ghlUserId && user.locationRoles.length > 0) {
-            const location = user.locationRoles[0].location;
-            if (location.ghlLocationId) {
+            const location = user.locationRoles.find((entry) => entry.locationId === activeLocation.id)?.location;
+            if (location?.ghlLocationId) {
                 try {
                     await updateGHLUser(location.ghlLocationId, user.ghlUserId, {
                         firstName: firstName.trim(),

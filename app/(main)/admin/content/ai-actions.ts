@@ -2,6 +2,7 @@
 
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
+import { getLocationContext } from "@/lib/auth/location-context";
 
 import { COMPONENT_SCHEMA } from "@/lib/ai/component-schema";
 import { DESIGN_SYSTEM_PROMPT, RECOMPOSITION_PROMPT } from "@/lib/ai/prompts/design-system";
@@ -60,14 +61,8 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
     }
 
     try {
-        let targetLocationId = locationId;
-
-        // If no locationId provided, resolve from user (simplistic single-tenant logic per existing patterns)
-        if (!targetLocationId) {
-            const user = await db.user.findUnique({ where: { clerkId: userId }, include: { locations: true } });
-            targetLocationId = user?.locations[0]?.id;
-            console.log(`Resolved Location ID: ${targetLocationId}`);
-        }
+        const targetLocationId = (await getLocationContext())?.id;
+        if (locationId && locationId !== targetLocationId) return { success: false, error: "Active location mismatch." };
 
         if (!targetLocationId) {
             console.log("Error: No Location Found");

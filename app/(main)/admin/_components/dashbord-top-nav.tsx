@@ -14,8 +14,15 @@ import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_co
 import { AdminNavigationGroups } from "./admin-navigation"
 import { cn } from "@/lib/utils"
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
+import { ActiveLocationSwitcher } from "./active-location-switcher"
 
-export default function DashboardTopNav({ children, appSurface = false, currentLocationName }: { children: ReactNode; appSurface?: boolean; currentLocationName: string }) {
+export default function DashboardTopNav({ children, appSurface = false, activeLocation, availableLocations, isPlatformAdmin }: {
+  children: ReactNode
+  appSurface?: boolean
+  activeLocation: { id: string; name: string | null }
+  availableLocations: Array<{ id: string; name: string | null }>
+  isPlatformAdmin: boolean
+}) {
   return (
     <div
       data-admin-top-nav={appSurface ? "app-surface" : "default"}
@@ -57,14 +64,14 @@ export default function DashboardTopNav({ children, appSurface = false, currentL
                   icon="languages"
                 />
               </div>
+              {isPlatformAdmin ? <Link href="/platform" className="mt-4 flex min-h-10 items-center rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Platform administration</Link> : null}
               <AdminNavigationGroups variant="mobile" />
             </div>
           </SheetContent>
         </Sheet>
-        <p className="min-w-0 truncate text-xs text-muted-foreground sm:text-sm">
-          Current location: <span className="font-medium text-foreground">{currentLocationName}</span>
-        </p>
+        {availableLocations.length > 1 ? <ActiveLocationSwitcher activeLocationId={activeLocation.id} locations={availableLocations} /> : null}
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
+          {isPlatformAdmin ? <Link href="/platform" className="hidden min-h-10 items-center rounded-md px-2 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex">Platform administration</Link> : null}
           <div className="hidden sm:flex">
             <QuickAssistStartButton
               label="Quick Assist"

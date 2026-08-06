@@ -16,7 +16,7 @@ test('preview accepts exact identity intent and derives actor, location, and cou
   assert.match(preview, /sourceUserId: string;\s*successorUserId\?: string;\s*mode: OffboardingMode;\s*suspendClerkGlobally: boolean/);
   assert.doesNotMatch(preview, /input\.(locationId|counts|role|isAdmin)/);
   assert.match(preview, /await auth\(\)/);
-  assert.match(preview, /resolveStrictAdminLocation/);
+  assert.match(preview, /getCurrentLocationId\(\)/);
   assert.match(preview, /where: \{ id: \{ in: requestedIds \} \}/);
   assert.match(preview, /requirePreviewIdentityById/);
   assert.match(preview, /clerk\.users\.getUser\(sourceLocal\.clerkId\)/);
@@ -105,7 +105,7 @@ test('offboarding is bound to the selected Team member instead of a standalone e
 });
 
 test('self-removal and member direct invocation fail closed server-side', () => {
-  assert.match(preview, /resolveStrictAdminLocation\(actorRecord/);
+  assert.match(preview, /getCurrentLocationId\(\)/);
   assert.match(preview, /source\.id === actorRecord!\.id/);
   assert.match(preview, /You cannot remove yourself from the active location/);
   assert.match(actions, /actor\.id === token\.sourceUserId/);

@@ -65,34 +65,15 @@ async function getAuthContext() {
   const { userId: clerkUserId } = await auth();
   if (!clerkUserId) throw new Error('Unauthorized');
 
-  const user = await db.user.findUnique({
-    where: { clerkId: clerkUserId },
-    select: {
-      id: true,
-      timeZone: true,
-      locations: { take: 1 },
-    },
-  });
-
-  if (user?.id && user.locations?.[0]?.id) {
-    const location = user.locations[0];
-    return {
-      location,
-      userId: user.id,
-      currentUserTimeZone: user.timeZone || location.timeZone || 'UTC',
-    };
-  }
-
   const location = await getLocationContext();
   if (!location?.id) throw new Error('No location context');
-
-  const fallbackUser = user?.id ? user : await getCurrentUserRecord(clerkUserId);
-  if (!fallbackUser?.id) throw new Error('User not found');
+  const user = await getCurrentUserRecord(clerkUserId);
+  if (!user?.id) throw new Error('User not found');
 
   return {
     location,
-    userId: fallbackUser.id,
-    currentUserTimeZone: fallbackUser.timeZone || location.timeZone || 'UTC',
+    userId: user.id,
+    currentUserTimeZone: user.timeZone || location.timeZone || 'UTC',
   };
 }
 

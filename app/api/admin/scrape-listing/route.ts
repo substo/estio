@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { getLocationContext } from '@/lib/auth/location-context';
 import {
     buildListingRelevanceRawAttributes,
     classifyListingRelevance,
@@ -14,8 +15,8 @@ export async function POST(req: Request) {
     const { userId } = await auth();
     if (!userId) return new NextResponse('Unauthorized', { status: 401 });
 
-    const user = await db.user.findUnique({ where: { clerkId: userId } });
-    if (!user) return new NextResponse('Unauthorized', { status: 401 });
+    const activeLocationId = (await getLocationContext())?.id || null;
+    if (!activeLocationId) return new NextResponse('Active location required', { status: 403 });
 
     const { listingId, url, platform } = await req.json();
 
@@ -104,15 +105,14 @@ export async function POST(req: Request) {
                         return;
                     }
                     locationId = existingListing?.locationId || null;
+                    if (locationId !== activeLocationId) {
+                        sendEvent({ status: 'error', error: 'Listing is outside the active location.' });
+                        return;
+                    }
                 }
 
                 if (!locationId) {
-                    // Fallback: get from user's first location
-                    const userWithLocs = await db.user.findUnique({
-                        where: { id: user.id },
-                        include: { locations: { take: 1 } },
-                    });
-                    locationId = userWithLocs?.locations?.[0]?.id || null;
+                    locationId = activeLocationId;
                 }
 
                 if (!locationId) {

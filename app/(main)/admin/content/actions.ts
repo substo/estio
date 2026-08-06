@@ -11,6 +11,7 @@ import {
     isSettingsDualWriteLegacyEnabled,
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
+import { getLocationContext } from "@/lib/auth/location-context";
 
 // Reserved slugs to prevent breaking the app
 const RESERVED_SLUGS = ["search", "property", "blog", "api", "dashboard", "sign-in"];
@@ -36,15 +37,19 @@ async function resolveUserContext() {
         return null;
     }
 
-    return { clerkUserId: userId, localUserId: user.id };
+    const activeLocationId = (await getLocationContext())?.id || null;
+    if (!activeLocationId) return null;
+    return { clerkUserId: userId, localUserId: user.id, activeLocationId };
 }
 
-async function assertLocationAccess(clerkUserId: string, locationId: string) {
+async function assertLocationAccess(clerkUserId: string, locationId: string, activeLocationId: string) {
+    if (locationId !== activeLocationId) return false;
     const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, locationId);
     return hasAccess;
 }
 
-async function assertLocationAdmin(clerkUserId: string, locationId: string) {
+async function assertLocationAdmin(clerkUserId: string, locationId: string, activeLocationId: string) {
+    if (locationId !== activeLocationId) return false;
     const isAdmin = await verifyUserIsLocationAdmin(clerkUserId, locationId);
     return isAdmin;
 }
@@ -88,7 +93,7 @@ export async function upsertPage(prevState: any, formData: FormData) {
     }
     if (!locationId) return { message: "Unauthorized: No Location" };
 
-    const hasAccess = await assertLocationAccess(context.clerkUserId, locationId);
+    const hasAccess = await assertLocationAccess(context.clerkUserId, locationId, context.activeLocationId);
     if (!hasAccess) return { message: "Unauthorized" };
 
     const title = formData.get("title") as string;
@@ -191,7 +196,7 @@ export async function deletePage(id: string) {
     });
     if (!page) return { message: "Error deleting page" };
 
-    const hasAccess = await assertLocationAccess(context.clerkUserId, page.locationId);
+    const hasAccess = await assertLocationAccess(context.clerkUserId, page.locationId, context.activeLocationId);
     if (!hasAccess) return { message: "Unauthorized" };
 
     try {
@@ -221,7 +226,7 @@ export async function upsertPost(prevState: any, formData: FormData) {
     }
     if (!locationId) return { message: "Unauthorized: No Location" };
 
-    const hasAccess = await assertLocationAccess(context.clerkUserId, locationId);
+    const hasAccess = await assertLocationAccess(context.clerkUserId, locationId, context.activeLocationId);
     if (!hasAccess) return { message: "Unauthorized" };
 
     const title = formData.get("title") as string;
@@ -282,7 +287,7 @@ export async function deletePost(id: string) {
     });
     if (!post) return { message: "Error deleting post" };
 
-    const hasAccess = await assertLocationAccess(context.clerkUserId, post.locationId);
+    const hasAccess = await assertLocationAccess(context.clerkUserId, post.locationId, context.activeLocationId);
     if (!hasAccess) return { message: "Unauthorized" };
 
     try {
@@ -305,7 +310,7 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
 
     if (!locationId) return { message: "Internal Error: No Location ID", success: false };
 
-    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId, context.activeLocationId);
     if (!isAdmin) {
         return { message: "Unauthorized", success: false };
     }
@@ -436,7 +441,7 @@ export async function updateFavoritesConfig(prevState: any, formData: FormData) 
     const locationId = String(formData.get("locationId") || "").trim();
     if (!locationId) return { success: false, message: "Missing location" };
 
-    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId, context.activeLocationId);
     if (!isAdmin) return { success: false, message: "Unauthorized" };
 
     const favoritesConfig = {
@@ -518,7 +523,7 @@ export async function updateSearchConfig(prevState: any, formData: FormData) {
     const locationId = String(formData.get("locationId") || "").trim();
     if (!locationId) return { success: false, message: "Missing location" };
 
-    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId, context.activeLocationId);
     if (!isAdmin) return { success: false, message: "Unauthorized" };
 
     const searchConfig = {
@@ -599,7 +604,7 @@ export async function updateSubmissionsConfig(prevState: any, formData: FormData
     const locationId = String(formData.get("locationId") || "").trim();
     if (!locationId) return { success: false, message: "Missing location" };
 
-    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId);
+    const isAdmin = await assertLocationAdmin(context.clerkUserId, locationId, context.activeLocationId);
     if (!isAdmin) return { success: false, message: "Unauthorized" };
 
     const submissionsConfig = {

@@ -10,6 +10,7 @@ import {
     isSettingsDualWriteLegacyEnabled,
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
+import { getLocationContext } from "@/lib/auth/location-context";
 
 type NavigationPayload = {
     navLinks: any[];
@@ -28,7 +29,7 @@ async function assertAdmin(locationId: string): Promise<string> {
         throw new Error("Unauthorized");
     }
 
-    const isAdmin = await verifyUserIsLocationAdmin(userId, locationId);
+    const isAdmin = (await getLocationContext())?.id === locationId && await verifyUserIsLocationAdmin(userId, locationId);
     if (!isAdmin) {
         throw new Error("Unauthorized");
     }

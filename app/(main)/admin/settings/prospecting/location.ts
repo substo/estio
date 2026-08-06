@@ -1,15 +1,8 @@
-import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import { getLocationContext } from '@/lib/auth/location-context';
 
 export async function getProspectingLocationId() {
-    const { userId } = await auth();
-
-    const user = await db.user.findUnique({
-        where: { clerkId: userId || '' },
-        include: { locations: { take: 1 } },
-    });
-
-    return user?.locations?.[0]?.id || null;
+    return (await getLocationContext())?.id || null;
 }
 
 export async function getProspectingConnection(connectionId: string, locationId: string) {

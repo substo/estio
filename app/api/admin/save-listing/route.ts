@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import db from '@/lib/db';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { getLocationContext } from '@/lib/auth/location-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,8 +10,8 @@ export async function POST(req: Request) {
     const { userId } = await auth();
     if (!userId) return new NextResponse('Unauthorized', { status: 401 });
 
-    const user = await db.user.findUnique({ where: { clerkId: userId } });
-    if (!user) return new NextResponse('Unauthorized', { status: 401 });
+    const activeLocationId = (await getLocationContext())?.id || null;
+    if (!activeLocationId) return new NextResponse('Active location required', { status: 403 });
 
     const { listingId, locationId: providedLocationId, platform, url, data } = await req.json();
 
@@ -19,7 +20,10 @@ export async function POST(req: Request) {
     }
 
     // Resolve locationId
-    let locationId = providedLocationId || null;
+    if (providedLocationId && providedLocationId !== activeLocationId) {
+        return new NextResponse('Active location mismatch', { status: 403 });
+    }
+    let locationId = activeLocationId;
     let existingListingLocationId: string | null = null;
 
     if (listingId) {
@@ -35,18 +39,6 @@ export async function POST(req: Request) {
             return new NextResponse('Listing does not belong to the requested location', { status: 403 });
         }
         locationId = existingListingLocationId;
-    }
-
-    if (!locationId) {
-        const userWithLocs = await db.user.findUnique({
-            where: { id: user.id },
-            include: { locations: { take: 1 } },
-        });
-        locationId = userWithLocs?.locations?.[0]?.id || null;
-    }
-
-    if (!locationId) {
-        return new NextResponse('Could not determine locationId', { status: 400 });
     }
 
     const hasAccess = await verifyUserHasAccessToLocation(userId, locationId);

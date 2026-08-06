@@ -1,0 +1,4 @@
+CREATE TYPE "PlatformRole" AS ENUM ('STANDARD', 'PLATFORM_ADMIN');
+
+ALTER TABLE "User"
+ADD COLUMN "platformRole" "PlatformRole" NOT NULL DEFAULT 'STANDARD';

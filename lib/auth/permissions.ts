@@ -16,17 +16,18 @@ export async function verifyUserHasAccessToLocation(userId: string, locationId: 
     try {
         const user = await db.user.findUnique({
             where: { clerkId: userId },
-            include: {
+            select: {
                 locations: {
                     where: { id: locationId },
                     select: { id: true }
-                }
+                },
+                locationRoles: { where: { locationId }, select: { id: true } },
             }
         });
 
 
 
-        return !!user?.locations?.length;
+        return user?.locations.length === 1 && user.locationRoles.length === 1;
     } catch (error) {
         console.error('[verifyUserHasAccessToLocation] Error checking permissions:', error);
         return false;

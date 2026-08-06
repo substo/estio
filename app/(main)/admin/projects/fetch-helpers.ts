@@ -3,11 +3,12 @@
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
+import { getLocationContext } from '@/lib/auth/location-context';
 
 export async function getProjectsForSelect(locationId: string) {
     try {
         const { userId } = await auth();
-        if (!userId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
+        if (!userId || (await getLocationContext())?.id !== locationId || !(await verifyUserHasAccessToLocation(userId, locationId))) {
             return [];
         }
         const projects = await db.project.findMany({
