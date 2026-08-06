@@ -88,7 +88,7 @@ export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
                                 </Link>
                             </DialogClose>
                             <DialogClose asChild>
-                                <Link href="/admin" legacyBehavior passHref className="cursor-pointer">
+                                <Link href="/dashboard" legacyBehavior passHref className="cursor-pointer">
                                     <Button variant="outline">
                                         Dashboard
                                     </Button>
@@ -145,7 +145,7 @@ export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
                         </NavigationMenuContent>
                     </NavigationMenuItem>
                     <NavigationMenuItem className="max-[825px]:hidden">
-                        <Link href="/admin">
+                        <Link href="/dashboard">
                             <Button variant="ghost">
                                 Dashboard
                             </Button>

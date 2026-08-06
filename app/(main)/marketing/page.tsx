@@ -27,7 +27,7 @@ export default function MarketingPage() {
             From import to publish, we handle the heavy lifting.
           </p>
           <div className='flex flex-row gap-4 mt-6'>
-            <Link href="/admin">
+            <Link href="/dashboard">
               <Button size="lg">Get Started</Button>
             </Link>
           </div>

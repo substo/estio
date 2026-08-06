@@ -12,7 +12,7 @@ export default function HeroSection() {
                 Vision-powered imports, intelligent feed mapping, and instant site generation. Sync listings, capture leads, and manage contacts—seamlessly integrated.
             </p>
             <div className="flex justify-center items-center mt-5 gap-3">
-                <Link href="/admin">
+                <Link href="/dashboard">
                     <Button className="animate-buttonheartbeat rounded-md bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white">
                         Get Started
                     </Button>

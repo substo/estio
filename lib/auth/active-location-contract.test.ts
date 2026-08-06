@@ -10,6 +10,8 @@ const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
 const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/platform/page.tsx");
+const dashboardEntry = read("app/(main)/dashboard/page.tsx");
+const publicNavbar = read("components/wrapper/navbar.tsx");
 
 test("resolver uses immutable Clerk mapping and local connection-role intersection", () => {
   assert.match(resolver, /where: \{ clerkId: clerkUserId \}/);
@@ -41,4 +43,12 @@ test("platform access is role-based, tenant-independent, and exposes only aggreg
   assert.match(platformPage, /Active members/);
   assert.match(platformPage, /Most recent activity/);
   assert.doesNotMatch(platformPage, /conversation|message|contact|credential|apiKey|ipAddress/);
+});
+
+test("public dashboard entry sends platform administrators to the platform console", () => {
+  assert.match(dashboardEntry, /getPlatformAdminContext/);
+  assert.match(dashboardEntry, /\? "\/platform" : "\/admin"/);
+  assert.doesNotMatch(dashboardEntry, /email|publicMetadata|cookie/);
+  assert.doesNotMatch(publicNavbar, /href="\/admin"/);
+  assert.match(publicNavbar, /href="\/dashboard"/);
 });

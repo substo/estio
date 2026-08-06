@@ -33,7 +33,7 @@ export default function SetupPage() {
                             Add the app to your GoHighLevel agency in 2 minutes. This one-time setup works for all your sub-accounts.
                         </p>
                         <div className="pt-4">
-                            <Link href="/admin">
+                            <Link href="/dashboard">
                                 <Button size="lg" className="animate-buttonheartbeat">
                                     Get Started / Login
                                 </Button>
