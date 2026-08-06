@@ -8,7 +8,7 @@ import { AnalyticsTracker } from "@/components/analytics/analytics-tracker";
 import { LocationPresenceTracker } from "./_components/location-presence-tracker";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
 import db from "@/lib/db";
-import { getCurrentImpersonationContext } from "@/lib/auth/impersonation";
+import { activateCurrentImpersonation } from "@/lib/auth/impersonation";
 import { auth } from "@clerk/nextjs/server";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
 import { listPlatformLocationLoginOptions } from "@/lib/auth/platform-location-options";
@@ -27,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   const { location, user } = resolution;
-  const impersonation = await getCurrentImpersonationContext();
+  const impersonation = (await auth()).actor ? await activateCurrentImpersonation() : null;
   const needsOnboarding = !user.firstName || !user.lastName;
   const [siteConfig, platformLoginLocations] = await Promise.all([
     db.siteConfig.findUnique({ where: { locationId: location.id }, select: { theme: true } }),

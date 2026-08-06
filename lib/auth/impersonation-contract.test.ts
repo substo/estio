@@ -32,10 +32,18 @@ test("the audited location overrides cookies and invalid actor sessions fail clo
 test("server and client detect actor state, show a banner, and provide an exit", () => {
   const resolver = read("lib/auth/active-location.ts");
   const banner = read("app/(main)/admin/_components/impersonation-banner.tsx");
+  const layout = read("app/(main)/admin/layout.tsx");
   assert.match(resolver, /authState\.actor/);
+  assert.match(layout, /activateCurrentImpersonation/);
   assert.match(banner, /useAuth\(\)/);
   assert.match(banner, /Logged in as/);
   assert.match(banner, /\/api\/platform\/impersonation\/end/);
+});
+
+test("Clerk owns one-time ticket consumption for actor-token sign in", () => {
+  const signInPage = read("app/(main)/(auth)/sign-in/[[...sign-in]]/page.tsx");
+  assert.match(signInPage, /<SignIn \/>/);
+  assert.doesNotMatch(signInPage, /useSignIn|strategy: "ticket"|__clerk_ticket|signIn\.create/);
 });
 
 test("master login is direct, does not require a support reason, and allows normal user actions", () => {
