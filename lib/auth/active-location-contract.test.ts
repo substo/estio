@@ -16,6 +16,7 @@ const dashboardEntry = read("app/(main)/dashboard/page.tsx");
 const publicNavbar = read("components/wrapper/navbar.tsx");
 const platformBootstrapScript = read("scripts/grant-platform-admin.ts");
 const platformMasterProvisioner = read("scripts/provision-platform-master-location.ts");
+const activeLocationRoute = read("app/api/active-location/route.ts");
 
 test("resolver uses immutable Clerk mapping and local connection-role intersection", () => {
   assert.match(resolver, /where: \{ clerkId: clerkUserId \}/);
@@ -24,6 +25,8 @@ test("resolver uses immutable Clerk mapping and local connection-role intersecti
   assert.match(resolver, /httpOnly: true/);
   assert.match(resolver, /sameSite: "lax"/);
   assert.match(resolver, /path: "\/"/);
+  assert.match(resolver, /isPlatformMaster: true/);
+  assert.match(resolver, /scopeDirectLocationsForSession/);
 });
 
 test("admin layout blocks multi-location tenant rendering until selection", () => {
@@ -50,12 +53,20 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.match(layout, /AdminShellLayout/);
   assert.doesNotMatch(layout, /MasterLoginPage/);
   assert.match(platformLocationOptions, /user\.locations\.some/);
-  assert.match(platformLocationSwitcher, /platform-location-login/);
-  assert.match(platformLocationSwitcher, /platform-user-login/);
+  assert.match(platformLocationSwitcher, /aria-label="Choose location"/);
+  assert.match(platformLocationSwitcher, /aria-label="Choose user"/);
+  assert.match(platformLocationSwitcher, /DropdownMenuRadioGroup/);
   assert.match(platformLocationSwitcher, /Log in/);
   assert.match(platformLocationSwitcher, /!selectedLocation\.isPlatformMaster/);
   assert.doesNotMatch(platformLocationOptions, /conversation|message|contact|credential|apiKey|ipAddress/);
   assert.match(platformPage, /redirect\("\/admin"\)/);
+});
+
+test("active-location writes accept the public origin behind the reverse proxy", () => {
+  assert.match(activeLocationRoute, /isAllowedRequestOrigin/);
+  assert.match(activeLocationRoute, /x-forwarded-host/);
+  assert.match(activeLocationRoute, /x-forwarded-proto/);
+  assert.doesNotMatch(activeLocationRoute, /origin !== request\.nextUrl\.origin/);
 });
 
 test("public dashboard entry sends every authenticated user to admin", () => {

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
+import { APP_URL } from "@/lib/app-config";
+import { isAllowedRequestOrigin } from "@/lib/auth/request-origin-policy";
 import {
   ACTIVE_LOCATION_COOKIE,
   ACTIVE_LOCATION_COOKIE_OPTIONS,
@@ -13,7 +15,14 @@ function safeReturnTo(value: unknown): string {
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) {
+  if (!isAllowedRequestOrigin({
+    origin,
+    requestOrigin: request.nextUrl.origin,
+    appUrl: APP_URL,
+    host: request.headers.get("host"),
+    forwardedHost: request.headers.get("x-forwarded-host"),
+    forwardedProto: request.headers.get("x-forwarded-proto"),
+  })) {
     return NextResponse.json({ ok: false, error: "Invalid request origin." }, { status: 403 });
   }
 

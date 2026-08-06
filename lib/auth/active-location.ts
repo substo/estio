@@ -4,7 +4,12 @@ import { auth } from "@clerk/nextjs/server";
 import type { Location, PlatformRole } from "@prisma/client";
 import { cookies } from "next/headers";
 import db from "@/lib/db";
-import { chooseActiveLocation, intersectAuthorizedLocations, type AuthorizedLocation } from "@/lib/auth/active-location-policy";
+import {
+  chooseActiveLocation,
+  intersectAuthorizedLocations,
+  scopeDirectLocationsForSession,
+  type AuthorizedLocation,
+} from "@/lib/auth/active-location-policy";
 import { extractImpersonationClaim } from "@/lib/auth/impersonation-policy";
 import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
 
@@ -46,7 +51,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
     where: { clerkId: clerkUserId },
     select: {
       id: true, clerkId: true, firstName: true, lastName: true, phone: true, platformRole: true,
-      locations: { select: { id: true, name: true } },
+      locations: { select: { id: true, name: true, isPlatformMaster: true } },
       locationRoles: { select: { locationId: true, role: true, contactAccessScope: true } },
     },
   });
@@ -54,7 +59,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
     return { status: "no_access", clerkUserId, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
 
-  const availableLocations = intersectAuthorizedLocations({ connectedLocations: user.locations, roles: user.locationRoles });
+  const authorizedLocations = intersectAuthorizedLocations({ connectedLocations: user.locations, roles: user.locationRoles });
   const actorClaim = extractImpersonationClaim(authState.actor);
   const impersonation = actorClaim
     ? await getImpersonationContextFromAuth({ userId: authState.userId, sessionId: authState.sessionId, actor: authState.actor })
@@ -62,6 +67,10 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
   if (authState.actor && !impersonation) {
     return { status: "no_access", clerkUserId, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
+  const availableLocations = scopeDirectLocationsForSession(authorizedLocations, {
+    platformRole: user.platformRole,
+    isImpersonating: Boolean(impersonation),
+  });
   const requestedLocationId = impersonation?.locationId ?? (await cookies()).get(ACTIVE_LOCATION_COOKIE)?.value;
   const selection = chooseActiveLocation(availableLocations, requestedLocationId);
   const localIdentity: LocalIdentity = {

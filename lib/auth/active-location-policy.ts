@@ -3,12 +3,13 @@ import type { ContactAccessScope, PlatformRole, UserRole } from "@prisma/client"
 export type AuthorizedLocation = {
   id: string;
   name: string | null;
+  isPlatformMaster: boolean;
   role: UserRole;
   contactAccessScope: ContactAccessScope;
 };
 
 export type LocationAuthorityInput = {
-  connectedLocations: Array<{ id: string; name: string | null }>;
+  connectedLocations: Array<{ id: string; name: string | null; isPlatformMaster: boolean }>;
   roles: Array<{ locationId: string; role: UserRole; contactAccessScope: ContactAccessScope }>;
 };
 
@@ -39,6 +40,14 @@ export function chooseActiveLocation(locations: AuthorizedLocation[], cookieLoca
   const requested = String(cookieLocationId || "").trim();
   const selected = locations.find((location) => location.id === requested);
   return selected ? { status: "authorized", location: selected } : { status: "selection_required", location: null };
+}
+
+export function scopeDirectLocationsForSession(
+  locations: AuthorizedLocation[],
+  session: { platformRole: PlatformRole; isImpersonating: boolean },
+): AuthorizedLocation[] {
+  if (session.platformRole !== "PLATFORM_ADMIN" || session.isImpersonating) return locations;
+  return locations.filter((location) => location.isPlatformMaster);
 }
 
 export function isPlatformAdministrator(platformRole: PlatformRole): boolean {
