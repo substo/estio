@@ -27,6 +27,7 @@ type LocalIdentity = {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
+  timeZone: string | null;
   platformRole: PlatformRole;
 };
 
@@ -50,7 +51,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
   const user = await db.user.findUnique({
     where: { clerkId: clerkUserId },
     select: {
-      id: true, clerkId: true, firstName: true, lastName: true, phone: true, platformRole: true,
+      id: true, clerkId: true, firstName: true, lastName: true, phone: true, timeZone: true, platformRole: true,
       locations: { select: { id: true, name: true, isPlatformMaster: true } },
       locationRoles: { select: { locationId: true, role: true, contactAccessScope: true } },
     },
@@ -75,7 +76,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
   const selection = chooseActiveLocation(availableLocations, requestedLocationId);
   const localIdentity: LocalIdentity = {
     id: user.id, clerkId: user.clerkId, firstName: user.firstName, lastName: user.lastName,
-    phone: user.phone, platformRole: user.platformRole,
+    phone: user.phone, timeZone: user.timeZone, platformRole: user.platformRole,
   };
   if (selection.status !== "authorized") {
     return { status: selection.status, clerkUserId, user: localIdentity, location: null, role: null, availableLocations, locationCount: availableLocations.length };

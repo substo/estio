@@ -15,18 +15,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import config from "@/config"
 import { SignOutButton, useUser } from "@clerk/nextjs"
-import {
-    CreditCard,
-    LogOut,
-    Settings,
-    User
-} from "lucide-react"
+import { LogOut, User } from "lucide-react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 
 export function UserProfile() {
-    const router = useRouter()
-
     if (!config?.auth?.enabled) {
         return null;
     }
@@ -45,13 +37,13 @@ function UserProfileContent() {
                 </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56">
-                <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                <DropdownMenuLabel>My profile</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                     <Link href="/admin/user-profile">
                         <DropdownMenuItem>
                             <User className="mr-2 h-4 w-4" />
-                            <span>Profile</span>
+                            <span>My profile</span>
                             <DropdownMenuShortcut>⇧⌘P</DropdownMenuShortcut>
                         </DropdownMenuItem>
                     </Link>

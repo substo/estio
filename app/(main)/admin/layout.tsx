@@ -66,7 +66,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       </AdminShellLayout>
       <OnboardingWrapper
         needsOnboarding={needsOnboarding}
-        existingData={{ firstName: user.firstName || "", lastName: user.lastName || "", phone: user.phone || "" }}
+        existingData={{ firstName: user.firstName || "", lastName: user.lastName || "", timeZone: user.timeZone || "" }}
       />
     </>
   );

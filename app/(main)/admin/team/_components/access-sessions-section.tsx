@@ -90,7 +90,7 @@ export function AccessSessionsSection({ members }: { members: AccessMember[] }) 
           <p className="mt-1 text-sm text-muted-foreground">Review when team members accessed this location and their location-filtered Estio sessions.</p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href="/admin/user-profile">Manage my devices</Link>
+          <Link href="/admin/user-profile#account-security">Manage my devices</Link>
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">

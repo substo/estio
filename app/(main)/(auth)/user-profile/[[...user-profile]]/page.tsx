@@ -1,22 +1,18 @@
-"use client"
-import PageWrapper from "@/components/wrapper/page-wrapper";
 import config from "@/config";
-import { UserProfile } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 
-const UserProfilePage = () => {
-    const router = useRouter()
-
+const UserProfilePage = async () => {
     if (!config?.auth?.enabled) {
-        router.back()
+        redirect('/admin');
     }
-    return (
-        <PageWrapper >
-            <div className="h-full flex items-center justify-center p-9">
-                {config?.auth?.enabled && <UserProfile path="/user-profile" routing="path" />}
-            </div>
-        </PageWrapper>
-    )
+
+    const { userId } = await auth();
+    if (!userId) {
+        redirect('/sign-in');
+    }
+
+    redirect('/admin/user-profile');
 }
 
 

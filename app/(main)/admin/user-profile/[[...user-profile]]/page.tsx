@@ -1,10 +1,9 @@
 import config from "@/config";
-import { UserProfile } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { UserProfileForm } from "../_components/user-profile-form";
-import { WhatsAppVerification } from "../_components/whatsapp-verification";
+import { AccountSecurityCard } from "../_components/account-security-card";
 
 const UserProfilePage = async () => {
     if (!config?.auth?.enabled) {
@@ -12,43 +11,40 @@ const UserProfilePage = async () => {
     }
 
     const user = await currentUser();
-
-    // Fetch local user details to populate the form
-    // We assume the user exists in DB properly via sync, but fallback gracefully
-    let dbUser = null;
-    if (user) {
-        dbUser = await db.user.findUnique({
-            where: { clerkId: user.id },
-            select: {
-                firstName: true,
-                lastName: true,
-                phone: true,
-                email: true,
-                timeZone: true,
-                id: true
-            }
-        });
+    if (!user) {
+        redirect('/sign-in');
     }
 
+    const dbUser = await db.user.findUnique({
+        where: { clerkId: user.id },
+        select: {
+            firstName: true,
+            lastName: true,
+            timeZone: true,
+        }
+    });
+
+    const primaryEmail = user.emailAddresses.find(
+        (email) => email.id === user.primaryEmailAddressId
+    )?.emailAddress || user.emailAddresses[0]?.emailAddress || '';
+
     const initialData = {
-        firstName: dbUser?.firstName || user?.firstName || '',
-        lastName: dbUser?.lastName || user?.lastName || '',
-        phone: dbUser?.phone || '',
-        email: dbUser?.email || user?.emailAddresses[0]?.emailAddress || '',
+        firstName: dbUser?.firstName || '',
+        lastName: dbUser?.lastName || '',
         timeZone: dbUser?.timeZone || '',
     };
 
     return (
-        <div className="flex flex-col items-center justify-start p-6 space-y-8 w-full max-w-5xl mx-auto">
-            <div className="w-full space-y-6">
+        <main className="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
+            <div className="space-y-1">
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">My profile</h1>
+                <p className="text-muted-foreground">Manage your personal details and sign-in security.</p>
+            </div>
+            <div className="grid gap-6">
                 <UserProfileForm initialData={initialData} />
-                <WhatsAppVerification />
+                <AccountSecurityCard primaryEmail={primaryEmail} />
             </div>
-
-            <div className="w-full flex justify-center">
-                <UserProfile path="/admin/user-profile" routing="path" />
-            </div>
-        </div>
+        </main>
     )
 }
 

@@ -17,7 +17,7 @@ interface OnboardingModalProps {
     existingData?: {
         firstName: string;
         lastName: string;
-        phone: string;
+        timeZone: string;
     };
 }
 
@@ -77,14 +77,23 @@ export function OnboardingModal({ existingData }: OnboardingModalProps) {
                     </div>
 
                     <div className="space-y-2">
-                        <Label htmlFor="phone">Phone Number</Label>
+                        <Label htmlFor="timeZone">Time zone *</Label>
                         <Input
-                            id="phone"
-                            name="phone"
-                            type="tel"
-                            placeholder="+357 99 123456"
-                            defaultValue={existingData?.phone}
+                            id="timeZone"
+                            name="timeZone"
+                            placeholder="For example, Europe/Nicosia"
+                            defaultValue={existingData?.timeZone}
+                            list="onboarding-common-timezones"
+                            required
                         />
+                        <datalist id="onboarding-common-timezones">
+                            <option value="Europe/Nicosia" />
+                            <option value="Europe/Athens" />
+                            <option value="Europe/London" />
+                            <option value="UTC" />
+                            <option value="Asia/Dubai" />
+                            <option value="America/New_York" />
+                        </datalist>
                     </div>
 
                     {error && (

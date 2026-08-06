@@ -14,13 +14,21 @@ export async function completeUserProfile(formData: FormData) {
         return { success: false, error: 'Unauthorized' };
     }
 
-    const firstName = formData.get('firstName') as string;
-    const lastName = formData.get('lastName') as string;
-    const phone = (formData.get('phone') as string) || null;
-    const rawTimeZone = (formData.get('timeZone') as string) || '';
+    const firstName = typeof formData.get('firstName') === 'string'
+        ? String(formData.get('firstName')).trim()
+        : '';
+    const lastName = typeof formData.get('lastName') === 'string'
+        ? String(formData.get('lastName')).trim()
+        : '';
+    const rawTimeZone = typeof formData.get('timeZone') === 'string'
+        ? String(formData.get('timeZone')).trim()
+        : '';
 
     if (!firstName || !lastName) {
         return { success: false, error: 'First name and last name are required' };
+    }
+    if (firstName.length > 100 || lastName.length > 100) {
+        return { success: false, error: 'First name and last name must be 100 characters or fewer' };
     }
 
     let timeZone = '';
@@ -28,70 +36,69 @@ export async function completeUserProfile(formData: FormData) {
         timeZone = normalizeIanaTimeZoneOrThrow(rawTimeZone);
     } catch (error) {
         if (error instanceof ViewingDateTimeValidationError) {
-            return { success: false, error: 'Please enter a valid IANA timezone (e.g. Europe/Nicosia).' };
+            return { success: false, error: 'Please choose a valid time zone (for example, Europe/Nicosia).' };
         }
-        return { success: false, error: 'Invalid timezone value.' };
+        return { success: false, error: 'Please choose a valid time zone.' };
     }
 
     try {
-        const activeLocation = await getLocationContext();
-        if (!activeLocation) return { success: false, error: 'No active location' };
-        // 1. Update local DB
+        // The local Estio user is the source of truth and is resolved only from the
+        // authenticated Clerk identity. No target user identifier is accepted.
         const user = await db.user.update({
             where: { clerkId: clerkUserId },
             data: {
-                firstName: firstName.trim(),
-                lastName: lastName.trim(),
+                firstName,
+                lastName,
                 timeZone,
-                // Phone is now managed via verified sync only
-                // phone: phone?.trim() || null 
             },
-            include: {
-                locationRoles: {
-                    where: { locationId: activeLocation.id },
-                    include: {
-                        location: true
-                    }
-                }
-            }
+            select: { id: true, ghlUserId: true },
         });
 
-        // 2. Sync to Clerk
+        // Clerk name mirroring is best effort; it never selects the local target.
         try {
             const client = await clerkClient();
             await client.users.updateUser(clerkUserId, {
-                firstName: firstName.trim(),
-                lastName: lastName.trim()
+                firstName,
+                lastName,
             });
         } catch (clerkError) {
             console.error('[Profile] Failed to sync to Clerk:', clerkError);
-            // Continue even if Clerk fails, as local DB is primary
         }
 
-        // 3. Sync to GHL
-        if (isGhlIntegrationEnabled() && user.ghlUserId && user.locationRoles.length > 0) {
-            const location = user.locationRoles.find((entry) => entry.locationId === activeLocation.id)?.location;
-            if (location?.ghlLocationId) {
-                try {
-                    await updateGHLUser(location.ghlLocationId, user.ghlUserId, {
-                        firstName: firstName.trim(),
-                        lastName: lastName.trim(),
-                        phone: phone?.trim() || undefined,
-                        email: user.email // optional but good for consistency
+        // An active location is optional for a personal profile edit. If one is
+        // authorized, mirror names only when both provider identities match.
+        const activeLocation = await getLocationContext().catch((locationError) => {
+            console.error('[Profile] Failed to resolve optional location for name sync:', locationError);
+            return null;
+        });
+        try {
+            if (isGhlIntegrationEnabled() && activeLocation?.ghlLocationId && user.ghlUserId) {
+                const matchingRole = await db.userLocationRole.findUnique({
+                    where: {
+                        userId_locationId: {
+                            userId: user.id,
+                            locationId: activeLocation.id,
+                        },
+                    },
+                    select: { id: true },
+                });
+                if (matchingRole) {
+                    await updateGHLUser(activeLocation.ghlLocationId, user.ghlUserId, {
+                        firstName,
+                        lastName,
                     });
                     console.log('[Profile] Synced to GHL successfully');
-                } catch (ghlError) {
-                    console.error('[Profile] Failed to sync to GHL:', ghlError);
-                    // Don't fail the whole request
                 }
             }
+        } catch (ghlError) {
+            console.error('[Profile] Failed to sync to GHL:', ghlError);
         }
 
-        revalidatePath('/admin');
+        revalidatePath('/admin/user-profile');
         return { success: true };
-    } catch (error: any) {
+    } catch (error) {
         console.error('[Profile] Failed to update profile:', error);
-        return { success: false, error: error.message || 'Failed to update profile' };
+        return { success: false, error: 'We could not update your profile. Please try again.' };
     }
 }
 
@@ -104,7 +111,7 @@ export async function getUserProfileStatus() {
     try {
         const user = await db.user.findUnique({
             where: { clerkId: clerkUserId },
-            select: { firstName: true, lastName: true, phone: true, timeZone: true }
+            select: { firstName: true, lastName: true, timeZone: true }
         });
 
         if (!user) {
@@ -117,7 +124,6 @@ export async function getUserProfileStatus() {
             existingData: {
                 firstName: user.firstName || '',
                 lastName: user.lastName || '',
-                phone: user.phone || '',
                 timeZone: user.timeZone || ''
             }
         };

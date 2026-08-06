@@ -8,7 +8,7 @@ interface OnboardingWrapperProps {
     existingData?: {
         firstName: string;
         lastName: string;
-        phone: string;
+        timeZone: string;
     };
 }
 
