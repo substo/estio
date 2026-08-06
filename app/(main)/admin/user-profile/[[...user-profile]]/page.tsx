@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { UserProfileForm } from "../_components/user-profile-form";
-import { AccountSecurityCard } from "../_components/account-security-card";
 
 const UserProfilePage = async () => {
     if (!config?.auth?.enabled) {
@@ -40,10 +39,7 @@ const UserProfilePage = async () => {
                 <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">My profile</h1>
                 <p className="text-muted-foreground">Manage your personal details and sign-in security.</p>
             </div>
-            <div className="grid gap-6">
-                <UserProfileForm initialData={initialData} />
-                <AccountSecurityCard primaryEmail={primaryEmail} />
-            </div>
+            <UserProfileForm initialData={initialData} primaryEmail={primaryEmail} />
         </main>
     )
 }

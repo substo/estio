@@ -8,17 +8,17 @@ const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
 
 const page = read('app/(main)/admin/user-profile/[[...user-profile]]/page.tsx');
 const form = read('app/(main)/admin/user-profile/_components/user-profile-form.tsx');
-const security = read('app/(main)/admin/user-profile/_components/account-security-card.tsx');
 const action = read('app/(main)/admin/profile-actions.ts');
 const completeAction = action.slice(0, action.indexOf('export async function getUserProfileStatus'));
 const legacyRoute = read('app/(main)/(auth)/user-profile/[[...user-profile]]/page.tsx');
 const sessionLinks = read('app/(main)/admin/team/_components/access-sessions-section.tsx');
 
-test('the canonical profile page renders two Estio sections without embedded or retired profile applications', () => {
+test('the canonical profile page renders one Estio personal-details section without embedded or retired profile applications', () => {
     assert.match(page, /<h1[^>]*>My profile<\/h1>/);
     assert.equal((page.match(/<h1\b/g) || []).length, 1);
-    assert.match(page, /<UserProfileForm initialData=\{initialData\} \/>/);
-    assert.match(page, /<AccountSecurityCard primaryEmail=\{primaryEmail\} \/>/);
+    assert.match(page, /<UserProfileForm initialData=\{initialData\} primaryEmail=\{primaryEmail\} \/>/);
+    assert.doesNotMatch(page, /AccountSecurityCard/);
+    assert.equal(existsSync(path.join(root, 'app/(main)/admin/user-profile/_components/account-security-card.tsx')), false);
     assert.doesNotMatch(page, /<UserProfile\b/);
     assert.doesNotMatch(page, /WhatsAppVerification/);
     assert.equal(existsSync(path.join(root, 'app/(main)/admin/user-profile/_components/whatsapp-verification.tsx')), false);
@@ -52,11 +52,11 @@ test('the action authenticates and always targets the authenticated local user w
 });
 
 test('account management opens as a modal with irrelevant API key navigation hidden', () => {
-    assert.match(security, /id="account-security"/);
-    assert.match(security, /<h2 id="account-security-heading"/);
-    assert.doesNotMatch(security, /CardTitle/);
-    assert.match(security, /aria-label="Manage sign-in and security"/);
-    assert.match(security, /openUserProfile\(\{ apiKeysProps: \{ hide: true \} \}\)/);
+    assert.match(form, /id="account-security"/);
+    assert.match(form, /Primary sign-in email/);
+    assert.doesNotMatch(form, /Account security<\/h2>/);
+    assert.match(form, /aria-label="Manage sign-in and security"/);
+    assert.match(form, /openUserProfile\(\{ apiKeysProps: \{ hide: true \} \}\)/);
     assert.match(sessionLinks, /href="\/admin\/user-profile#account-security"/);
 });
 

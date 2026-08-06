@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useClerk } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { completeUserProfile } from '@/app/(main)/admin/profile-actions';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 
 interface UserProfileFormProps {
+    primaryEmail: string;
     initialData: {
         firstName: string;
         lastName: string;
@@ -16,7 +18,8 @@ interface UserProfileFormProps {
     };
 }
 
-export function UserProfileForm({ initialData }: UserProfileFormProps) {
+export function UserProfileForm({ initialData, primaryEmail }: UserProfileFormProps) {
+    const clerk = useClerk();
     const [isPending, startTransition] = useTransition();
     const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -88,6 +91,26 @@ export function UserProfileForm({ initialData }: UserProfileFormProps) {
                         <p className="text-xs text-muted-foreground">
                             Used to show appointments and schedules in your local time.
                         </p>
+                    </div>
+
+                    <div
+                        id="account-security"
+                        className="flex scroll-mt-6 flex-col gap-4 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                        <div className="min-w-0">
+                            <p className="text-sm font-medium">Primary sign-in email</p>
+                            <p className="truncate text-sm text-muted-foreground">{primaryEmail || 'Not available'}</p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full shrink-0 sm:w-auto"
+                            aria-label="Manage sign-in and security"
+                            onClick={() => clerk.openUserProfile({ apiKeysProps: { hide: true } })}
+                        >
+                            <ShieldCheck className="mr-2 h-4 w-4" />
+                            Manage sign-in and security
+                        </Button>
                     </div>
 
                     <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
