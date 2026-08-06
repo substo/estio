@@ -1,7 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { APP_DOMAIN, APP_URL, SYSTEM_DOMAINS } from "@/lib/app-config";
-import { isRestrictedImpersonationRequest } from "@/lib/auth/impersonation-policy";
 
 const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)"]);
 
@@ -11,16 +10,6 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   // Remove port if present (robust regex)
   hostname = hostname ? hostname.replace(/:\d+$/, "") : "";
   const url = req.nextUrl;
-
-  if (isRestrictedImpersonationRequest(url.pathname, req.method)) {
-    const authState = await auth();
-    if (authState.actor) {
-      return NextResponse.json(
-        { error: "This operation is unavailable while using support access." },
-        { status: 403, headers: { "Cache-Control": "no-store" } },
-      );
-    }
-  }
 
   if (hostname === `www.${APP_DOMAIN}`) {
     const destination = new URL(req.url);

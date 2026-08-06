@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useAuth, useClerk } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 
-export default function InvalidSupportAccessPage() {
+export default function InvalidMasterLoginPage() {
   const { sessionId } = useAuth();
   const clerk = useClerk();
   const [busy, setBusy] = useState(false);
@@ -17,9 +17,9 @@ export default function InvalidSupportAccessPage() {
 
   return (
     <main className="mx-auto flex min-h-[60vh] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
-      <h1 className="text-2xl font-semibold">Support access ended</h1>
-      <p className="text-muted-foreground">This session expired or no longer has valid access to the audited location. Exit it before continuing.</p>
-      <Button onClick={exit} disabled={busy}>{busy ? "Exiting…" : "Exit support access"}</Button>
+      <h1 className="text-2xl font-semibold">User session ended</h1>
+      <p className="text-muted-foreground">This login expired or the selected user no longer belongs to the location. Sign out before continuing.</p>
+      <Button onClick={exit} disabled={busy}>{busy ? "Signing out…" : "Sign out user"}</Button>
     </main>
   );
 }

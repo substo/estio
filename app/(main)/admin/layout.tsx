@@ -43,9 +43,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
           targetName: impersonation.targetName,
           targetEmail: impersonation.targetEmail,
           locationName: impersonation.locationName,
-          reason: impersonation.reason,
           sessionId: impersonation.sessionId,
-          sessionExpiresAt: impersonation.sessionExpiresAt.toISOString(),
         } : null}
       >
         <AdminContentFrame>

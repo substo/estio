@@ -8,6 +8,6 @@ export async function POST() {
     await endCurrentImpersonation();
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch {
-    return NextResponse.json({ error: "Support access is invalid or already ended." }, { status: 403, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ error: "Master login is invalid or already ended." }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
 }

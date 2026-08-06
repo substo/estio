@@ -8,6 +8,6 @@ export async function POST() {
     const context = await activateCurrentImpersonation();
     return NextResponse.json({ ok: true, expiresAt: context.sessionExpiresAt.toISOString() }, { headers: { "Cache-Control": "no-store" } });
   } catch {
-    return NextResponse.json({ error: "Support access is invalid or expired." }, { status: 403, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ error: "Master login is invalid or expired." }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
 }

@@ -10,6 +10,7 @@ const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
 const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/platform/page.tsx");
+const masterLoginForm = read("app/(main)/platform/_components/master-login-form.tsx");
 const dashboardEntry = read("app/(main)/dashboard/page.tsx");
 const publicNavbar = read("components/wrapper/navbar.tsx");
 const platformBootstrapScript = read("scripts/grant-platform-admin.ts");
@@ -37,12 +38,15 @@ test("one-location header renders no label or disabled selector and multi-locati
   assert.match(switcher, /window\.location\.reload\(\)/);
 });
 
-test("platform access is role-based, tenant-independent, and exposes only aggregate location data", () => {
+test("platform access is role-based, tenant-independent, and offers location-user master login", () => {
   assert.match(platformAccess, /where: \{ clerkId: userId \}/);
   assert.match(platformAccess, /platformRole !== "PLATFORM_ADMIN"/);
   assert.doesNotMatch(platformAccess, /email|locations|cookie|metadata/);
-  assert.match(platformPage, /Active members/);
-  assert.match(platformPage, /Most recent activity/);
+  assert.match(platformPage, /Master login/);
+  assert.match(platformPage, /user\.locations\.some/);
+  assert.match(masterLoginForm, /master-location/);
+  assert.match(masterLoginForm, /master-user/);
+  assert.match(masterLoginForm, /Log in as user/);
   assert.doesNotMatch(platformPage, /conversation|message|contact|credential|apiKey|ipAddress/);
 });
 

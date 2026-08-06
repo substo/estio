@@ -2,10 +2,11 @@ import "server-only";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import db from "@/lib/db";
-import { extractImpersonationClaim, identitiesAgree, normalizeSupportReason, type ActorClaim } from "@/lib/auth/impersonation-policy";
+import { extractImpersonationClaim, identitiesAgree, type ActorClaim } from "@/lib/auth/impersonation-policy";
 
 export const ACTOR_TOKEN_TTL_SECONDS = 5 * 60;
-export const IMPERSONATION_SESSION_MAX_SECONDS = 15 * 60;
+export const IMPERSONATION_SESSION_MAX_SECONDS = 8 * 60 * 60;
+const MASTER_LOGIN_AUDIT_REASON = "Master user login";
 
 type AuthState = {
   userId: string | null;
@@ -35,11 +36,9 @@ function displayName(user: { firstName: string | null; lastName: string | null; 
   return [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
 }
 
-export async function startImpersonation(input: { targetUserId: string; locationId: string; reason: unknown }) {
+export async function startImpersonation(input: { targetUserId: string; locationId: string }) {
   const authState = await auth();
-  if (!authState.userId || authState.actor) throw new Error("Not authorized to start support access.");
-  const reason = normalizeSupportReason(input.reason);
-  if (!reason) throw new Error("Provide a support reason between 10 and 500 characters.");
+  if (!authState.userId || authState.actor) throw new Error("Not authorized to use master login.");
 
   const [actor, target] = await Promise.all([
     db.user.findUnique({
@@ -56,7 +55,7 @@ export async function startImpersonation(input: { targetUserId: string; location
     }),
   ]);
   if (!actor || actor.platformRole !== "PLATFORM_ADMIN" || !actor.clerkId || !target?.clerkId) {
-    throw new Error("Not authorized to start support access.");
+    throw new Error("Not authorized to use master login.");
   }
   if (actor.id === target.id || actor.clerkId === target.clerkId) throw new Error("You cannot impersonate your own account.");
   if (target.locations.length !== 1 || target.locationRoles.length !== 1) {
@@ -85,7 +84,7 @@ export async function startImpersonation(input: { targetUserId: string; location
       actorClerkId: actor.clerkId,
       targetClerkId: target.clerkId,
       locationId: target.locations[0].id,
-      reason,
+      reason: MASTER_LOGIN_AUDIT_REASON,
       tokenExpiresAt,
       sessionExpiresAt,
     },
@@ -101,7 +100,7 @@ export async function startImpersonation(input: { targetUserId: string; location
       sessionMaxDurationInSeconds: IMPERSONATION_SESSION_MAX_SECONDS,
     });
     actorTokenId = actorToken.id;
-    if (!actorToken.url) throw new Error("Clerk did not return a support access URL.");
+    if (!actorToken.url) throw new Error("Clerk did not return a master login URL.");
     await db.impersonationAudit.update({ where: { id: audit.id }, data: { clerkActorTokenId: actorToken.id } });
 
     const launchUrl = new URL(actorToken.url);
@@ -182,7 +181,7 @@ export async function getCurrentImpersonationContext(): Promise<ImpersonationCon
 
 export async function activateCurrentImpersonation(): Promise<ImpersonationContext> {
   const context = await getCurrentImpersonationContext();
-  if (!context) throw new Error("Support access is invalid or expired.");
+  if (!context) throw new Error("Master login is invalid or expired.");
   await db.impersonationAudit.updateMany({
     where: { id: context.auditId, status: "PENDING" },
     data: { status: "ACTIVE", activatedAt: new Date(), targetSessionId: context.sessionId },
@@ -197,7 +196,7 @@ export async function activateCurrentImpersonation(): Promise<ImpersonationConte
 export async function endCurrentImpersonation(): Promise<void> {
   const state = await auth();
   const claim = extractImpersonationClaim(state.actor);
-  if (!state.actor || !state.sessionId) throw new Error("Support access is invalid or already ended.");
+  if (!state.actor || !state.sessionId) throw new Error("Master login is invalid or already ended.");
   const audit = claim ? await db.impersonationAudit.findFirst({
     where: { id: claim.auditId, actorClerkId: claim.actorClerkId, targetClerkId: state.userId || undefined },
     select: { id: true, clerkActorTokenId: true },
@@ -205,7 +204,7 @@ export async function endCurrentImpersonation(): Promise<void> {
   if (audit) {
     await db.impersonationAudit.updateMany({
       where: { id: audit.id, status: { in: ["PENDING", "ACTIVE"] } },
-      data: { status: "ENDED", endedAt: new Date(), endReason: "Exited by platform administrator" },
+      data: { status: "ENDED", endedAt: new Date(), endReason: "Master user ended the user session" },
     });
   }
   const clerk = await clerkClient();
@@ -216,9 +215,4 @@ export async function endCurrentImpersonation(): Promise<void> {
   }
   await clerk.sessions.revokeSession(state.sessionId).catch(() => undefined);
   if (audit && revokedAt) await db.impersonationAudit.update({ where: { id: audit.id }, data: { revokedAt } });
-}
-
-export async function assertNotImpersonating(): Promise<void> {
-  const { actor } = await auth();
-  if (actor) throw new Error("This operation is unavailable while using support access.");
 }

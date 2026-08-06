@@ -15,7 +15,7 @@ test("actor tokens are created only in the server service with bounded lifetime 
   assert.match(service, /additionalProperties: \{ auditId: audit\.id, locationId:/);
 });
 
-test("support access requires platform role, Clerk identity agreement, and both membership records", () => {
+test("master login requires platform role, Clerk identity agreement, and both membership records", () => {
   const service = read("lib/auth/impersonation.ts");
   assert.match(service, /platformRole !== "PLATFORM_ADMIN"/);
   assert.ok((service.match(/identitiesAgree\(/g) || []).length >= 2);
@@ -30,10 +30,23 @@ test("the audited location overrides cookies and invalid actor sessions fail clo
 });
 
 test("server and client detect actor state, show a banner, and provide an exit", () => {
-  const middleware = read("middleware.ts");
+  const resolver = read("lib/auth/active-location.ts");
   const banner = read("app/(main)/admin/_components/impersonation-banner.tsx");
-  assert.match(middleware, /authState\.actor/);
+  assert.match(resolver, /authState\.actor/);
   assert.match(banner, /useAuth\(\)/);
-  assert.match(banner, /Viewing as/);
+  assert.match(banner, /Logged in as/);
   assert.match(banner, /\/api\/platform\/impersonation\/end/);
+});
+
+test("master login is direct, does not require a support reason, and allows normal user actions", () => {
+  const service = read("lib/auth/impersonation.ts");
+  const form = read("app/(main)/platform/_components/master-login-form.tsx");
+  const middleware = read("middleware.ts");
+  assert.match(service, /MASTER_LOGIN_AUDIT_REASON = "Master user login"/);
+  assert.match(service, /IMPERSONATION_SESSION_MAX_SECONDS = 8 \* 60 \* 60/);
+  assert.doesNotMatch(service, /normalizeSupportReason/);
+  assert.match(form, /window\.location\.assign\(result\.launchUrl\)/);
+  assert.match(form, /Log in as user/);
+  assert.doesNotMatch(form, /Textarea|reason|clipboard|one-time support link/i);
+  assert.doesNotMatch(middleware, /isRestrictedImpersonationRequest/);
 });
