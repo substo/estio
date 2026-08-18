@@ -3,6 +3,7 @@ import { Building2, ContactRound, House, UsersRound } from "lucide-react";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DeleteLocationDialog } from "./_components/delete-location-dialog";
 
 const PAGE_SIZE = 20;
 
@@ -39,23 +40,39 @@ export default async function AdminPlatformPage({ searchParams }: { searchParams
       id: true,
       name: true,
       isPlatformMaster: true,
-      _count: { select: { contacts: true, properties: true } },
+      ghlLocationId: true,
+      whatsappPhoneNumberId: true,
+      users: {
+        orderBy: [{ firstName: "asc" }, { lastName: "asc" }, { email: "asc" }],
+        select: { id: true, email: true, name: true, firstName: true, lastName: true },
+      },
+      _count: {
+        select: {
+          users: true,
+          contacts: true,
+          properties: true,
+          companies: true,
+          projects: true,
+          conversations: true,
+          contentPages: true,
+          blogPosts: true,
+          mediaAssets: true,
+          impersonationAudits: true,
+          whatsappSessionAuthAuditEvents: true,
+          publicSiteDomains: { where: { status: { not: "RELEASED" } } },
+          whatsappChannels: true,
+          whatsappWebBridgeSessions: true,
+          smsRelayDevices: true,
+        },
+      },
     },
   });
   const locationIds = locations.map((location) => location.id);
-  const [memberCounts, activities] = await Promise.all([
-    Promise.all(locations.map((location) => db.userLocationRole.count({
-      where: {
-        locationId: location.id,
-        user: { locations: { some: { id: location.id } } },
-      },
-    }))),
-    locationIds.length ? db.locationSessionActivity.groupBy({
-      by: ["locationId"],
-      where: { locationId: { in: locationIds } },
-      _max: { lastSeenAt: true },
-    }) : Promise.resolve([]),
-  ]);
+  const activities = locationIds.length ? await db.locationSessionActivity.groupBy({
+    by: ["locationId"],
+    where: { locationId: { in: locationIds } },
+    _max: { lastSeenAt: true },
+  }) : [];
   const activityByLocation = new Map(activities.map((entry) => [entry.locationId, entry._max.lastSeenAt]));
   const pageHref = (target: number) => `/admin/platform?page=${target}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
   const stats = [
@@ -88,7 +105,7 @@ export default async function AdminPlatformPage({ searchParams }: { searchParams
       <section className="space-y-4" aria-labelledby="location-breakdown-heading">
         <div>
           <h2 id="location-breakdown-heading" className="text-xl font-semibold">Location breakdown</h2>
-          <p className="text-sm text-muted-foreground">Aggregate operational counts only; no tenant content is displayed.</p>
+          <p className="text-sm text-muted-foreground">Review linked users and tenant-data counts before removing an unused location.</p>
         </div>
         <form method="get" className="flex max-w-xl gap-2" role="search">
           <label htmlFor="platform-location-search" className="sr-only">Search locations</label>
@@ -96,25 +113,58 @@ export default async function AdminPlatformPage({ searchParams }: { searchParams
           <Button type="submit">Search</Button>
         </form>
         <div className="overflow-x-auto rounded-lg border bg-background">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[780px] text-sm">
             <caption className="sr-only">Platform location statistics</caption>
             <thead className="bg-muted/50 text-left">
-              <tr><th className="p-3">Location</th><th className="p-3">Members</th><th className="p-3">Contacts</th><th className="p-3">Properties</th><th className="p-3">Recent activity (UTC)</th></tr>
+              <tr><th className="p-3">Location</th><th className="p-3">Users</th><th className="p-3">Contacts</th><th className="p-3">Properties</th><th className="p-3">Recent activity (UTC)</th><th className="p-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
-              {locations.map((location, index) => (
-                <tr key={location.id} className="border-t">
-                  <td className="p-3 font-medium">
-                    {location.name || "Unnamed location"}
-                    {location.isPlatformMaster ? <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">Master</span> : null}
-                  </td>
-                  <td className="p-3 tabular-nums">{memberCounts[index].toLocaleString()}</td>
-                  <td className="p-3 tabular-nums">{location._count.contacts.toLocaleString()}</td>
-                  <td className="p-3 tabular-nums">{location._count.properties.toLocaleString()}</td>
-                  <td className="p-3 text-muted-foreground">{formatActivity(activityByLocation.get(location.id))}</td>
-                </tr>
-              ))}
-              {locations.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No locations found.</td></tr> : null}
+              {locations.map((location) => {
+                const locationName = location.name?.trim() || "Unnamed location";
+                return (
+                  <tr key={location.id} className="border-t">
+                    <td className="p-3 font-medium">
+                      {locationName}
+                      {location.isPlatformMaster ? <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">Master</span> : null}
+                    </td>
+                    <td className="p-3 tabular-nums">{location._count.users.toLocaleString()}</td>
+                    <td className="p-3 tabular-nums">{location._count.contacts.toLocaleString()}</td>
+                    <td className="p-3 tabular-nums">{location._count.properties.toLocaleString()}</td>
+                    <td className="p-3 text-muted-foreground">{formatActivity(activityByLocation.get(location.id))}</td>
+                    <td className="p-3 text-right">
+                      <DeleteLocationDialog location={{
+                        id: location.id,
+                        name: locationName,
+                        isPlatformMaster: location.isPlatformMaster,
+                        users: location.users.map((user) => ({
+                          id: user.id,
+                          email: user.email,
+                          label: [user.firstName, user.lastName].filter(Boolean).join(" ") || user.name || user.email,
+                        })),
+                        counts: {
+                          contacts: location._count.contacts,
+                          properties: location._count.properties,
+                          companies: location._count.companies,
+                          projects: location._count.projects,
+                          conversations: location._count.conversations,
+                          pages: location._count.contentPages,
+                          posts: location._count.blogPosts,
+                          mediaAssets: location._count.mediaAssets,
+                          retainedAudits: location._count.impersonationAudits + location._count.whatsappSessionAuthAuditEvents,
+                          externalResources:
+                            Number(Boolean(location.ghlLocationId))
+                            + Number(Boolean(location.whatsappPhoneNumberId))
+                            + location._count.publicSiteDomains
+                            + location._count.whatsappChannels
+                            + location._count.whatsappWebBridgeSessions
+                            + location._count.smsRelayDevices,
+                        },
+                      }} />
+                    </td>
+                  </tr>
+                );
+              })}
+              {locations.length === 0 ? <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No locations found.</td></tr> : null}
             </tbody>
           </table>
         </div>
