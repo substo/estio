@@ -10,10 +10,12 @@ const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
 const adminNavigation = read("app/(main)/admin/_components/admin-navigation.tsx");
 const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
-const platformPage = read("app/(main)/platform/page.tsx");
+const platformPage = read("app/(main)/admin/platform/page.tsx");
+const platformLayout = read("app/(main)/admin/platform/layout.tsx");
 const platformLocationOptions = read("lib/auth/platform-location-options.ts");
 const platformLocationSwitcher = read("app/(main)/admin/_components/platform-location-login-switcher.tsx");
 const dashboardEntry = read("app/(main)/dashboard/page.tsx");
+const adminDashboard = read("app/(main)/admin/page.tsx");
 const publicNavbar = read("components/wrapper/navbar.tsx");
 const platformBootstrapScript = read("scripts/grant-platform-admin.ts");
 const platformMasterProvisioner = read("scripts/provision-platform-master-location.ts");
@@ -62,12 +64,15 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.match(platformLocationSwitcher, /!selectedLocation\.isPlatformMaster/);
   assert.doesNotMatch(platformLocationOptions, /conversation|message|contact|credential|apiKey|ipAddress/);
   assert.match(platformPage, /Platform overview/);
+  assert.match(platformPage, /\/admin\/platform\?page=/);
   assert.match(platformPage, /db\.location\.findMany/);
   assert.match(platformPage, /db\.userLocationRole\.count/);
   assert.match(platformPage, /db\.locationSessionActivity\.groupBy/);
-  assert.match(adminNavigation, /showPlatformAdministration/);
-  assert.match(adminNavigation, /href: "\/platform"/);
-  assert.match(layout, /showPlatformAdministration=\{Boolean\(platformAdmin\)\}/);
+  assert.match(platformLayout, /getPlatformAdminContext/);
+  assert.match(platformLayout, /notFound\(\)/);
+  assert.doesNotMatch(adminNavigation, /href: "\/platform"|Platform overview/);
+  assert.match(adminDashboard, /href="\/admin\/platform"/);
+  assert.match(adminDashboard, /Platform overview/);
 });
 
 test("active-location writes accept the public origin behind the reverse proxy", () => {

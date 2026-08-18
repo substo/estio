@@ -44,7 +44,7 @@ export default async function Dashboard() {
               </CardContent>
             </Card>
           </Link> : null}
-          {platformAdmin ? <Link href="/platform" className="group block">
+          {platformAdmin ? <Link href="/admin/platform" className="group block">
             <Card className="h-full transition-colors hover:border-gray-400">
               <CardContent className="flex h-full items-start justify-between gap-4 p-5">
                 <div className="min-w-0">

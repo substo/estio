@@ -15,7 +15,7 @@ function formatActivity(value: Date | null | undefined) {
   }).format(value);
 }
 
-export default async function PlatformPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+export default async function AdminPlatformPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   const params = await searchParams;
   const query = String(params.q || "").trim().slice(0, 100);
   const requestedPage = Math.max(1, Number.parseInt(params.page || "1", 10) || 1);
@@ -57,7 +57,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
     }) : Promise.resolve([]),
   ]);
   const activityByLocation = new Map(activities.map((entry) => [entry.locationId, entry._max.lastSeenAt]));
-  const pageHref = (target: number) => `/platform?page=${target}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
+  const pageHref = (target: number) => `/admin/platform?page=${target}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
   const stats = [
     { label: "Locations", value: totalLocations, icon: Building2 },
     { label: "Memberships", value: totalMemberships, icon: UsersRound },
@@ -66,14 +66,11 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   ];
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">Estio</p>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Platform overview</h1>
-          <p className="mt-1 text-sm text-muted-foreground">A simple location-level snapshot. More platform metrics can be added here later.</p>
-        </div>
-        <Button asChild variant="outline"><Link href="/admin">Back to dashboard</Link></Button>
+    <div className="mx-auto w-full max-w-6xl space-y-6 p-2 sm:p-4">
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">Estio</p>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Platform overview</h1>
+        <p className="mt-1 text-sm text-muted-foreground">A simple location-level snapshot. More platform metrics can be added here later.</p>
       </div>
 
       <section aria-label="Platform totals" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -127,6 +124,6 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           <Button asChild variant="outline" aria-disabled={page >= totalPages} className={page >= totalPages ? "pointer-events-none opacity-50" : ""}><Link href={pageHref(page + 1)}>Next</Link></Button>
         </nav>
       </section>
-    </main>
+    </div>
   );
 }
