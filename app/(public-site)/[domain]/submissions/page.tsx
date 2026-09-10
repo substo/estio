@@ -37,7 +37,7 @@ export default async function SubmissionsPage(props: Props) {
         redirect(`/sign-in?redirect_url=/submissions`);
     }
 
-    const submissions = await getUserSubmissions();
+    const submissions = await getUserSubmissions(config.locationId);
     const primaryColor = config.primaryColor || undefined;
 
     // @ts-ignore
@@ -113,6 +113,7 @@ export default async function SubmissionsPage(props: Props) {
                                 key={property.id}
                                 property={property}
                                 domain={params.domain}
+                                locationId={config.locationId}
                                 primaryColor={primaryColor}
                                 isFavorited={false}
                                 customHref={`/submissions/${property.id}`}

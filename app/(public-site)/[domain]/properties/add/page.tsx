@@ -1,9 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { PublicPropertyForm } from "./_components/public-property-form";
-import db from "@/lib/db";
 import { getSiteConfig } from "@/lib/public-data";
-import { headers } from "next/headers";
+import { submitPublicProperty } from "@/app/actions/public-user";
 
 export const metadata = {
     title: "List Your Property",
@@ -18,11 +17,6 @@ export default async function AddPropertyPage({ params }: { params: Promise<{ do
         redirect(`/sign-in?redirect_url=/properties/add`);
     }
 
-    // Resolve Location ID from Domain (Standard Pattern in this app)
-    const headerList = await headers();
-    const host = headerList.get("host"); // We can trust the middleware rewrite or use params.domain if consistent. 
-    // Usually `getSiteConfig` handles the lookup.
-    // However, `params.domain` in the path might be the tenant domain.
     const config = await getSiteConfig(resolvedParams.domain);
 
     if (!config) {
@@ -56,9 +50,9 @@ export default async function AddPropertyPage({ params }: { params: Promise<{ do
             <div className="container mx-auto px-4 -mt-8 pb-16">
                 <PublicPropertyForm
                     locationId={config.locationId}
+                    submitAction={submitPublicProperty.bind(null, config.locationId)}
                 />
             </div>
         </div>
     );
 }
-

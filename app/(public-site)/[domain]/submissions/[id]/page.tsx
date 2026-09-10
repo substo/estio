@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { Metadata } from "next";
+import { updatePublicProperty } from "@/app/actions/public-user";
+import { publicOwnerPropertyWhere } from "@/app/actions/public-user-location";
 
 interface Props {
     params: Promise<{ domain: string; id: string }>;
@@ -34,23 +36,19 @@ export default async function EditSubmissionPage(props: Props) {
     // Verify ownership and fetch property
     const contact = await db.contact.findUnique({
         where: { clerkUserId: userId },
-        select: { id: true }
+        select: { id: true, locationId: true }
     });
 
-    if (!contact) {
+    if (!contact || contact.locationId !== config.locationId) {
         redirect('/submissions?error=profile_not_found');
     }
 
     const property = await db.property.findFirst({
-        where: {
-            id: params.id,
-            contactRoles: {
-                some: {
-                    contactId: contact.id,
-                    role: 'Owner'
-                }
-            }
-        },
+        where: publicOwnerPropertyWhere({
+            propertyId: params.id,
+            locationId: config.locationId,
+            contactId: contact.id,
+        }),
         include: {
             media: {
                 orderBy: { sortOrder: 'asc' }
@@ -84,6 +82,7 @@ export default async function EditSubmissionPage(props: Props) {
 
                 <PublicPropertyForm
                     locationId={config.locationId}
+                    submitAction={updatePublicProperty.bind(null, config.locationId)}
                     initialData={property}
                 />
             </div>

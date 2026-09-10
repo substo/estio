@@ -1,51 +1,92 @@
 import db from "@/lib/db";
 import { currentUser } from "@clerk/nextjs/server";
+import { Prisma } from "@prisma/client";
+
+type PublicClerkUser = {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    emailAddresses: Array<{ emailAddress: string }>;
+};
+
+type EnsureContactDependencies = {
+    contact: any;
+    isUniqueError: (error: unknown) => boolean;
+};
+
+function isUniqueConstraintError(error: unknown) {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+const defaultDependencies: EnsureContactDependencies = {
+    contact: db.contact,
+    isUniqueError: isUniqueConstraintError,
+};
+
+async function findClerkContact(clerkUserId: string, dependencies: EnsureContactDependencies) {
+    return dependencies.contact.findUnique({
+        where: { clerkUserId },
+        select: { id: true, locationId: true, name: true, email: true },
+    });
+}
 
 /**
- * FAIL-SAFE: Ensures that a signed-in Public User has a corresponding Contact record.
- * This is Critical because OAuth/Google sign-ups often strip metadata, creating a "Ghost User" 
- * situation where the Webhook fails to create the contact.
- * 
- * This function should be called in high-level layouts (e.g. Tenant Layout).
+ * Implements the current one-Clerk-user/one-Contact policy. Existing Clerk
+ * identities are never reassigned to another location.
+ */
+export async function ensureContactForClerkUser(
+    locationId: string,
+    user: PublicClerkUser,
+    dependencies: EnsureContactDependencies = defaultDependencies,
+) {
+    const existingContact = await findClerkContact(user.id, dependencies);
+    if (existingContact) {
+        if (existingContact.locationId !== locationId) {
+            console.warn("[Fail-Safe] Refusing to reuse a Clerk contact across public-site tenants", {
+                clerkUserId: user.id,
+                requestedLocationId: locationId,
+                contactLocationId: existingContact.locationId,
+            });
+            return null;
+        }
+        return existingContact;
+    }
+
+    console.log(`[Fail-Safe] Creating Contact for user ${user.id} at location ${locationId}`);
+    const name = `${user.firstName || ""} ${user.lastName || ""}`.trim();
+    const email = user.emailAddresses[0]?.emailAddress;
+
+    try {
+        return await dependencies.contact.create({
+            data: {
+                location: { connect: { id: locationId } },
+                clerkUserId: user.id,
+                name,
+                email,
+                status: "new",
+                leadSource: "Website Login (Fail-Safe)",
+                leadStage: "New Lead",
+            },
+            select: { id: true, locationId: true, name: true, email: true },
+        });
+    } catch (error) {
+        if (!dependencies.isUniqueError(error)) throw error;
+
+        // Another request may have linked/created the identity first. Re-read
+        // the global unique key and only accept a result in this location.
+        const racedContact = await findClerkContact(user.id, dependencies);
+        return racedContact?.locationId === locationId ? racedContact : null;
+    }
+}
+
+/**
+ * Fail-safe for OAuth sign-ins whose webhook has not created the Contact yet.
  */
 export async function ensureContactExists(locationId: string) {
     try {
         const user = await currentUser();
         if (!user) return null;
-
-        // 1. Check if Contact already exists
-        const existingContact = await db.contact.findUnique({
-            where: { clerkUserId: user.id },
-            select: { id: true, locationId: true }
-        });
-
-        if (existingContact) {
-            // Optional: Ensure they are on the right location? 
-            // For now, a user is likely one-to-one with a contact/location for our scope, 
-            // or we might allow multiple contacts per user later. 
-            // But strict MVP: returns existing.
-            return existingContact;
-        }
-
-        console.log(`[Fail-Safe] Creating Contact for user ${user.id} at location ${locationId}`);
-
-        // 2. Create Contact if missing
-        const name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-        const email = user.emailAddresses[0]?.emailAddress;
-
-        const newContact = await db.contact.create({
-            data: {
-                location: { connect: { id: locationId } },
-                clerkUserId: user.id,
-                name: name,
-                email: email,
-                status: "new", // "lead"
-                leadSource: "Website Login (Fail-Safe)",
-                leadStage: "New Lead",
-            }
-        });
-
-        return newContact;
+        return await ensureContactForClerkUser(locationId, user);
     } catch (error) {
         console.error("[Fail-Safe] Error ensuring contact exists:", error);
         return null;

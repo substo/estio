@@ -39,7 +39,7 @@ export default async function FavoritesPage(props: Props) {
         redirect(`/sign-in?redirect_url=/favorites`);
     }
 
-    const favorites = await getFavorites();
+    const favorites = await getFavorites(config.locationId);
     const primaryColor = config.primaryColor || undefined;
 
     // @ts-ignore
@@ -93,6 +93,7 @@ export default async function FavoritesPage(props: Props) {
                                 key={property.id}
                                 property={property}
                                 domain={params.domain}
+                                locationId={config.locationId}
                                 primaryColor={primaryColor}
                                 isFavorited={true}
                             />

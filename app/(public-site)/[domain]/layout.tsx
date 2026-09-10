@@ -83,11 +83,11 @@ export default async function PublicSiteLayout(props: Props) {
     // 4. Fail-Safe: Ensure Contact Exists (Public User)
     // If user is logged in via OAuth/Google, metadata might be missing.
     // This check ensures they are created as a Contact on valid access.
-    if (config?.location?.id) {
+    if (config.locationId) {
         // Run in background (don't await to avoid blocking render completely, 
         // OR await if proper session setup is critical for children)
         // Since it's server component, awaiting is safer to ensure consistency
-        await ensureContactExists(config.location.id);
+        await ensureContactExists(config.locationId);
     }
     // Map existing primary color handling to new CSS variable structure
     const primaryColor = theme?.primaryColor;

@@ -144,7 +144,7 @@ export default async function PropertyDetailPage(props: Props) {
     const price = new Intl.NumberFormat("en-US", { style: "currency", currency: property.currency || "EUR", maximumFractionDigits: 0 }).format(property.price || 0);
 
     // Check if property is favorited by current user
-    const propertyIsFavorited = await isFavorited(property.id);
+    const propertyIsFavorited = await isFavorited(config.locationId, property.id);
 
     // Extract all images for gallery
     let allImages: string[] = [];
@@ -248,6 +248,7 @@ export default async function PropertyDetailPage(props: Props) {
                             </div>
                             <div className="flex gap-2">
                                 <FavoriteButton
+                                    locationId={config.locationId}
                                     propertyId={property.id}
                                     initialFavorited={propertyIsFavorited}
                                     variant="button"

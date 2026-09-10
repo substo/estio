@@ -212,6 +212,12 @@ Several Contact fields serve dual purposes for both CRM agents and authenticated
 
 > **Implementation**: See [Public Site Architecture - Section 10](./public-site-architecture.md#10-public-user-authentication--features) for server actions and UI components.
 
+#### Public identity and tenant ownership
+
+The current schema implements **one Clerk user → one Contact globally** because `Contact.clerkUserId` is unique. That Contact belongs to exactly one `locationId`; it is not shared with, copied into, or silently reassigned to another location. Public owners are Contacts connected to their properties through an `Owner` `ContactPropertyRole`, and both the Contact and Property must belong to the resolved public-site location.
+
+Consequently, a Clerk identity already linked to Location A cannot use authenticated Contact features on Location B. The request fails closed. Supporting a separate Contact per tenant would require an explicit identity/schema design change (for example a tenant-scoped Clerk-link model or a composite uniqueness rule) and a migration; this tenant-isolation change intentionally does neither.
+
 ### 3. Property Interest (Roles)
 -   **`ContactPropertyRole`**: The primary method for rich property associations (Owner, Buyer, Tenant, Agent, Maintenance).
 -   **`ContactPropertyRole`**: All property associations are now handled via this join table.

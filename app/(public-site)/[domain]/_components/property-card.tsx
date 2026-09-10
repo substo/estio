@@ -12,12 +12,13 @@ import { FavoriteButton } from "./favorite-button";
 interface PropertyCardProps {
     property: any;
     domain: string;
+    locationId: string;
     primaryColor?: string;
     isFavorited?: boolean;
     customHref?: string;
 }
 
-export function PropertyCard({ property, domain, primaryColor, isFavorited = false, customHref }: PropertyCardProps) {
+export function PropertyCard({ property, domain, locationId, primaryColor, isFavorited = false, customHref }: PropertyCardProps) {
     // 1. Image Data Logic
     const mainImage = property.media?.[0];
     const imageUrl = mainImage?.cloudflareImageId
@@ -50,6 +51,7 @@ export function PropertyCard({ property, domain, primaryColor, isFavorited = fal
                     {/* Favorite Button */}
                     <div className="absolute top-3 right-3">
                         <FavoriteButton
+                            locationId={locationId}
                             propertyId={property.id}
                             initialFavorited={isFavorited}
                             size="sm"
@@ -92,4 +94,3 @@ export function PropertyCard({ property, domain, primaryColor, isFavorited = fal
         </Link>
     );
 }
-

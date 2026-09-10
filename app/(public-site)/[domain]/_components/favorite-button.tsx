@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 interface FavoriteButtonProps {
+    locationId: string;
     propertyId: string;
     initialFavorited?: boolean;
     className?: string;
@@ -16,6 +17,7 @@ interface FavoriteButtonProps {
 }
 
 export function FavoriteButton({
+    locationId,
     propertyId,
     initialFavorited = false,
     className,
@@ -50,7 +52,7 @@ export function FavoriteButton({
         }
 
         startTransition(async () => {
-            const result = await toggleFavorite(propertyId);
+            const result = await toggleFavorite(locationId, propertyId);
             if (result.success) {
                 setIsFavorited(result.isFavorited);
             }

@@ -18,7 +18,7 @@ import { PublicImageUploader, UploadedImage } from "./public-image-uploader";
 import { PROPERTY_LOCATIONS as LOCATIONS } from "@/lib/properties/locations";
 import { PROPERTY_TYPES as TYPES } from "@/lib/properties/constants";
 
-import { updatePublicProperty, submitPublicProperty } from "@/app/actions/public-user";
+import type { PublicPropertyState } from "@/app/actions/public-user-location";
 import { toast } from "sonner";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -35,10 +35,11 @@ const SIMPLE_TYPES = TYPES.map(cat => ({
 
 interface PublicPropertyFormProps {
     locationId: string;
+    submitAction: (previousState: unknown, formData: FormData) => Promise<PublicPropertyState>;
     initialData?: any; // Property object with media
 }
 
-export function PublicPropertyForm({ locationId, initialData }: PublicPropertyFormProps) {
+export function PublicPropertyForm({ locationId, submitAction, initialData }: PublicPropertyFormProps) {
     const router = useRouter();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
@@ -75,10 +76,7 @@ export function PublicPropertyForm({ locationId, initialData }: PublicPropertyFo
         }
 
         try {
-            // @ts-ignore
-            const result = initialData?.id
-                ? await updatePublicProperty(null, formData)
-                : await submitPublicProperty(null, formData);
+            const result = await submitAction(null, formData);
 
             if (result.success) {
                 setIsSuccess(true);

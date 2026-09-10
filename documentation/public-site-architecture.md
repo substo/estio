@@ -146,6 +146,9 @@ Tenant domains support accessing `/admin` for white-label admin functionality.
 *   **UI Integration**: `PublicHeader` conditionally renders "Log In" or "User Button" based on auth state.
 *   **Layout**: The public site layout (`app/(public-site)/[domain]/layout.tsx`) is wrapped in `<ClerkProvider>` to support auth components.
 *   **Data Link**: Authenticated users are linked to `Contact` records via the `clerkUserId` field.
+*   **Tenant Binding**: Submission, edit, favorite, and public upload requests resolve the registered request hostname on the server. Page-bound `locationId` values and browser-supplied IDs are assertions only; the resolved hostname is authoritative.
+*   **Isolation Rule**: The authenticated Contact, target Property, and `Owner` relationship must all belong to the resolved location. Mismatches fail before database mutations, analytics, or Cloudflare upload URL creation.
+*   **Current Identity Limitation**: `Contact.clerkUserId` is globally unique, so one Clerk identity maps to one Contact in one location. Cross-location reuse is rejected; no Contact is reassigned automatically.
 
 > [!IMPORTANT]
 > **User Experience Requirement**:
@@ -211,4 +214,3 @@ For users who are both **Public Users** (browsing) and **Team Members** (managin
     *   **Implementation**: `layout.tsx` performs a server-side DB check (`verifyUserHasAccessToLocation`) and passes an `isTeamMember` flag to the `PublicHeader`.
     *   **UI**: Displays a "Dashboard" link (LayoutDashboard icon) in the header actions area.
     *   **Purpose**: Allows smooth transition from browsing the public site to managing it.
-
