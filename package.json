@@ -26,6 +26,7 @@
         "test:viewings:sessions": "tsx --test lib/viewings/sessions/*.test.ts",
         "test:scraping:deep": "node --test lib/scraping/deep-scrape-types.test.mjs",
         "test:scraping:relevance": "tsx --test lib/scraping/listing-relevance-classifier.test.ts lib/scraping/listing-scraper.relevance.test.ts",
+        "test:public-tenant:db": "bash scripts/test-public-tenant-db.sh",
         "prospecting:reclassify": "tsx scripts/reclassify-scraped-listings.ts",
         "ops:wa-outbox:mark-stale": "tsx scripts/mark-stale-whatsapp-outbox.ts",
         "ops:wa-egress:node-config": "tsx scripts/ops/whatsapp-device-egress-node-config.ts",

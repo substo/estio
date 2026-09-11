@@ -150,13 +150,17 @@ Tenant domains support accessing `/admin` for white-label admin functionality.
 *   **Isolation Rule**: The authenticated Contact, target Property, and `Owner` relationship must all belong to the resolved location. Mismatches fail before database mutations, analytics, or Cloudflare upload URL creation.
 *   **Current Identity Limitation**: `Contact.clerkUserId` is globally unique, so one Clerk identity maps to one Contact in one location. Cross-location reuse is rejected; no Contact is reassigned automatically.
 
+#### 10.1 Tenant Isolation Verification
+
+Run `npm run test:public-tenant:db` to exercise public submission isolation against a real disposable PostgreSQL database. The runner starts a loopback-only temporary PostgreSQL cluster, applies the Prisma schema, creates two tenant fixtures, verifies list/edit/create/favorite/upload denials and serializable rollback, then stops and removes the cluster. The test refuses non-loopback database URLs and never reads the normal production `DATABASE_URL`.
+
 > [!IMPORTANT]
 > **User Experience Requirement**:
 > 1. **Direct Sign-In**: Users must sign in directly on the tenant domain (e.g., `downtowncyprus.site/sign-in`), not be redirected to the platform domain (`estio.co`).
 > 2. **No Public Redirects**: Anonymous browsing must be seamless (no `isSatellite` redirect loops).
 > 3. **Implementation**: Achieved via **"Lazy Satellite Mode"** (see [multi-tenant-auth-email.md](./multi-tenant-auth-email.md)).
 
-#### 10.1 Favorited Properties
+#### 10.2 Favorited Properties
 Public users can save properties they're interested in.
 
 **Data Model:**
@@ -178,7 +182,7 @@ Public users can save properties they're interested in.
 - ❤️ Heart icon in header → Links to `/favorites`
 - Non-authenticated users redirected to sign-in when clicking
 
-#### 10.2 Saved Searches
+#### 10.3 Saved Searches
 Users can save their search filters for quick access.
 
 **Data Model (Contact.requirement* fields):**
@@ -206,7 +210,7 @@ Users can save their search filters for quick access.
 4. User clicks 📑 Bookmark icon in header → Redirects to `/properties/search?saved=true`
 5. Page detects `?saved=true`, fetches saved filters, redirects to full filter URL
 
-#### 10.3 Team Member Utilities (Hybrid Mode)
+#### 10.4 Team Member Utilities (Hybrid Mode)
 For users who are both **Public Users** (browsing) and **Team Members** (managing), the interface adapts to provide quick access to the backend.
 
 *   **Admin Dashboard Link**: 
