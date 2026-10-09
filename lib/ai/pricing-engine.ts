@@ -29,6 +29,8 @@ type ProviderPricingMetadata = {
 
 function normalizeProvider(value: string): AiProviderModelProvider | null {
     const provider = String(value || "").trim().toLowerCase();
+    if (provider === "openai") return "openai_api";
+    if (provider === "google" || provider === "google_gemini_live") return "google_gemini";
     if (provider === "google_gemini" || provider === "openai_api" || provider === "chatgpt_subscription") {
         return provider;
     }

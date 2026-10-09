@@ -6,6 +6,8 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { resolveLocationOpenAiApiKey } from "@/lib/ai/location-openai-key";
 import { isChatGptSubscriptionTransportEnabled, resolveChatGptSubscriptionCredential } from "@/lib/ai/chatgpt-subscription";
 
+import { quickAssistModelOptions } from "@/lib/viewings/sessions/quick-assist-models";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,7 @@ async function respond(req: NextRequest, id: string, refresh: boolean) {
             ? resolveChatGptSubscriptionCredential({ executionMode: "interactive", locationId: session.locationId, userId: user?.id })
             : Promise.resolve(null),
     ]);
-    return NextResponse.json({ engines, providers: { google: !!googleKey, openai: !!openaiKey, codex: !!codexCredential }, selectedModel: session.liveModel, checkedAt: engines.find((engine) => engine.checkedAt)?.checkedAt || null });
+    return NextResponse.json({ modelOptions: quickAssistModelOptions({ google: !!googleKey, openai: !!openaiKey, codex: !!codexCredential }), engines, providers: { google: !!googleKey, openai: !!openaiKey, codex: !!codexCredential }, selectedModel: session.liveModel, checkedAt: engines.find((engine) => engine.checkedAt)?.checkedAt || null });
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

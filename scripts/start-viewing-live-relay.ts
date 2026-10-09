@@ -404,6 +404,7 @@ async function persistUsage(context: RelayContext, usageMetadata: any) {
                 totalTokens,
                 metadata: {
                     source: "gemini_live",
+                    providerUsage: usageMetadata,
                 },
             },
         });
@@ -834,18 +835,36 @@ async function connectOpenAiTranslation(context: RelayContext, reconnecting: boo
         ws.once("error", reject);
     });
     let expectedClose = false;
+    let pendingAudioSeconds = 0;
+    const flushAudioUsage = () => {
+        const seconds = pendingAudioSeconds;
+        pendingAudioSeconds = 0;
+        if (!seconds) return;
+        queueContextTask(context, async () => {
+            for (const model of [context.modelName, "gpt-realtime-whisper"]) {
+                await forwardRelayEvent({ sessionId: context.sessionId, relaySessionToken: context.relaySessionToken,
+                    payload: { eventType: "usage", phase: "live_audio", provider: "openai", model,
+                        inputAudioSeconds: seconds, metadata: { source: "forwarded_pcm_duration", component: model === context.modelName ? "translation" : "input_transcription" } } });
+            }
+        });
+    };
     const wrapper = {
         sendRealtimeInput: (input: any) => {
             if (input.audio?.data && ws.readyState === WebSocketLib.OPEN) {
-                ws.send(JSON.stringify({ type: "session.input_audio_buffer.append", audio: pcm16To24k(input.audio.data, input.audio.mimeType) }));
+                const pcm = pcm16To24k(input.audio.data, input.audio.mimeType);
+                ws.send(JSON.stringify({ type: "session.input_audio_buffer.append", audio: pcm }));
+                pendingAudioSeconds += Buffer.from(pcm, "base64").length / (24000 * 2);
+                if (pendingAudioSeconds >= 10) flushAudioUsage();
             }
             if (input.audioStreamEnd && ws.readyState === WebSocketLib.OPEN) {
                 expectedClose = true;
+                flushAudioUsage();
                 ws.send(JSON.stringify({ type: "session.close" }));
             }
         },
         close: () => {
             expectedClose = true;
+            flushAudioUsage();
             if (ws.readyState === WebSocketLib.OPEN) ws.send(JSON.stringify({ type: "session.close" }));
             setTimeout(() => ws.close(), 2_000);
         },
@@ -878,6 +897,7 @@ async function connectOpenAiTranslation(context: RelayContext, reconnecting: boo
         }
     });
     ws.on("close", () => {
+        flushAudioUsage();
         if (context.vendorSession !== wrapper) return;
         context.vendorSession = null;
         if (!expectedClose && context.sockets.size > 0) scheduleReconnect(context);

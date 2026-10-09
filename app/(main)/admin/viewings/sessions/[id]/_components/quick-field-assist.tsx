@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { QUICK_ASSIST_RATES, quickAssistRateLabel } from "@/lib/viewings/sessions/quick-assist-cost";
+import { QuickAssistUsagePanel, type QuickAssistUsageSnapshot } from "./quick-assist-usage";
+import type { QuickAssistModelOption } from "@/lib/viewings/sessions/quick-assist-models";
 import {
     ArrowLeft,
     Check,
@@ -402,6 +405,24 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         ? initialSession.liveModel : "automatic");
     const [engines, setEngines] = useState<Array<{ provider: string; model: string; configured: boolean; listed: boolean; checkedAt: string | null; error: string | null }>>([]);
     const [providers, setProviders] = useState<{ google: boolean; openai: boolean; codex: boolean } | null>(null);
+    const [modelOptions, setModelOptions] = useState<{ assistant: QuickAssistModelOption[]; transcribe: QuickAssistModelOption[] }>({ assistant: [], transcribe: [] });
+    const [assistantModel, setAssistantModel] = useState("automatic");
+    const [transcribeModel, setTranscribeModel] = useState("automatic");
+    const [lastUsedModel, setLastUsedModel] = useState<string | null>(null);
+    const [sessionUsage, setSessionUsage] = useState<QuickAssistUsageSnapshot | null>(null);
+    const usageVersionRef = useRef<string | null>(null);
+    const [usageError, setUsageError] = useState(false);
+    const refreshUsage = async (notify = false) => {
+        try {
+            const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/usage`);
+            if (!response.ok) throw new Error("Could not load usage");
+            const payload = await response.json();
+            setSessionUsage(payload); setUsageError(false);
+            const version = `${payload.count}:${payload.totalCost}:${payload.unavailableCount}`;
+            if (notify && usageVersionRef.current !== version) window.dispatchEvent(new Event("estio:ai-usage-updated"));
+            usageVersionRef.current = version;
+        } catch { setUsageError(true); }
+    };
     const [engineChecking, setEngineChecking] = useState(false);
     const [selectedContactId, setSelectedContactId] = useState(initialSession.contact?.id || "");
     const [selectedPropertyId, setSelectedPropertyId] = useState(initialSession.primaryProperty?.id || "");
@@ -445,6 +466,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             if (!response.ok) throw new Error(payload.error || "Could not check translation engines.");
             setEngines(payload.engines || []);
             setProviders(payload.providers || null);
+            setModelOptions(payload.modelOptions || { assistant: [], transcribe: [] });
         } catch (error) {
             setError(error instanceof Error ? error.message : "Could not check translation engines.");
         } finally {
@@ -453,10 +475,20 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
     useEffect(() => {
         void checkEngines(false);
+        void refreshUsage();
+        const timer = setInterval(() => void refreshUsage(true), 15000);
+        return () => clearInterval(timer);
     }, [session.id]);
+    const currentOptions = isAssistantMode ? modelOptions.assistant : modelOptions.transcribe;
+    const currentModel = isInterpreterMode ? engineModel : isAssistantMode ? assistantModel : transcribeModel;
+    const resolvedOption = currentOptions.find(o => o.value === currentModel) || (currentModel === "automatic" ? currentOptions[0] : undefined);
+    const resolvedEngine = engines.find(e => e.listed && e.configured && (!twoWay || e.provider === "google_gemini_live") && (engineModel === "automatic" || e.model === engineModel));
+    const resolvedModel = isInterpreterMode ? resolvedEngine?.model : resolvedOption?.value;
+
+    const selectedRate = resolvedModel ? QUICK_ASSIST_RATES[resolvedModel.replace(/^openai:/, "")] : undefined;
     const readyForMode = isInterpreterMode
         ? engines.some((engine) => engine.configured && engine.listed && (engineModel === "automatic" || engine.model === engineModel) && (twoWay ? engine.provider === "google_gemini_live" : true))
-        : Boolean(providers?.google || providers?.openai || (isAssistantMode && providers?.codex));
+        : Boolean(resolvedOption);
     const missingModeConnection = providers !== null && !readyForMode;
     const selectedContact = quickContextOptions.contacts.find((contact) => contact.id === selectedContactId) || null;
     const contactLanguageHint = selectedContact?.preferredLang && languageCode(selectedContact.preferredLang) === languageCode(clientLanguage)
@@ -565,6 +597,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 const type = String(envelope?.type || "");
                 const payload = envelope?.payload || {};
 
+                if (type === "viewing_session.usage.updated") void refreshUsage(true);
                 if (type === "viewing_session.message.created" && payload?.message) {
                     const incoming = payload.message as SessionMessage;
                     setMessages((current) => (current.some((item) => item.id === incoming.id) ? current : [...current, incoming]));
@@ -806,10 +839,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 const answerResponse = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/assistant`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ prompt: text }),
+                    body: JSON.stringify({ prompt: text, model: assistantModel }),
                 });
                 const answerPayload = await answerResponse.json().catch(() => null);
                 if (!answerResponse.ok || !answerPayload?.answer) throw new Error(answerPayload?.error || "Assistant could not answer.");
+                setLastUsedModel(`${answerPayload.provider} · ${answerPayload.model}`);
+                await refreshUsage(true);
                 const saveResponse = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/messages`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -827,6 +862,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const transcribeRecordedAudio = async (file: File) => {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("model", transcribeModel);
         const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/audio-transcribe`, {
             method: "POST",
             body: formData,
@@ -835,6 +871,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         if (!response.ok || !payload?.success) {
             throw new Error(payload?.error || "Failed to transcribe audio.");
         }
+        setLastUsedModel(`${payload.provider} · ${payload.model}`);
+        await refreshUsage(true);
         await sendMessage(payload.transcript);
     };
 
@@ -858,28 +896,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
 
         if (typeof window === "undefined" || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-            const recognizer = recognizerRef.current;
-            if (!recognizer) {
-                setError("Microphone capture is not available in this browser.");
-                return;
-            }
-            recognizer.lang = session.agentLanguage || "en";
-            recognizer.interimResults = false;
-            recognizer.continuous = true;
-            recognizer.onresult = (event: any) => {
-                const last = event?.results?.[event.results.length - 1];
-                const transcript = String(last?.[0]?.transcript || "").trim();
-                if (transcript) void sendMessage(transcript);
-            };
-            recognizer.onerror = () => setSpeechOn(false);
-            recognizer.onend = () => setSpeechOn(false);
-            if (speechOn) {
-                recognizer.stop();
-                setSpeechOn(false);
-            } else {
-                recognizer.start();
-                setSpeechOn(true);
-            }
+            setError("This browser cannot capture audio for the selected model. Use a browser with microphone recording support, or type an Assistant question.");
             return;
         }
 
@@ -1199,6 +1216,23 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             <Button type="button" variant={isTranscribeMode ? "default" : "outline"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
                             <Button type="button" variant={isAssistantMode ? "default" : "outline"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Assistant</Button>
                         </div>
+                        <div className="rounded-xl border p-3 space-y-2">
+                            <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "Assistant model"}</Label>
+                            <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); } else if (isAssistantMode) setAssistantModel(value); else setTranscribeModel(value); }} disabled={micStreaming || sending || modePending || engineChecking}>
+                                <SelectTrigger id="quick-assist-model"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="automatic">Automatic{resolvedModel && currentModel === "automatic" ? ` · ${resolvedModel}` : ""}</SelectItem>
+                                    {isInterpreterMode ? engines.map(engine => <SelectItem key={engine.model} value={engine.model} disabled={!engine.configured || !engine.listed || (twoWay && engine.provider !== "google_gemini_live")}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"} · {engine.model}</SelectItem>) : currentOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">{resolvedModel ? `${isInterpreterMode ? resolvedEngine?.provider === "google_gemini_live" ? "Google" : "OpenAI API" : resolvedOption?.provider} · ${resolvedModel}` : engineChecking ? "Checking connections…" : "No available model selected"}</p>
+                            {resolvedModel && <p className="text-xs text-muted-foreground">{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}
+                            {selectedRate && <a className="block text-xs underline text-muted-foreground" href={selectedRate.sourceUrl} target="_blank" rel="noreferrer">Provider rates · verified {selectedRate.verifiedAt}</a>}
+                            {isAssistantMode && <div className="space-y-2 border-t pt-2"><Label htmlFor="quick-assist-mic-model">Microphone transcription model</Label><Select value={transcribeModel} onValueChange={setTranscribeModel} disabled={micStreaming || sending}><SelectTrigger id="quick-assist-mic-model"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic · {modelOptions.transcribe[0]?.model || "not connected"}</SelectItem>{modelOptions.transcribe.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">{quickAssistRateLabel(transcribeModel === "automatic" ? modelOptions.transcribe[0]?.value || "" : transcribeModel, true)} Speech transcription is charged separately from the answer.</p></div>}
+                            {isAssistantMode && !modelOptions.transcribe.length && <p className="text-xs text-amber-700">Connect Google or OpenAI API to speak a question. You can still type a question for Codex.</p>}
+                            {lastUsedModel && <p className="text-xs">Last used: {lastUsedModel}</p>}
+                        </div>
+                        <QuickAssistUsagePanel usage={sessionUsage} error={usageError} />
                         {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                             <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Assistant needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
                             <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
@@ -1299,7 +1333,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
                         <div className="rounded-2xl border bg-white p-3">
                             <div className="flex flex-col gap-2 sm:flex-row">
-                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder} disabled={livePending || (missingModeConnection && !micStreaming && !speechOn)}>
+                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={startInterpreterNow} disabled={livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                                     {(micStreaming || speechOn) ? "Stop" : "Start"}
                                 </Button>
@@ -1332,14 +1366,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         {isInterpreterMode && <Card>
                             <CardHeader className="pb-2"><CardTitle className="text-base">Translation Engine</CardTitle><CardDescription>Choose an available live interpreter for this location.</CardDescription></CardHeader>
                             <CardContent className="space-y-3">
-                                <Select value={engineModel} onValueChange={(value) => { setEngineModel(value); relaySocketRef.current?.close(); }} disabled={micStreaming}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="automatic">Automatic recommended</SelectItem>
-                                        {engines.map((engine) => <SelectItem key={engine.model} value={engine.model} disabled={!engine.listed}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"} · {engine.model}{engine.listed ? "" : " (unavailable)"}</SelectItem>)}
-                                        {engineModel !== "automatic" && !engines.some((engine) => engine.model === engineModel) && <SelectItem value={engineModel} disabled>{engineModel} (saved, unavailable)</SelectItem>}
-                                    </SelectContent>
-                                </Select>
                                 <div className="space-y-1 text-xs text-muted-foreground">
                                     {engines.map((engine) => <div key={engine.provider}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"}: {engine.provider === session.liveProvider && session.transportStatus === "connected" ? "live connection active" : engine.listed ? "listed for this location; live access checked on connection" : engine.error || "Unavailable"}</div>)}
                                     <div>Last checked: {engines.find((engine) => engine.checkedAt)?.checkedAt ? new Date(engines.find((engine) => engine.checkedAt)!.checkedAt!).toLocaleString() : "Never"}</div>

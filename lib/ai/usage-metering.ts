@@ -17,6 +17,7 @@ export interface RecordAiUsageInput {
     outputTokenType?: "text" | "image";
     quantity?: number;
     metadata?: Record<string, unknown>;
+    estimatedCostUsd?: number;
     fundingScope?: AiFundingScope;
     executionMode?: "interactive" | "background";
 }
@@ -78,7 +79,8 @@ export async function securelyRecordAiUsage(input: RecordAiUsageInput): Promise<
             }),
         });
 
-        const estimatedCostUsd = await calculateAiCost({
+        const estimatedCostUsd = input.estimatedCostUsd !== undefined && Number.isFinite(input.estimatedCostUsd) && input.estimatedCostUsd >= 0
+            ? input.estimatedCostUsd : await calculateAiCost({
             provider: input.provider,
             model: input.model,
             locationId: input.locationId,

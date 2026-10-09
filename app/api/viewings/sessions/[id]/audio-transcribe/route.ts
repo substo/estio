@@ -6,6 +6,9 @@ import { resolveLocationOpenAiApiKey } from "@/lib/ai/location-openai-key";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 
+import { quickAssistModelOptions, selectQuickAssistModel } from "@/lib/viewings/sessions/quick-assist-models";
+import { estimateQuickAssistCost, googleUsageCounts } from "@/lib/viewings/sessions/quick-assist-cost";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -68,10 +71,11 @@ export async function POST(
     }
 
     try {
-        if (!apiKey && openaiKey) {
+        const selected = selectQuickAssistModel(quickAssistModelOptions({ google: !!apiKey, openai: !!openaiKey, codex: false }).transcribe, asString(formData?.get("model")) || "automatic");
+        if (selected.provider === "OpenAI API" && openaiKey) {
             const body = new FormData();
             body.set("file", file);
-            body.set("model", "gpt-4o-mini-transcribe");
+            body.set("model", selected.model);
             const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
                 method: "POST",
                 headers: { Authorization: `Bearer ${openaiKey}` },
@@ -82,6 +86,8 @@ export async function POST(
             const payload = await response.json();
             const transcript = asString(payload?.text);
             if (!transcript) return NextResponse.json({ success: false, error: "Transcript was empty." }, { status: 422 });
+            const counts = { inputTokens: Number(payload.usage?.input_tokens || 0), outputTokens: Number(payload.usage?.output_tokens || 0), usageAvailable: payload.usage?.type === "tokens" };
+            const cost = estimateQuickAssistCost({ model: selected.model, ...counts });
             await securelyRecordAiUsage({
                 locationId: session.locationId,
                 resourceType: "viewing_session",
@@ -89,16 +95,17 @@ export async function POST(
                 featureArea: "audio_transcription",
                 action: "viewing_session_audio_transcribe",
                 provider: "openai",
-                model: "gpt-4o-mini-transcribe",
-                inputTokens: 0,
-                outputTokens: 0,
-                metadata: { source: "viewing-session-audio-transcribe", sessionId: session.id, mimeType: asString(file.type) || "audio/webm", size: file.size },
+                model: selected.model,
+                inputTokens: counts.inputTokens,
+                outputTokens: counts.outputTokens,
+                estimatedCostUsd: cost.amount,
+                metadata: { costStatus: cost.status, calculation: cost.calculation, pricingSource: cost.rate?.sourceUrl, pricingVerifiedAt: cost.rate?.verifiedAt, mode: "Transcribe", source: "viewing-session-audio-transcribe", sessionId: session.id, mimeType: asString(file.type) || "audio/webm", size: file.size },
             });
-            return NextResponse.json({ success: true, transcript, mimeType: asString(file.type) || "audio/webm", size: file.size });
+            return NextResponse.json({ success: true, transcript, model: selected.model, provider: selected.provider, cost, mimeType: asString(file.type) || "audio/webm", size: file.size });
         }
 
         const bytes = Buffer.from(await file.arrayBuffer());
-        const modelName = asString(session.translationModel) || "gemini-2.5-flash";
+        const modelName = selected.model;
         const model = new GoogleGenerativeAI(apiKey!).getGenerativeModel({
             model: modelName,
             generationConfig: { temperature: 0, responseMimeType: "text/plain" },
@@ -118,11 +125,8 @@ export async function POST(
             return NextResponse.json({ success: false, error: "Transcript was empty." }, { status: 422 });
         }
 
-        const usage = (result.response.usageMetadata || {}) as Record<string, unknown>;
-        const readUsage = (key: string) => {
-            const value = Number(usage[key]);
-            return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
-        };
+        const counts = googleUsageCounts(result.response.usageMetadata, true);
+        const cost = estimateQuickAssistCost({ model: modelName, ...counts });
 
         await securelyRecordAiUsage({
             locationId: session.locationId,
@@ -132,9 +136,11 @@ export async function POST(
             action: "viewing_session_audio_transcribe",
             provider: "google_gemini",
             model: modelName,
-            inputTokens: readUsage("promptTokenCount"),
-            outputTokens: readUsage("candidatesTokenCount"),
+            inputTokens: counts.inputTokens,
+            outputTokens: counts.outputTokens,
+            estimatedCostUsd: cost.amount,
             metadata: {
+                costStatus: cost.status, calculation: cost.calculation, pricingSource: cost.rate?.sourceUrl, pricingVerifiedAt: cost.rate?.verifiedAt, mode: "Transcribe",
                 source: "viewing-session-audio-transcribe",
                 sessionId: session.id,
                 mimeType: asString(file.type) || "audio/webm",
@@ -145,6 +151,7 @@ export async function POST(
         return NextResponse.json({
             success: true,
             transcript,
+            model: modelName, provider: selected.provider, cost,
             mimeType: asString(file.type) || "audio/webm",
             size: file.size,
         });

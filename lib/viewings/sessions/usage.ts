@@ -4,6 +4,8 @@ import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-sessi
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
 import { VIEWING_SESSION_EVENT_TYPES } from "@/lib/viewings/sessions/types";
 
+import { estimateQuickAssistCost, googleUsageCounts } from "./quick-assist-cost";
+
 type RecordViewingSessionUsageInput = {
     sessionId: string;
     locationId: string;
@@ -36,7 +38,7 @@ function asNumber(value: unknown, fallback: number = 0): number {
 
 function normalizeAiUsageProvider(value: unknown): string {
     const normalized = asString(value).toLowerCase();
-    if (!normalized || normalized === "google") return "google_gemini";
+    if (!normalized || normalized === "google" || normalized === "google_gemini_live") return "google_gemini";
     return normalized;
 }
 
@@ -63,8 +65,9 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
     const locationId = asString(input.locationId);
     if (!sessionId || !locationId) return null;
 
-    const inputTokens = Math.max(0, Math.floor(asNumber(input.inputTokens, 0)));
-    const outputTokens = Math.max(0, Math.floor(asNumber(input.outputTokens, 0)));
+    const providerCounts = input.metadata?.providerUsage ? googleUsageCounts(input.metadata.providerUsage, true, true) : null;
+    const inputTokens = Math.max(0, Math.floor(providerCounts?.inputTokens ?? asNumber(input.inputTokens, 0)));
+    const outputTokens = Math.max(0, Math.floor(providerCounts?.outputTokens ?? asNumber(input.outputTokens, 0)));
     const totalTokens = Math.max(
         0,
         Math.floor(
@@ -74,7 +77,9 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
             )
         )
     );
-    const estimatedCostUsd = Math.max(0, asNumber(input.estimatedCostUsd, 0));
+    const liveCounts = providerCounts || { inputTokens, outputTokens, usageAvailable: (inputTokens + outputTokens > 0 || Number(input.inputAudioSeconds) > 0) };
+    const liveCost = input.phase === "live_audio" ? estimateQuickAssistCost({ model: asString(input.model), ...liveCounts, inputAudioSeconds: Number(input.inputAudioSeconds || 0) }) : null;
+    const estimatedCostUsd = liveCost ? liveCost.amount : Math.max(0, asNumber(input.estimatedCostUsd, 0));
     const actualCostUsd = Math.max(0, asNumber(input.actualCostUsd, estimatedCostUsd));
     const usageAuthority = resolveViewingSessionUsageAuthority(input.phase, input.usageAuthority);
     const costAuthority = resolveViewingSessionCostAuthority(input.costAuthority);
@@ -110,7 +115,7 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
             actualCostUsd: {
                 increment: actualCostUsd,
             },
-            ...(asString(input.provider) ? { liveProvider: asString(input.provider) } : {}),
+            ...(input.phase === "live_audio" && asString(input.provider) ? { liveProvider: asString(input.provider) } : {}),
         },
         select: {
             id: true,
@@ -144,7 +149,11 @@ export async function recordViewingSessionUsage(input: RecordViewingSessionUsage
         model: asString(usage.model) || "unknown",
         inputTokens,
         outputTokens,
+        estimatedCostUsd,
         metadata: {
+            costStatus: liveCost?.status || (input.estimatedCostUsd != null ? "estimated" : "unavailable"),
+            calculation: liveCost?.calculation, pricingSource: liveCost?.rate?.sourceUrl, pricingVerifiedAt: liveCost?.rate?.verifiedAt,
+            mode: input.phase === "live_audio" ? "Translate" : input.phase,
             source: "recordViewingSessionUsage",
             sessionId,
             usageId: usage.id,

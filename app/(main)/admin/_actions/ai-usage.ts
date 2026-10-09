@@ -105,6 +105,7 @@ export async function getPropertyAiUsageSummary(propertyId: string): Promise<AiU
 }
 
 export interface LocationAiUsageSummary {
+    quickAssist?: { monthCost: number; todayCost: number; calls: number; unavailableCalls: number; subscriptionCalls: number };
     totalCalls: number;
     totalTokens: number;
     totalEstimatedCostUsd: number;
@@ -164,6 +165,7 @@ async function getAiUsageSummary(
                 recordedAt: { gte: startOfMonth },
             },
             select: {
+                resourceType: true, metadata: true, recordedAt: true,
                 featureArea: true,
                 action: true,
                 provider: true,
@@ -174,6 +176,7 @@ async function getAiUsageSummary(
         })
     ]);
 
+    const quickAssist = { monthCost: 0, todayCost: 0, calls: 0, unavailableCalls: 0, subscriptionCalls: 0 };
     const featureMap = new Map<string, { count: number; tokens: number; costUsd: number }>();
     const actionMap = new Map<string, { featureArea: string; action: string; count: number; tokens: number; costUsd: number }>();
     const modelMap = new Map<string, { provider: string; model: string; count: number; tokens: number; costUsd: number }>();
@@ -187,6 +190,13 @@ async function getAiUsageSummary(
         totalTokens += tokens;
         totalCost += cost;
 
+        if (r.resourceType === "viewing_session") {
+            const metadata = (r.metadata || {}) as Record<string, unknown>;
+            quickAssist.monthCost += cost; quickAssist.calls += 1;
+            if (r.recordedAt >= startOfToday) quickAssist.todayCost += cost;
+            if (metadata.costStatus === "unavailable" || (cost === 0 && !metadata.costStatus && r.provider !== "chatgpt_subscription")) quickAssist.unavailableCalls += 1;
+            if (r.provider === "chatgpt_subscription") quickAssist.subscriptionCalls += 1;
+        }
         // By feature area
         const fe = featureMap.get(r.featureArea) || { count: 0, tokens: 0, costUsd: 0 };
         fe.count += 1;
@@ -221,6 +231,7 @@ async function getAiUsageSummary(
         totalCalls: records.length,
         totalTokens,
         totalEstimatedCostUsd: totalCost,
+        quickAssist,
         todayCalls: todayAgg._count.id,
         todayTokens: todayAgg._sum.totalTokens || 0,
         todayEstimatedCostUsd: todayAgg._sum.estimatedCostUsd || 0,

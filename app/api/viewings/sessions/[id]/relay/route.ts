@@ -519,7 +519,7 @@ export async function POST(
             provider: parsed.data.provider || null,
             model: parsed.data.model || null,
             transportStatus: parsed.data.transportStatus || null,
-            usageAuthority: "provider_reported",
+            usageAuthority: parsed.data.metadata?.source === "forwarded_pcm_duration" ? "derived" : "provider_reported",
             costAuthority: "estimated",
             inputAudioSeconds: parsed.data.inputAudioSeconds || 0,
             outputAudioSeconds: parsed.data.outputAudioSeconds || 0,
