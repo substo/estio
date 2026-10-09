@@ -147,6 +147,9 @@ async function createRelayMessage(args: {
     const modelVersion = String(args.modelVersion || "").trim() || null;
     const transcriptStatus = args.transcriptStatus || VIEWING_SESSION_TRANSCRIPT_STATUSES.final;
     const pipelinePolicy = resolveViewingSessionPipelinePolicy({ sessionKind: args.sessionKind });
+    const liveInterpreterTranscript = args.sessionKind === "two_way_interpreter"
+        && args.origin === VIEWING_SESSION_MESSAGE_ORIGINS.relayLiveTranscript
+        && (args.metadata?.channel === "input" || args.metadata?.channel === "output");
 
     const writeResult = await db.$transaction(async (tx) => {
         if (sourceMessageId) {
@@ -193,6 +196,8 @@ async function createRelayMessage(args: {
             const isToolResult = args.messageKind === VIEWING_SESSION_MESSAGE_KINDS.toolResult;
             const translationStatus = isToolResult
                 ? VIEWING_SESSION_TRANSLATION_STATUSES.skipped
+                : liveInterpreterTranscript
+                    ? (args.metadata?.channel === "output" ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.skipped)
                 : (args.translatedText ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.pending);
             const insightStatus = isToolResult
                 ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped
@@ -256,6 +261,8 @@ async function createRelayMessage(args: {
         const isToolResult = args.messageKind === VIEWING_SESSION_MESSAGE_KINDS.toolResult;
         const translationStatus = isToolResult
             ? VIEWING_SESSION_TRANSLATION_STATUSES.skipped
+            : liveInterpreterTranscript
+                ? (args.metadata?.channel === "output" ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.skipped)
             : (args.translatedText ? VIEWING_SESSION_TRANSLATION_STATUSES.completed : VIEWING_SESSION_TRANSLATION_STATUSES.pending);
         const insightStatus = isToolResult
             ? VIEWING_SESSION_INSIGHT_PIPELINE_STATUSES.skipped
@@ -597,8 +604,13 @@ export async function POST(
     }
 
     const message = (relayMessage as any).message;
+    const liveInterpreterTranscript = session.sessionKind === "two_way_interpreter"
+        && parsed.data.eventType === "transcript"
+        && parsed.data.origin === VIEWING_SESSION_MESSAGE_ORIGINS.relayLiveTranscript
+        && (parsed.data.metadata?.channel === "input" || parsed.data.metadata?.channel === "output");
     if (
         message &&
+        !liveInterpreterTranscript &&
         message.messageKind === VIEWING_SESSION_MESSAGE_KINDS.utterance &&
         (
             message.translationStatus !== VIEWING_SESSION_TRANSLATION_STATUSES.completed ||

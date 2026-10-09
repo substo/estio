@@ -10,6 +10,7 @@ import {
     validateViewingLiveRelayAvailability,
 } from "@/lib/viewings/sessions/gemini-live";
 import { resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
+import { getLocationTranslationEngines, providerForTranslationModel, selectTranslationModel } from "@/lib/viewings/sessions/translation-engines";
 import {
     ensureViewingSessionWithinLiveWindow,
     setViewingSessionTransportStatus,
@@ -36,6 +37,7 @@ const liveAuthSchema = z.object({
     ]).optional(),
     audioPlaybackClientEnabled: z.boolean().optional(),
     audioPlaybackAgentEnabled: z.boolean().optional(),
+    liveModel: z.string().max(100).optional(),
 });
 
 function normalizeMode(mode: string | null | undefined): ViewingSessionMode {
@@ -216,11 +218,31 @@ export async function POST(
         : session.audioPlaybackAgentEnabled;
 
     const canUpdateAgentPlayback = context.role === "admin" || context.role === "agent";
+    const translationMode = desiredMode === VIEWING_SESSION_MODES.assistantLiveTranslate;
+    let selectedModel = desiredMode === session.mode
+        ? (session.liveModel || resolveLiveModelForMode(desiredMode))
+        : resolveLiveModelForMode(desiredMode);
+    if (translationMode) {
+        if (parsed.data.liveModel && !canUpdateAgentPlayback) {
+            return NextResponse.json({ success: false, error: "Only an agent can change the translation engine." }, { status: 403 });
+        }
+        const engines = await getLocationTranslationEngines(session.locationId);
+        const selected = selectTranslationModel({ requestedModel: parsed.data.liveModel, savedModel: selectedModel, engines });
+        if (!selected) {
+            const unavailable = engines.find((engine) => engine.model === (parsed.data.liveModel || selectedModel));
+            return NextResponse.json({ success: false, error: unavailable?.error || "Selected translation engine is unavailable. Check available models in Advanced.", code: "TRANSLATION_ENGINE_UNAVAILABLE" }, { status: 409 });
+        }
+        selectedModel = selected.model;
+        if (selected.provider === "openai_realtime_translation" && session.participantMode === "agent_only" && session.speechMode === "continuous") {
+            return NextResponse.json({ success: false, error: "Two-way translation on one microphone requires the Google Live Translation engine. Choose One-way for OpenAI.", code: "TWO_WAY_ENGINE_UNAVAILABLE" }, { status: 409 });
+        }
+    }
     let sessionUpdate = await db.viewingSession.update({
         where: { id: session.id },
         data: {
             mode: desiredMode,
-            liveModel: resolveLiveModelForMode(desiredMode),
+            liveModel: selectedModel,
+            liveProvider: translationMode ? providerForTranslationModel(selectedModel) || "google_gemini_live" : "google_gemini_live",
             audioPlaybackClientEnabled: nextAudioPlaybackClientEnabled,
             audioPlaybackAgentEnabled: canUpdateAgentPlayback
                 ? nextAudioPlaybackAgentEnabled
@@ -310,7 +332,9 @@ export async function POST(
         });
     }
 
-    const credentialHealth = await validateGeminiLiveCredentialsForLocation(sessionUpdate.locationId);
+    const credentialHealth = sessionUpdate.liveProvider === "openai_realtime_translation"
+        ? { ok: true }
+        : await validateGeminiLiveCredentialsForLocation(sessionUpdate.locationId);
     if (!credentialHealth.ok) {
         return NextResponse.json(
             { success: false, error: credentialHealth.error || "Live credentials unavailable." },
@@ -381,6 +405,7 @@ export async function POST(
         clientLanguage: sessionUpdate.clientLanguage,
         relayRole,
         requestOrigin,
+        model: sessionUpdate.liveModel,
     });
 
     const ttlSeconds = 15 * 60;

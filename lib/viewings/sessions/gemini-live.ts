@@ -2,9 +2,10 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { getLiveModeCapabilities, resolveLiveModelForMode } from "@/lib/viewings/sessions/live-models";
 import { VIEWING_SESSION_MODES, type ViewingSessionMode } from "@/lib/viewings/sessions/types";
+import { providerForTranslationModel } from "@/lib/viewings/sessions/translation-engines";
 
 export type ViewingLiveAuthPayload = {
-    provider: "google_gemini_live";
+    provider: "google_gemini_live" | "openai_realtime_translation";
     model: string;
     mode: ViewingSessionMode;
     capabilities: ReturnType<typeof getLiveModeCapabilities>;
@@ -236,6 +237,7 @@ export async function validateViewingLiveRelayAvailability(args?: {
 export async function buildViewingLiveAuthPayload(args: {
     locationId: string;
     mode: ViewingSessionMode;
+    model?: string | null;
     agentLanguage?: unknown;
     clientLanguage?: unknown;
     relayRole?: "agent" | "client";
@@ -244,15 +246,15 @@ export async function buildViewingLiveAuthPayload(args: {
     const relayConfig = resolveViewingLiveRelayConfig({
         requestOrigin: args.requestOrigin || null,
     });
-    const model = resolveLiveModelForMode(args.mode);
-    const capabilities = getLiveModeCapabilities(args.mode);
+    const model = args.model || resolveLiveModelForMode(args.mode);
+    const capabilities = { ...getLiveModeCapabilities(args.mode), model };
     const translationEnabled = args.mode === VIEWING_SESSION_MODES.assistantLiveTranslate;
     const agentLanguage = normalizeLanguageCode(args.agentLanguage, "en");
     const clientLanguage = normalizeLanguageCode(args.clientLanguage, "en");
     const targetLanguageCode = args.relayRole === "client" ? agentLanguage : clientLanguage;
 
     return {
-        provider: "google_gemini_live",
+        provider: providerForTranslationModel(model) || "google_gemini_live",
         model,
         mode: args.mode,
         capabilities,
@@ -268,7 +270,7 @@ export async function buildViewingLiveAuthPayload(args: {
             translation: {
                 enabled: true,
                 targetLanguageCode,
-                echoTargetLanguage: true,
+                echoTargetLanguage: false,
             },
         } : {}),
         relay: {

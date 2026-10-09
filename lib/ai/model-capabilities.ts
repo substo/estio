@@ -13,7 +13,8 @@ export type AiModelCapability =
     | "imageEdit"
     | "embedding"
     | "tools"
-    | "streaming";
+    | "streaming"
+    | "liveSpeechTranslation";
 
 export type AiTaskId =
     | "conversation.draft"
@@ -30,6 +31,7 @@ export type AiTaskId =
     | "contact.requirements"
     | "contact.verification"
     | "viewing.translation"
+    | "viewing.liveSpeechTranslation"
     | "viewing.insights"
     | "viewing.summary";
 
@@ -119,12 +121,21 @@ export function isLikelyPropertyImageGenerationModel(model: AiModelDescriptor): 
 export function isLikelyPropertyImageAnalysisModel(model: AiModelDescriptor): boolean {
     if (isChatGptSubscriptionTextModel(model)) return true;
     if (!isGeminiFamilyModel(model) || isExcludedUtilityModel(model)) return false;
+    const value = normalizeModelValue(model.value).toLowerCase();
+    if (value.includes("-live") || value.includes("native-audio") || value.includes("transcribe")) return false;
     return !isLikelyPropertyImageGenerationModel(model);
 }
 
 export function getModelCapabilities(model: AiModelDescriptor): AiModelCapability[] {
     const value = normalizeModelValue(model.value).toLowerCase();
     const capabilities = new Set<AiModelCapability>();
+
+    if (value === "gemini-3.5-live-translate-preview" || value === "openai:gpt-realtime-translate" || value === "gpt-realtime-translate") {
+        return ["audioInput", "streaming", "liveSpeechTranslation"];
+    }
+    if (value.includes("-live") || value.includes("native-audio") || value.includes("realtime") || value.includes("transcribe")) {
+        return ["audioInput", "streaming"];
+    }
 
     if (isOpenAiTextModel(model) || isChatGptSubscriptionTextModel(model)) {
         capabilities.add("text");
@@ -233,6 +244,11 @@ export const AI_TASK_DEFINITIONS: Record<AiTaskId, AiTaskDefinition> = {
         id: "viewing.translation",
         label: "Viewing-session translation",
         requiredCapabilities: ["text", "json"],
+    },
+    "viewing.liveSpeechTranslation": {
+        id: "viewing.liveSpeechTranslation",
+        label: "Live speech translation",
+        requiredCapabilities: ["liveSpeechTranslation"],
     },
     "viewing.insights": {
         id: "viewing.insights",

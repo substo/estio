@@ -6,16 +6,15 @@ import {
     ArrowLeft,
     Check,
     ChevronsUpDown,
-    Languages,
     Loader2,
     Mic,
     MicOff,
-    Radio,
     Save,
     Send,
     Settings2,
     Share2,
     Shuffle,
+    Volume2,
     Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -224,6 +223,9 @@ function resolveMessageTargetLanguage(message: SessionMessage, agentLanguage: st
 }
 
 function getMessageDisplayState(message: SessionMessage, agentLanguage: string, clientLanguage: string) {
+    if (message.speaker === "system" && message.origin === "relay_live_transcript") {
+        return { primaryText: message.originalText, isWaitingForTranslation: false };
+    }
     const targetLanguage = resolveMessageTargetLanguage(message, agentLanguage, clientLanguage);
     const translatedText = message.translatedText?.trim() || "";
     const originalText = message.originalText.trim();
@@ -388,9 +390,18 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(
         initialSession.sessionKind === "two_way_interpreter" ? true : initialSession.audioPlaybackAgentEnabled
     );
+    const [textDisplay, setTextDisplay] = useState<"both" | "translation" | "hidden">("both");
+    const [voiceVolume, setVoiceVolume] = useState(1);
+    const [replayVoiceName, setReplayVoiceName] = useState("automatic");
+    const [replayVoices, setReplayVoices] = useState<SpeechSynthesisVoice[]>([]);
+    const [broaderDetection, setBroaderDetection] = useState(false);
     const [shareInfo, setShareInfo] = useState<{ url: string | null; token: string; pinCode: string; expiresAt: string } | null>(null);
     const [contextDialogOpen, setContextDialogOpen] = useState(false);
     const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [engineModel, setEngineModel] = useState(initialSession.liveModel && initialSession.liveModel !== "gemini-3.5-live-translate-preview"
+        ? initialSession.liveModel : "automatic");
+    const [engines, setEngines] = useState<Array<{ provider: string; model: string; configured: boolean; listed: boolean; checkedAt: string | null; error: string | null }>>([]);
+    const [engineChecking, setEngineChecking] = useState(false);
     const [selectedContactId, setSelectedContactId] = useState(initialSession.contact?.id || "");
     const [selectedPropertyId, setSelectedPropertyId] = useState(initialSession.primaryProperty?.id || "");
     const [selectedViewingId, setSelectedViewingId] = useState(initialSession.viewing?.id || "");
@@ -399,7 +410,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [contextNotes, setContextNotes] = useState("");
     const recognizerRef = useRef<SpeechRecognizerLike | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const mediaChunksRef = useRef<Blob[]>([]);
+    const recorderChunksRef = useRef<Blob[]>([]);
+    const recorderActiveRef = useRef(false);
+    const recorderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const recordingUploadRef = useRef<Promise<void>>(Promise.resolve());
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const relaySocketRef = useRef<WebSocket | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -410,16 +424,34 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const playbackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const liveInfoRef = useRef<any>(null);
     const audioPlaybackEnabledRef = useRef(audioPlaybackEnabled);
+    const voiceVolumeRef = useRef(voiceVolume);
 
     const renderedMessages = useMemo(
         () => selectEffectiveViewingTranscriptMessages(sortViewingTranscriptMessages(messages)),
         [messages]
     );
-    const latestMessage = renderedMessages[renderedMessages.length - 1] || null;
     const sessionTitle = session.primaryProperty?.title || session.viewing?.property.title || "Quick Field Assist";
     const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
-    const isListenOnlyMode = session.sessionKind === "listen_only" || session.speechMode === "listen_only" || session.participantMode === "agent_only";
+    const isTranscribeMode = session.sessionKind === "listen_only";
+    const isAssistantMode = session.sessionKind === "quick_translate";
+    const twoWay = session.speechMode !== "push_to_talk";
+    const checkEngines = async (refresh: boolean) => {
+        setEngineChecking(true);
+        try {
+            const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/translation-engines`, { method: refresh ? "POST" : "GET" });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || "Could not check translation engines.");
+            setEngines(payload.engines || []);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : "Could not check translation engines.");
+        } finally {
+            setEngineChecking(false);
+        }
+    };
+    useEffect(() => {
+        if (advancedOpen && isInterpreterMode) void checkEngines(false);
+    }, [advancedOpen, isInterpreterMode, session.id]);
     const selectedContact = quickContextOptions.contacts.find((contact) => contact.id === selectedContactId) || null;
     const contactLanguageHint = selectedContact?.preferredLang && languageCode(selectedContact.preferredLang) === languageCode(clientLanguage)
         ? `${languageLabel(selectedContact.preferredLang)} from contact`
@@ -437,6 +469,21 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         });
         playbackSourcesRef.current.clear();
         playbackCursorRef.current = 0;
+    };
+
+    const replayTranslatedText = (message: SessionMessage) => {
+        if (typeof window === "undefined" || !window.speechSynthesis) {
+            setError("Synthesized replay is unavailable in this browser.");
+            return;
+        }
+        const text = message.speaker === "system" ? message.originalText : message.translatedText;
+        if (!text?.trim()) return;
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = message.targetLanguage || (message.speaker === "system" ? clientLanguage : resolveMessageTargetLanguage(message, agentLanguage, clientLanguage));
+        utterance.volume = voiceVolume;
+        if (replayVoiceName !== "automatic") utterance.voice = replayVoices.find((voice) => voice.voiceURI === replayVoiceName) || null;
+        window.speechSynthesis.speak(utterance);
     };
 
     const playPcmAudioChunk = async (mimeType: string, data: string) => {
@@ -459,7 +506,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         buffer.copyToChannel(samples, 0);
         const source = audioContext.createBufferSource();
         source.buffer = buffer;
-        source.connect(audioContext.destination);
+        const gain = audioContext.createGain();
+        gain.gain.value = voiceVolumeRef.current;
+        source.connect(gain);
+        gain.connect(audioContext.destination);
         source.onended = () => {
             playbackSourcesRef.current.delete(source);
         };
@@ -477,9 +527,22 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     }, [audioPlaybackEnabled]);
 
+    useEffect(() => { voiceVolumeRef.current = voiceVolume; }, [voiceVolume]);
+
+    useEffect(() => {
+        if (!window.speechSynthesis) return;
+        const updateVoices = () => setReplayVoices(window.speechSynthesis.getVoices());
+        updateVoices();
+        window.speechSynthesis.addEventListener("voiceschanged", updateVoices);
+        return () => window.speechSynthesis.removeEventListener("voiceschanged", updateVoices);
+    }, []);
+
     useEffect(() => {
         recognizerRef.current = createSpeechRecognizer();
         return () => {
+            recorderActiveRef.current = false;
+            if (recorderTimerRef.current) clearTimeout(recorderTimerRef.current);
+            if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
             try {
                 recognizerRef.current?.stop();
             } catch {
@@ -583,7 +646,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 mode: getLiveModeForSessionKind(session.sessionKind),
-                audioPlaybackAgentEnabled: isInterpreterMode ? true : audioPlaybackEnabled,
+                ...(isInterpreterMode ? { liveModel: engineModel } : {}),
+                audioPlaybackAgentEnabled: audioPlaybackEnabled,
             }),
         });
         const payload = await response.json().catch(() => null);
@@ -595,6 +659,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             ...current,
             transportStatus: payload?.session?.transportStatus || current.transportStatus,
             liveProvider: payload?.session?.liveProvider || current.liveProvider,
+            liveModel: payload?.session?.model || current.liveModel,
             participantMode: payload?.session?.participantMode || current.participantMode,
             sessionKind: payload?.session?.sessionKind || current.sessionKind,
             speechMode: payload?.session?.speechMode || current.speechMode,
@@ -603,6 +668,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }));
 
         liveInfoRef.current = payload.liveAuth || null;
+        setEngineModel((current) => current === "automatic" ? current : (payload?.session?.model || current));
         const relayUrl = String(payload?.liveAuth?.relay?.websocketUrl || "").trim();
         const relaySessionToken = String(payload?.liveAuth?.relay?.relaySessionToken || "").trim();
         if (!relayUrl || !relaySessionToken) {
@@ -630,14 +696,15 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             socket.addEventListener("open", handleOpen);
             socket.addEventListener("error", handleError);
         });
+        if (isInterpreterMode) socket.send(JSON.stringify({ eventType: "translation_detection", broaderDetection }));
         socket.onmessage = (event) => {
             try {
                 const payload = JSON.parse(event.data || "{}");
                 if (payload?.type === "relay.audio.chunk" && audioPlaybackEnabledRef.current && payload?.mimeType && payload?.data) {
                     void playPcmAudioChunk(String(payload.mimeType), String(payload.data)).catch(() => undefined);
                 }
-                if (payload?.type === "relay.error") {
-                    setError(String(payload?.error || "Relay transport error."));
+                if (payload?.type === "relay.error" || payload?.type === "relay.vendor.error" || payload?.type === "relay.vendor.connect_failed" || payload?.type === "relay.vendor.failed") {
+                    setError(String(payload?.error || payload?.reason || "Relay transport error."));
                 }
             } catch (relayError) {
                 console.error("Failed to parse relay websocket payload:", relayError);
@@ -659,13 +726,15 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             throw new Error("Live relay is unavailable.");
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
         const audioContext = new AudioContext();
         const source = audioContext.createMediaStreamSource(stream);
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
         processor.onaudioprocess = (event) => {
             if (!relaySocketRef.current || relaySocketRef.current.readyState !== WebSocket.OPEN) return;
-            const input = event.inputBuffer.getChannelData(0);
+            const input = playbackSourcesRef.current.size > 0
+                ? new Float32Array(event.inputBuffer.length)
+                : event.inputBuffer.getChannelData(0);
             const downsampled = downsampleBuffer(input, audioContext.sampleRate, 16000);
             relaySocketRef.current.send(JSON.stringify({
                 eventType: "audio_input",
@@ -705,7 +774,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const sendMessage = async (textOverride?: string) => {
         const text = String(textOverride ?? draft).trim();
         if (!text || sending) return;
-        const speaker = getMessageSpeakerForSessionKind(session.sessionKind);
+        const speaker = isTranscribeMode ? "agent" : getMessageSpeakerForSessionKind(session.sessionKind);
         setSending(true);
         setError(null);
         try {
@@ -715,6 +784,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 body: JSON.stringify({
                     speaker,
                     originalText: text,
+                    ...(isTranscribeMode || isAssistantMode ? { translatedText: text, targetLanguage: agentLanguage, origin: "browser_stt" } : {}),
                     originalLanguage: speaker === "client"
                         ? (session.clientLanguage || session.agentLanguage || "en")
                         : (session.agentLanguage || "en"),
@@ -726,6 +796,21 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 return;
             }
             setDraft("");
+            if (isAssistantMode) {
+                const answerResponse = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/assistant`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt: text }),
+                });
+                const answerPayload = await answerResponse.json().catch(() => null);
+                if (!answerResponse.ok || !answerPayload?.answer) throw new Error(answerPayload?.error || "Assistant could not answer.");
+                const saveResponse = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/messages`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ speaker: "system", originalText: answerPayload.answer, translatedText: answerPayload.answer, originalLanguage: agentLanguage, targetLanguage: agentLanguage }),
+                });
+                if (!saveResponse.ok) throw new Error("Assistant answered, but the reply could not be saved.");
+            }
         } catch (sendError: any) {
             setError(sendError?.message || "Failed to send message.");
         } finally {
@@ -748,23 +833,22 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     const toggleFallbackRecorder = async () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+            recorderActiveRef.current = false;
+            if (recorderTimerRef.current) clearTimeout(recorderTimerRef.current);
+            mediaRecorderRef.current.stop();
+            return;
+        }
         if (micStreaming) {
             stopLiveMicStream();
             return;
         }
 
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-            mediaRecorderRef.current.stop();
-            return;
-        }
-
-        if (typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function") {
+        if (isInterpreterMode && typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function") {
             try {
                 await startLiveMicStream();
                 return;
-            } catch {
-                // fall through to clip recording / speech recognition fallback
-            }
+            } catch (liveError) { throw liveError; }
         }
 
         if (typeof window === "undefined" || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -779,9 +863,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             recognizer.onresult = (event: any) => {
                 const last = event?.results?.[event.results.length - 1];
                 const transcript = String(last?.[0]?.transcript || "").trim();
-                if (transcript) {
-                    setDraft((current) => (current ? `${current} ${transcript}` : transcript));
-                }
+                if (transcript) void sendMessage(transcript);
             };
             recognizer.onerror = () => setSpeechOn(false);
             recognizer.onend = () => setSpeechOn(false);
@@ -799,43 +881,36 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         const recorder = new MediaRecorder(stream);
         mediaStreamRef.current = stream;
         mediaRecorderRef.current = recorder;
-        mediaChunksRef.current = [];
-
+        recorderActiveRef.current = true;
         recorder.ondataavailable = (event: BlobEvent) => {
-            if (event.data && event.data.size > 0) {
-                mediaChunksRef.current.push(event.data);
-            }
+            if (event.data?.size) recorderChunksRef.current.push(event.data);
         };
-
-        recorder.onstop = async () => {
-            const chunks = [...mediaChunksRef.current];
-            mediaChunksRef.current = [];
-            stream.getTracks().forEach((track) => track.stop());
-            mediaRecorderRef.current = null;
-            const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-            if (!blob.size) return;
-            try {
-                await transcribeRecordedAudio(new File([blob], `quick-assist-${Date.now()}.webm`, { type: blob.type }));
-            } catch (transcribeError: any) {
-                setError(transcribeError?.message || "Failed to process recorded audio.");
+        recorder.onstop = () => {
+            const blob = new Blob(recorderChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+            recorderChunksRef.current = [];
+            if (blob.size) {
+                recordingUploadRef.current = recordingUploadRef.current.then(() =>
+                    transcribeRecordedAudio(new File([blob], `quick-assist-${Date.now()}.webm`, { type: blob.type }))
+                ).catch((transcribeError: any) => setError(transcribeError?.message || "Failed to process recorded audio."));
+            }
+            if (recorderActiveRef.current) {
+                recorder.start();
+                recorderTimerRef.current = setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 5000);
+            } else {
+                stream.getTracks().forEach((track) => track.stop());
+                mediaRecorderRef.current = null;
+                setMicStreaming(false);
             }
         };
 
         recorder.start();
+        recorderTimerRef.current = setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 5000);
         setMicStreaming(true);
-        setTimeout(() => {
-            if (recorder.state === "recording") {
-                recorder.stop();
-                setMicStreaming(false);
-            }
-        }, 5000);
     };
 
     const startInterpreterNow = () => {
         startLiveTransition(async () => {
             setError(null);
-            setAudioPlaybackEnabled(true);
-            audioPlaybackEnabledRef.current = true;
             try {
                 await toggleFallbackRecorder();
             } catch (liveError: any) {
@@ -870,6 +945,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 agentLanguage: payload?.session?.agentLanguage || normalizedAgent,
                 clientLanguage: payload?.session?.clientLanguage || normalizedClient,
             }));
+            if (micStreaming) {
+                stopLiveMicStream();
+                relaySocketRef.current?.close();
+                relaySocketRef.current = null;
+                await startLiveMicStream();
+            }
         } catch (languageError: any) {
             setError(languageError?.message || "Failed to update languages.");
         }
@@ -944,7 +1025,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     };
 
-    const switchMode = (sessionKind: "quick_translate" | "listen_only" | "two_way_interpreter") => {
+    const switchMode = (sessionKind: "quick_translate" | "listen_only" | "two_way_interpreter", requestedSpeechMode?: "continuous" | "push_to_talk") => {
         startModeTransition(async () => {
             setError(null);
             try {
@@ -953,11 +1034,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         sessionKind,
-                        speechMode: sessionKind === "listen_only"
+                        speechMode: requestedSpeechMode || (sessionKind === "listen_only"
                             ? "listen_only"
                             : sessionKind === "two_way_interpreter"
                                 ? "continuous"
-                                : "push_to_talk",
+                                : "push_to_talk"),
                     }),
                 });
                 const payload = await response.json().catch(() => null);
@@ -969,13 +1050,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     ...current,
                     sessionKind: payload?.session?.sessionKind || sessionKind,
                     speechMode: payload?.session?.speechMode || current.speechMode,
-                    audioPlaybackAgentEnabled: sessionKind === "two_way_interpreter"
-                        ? true
-                        : current.audioPlaybackAgentEnabled,
+                    audioPlaybackAgentEnabled: current.audioPlaybackAgentEnabled,
                 }));
-                if (sessionKind === "two_way_interpreter") {
-                    setAudioPlaybackEnabled(true);
-                }
+                relaySocketRef.current?.close();
+                relaySocketRef.current = null;
             } catch (modeError: any) {
                 setError(modeError?.message || "Failed to update quick mode.");
             }
@@ -1013,6 +1091,16 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         startSaveTransition(async () => {
             setError(null);
             try {
+                if (mediaRecorderRef.current?.state === "recording") {
+                    recorderActiveRef.current = false;
+                    if (recorderTimerRef.current) clearTimeout(recorderTimerRef.current);
+                    const recorder = mediaRecorderRef.current;
+                    const stopped = new Promise<void>((resolve) => recorder.addEventListener("stop", () => resolve(), { once: true }));
+                    recorder.stop();
+                    await stopped;
+                    await recordingUploadRef.current;
+                }
+                if (micStreaming && !mediaRecorderRef.current) stopLiveMicStream();
                 const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/close`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -1059,31 +1147,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button
-                        type="button"
-                        variant={isInterpreterMode ? "default" : "outline"}
-                        onClick={() => startLiveTransition(async () => {
-                            setError(null);
-                            try {
-                                if (isInterpreterMode) {
-                                    await toggleFallbackRecorder();
-                                } else {
-                                    await connectLiveTransport();
-                                }
-                            } catch (liveError: any) {
-                                setError(liveError?.message || (isInterpreterMode ? "Failed to start live interpreter." : "Failed to connect live transport."));
-                            }
-                        })}
-                        disabled={livePending || (isInterpreterMode && micStreaming)}
-                    >
-                        {livePending
-                            ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                            : isInterpreterMode
-                                ? <Mic className="mr-1.5 h-4 w-4" />
-                                : <Radio className="mr-1.5 h-4 w-4" />}
-                        {isInterpreterMode ? (micStreaming ? "Interpreter On" : "Start Interpreter") : "Connect Live"}
-                    </Button>
-                    <Button type="button" onClick={enableShareMode} disabled={modePending || session.participantMode === "shared_client"}>
+                    <Button type="button" variant="outline" onClick={enableShareMode} disabled={modePending || session.participantMode === "shared_client"}>
                         <Share2 className="mr-1.5 h-4 w-4" />
                         Share
                     </Button>
@@ -1093,12 +1157,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             {session.participantMode === "agent_only" && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                     Internal quick mode is active. Client disclosure is only required after you switch to shared mode.
-                </div>
-            )}
-
-            {sameInterpreterLanguage && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Interpreter is set to {languageLabel(agentLanguage)} to {languageLabel(clientLanguage)}. Choose the customer language before starting if you need translated speech.
                 </div>
             )}
 
@@ -1124,20 +1182,26 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             <div className="space-y-4">
                 <Card className="overflow-hidden">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Live Interpreter</CardTitle>
+                        <CardTitle className="text-base">Quick Assist</CardTitle>
                         <CardDescription>
-                            {isListenOnlyMode
-                                ? (session.transportStatus === "connected" ? `Translating your speech to ${languageLabel(clientLanguage)}.` : "Choose languages, then start the mic.")
-                                : isInterpreterMode
-                                ? (session.transportStatus === "connected" ? "Speak either language." : "Choose two languages, then start the mic.")
-                                : (session.transportStatus === "connected" ? "Connected" : "Choose languages, then start speaking.")}
+                            {isInterpreterMode ? "Speak naturally in either selected language." : isTranscribeMode ? "Capture speech as text." : "Ask AI for help with the conversation."}
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                        <div className="grid grid-cols-3 gap-2" role="group" aria-label="Quick Assist mode">
+                            <Button type="button" variant={isInterpreterMode ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending || micStreaming || sending}>Translate</Button>
+                            <Button type="button" variant={isTranscribeMode ? "default" : "outline"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
+                            <Button type="button" variant={isAssistantMode ? "default" : "outline"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Assistant</Button>
+                        </div>
+                        {isInterpreterMode && <div className="grid grid-cols-2 gap-2" role="group" aria-label="Conversation direction">
+                            <Button type="button" variant={twoWay ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter", "continuous")} disabled={modePending || micStreaming}>Two-way</Button>
+                            <Button type="button" variant={!twoWay ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter", "push_to_talk")} disabled={modePending || micStreaming}>One-way</Button>
+                        </div>}
+                        {isInterpreterMode && !twoWay && <p className="text-xs text-muted-foreground">One-way translates from your language to the customer’s language. The engine can detect the spoken source language.</p>}
                         <div className="rounded-xl border bg-white p-2">
                             <div className="grid grid-cols-[1fr,44px,1fr] items-center gap-1">
                                 <LanguagePicker
-                                    label="You speak"
+                                    label="Language 1"
                                     value={agentLanguage}
                                     onChange={(value) => void persistLanguagePair(value, clientLanguage)}
                                 />
@@ -1152,7 +1216,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     <Shuffle className="h-4 w-4" />
                                 </Button>
                                 <LanguagePicker
-                                    label="Customer"
+                                    label="Language 2"
                                     value={clientLanguage}
                                     hint={contactLanguageHint}
                                     onChange={(value) => void persistLanguagePair(agentLanguage, value)}
@@ -1165,12 +1229,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             )}
                         </div>
 
-                        {!isInterpreterMode && (
+                        {isAssistantMode && (
                             <div className="rounded-xl border bg-white p-3">
                                 <Textarea
                                     value={draft}
                                     onChange={(event) => setDraft(event.target.value)}
-                                    placeholder="Type to translate, or use the mic."
+                                    placeholder="Ask for help with this conversation, or use the mic."
                                     className="min-h-[96px] resize-none border-0 p-0 text-base shadow-none focus-visible:ring-0"
                                     onKeyDown={(event) => {
                                         if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -1182,19 +1246,18 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             </div>
                         )}
 
-                        <ScrollArea className="h-[360px] rounded-xl border bg-slate-50 px-4 py-3">
+                        {textDisplay !== "hidden" && <ScrollArea className="h-[360px] rounded-xl border bg-slate-50 px-4 py-3">
                             <div className="space-y-3">
                                 {renderedMessages.length === 0 && (
                                     <div className="rounded-xl border border-dashed bg-white px-4 py-8 text-center text-sm text-muted-foreground">
-                                        {isListenOnlyMode
-                                            ? `Start the mic and speak ${languageLabel(agentLanguage)}.`
-                                            : isInterpreterMode
-                                            ? "Start the mic and speak either selected language."
-                                            : "Start speaking, listening, or typing to begin the session."}
+                                        {isTranscribeMode ? "Press Start to capture speech as text." : isInterpreterMode ? "Press Start to translate both sides of the conversation." : "Ask a question or press Start to speak."}
                                     </div>
                                 )}
-                                {renderedMessages.map((message, index) => {
+                                {renderedMessages.filter((message) => textDisplay !== "translation" || !(isInterpreterMode && message.origin === "relay_live_transcript" && message.speaker !== "system")).map((message, index) => {
                                     const display = getMessageDisplayState(message, agentLanguage, clientLanguage);
+                                    const sourceForTranslation = isInterpreterMode && message.speaker === "system" && message.origin === "relay_live_transcript"
+                                        ? renderedMessages.slice(0, renderedMessages.findIndex((item) => item.id === message.id)).reverse().find((item) => item.origin === "relay_live_transcript" && item.speaker !== "system" && item.originalText.trim())
+                                        : null;
                                     return (
                                         <div
                                             key={message.id}
@@ -1207,31 +1270,24 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                                 <span>{message.speaker}</span>
                                                 <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                                             </div>
-                                            <div
-                                                className={cn(
-                                                    "text-lg font-medium leading-snug",
-                                                    display.isWaitingForTranslation ? "text-slate-500" : "text-slate-950"
-                                                )}
-                                            >
-                                                {display.primaryText}
+                                            <div className="flex items-start gap-2">
+                                                <div className={cn("min-w-0 flex-1 text-lg font-medium leading-snug", display.isWaitingForTranslation ? "text-slate-500" : "text-slate-950")}>{display.primaryText}</div>
+                                                {isInterpreterMode && (message.speaker === "system" || (message.translatedText && message.translatedText !== message.originalText)) && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={() => replayTranslatedText(message)} aria-label="Replay translation"><Volume2 className="h-4 w-4" /></Button>}
                                             </div>
-                                            <div className="mt-1 text-sm text-slate-500">{message.originalText}</div>
-                                            <div className="mt-2 text-[10px] text-muted-foreground">
-                                                {message.translationStatus || "pending"} • {message.transcriptStatus || "final"}
-                                            </div>
+                                            {textDisplay === "both" && (sourceForTranslation || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-slate-500">{sourceForTranslation?.originalText || message.originalText}</div>}
                                         </div>
                                     );
                                 })}
                             </div>
-                        </ScrollArea>
+                        </ScrollArea>}
 
                         <div className="rounded-2xl border bg-white p-3">
                             <div className="flex flex-col gap-2 sm:flex-row">
-                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder}>
+                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder} disabled={livePending}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
-                                    {(micStreaming || speechOn) ? "Stop Mic" : isInterpreterMode ? "Start Interpreter" : "Start Mic"}
+                                    {(micStreaming || speechOn) ? "Stop" : "Start"}
                                 </Button>
-                                {!isInterpreterMode && (
+                                {isAssistantMode && (
                                     <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending}>
                                         {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                         Send
@@ -1239,12 +1295,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 )}
                             </div>
                             <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                                <span>{isListenOnlyMode ? `Translates ${languageLabel(agentLanguage)} to ${languageLabel(clientLanguage)}.` : isInterpreterMode ? "Translates both directions from one mic." : "Live audio relay first, browser fallback last."}</span>
-                                <label className="flex items-center gap-2">
-                                    Speak
-                                    <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} />
-                                </label>
+                                <span>{isInterpreterMode ? (twoWay ? `${languageLabel(agentLanguage)} ↔ ${languageLabel(clientLanguage)}` : `${languageLabel(agentLanguage)} → ${languageLabel(clientLanguage)}`) : isTranscribeMode ? "Speech is saved as text." : "AI can answer questions and help you reply."}</span>
                             </div>
+                            {isInterpreterMode && <div className="grid gap-3 pt-2 sm:grid-cols-2">
+                                <label className="flex items-center justify-between gap-2 text-sm">Translated voice <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} aria-label={audioPlaybackEnabled ? "Mute translated voice" : "Turn on translated voice"} /></label>
+                                <div className="space-y-1"><Label>Text display</Label><Select value={textDisplay} onValueChange={(value) => setTextDisplay(value as typeof textDisplay)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Original + translation</SelectItem><SelectItem value="translation">Translation</SelectItem><SelectItem value="hidden">Hide captions</SelectItem></SelectContent></Select></div>
+                            </div>}
                         </div>
                     </CardContent>
                 </Card>
@@ -1257,24 +1313,40 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         </Button>
                     </CollapsibleTrigger>
                     <CollapsibleContent className="mt-4 space-y-4">
+                        {isInterpreterMode && <Card>
+                            <CardHeader className="pb-2"><CardTitle className="text-base">Translation Engine</CardTitle><CardDescription>Choose an available live interpreter for this location.</CardDescription></CardHeader>
+                            <CardContent className="space-y-3">
+                                <Select value={engineModel} onValueChange={(value) => { setEngineModel(value); relaySocketRef.current?.close(); }} disabled={micStreaming}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="automatic">Automatic recommended</SelectItem>
+                                        {engines.map((engine) => <SelectItem key={engine.model} value={engine.model} disabled={!engine.listed}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"} · {engine.model}{engine.listed ? "" : " (unavailable)"}</SelectItem>)}
+                                        {engineModel !== "automatic" && !engines.some((engine) => engine.model === engineModel) && <SelectItem value={engineModel} disabled>{engineModel} (saved, unavailable)</SelectItem>}
+                                    </SelectContent>
+                                </Select>
+                                <div className="space-y-1 text-xs text-muted-foreground">
+                                    {engines.map((engine) => <div key={engine.provider}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"}: {engine.provider === session.liveProvider && session.transportStatus === "connected" ? "live connection active" : engine.listed ? "listed for this location; live access checked on connection" : engine.error || "Unavailable"}</div>)}
+                                    <div>Last checked: {engines.find((engine) => engine.checkedAt)?.checkedAt ? new Date(engines.find((engine) => engine.checkedAt)!.checkedAt!).toLocaleString() : "Never"}</div>
+                                </div>
+                                <Button type="button" variant="outline" onClick={() => void checkEngines(true)} disabled={engineChecking}>{engineChecking ? "Checking…" : "Check available models"}</Button>
+                            </CardContent>
+                        </Card>}
+                        <Card>
+                            <CardHeader className="pb-2"><CardTitle className="text-base">Voice & Detection</CardTitle></CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-1.5"><Label>Replay voice</Label><Select value={replayVoiceName} onValueChange={setReplayVoiceName}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic for language</SelectItem>{replayVoices.map((voice) => <SelectItem key={voice.voiceURI} value={voice.voiceURI}>{voice.name} ({voice.lang})</SelectItem>)}</SelectContent></Select></div>
+                                <div className="space-y-1.5"><Label htmlFor="quick-assist-volume">Voice volume</Label><input id="quick-assist-volume" type="range" min="0" max="1" step="0.05" value={voiceVolume} onChange={(event) => setVoiceVolume(Number(event.target.value))} className="w-full" /></div>
+                                <p className="text-xs text-muted-foreground">Replay uses your device’s available voices. The live translated voice is chosen by the provider.</p>
+                                <label className="flex items-center justify-between gap-3 text-sm">Detect languages beyond the selected pair <Switch checked={broaderDetection} onCheckedChange={(value) => { setBroaderDetection(value); if (relaySocketRef.current?.readyState === WebSocket.OPEN) relaySocketRef.current.send(JSON.stringify({ eventType: "translation_detection", broaderDetection: value })); }} /></label>
+                                <p className="text-xs text-muted-foreground">Broader detection lets the engine translate other detected source languages into the selected targets.</p>
+                            </CardContent>
+                        </Card>
                         <Card>
                             <CardHeader className="pb-2">
-                                <CardTitle className="text-base">Mode & Context</CardTitle>
-                                <CardDescription>Use this when you need more than fast two-way interpreting.</CardDescription>
+                                <CardTitle className="text-base">Context</CardTitle>
+                                <CardDescription>Attach a contact or property to this session.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-3">
-                                <div className="flex flex-wrap gap-2">
-                                    <Button type="button" variant={session.sessionKind === "quick_translate" ? "default" : "outline"} onClick={() => switchMode("quick_translate")} disabled={modePending}>
-                                        Speak
-                                    </Button>
-                                    <Button type="button" variant={session.sessionKind === "listen_only" ? "default" : "outline"} onClick={() => switchMode("listen_only")} disabled={modePending}>
-                                        Listen
-                                    </Button>
-                                    <Button type="button" variant={session.sessionKind === "two_way_interpreter" ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending}>
-                                        <Languages className="mr-1.5 h-4 w-4" />
-                                        Interpreter
-                                    </Button>
-                                </div>
                                 <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
                                     <DialogTrigger asChild>
                                         <Button type="button" variant="outline" className="w-full justify-start">Attach Context</Button>
@@ -1326,10 +1398,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                                         ))}
                                                     </SelectContent>
                                                 </Select>
-                                            </div>
-                                            <div className="grid gap-3 sm:grid-cols-2">
-                                                <LanguagePicker label="Agent language" value={agentLanguage} onChange={(value) => void persistLanguagePair(value, clientLanguage)} />
-                                                <LanguagePicker label="Customer language" value={clientLanguage} hint={contactLanguageHint} onChange={(value) => void persistLanguagePair(agentLanguage, value)} />
                                             </div>
                                             <div className="space-y-1.5">
                                                 <Label>Notes</Label>
@@ -1402,17 +1470,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Latest Utterance</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-1 text-sm">
-                            <div className="font-medium">{latestMessage?.translatedText || latestMessage?.originalText || "No utterances yet."}</div>
-                            {latestMessage && (
-                                <div className="text-muted-foreground">{latestMessage.originalText}</div>
-                            )}
-                        </CardContent>
-                    </Card>
                 </div>
                     </CollapsibleContent>
                 </Collapsible>

@@ -82,53 +82,18 @@ export default async function ViewingSessionsIndexPage() {
                 </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4">
                 <Card>
                     <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Quick Translate</CardTitle>
-                        <CardDescription>One tap into private translation for agent-led conversations.</CardDescription>
+                        <CardTitle className="text-base">Quick Assist</CardTitle>
+                        <CardDescription>Open one page for live translation, transcription, or AI assistance.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <QuickAssistStartButton
-                            label="Start Quick Translate"
+                            label="Open Quick Assist"
                             locationId={locationId}
-                            sessionKind={VIEWING_SESSION_KINDS.quickTranslate}
-                            quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.global}
-                            size="default"
-                            className="w-full"
-                        />
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Listen</CardTitle>
-                        <CardDescription>Passive subtitle mode for conversations you need to understand in real time.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <QuickAssistStartButton
-                            label="Start Listen Mode"
-                            locationId={locationId}
-                            sessionKind={VIEWING_SESSION_KINDS.listenOnly}
-                            quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.global}
-                            size="default"
-                            className="w-full"
-                            icon="radio"
-                        />
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Live Interpreter</CardTitle>
-                        <CardDescription>Fast speech-to-speech translation when both sides need to talk now.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <QuickAssistStartButton
-                            label="Start Interpreter"
-                            locationId={locationId}
-                            mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
                             sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
+                            mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
                             quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.global}
                             size="default"
                             className="w-full"

@@ -30,7 +30,6 @@ export default async function ViewingSessionPage(
             },
             messages: {
                 orderBy: [{ timestamp: "asc" }, { createdAt: "asc" }],
-                take: 600,
             },
             insights: {
                 where: {

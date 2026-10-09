@@ -51,7 +51,7 @@ export function QuickAssistStartButton({
     contactId,
     primaryPropertyId,
     viewingId,
-    sessionKind = VIEWING_SESSION_KINDS.quickTranslate,
+    sessionKind = VIEWING_SESSION_KINDS.twoWayInterpreter,
     mode,
     quickStartSource = VIEWING_SESSION_QUICK_START_SOURCES.global,
     variant = "default",
