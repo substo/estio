@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { QUICK_ASSIST_RATES, quickAssistRateLabel } from "@/lib/viewings/sessions/quick-assist-cost";
+import { QUICK_ASSIST_RATES, quickAssistRateLabel, formatQuickAssistCost } from "@/lib/viewings/sessions/quick-assist-cost";
 import { QuickAssistUsagePanel, type QuickAssistUsageSnapshot } from "./quick-assist-usage";
 import type { QuickAssistModelOption } from "@/lib/viewings/sessions/quick-assist-models";
 import {
     ArrowLeft,
+    Info,
     Check,
     ChevronsUpDown,
     Loader2,
@@ -22,7 +23,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { REPLY_LANGUAGE_OPTIONS, getReplyLanguageLabel, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import {
     sortViewingTranscriptMessages,
@@ -168,13 +167,6 @@ function createSpeechRecognizer(): SpeechRecognizerLike | null {
     return new SpeechCtor();
 }
 
-function formatSessionKindLabel(value: string) {
-    if (value === "listen_only") return "Listen";
-    if (value === "two_way_interpreter") return "Two-way";
-    if (value === "quick_translate") return "Speak";
-    return "Structured";
-}
-
 function getMessageSpeakerForSessionKind(sessionKind: string) {
     if (sessionKind === "listen_only") return "client";
     return "agent";
@@ -268,11 +260,11 @@ function LanguagePicker({
                     variant="ghost"
                     role="combobox"
                     aria-expanded={open}
-                    className="h-auto min-h-[64px] w-full justify-between rounded-lg px-3 py-2 text-left hover:bg-slate-100"
+                    className="h-auto min-h-[64px] w-full justify-between rounded-lg px-3 py-2 text-left hover:bg-muted"
                 >
                     <span className="min-w-0">
                         <span className="block text-[11px] font-medium uppercase text-muted-foreground">{label}</span>
-                        <span className="block truncate text-base font-semibold text-slate-950">{languageLabel(resolved)}</span>
+                        <span className="block truncate text-base font-semibold text-foreground">{languageLabel(resolved)}</span>
                         {hint && <span className="block truncate text-[11px] text-muted-foreground">{hint}</span>}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -452,7 +444,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         () => selectEffectiveViewingTranscriptMessages(sortViewingTranscriptMessages(messages)),
         [messages]
     );
-    const sessionTitle = session.primaryProperty?.title || session.viewing?.property.title || "Quick Field Assist";
     const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
     const isTranscribeMode = session.sessionKind === "listen_only";
@@ -1152,36 +1143,23 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     return (
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-4 sm:px-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-1">
-                    <Link href="/admin/contacts" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                        <ArrowLeft className="h-3.5 w-3.5" />
-                        Back to Contacts
-                    </Link>
-                    <h1 className="text-2xl font-semibold tracking-tight">{sessionTitle}</h1>
-                    <p className="text-sm text-muted-foreground">
-                        {participantLabel} • {formatSessionKindLabel(session.sessionKind)} • {session.participantMode === "agent_only" ? "Private" : "Shared"}
-                    </p>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                        <Badge variant="secondary">{session.assignmentStatus === "assigned" ? "Assigned" : "Needs assignment"}</Badge>
-                        <Badge variant="outline">Transport {session.transportStatus}</Badge>
-                        <Badge variant="outline">Save {session.savePolicy}</Badge>
+        <div className="-my-4 flex h-[calc(100dvh-3.5rem)] min-h-0 w-[calc(100%+2rem)] max-w-3xl self-center flex-col gap-3 px-3 py-3 sm:px-6">
+            <header className="flex shrink-0 items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                    <Button asChild variant="ghost" size="icon" className="shrink-0"><Link href="/admin/contacts" aria-label="Back to contacts"><ArrowLeft className="h-5 w-5" /></Link></Button>
+                    <div className="min-w-0">
+                        <h1 className="text-lg font-semibold tracking-tight">Quick Assist</h1>
+                        <p className="truncate text-xs text-muted-foreground">{participantLabel === "Unassigned session" ? "New conversation" : participantLabel} · {session.participantMode === "agent_only" ? "Private" : "Shared"}</p>
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" onClick={enableShareMode} disabled={modePending || session.participantMode === "shared_client"}>
-                        <Share2 className="mr-1.5 h-4 w-4" />
-                        Share
-                    </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                    <Dialog>
+                        <DialogTrigger asChild><Button type="button" variant="ghost" className="gap-1.5 px-2" aria-label="Session cost and usage details"><Info className="h-4 w-4" /><span className="font-mono text-xs">{sessionUsage ? formatQuickAssistCost(sessionUsage.totalCost) : usageError ? "—" : "…"}</span>{(usageError || !!sessionUsage?.unavailableCount) && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="Some costs unavailable" />}</Button></DialogTrigger>
+                        <DialogContent className="max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Session cost</DialogTitle><DialogDescription>Usage for this conversation, included in your Today and Month totals.</DialogDescription></DialogHeader><QuickAssistUsagePanel usage={sessionUsage} error={usageError} />{resolvedModel && <p className="text-sm text-muted-foreground">Current model: {resolvedModel}<br />{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}</DialogContent>
+                    </Dialog>
+                    <Button type="button" variant="ghost" size="icon" aria-label="Advanced settings" onClick={() => setAdvancedOpen(true)}><Settings2 className="h-5 w-5" /></Button>
                 </div>
-            </div>
-
-            {session.participantMode === "agent_only" && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Internal quick mode is active. Client disclosure is only required after you switch to shared mode.
-                </div>
-            )}
+            </header>
 
             {error && (
                 <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -1202,37 +1180,14 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 </Card>
             )}
 
-            <div className="space-y-4">
-                <Card className="overflow-hidden">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Quick Assist</CardTitle>
-                        <CardDescription>
-                            {isInterpreterMode ? "Speak naturally in either selected language." : isTranscribeMode ? "Capture speech as text." : "Ask AI for help with the conversation."}
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                        <div className="grid grid-cols-3 gap-2" role="group" aria-label="Quick Assist mode">
-                            <Button type="button" variant={isInterpreterMode ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending || micStreaming || sending}>Translate</Button>
-                            <Button type="button" variant={isTranscribeMode ? "default" : "outline"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
-                            <Button type="button" variant={isAssistantMode ? "default" : "outline"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Assistant</Button>
+            <div className="flex min-h-0 flex-1 flex-col">
+                <section className="flex min-h-0 flex-1 flex-col">
+                    <div className="flex min-h-0 flex-1 flex-col gap-3">
+                        <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Quick Assist mode">
+                            <Button type="button" aria-pressed={isInterpreterMode} className="h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending || micStreaming || sending}>Translate</Button>
+                            <Button type="button" aria-pressed={isTranscribeMode} className="h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
+                            <Button type="button" aria-pressed={isAssistantMode} className="h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Assistant</Button>
                         </div>
-                        <div className="rounded-xl border p-3 space-y-2">
-                            <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "Assistant model"}</Label>
-                            <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); } else if (isAssistantMode) setAssistantModel(value); else setTranscribeModel(value); }} disabled={micStreaming || sending || modePending || engineChecking}>
-                                <SelectTrigger id="quick-assist-model"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="automatic">Automatic{resolvedModel && currentModel === "automatic" ? ` · ${resolvedModel}` : ""}</SelectItem>
-                                    {isInterpreterMode ? engines.map(engine => <SelectItem key={engine.model} value={engine.model} disabled={!engine.configured || !engine.listed || (twoWay && engine.provider !== "google_gemini_live")}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"} · {engine.model}</SelectItem>) : currentOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground">{resolvedModel ? `${isInterpreterMode ? resolvedEngine?.provider === "google_gemini_live" ? "Google" : "OpenAI API" : resolvedOption?.provider} · ${resolvedModel}` : engineChecking ? "Checking connections…" : "No available model selected"}</p>
-                            {resolvedModel && <p className="text-xs text-muted-foreground">{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}
-                            {selectedRate && <a className="block text-xs underline text-muted-foreground" href={selectedRate.sourceUrl} target="_blank" rel="noreferrer">Provider rates · verified {selectedRate.verifiedAt}</a>}
-                            {isAssistantMode && <div className="space-y-2 border-t pt-2"><Label htmlFor="quick-assist-mic-model">Microphone transcription model</Label><Select value={transcribeModel} onValueChange={setTranscribeModel} disabled={micStreaming || sending}><SelectTrigger id="quick-assist-mic-model"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic · {modelOptions.transcribe[0]?.model || "not connected"}</SelectItem>{modelOptions.transcribe.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">{quickAssistRateLabel(transcribeModel === "automatic" ? modelOptions.transcribe[0]?.value || "" : transcribeModel, true)} Speech transcription is charged separately from the answer.</p></div>}
-                            {isAssistantMode && !modelOptions.transcribe.length && <p className="text-xs text-amber-700">Connect Google or OpenAI API to speak a question. You can still type a question for Codex.</p>}
-                            {lastUsedModel && <p className="text-xs">Last used: {lastUsedModel}</p>}
-                        </div>
-                        <QuickAssistUsagePanel usage={sessionUsage} error={usageError} />
                         {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                             <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Assistant needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
                             <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
@@ -1243,12 +1198,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 <Button type="button" size="sm" variant="ghost" onClick={() => void checkEngines(true)} disabled={engineChecking}>{engineChecking ? "Checking…" : "Check again"}</Button>
                             </div>
                         </div>}
-                        {isInterpreterMode && <div className="grid grid-cols-2 gap-2" role="group" aria-label="Conversation direction">
-                            <Button type="button" variant={twoWay ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter", "continuous")} disabled={modePending || micStreaming}>Two-way</Button>
-                            <Button type="button" variant={!twoWay ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter", "push_to_talk")} disabled={modePending || micStreaming}>One-way</Button>
+                        {isInterpreterMode && <div className="flex shrink-0 justify-center gap-1" role="group" aria-label="Conversation direction">
+                            <Button type="button" aria-pressed={twoWay} className="rounded-full px-5" size="sm" variant={twoWay ? "secondary" : "ghost"} onClick={() => switchMode("two_way_interpreter", "continuous")} disabled={modePending || micStreaming}>Two-way</Button>
+                            <Button type="button" aria-pressed={!twoWay} className="rounded-full px-5" size="sm" variant={!twoWay ? "secondary" : "ghost"} onClick={() => switchMode("two_way_interpreter", "push_to_talk")} disabled={modePending || micStreaming}>One-way</Button>
                         </div>}
                         {isInterpreterMode && !twoWay && <p className="text-xs text-muted-foreground">One-way translates from your language to the customer’s language. The engine can detect the spoken source language.</p>}
-                        <div className="rounded-xl border bg-white p-2">
+                        <div className="shrink-0 rounded-xl border bg-background p-1">
                             <div className="grid grid-cols-[1fr,44px,1fr] items-center gap-1">
                                 <LanguagePicker
                                     label="Language 1"
@@ -1279,27 +1234,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             )}
                         </div>
 
-                        {isAssistantMode && (
-                            <div className="rounded-xl border bg-white p-3">
-                                <Textarea
-                                    value={draft}
-                                    onChange={(event) => setDraft(event.target.value)}
-                                    placeholder="Ask for help with this conversation, or use the mic."
-                                    className="min-h-[96px] resize-none border-0 p-0 text-base shadow-none focus-visible:ring-0"
-                                    onKeyDown={(event) => {
-                                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                                            event.preventDefault();
-                                            void sendMessage();
-                                        }
-                                    }}
-                                />
-                            </div>
-                        )}
-
-                        {textDisplay !== "hidden" && <ScrollArea className="h-[360px] rounded-xl border bg-slate-50 px-4 py-3">
+                        {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
                             <div className="space-y-3">
                                 {renderedMessages.length === 0 && (
-                                    <div className="rounded-xl border border-dashed bg-white px-4 py-8 text-center text-sm text-muted-foreground">
+                                    <div className="flex min-h-40 items-center justify-center px-4 py-8 text-center text-base text-muted-foreground">
                                         {isTranscribeMode ? "Press Start to capture speech as text." : isInterpreterMode ? "Press Start to translate both sides of the conversation." : "Ask a question or press Start to speak."}
                                     </div>
                                 )}
@@ -1312,8 +1250,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                         <div
                                             key={message.id}
                                             className={cn(
-                                                "rounded-2xl border bg-white px-4 py-3 shadow-sm",
-                                                index === renderedMessages.length - 1 && "border-blue-300"
+                                                "rounded-2xl bg-background px-4 py-3",
+                                                index === renderedMessages.length - 1 && "ring-1 ring-border"
                                             )}
                                         >
                                             <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -1321,48 +1259,75 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                                 <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                                             </div>
                                             <div className="flex items-start gap-2">
-                                                <div className={cn("min-w-0 flex-1 text-lg font-medium leading-snug", display.isWaitingForTranslation ? "text-slate-500" : "text-slate-950")}>{display.primaryText}</div>
+                                                <div className={cn("min-w-0 flex-1 text-base leading-relaxed", display.isWaitingForTranslation ? "text-muted-foreground" : "text-foreground")}>{display.primaryText}</div>
                                                 {isInterpreterMode && (message.speaker === "system" || (message.translatedText && message.translatedText !== message.originalText)) && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={() => replayTranslatedText(message)} aria-label="Replay translation"><Volume2 className="h-4 w-4" /></Button>}
                                             </div>
-                                            {textDisplay === "both" && (sourceForTranslation || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-slate-500">{sourceForTranslation?.originalText || message.originalText}</div>}
+                                            {textDisplay === "both" && (sourceForTranslation || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceForTranslation?.originalText || message.originalText}</div>}
                                         </div>
                                     );
                                 })}
                             </div>
                         </ScrollArea>}
 
-                        <div className="rounded-2xl border bg-white p-3">
-                            <div className="flex flex-col gap-2 sm:flex-row">
-                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={startInterpreterNow} disabled={livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
+                        {isInterpreterMode && textDisplay === "hidden" && <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl bg-muted/30 p-6 text-center text-sm text-muted-foreground">Captions hidden.{(micStreaming || speechOn) ? " Listening and translation continue." : " Press Start when you’re ready."}</div>}
+                        {isAssistantMode && (
+                            <div className="shrink-0 rounded-xl border bg-background p-3">
+                                <Textarea
+                                    value={draft}
+                                    onChange={(event) => setDraft(event.target.value)}
+                                    placeholder="Ask for help with this conversation, or use the mic."
+                                    className="min-h-[64px] max-h-[120px] resize-none border-0 p-0 text-base shadow-none focus-visible:ring-0"
+                                    onKeyDown={(event) => {
+                                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                            event.preventDefault();
+                                            void sendMessage();
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
+
+                        <div className="shrink-0 space-y-3 border-t bg-background pt-3 pb-[env(safe-area-inset-bottom)]">
+                            <div className="flex gap-2">
+                                <Button type="button" size="lg" className="min-h-14 flex-1 rounded-2xl text-base" onClick={startInterpreterNow} disabled={livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                                     {(micStreaming || speechOn) ? "Stop" : "Start"}
                                 </Button>
                                 {isAssistantMode && (
-                                    <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending || missingModeConnection}>
+                                    <Button type="button" size="lg" variant="outline" className="min-h-14 rounded-2xl sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending || missingModeConnection}>
                                         {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                         Send
                                     </Button>
                                 )}
                             </div>
-                            <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                                <span>{isInterpreterMode ? (twoWay ? `${languageLabel(agentLanguage)} ↔ ${languageLabel(clientLanguage)}` : `${languageLabel(agentLanguage)} → ${languageLabel(clientLanguage)}`) : isTranscribeMode ? "Speech is saved as text." : "AI can answer questions and help you reply."}</span>
-                            </div>
-                            {isInterpreterMode && <div className="grid gap-3 pt-2 sm:grid-cols-2">
-                                <label className="flex items-center justify-between gap-2 text-sm">Translated voice <Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} aria-label={audioPlaybackEnabled ? "Mute translated voice" : "Turn on translated voice"} /></label>
-                                <div className="space-y-1"><Label>Text display</Label><Select value={textDisplay} onValueChange={(value) => setTextDisplay(value as typeof textDisplay)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Original + translation</SelectItem><SelectItem value="translation">Translation</SelectItem><SelectItem value="hidden">Hide captions</SelectItem></SelectContent></Select></div>
+                            <div className="text-center text-xs text-muted-foreground" role="status">{(micStreaming || speechOn) ? "Listening…" : engineChecking ? "Checking models…" : isInterpreterMode ? "Speak naturally in either selected language." : isTranscribeMode ? "Capture speech as text." : "Type a question or use the microphone."}</div>
+                            {isInterpreterMode && <div className="flex items-center justify-between gap-2">
+                                <label className="flex shrink-0 items-center gap-2 text-sm"><Volume2 className="h-4 w-4" /><span>Voice {audioPlaybackEnabled ? "on" : "muted"}</span><Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} aria-label="Translated voice" /></label>
+                                <Select value={textDisplay} onValueChange={(value) => setTextDisplay(value as typeof textDisplay)}><SelectTrigger className="h-10 w-auto min-w-0 max-w-[55%] border-0 text-xs shadow-none" aria-label="Text display"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Original + translation</SelectItem><SelectItem value="translation">Translation</SelectItem><SelectItem value="hidden">Hide captions</SelectItem></SelectContent></Select>
                             </div>}
                         </div>
-                    </CardContent>
-                </Card>
+                    </div>
+                </section>
 
-                <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                    <CollapsibleTrigger asChild>
-                        <Button type="button" variant="outline" className="w-full justify-center">
-                            <Settings2 className="mr-2 h-4 w-4" />
-                            {advancedOpen ? "Hide Advanced" : "Advanced"}
-                        </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-4 space-y-4">
+                <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                    <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
+                        <DialogHeader><DialogTitle>Advanced</DialogTitle><DialogDescription>Models, conversation context, voice and saving.</DialogDescription></DialogHeader>
+                        <div className="rounded-xl border p-3 space-y-2">
+                            <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "Assistant model"}</Label>
+                            <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); } else if (isAssistantMode) setAssistantModel(value); else setTranscribeModel(value); }} disabled={micStreaming || sending || modePending || engineChecking}>
+                                <SelectTrigger id="quick-assist-model"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="automatic">Automatic{resolvedModel && currentModel === "automatic" ? ` · ${resolvedModel}` : ""}</SelectItem>
+                                    {isInterpreterMode ? engines.map(engine => <SelectItem key={engine.model} value={engine.model} disabled={!engine.configured || !engine.listed || (twoWay && engine.provider !== "google_gemini_live")}>{engine.provider === "google_gemini_live" ? "Google" : "OpenAI API"} · {engine.model}</SelectItem>) : currentOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">{resolvedModel ? `${isInterpreterMode ? resolvedEngine?.provider === "google_gemini_live" ? "Google" : "OpenAI API" : resolvedOption?.provider} · ${resolvedModel}` : engineChecking ? "Checking connections…" : "No available model selected"}</p>
+                            {resolvedModel && <p className="text-xs text-muted-foreground">{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}
+                            {selectedRate && <a className="block text-xs underline text-muted-foreground" href={selectedRate.sourceUrl} target="_blank" rel="noreferrer">Provider rates · verified {selectedRate.verifiedAt}</a>}
+                            {isAssistantMode && <div className="space-y-2 border-t pt-2"><Label htmlFor="quick-assist-mic-model">Microphone transcription model</Label><Select value={transcribeModel} onValueChange={setTranscribeModel} disabled={micStreaming || sending}><SelectTrigger id="quick-assist-mic-model"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic · {modelOptions.transcribe[0]?.model || "not connected"}</SelectItem>{modelOptions.transcribe.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">{quickAssistRateLabel(transcribeModel === "automatic" ? modelOptions.transcribe[0]?.value || "" : transcribeModel, true)} Speech transcription is charged separately from the answer.</p></div>}
+                            {isAssistantMode && !modelOptions.transcribe.length && <p className="text-xs text-amber-700">Connect Google or OpenAI API to speak a question. You can still type a question for Codex.</p>}
+                            {lastUsedModel && <p className="text-xs">Last used: {lastUsedModel}</p>}
+                        </div>
                         {isInterpreterMode && <Card>
                             <CardHeader className="pb-2"><CardTitle className="text-base">Translation Engine</CardTitle><CardDescription>Choose an available live interpreter for this location.</CardDescription></CardHeader>
                             <CardContent className="space-y-3">
@@ -1386,7 +1351,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         <Card>
                             <CardHeader className="pb-2">
                                 <CardTitle className="text-base">Context</CardTitle>
-                                <CardDescription>Attach a contact or property to this session.</CardDescription>
+                                <CardDescription>{session.contact?.name || "No contact attached"}{session.primaryProperty?.title ? ` · ${session.primaryProperty.title}` : ""}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-3">
                                 <Dialog open={contextDialogOpen} onOpenChange={setContextDialogOpen}>
@@ -1454,20 +1419,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             </CardContent>
                         </Card>
 
+                        <div className="flex items-center justify-between gap-3 rounded-xl border p-3">
+                            <div className="text-xs text-muted-foreground">{session.participantMode === "agent_only" ? "Private conversation" : "Shared conversation"} · {session.transportStatus}<br />{session.assignmentStatus === "assigned" ? "Assigned" : "Not attached to a contact yet"}</div>
+                            <Button type="button" variant="outline" onClick={enableShareMode} disabled={modePending || session.participantMode === "shared_client"}><Share2 className="mr-2 h-4 w-4" />Share</Button>
+                        </div>
                 <div className="space-y-4">
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Current Context</CardTitle>
-                            <CardDescription>Attach structure after the session starts.</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2 text-sm">
-                            <div><span className="font-medium">Contact:</span> {session.contact?.name || "Not attached"}</div>
-                            <div><span className="font-medium">Property:</span> {session.primaryProperty?.title || "Not attached"}</div>
-                            <div><span className="font-medium">Viewing:</span> {session.viewing?.id || "Not attached"}</div>
-                            <div><span className="font-medium">Languages:</span> {languageLabel(session.agentLanguage || agentLanguage)} {"->"} {languageLabel(session.clientLanguage || clientLanguage)}</div>
-                        </CardContent>
-                    </Card>
-
                     <Card>
                         <CardHeader className="pb-2">
                             <CardTitle className="text-base">Save Options</CardTitle>
@@ -1489,7 +1445,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         </CardContent>
                     </Card>
 
-                    <Card>
+                    {summary?.sessionSummary && <Card>
                         <CardHeader className="pb-2">
                             <CardTitle className="text-base">Summary</CardTitle>
                             <CardDescription>Generated after save or when manually refreshed by the server pipeline.</CardDescription>
@@ -1510,11 +1466,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 <div className="text-muted-foreground">No saved summary yet.</div>
                             )}
                         </CardContent>
-                    </Card>
+                    </Card>}
 
                 </div>
-                    </CollapsibleContent>
-                </Collapsible>
+                    </DialogContent>
+                </Dialog>
             </div>
         </div>
     );
