@@ -197,6 +197,13 @@ case "$CURRENT_COLOR" in
         ;;
 esac
 
+# Opt-in releases can limit runtime changes to the web app and viewing relay.
+DEPLOY_RUNTIME_SCOPE="${DEPLOY_RUNTIME_SCOPE:-all}"
+case "$DEPLOY_RUNTIME_SCOPE" in
+    all|web-viewing) ;;
+    *) echo "❌ Invalid DEPLOY_RUNTIME_SCOPE"; exit 1 ;;
+esac
+
 # Step 1: LOCAL BUILD
 echo "🏗️  Building LOCALLY (Bypassing Server Limits)..."
 # Ensure we have dependencies
@@ -215,18 +222,26 @@ fi
 
 echo "✅ Found .env.prod"
 
-# Use this for local build (forcing Next.js to use these vars)
-cp .env.prod .env.production.local
-
-# Run Build
-echo "⚡ Running Next.js Build..."
-# Clean previous build to prevent cache corruption
-rm -rf .next
-
-# We don't need to pass vars inline anymore; .env.production.local takes precedence
-NODE_OPTIONS='--max-old-space-size=8192' npm run build
-
-# Cleanup local override immediately after build to prevent accidents
+BUILD_SOURCE_HASH=$(node scripts/deploy-build-fingerprint.cjs)
+if [ -n "${DEPLOY_PREBUILT_BUILD_ID:-}" ]; then
+    if [ "$(cat .next/BUILD_ID 2>/dev/null)" != "$DEPLOY_PREBUILT_BUILD_ID" ] || \
+       [ "$(cat .next/estio-source.sha256 2>/dev/null)" != "$BUILD_SOURCE_HASH" ] || \
+       [ ! -d .next/server ] || [ ! -d .next/static ]; then
+        echo "❌ Prebuilt artifact does not match the requested build or current source/environment."
+        exit 1
+    fi
+    echo "✅ Reusing verified build $DEPLOY_PREBUILT_BUILD_ID (source/environment fingerprint matched)"
+else
+    cp .env.prod .env.production.local
+    echo "⚡ Running Next.js Build..."
+    rm -rf .next
+    NODE_OPTIONS='--max-old-space-size=8192' npm run build
+    if [ "$(node scripts/deploy-build-fingerprint.cjs)" != "$BUILD_SOURCE_HASH" ]; then
+        echo "❌ Source or environment changed during build."
+        exit 1
+    fi
+    printf '%s\n' "$BUILD_SOURCE_HASH" > .next/estio-source.sha256
+fi
 rm -f .env.production.local
 
 # Step 2: Prepare Target Directory
@@ -325,6 +340,7 @@ echo "🔄 Switching live with health-checked runtime cutover..."
 ssh $SSH_OPTS $SERVER bash << ENDSSH
     set -euo pipefail
 
+    DEPLOY_RUNTIME_SCOPE="$DEPLOY_RUNTIME_SCOPE"
     TARGET_APP_NAME="$TARGET_APP_NAME"
     TARGET_PORT="$TARGET_PORT"
     TARGET_DIR="$TARGET_DIR"
@@ -486,6 +502,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     fi
     echo "✅ Post-switch soak checks passed"
 
+    if [ "\$DEPLOY_RUNTIME_SCOPE" = "all" ]; then
     echo "🧠 Ensuring dedicated scraping worker is running (\$SCRAPE_WORKER_APP_NAME)..."
     if pm2 describe "\$SCRAPE_WORKER_APP_NAME" > /dev/null 2>&1; then
         pm2 delete "\$SCRAPE_WORKER_APP_NAME" || true
@@ -617,6 +634,8 @@ NODE
         exit 1
     fi
 
+    fi
+
     echo "🔌 Ensuring viewing live relay process is running (\$VIEWING_RELAY_APP_NAME) on :\$VIEWING_RELAY_PORT..."
     if pm2 describe "\$VIEWING_RELAY_APP_NAME" > /dev/null 2>&1; then
         pm2 delete "\$VIEWING_RELAY_APP_NAME" || true
@@ -642,6 +661,7 @@ NODE
         exit 1
     fi
 
+    if [ "\$DEPLOY_RUNTIME_SCOPE" = "all" ]; then
     WHATSAPP_BRIDGE_SESSION_DIR="\${WHATSAPP_WEB_BRIDGE_SESSION_DIR:-$WHATSAPP_BRIDGE_SESSION_DIR_DEFAULT}"
     case "\$WHATSAPP_BRIDGE_SESSION_DIR" in
         /*) ;;
@@ -988,6 +1008,8 @@ NODE
             echo "✅ No retired WhatsApp call R&D PM2 process is running: \$RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAME"
         fi
     done
+
+    fi
 
     # Mark this deployment as current so stale delayed cleanup jobs become no-ops.
     printf "%s\n" "\$DEPLOY_TOKEN" > "\$CURRENT_DEPLOY_TOKEN_FILE"

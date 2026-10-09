@@ -38,6 +38,7 @@ type Attempt = SafeCodexDeviceAttempt & {
     homeDir: string;
     handled: boolean;
     timeout: NodeJS.Timeout;
+    accountPoll?: NodeJS.Timeout;
     rateLimitTimeout?: NodeJS.Timeout;
     pendingAccount?: any;
 };
@@ -156,6 +157,7 @@ function send(attempt: Attempt, message: unknown) {
 
 async function cleanup(attempt: Attempt) {
     clearTimeout(attempt.timeout);
+    if (attempt.accountPoll) clearInterval(attempt.accountPoll);
     if (attempt.rateLimitTimeout) clearTimeout(attempt.rateLimitTimeout);
     delete attempt.userCode;
     if (!attempt.process.killed) attempt.process.kill("SIGTERM");
@@ -183,7 +185,16 @@ async function isStillAuthorized(attempt: Attempt): Promise<boolean> {
 async function completeLogin(attempt: Attempt, account: any, usageLimits: SafeChatGptUsageLimits | null = null) {
     if (!canConsumeCodexDeviceAttempt(attempt)) return;
     attempt.handled = true;
-    if (!await isStillAuthorized(attempt)) {
+    let authorized = false;
+    try {
+        authorized = await isStillAuthorized(attempt);
+    } catch {
+        attempt.state = "failed";
+        attempt.message = "Could not verify your access after ChatGPT sign-in. Start again.";
+        await cleanup(attempt);
+        return;
+    }
+    if (!authorized) {
         attempt.state = "failed";
         attempt.message = "Your access changed before sign-in completed. Start again.";
         await cleanup(attempt);
@@ -268,6 +279,14 @@ function handleMessage(attempt: Attempt, message: any) {
         attempt.loginId = String(message.result.loginId || "");
         attempt.verificationUrl = String(message.result.verificationUrl || "");
         attempt.userCode = String(message.result.userCode || "");
+        // The completion notification can be missed while the browser authorizes the code.
+        // This isolated Codex home has no prior account, so account/read is also a safe
+        // source of truth for completion.
+        attempt.accountPoll = setInterval(() => {
+            if (!attempt.handled && !attempt.pendingAccount) {
+                send(attempt, { method: "account/read", id: 3, params: { refreshToken: false } });
+            }
+        }, 2000);
         return;
     }
     if (message?.method === "account/login/completed" && message?.params?.loginId === attempt.loginId) {
@@ -281,6 +300,8 @@ function handleMessage(attempt: Attempt, message: any) {
         return;
     }
     if (message?.id === 3 && message?.result?.account) {
+        if (attempt.handled || attempt.pendingAccount) return;
+        if (attempt.accountPoll) clearInterval(attempt.accountPoll);
         attempt.pendingAccount = message.result.account;
         send(attempt, { method: "account/rateLimits/read", id: 4, params: {} });
         attempt.rateLimitTimeout = setTimeout(() => {
