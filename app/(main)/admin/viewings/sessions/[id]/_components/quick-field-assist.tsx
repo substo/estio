@@ -401,6 +401,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [engineModel, setEngineModel] = useState(initialSession.liveModel && initialSession.liveModel !== "gemini-3.5-live-translate-preview"
         ? initialSession.liveModel : "automatic");
     const [engines, setEngines] = useState<Array<{ provider: string; model: string; configured: boolean; listed: boolean; checkedAt: string | null; error: string | null }>>([]);
+    const [providers, setProviders] = useState<{ google: boolean; openai: boolean; codex: boolean } | null>(null);
     const [engineChecking, setEngineChecking] = useState(false);
     const [selectedContactId, setSelectedContactId] = useState(initialSession.contact?.id || "");
     const [selectedPropertyId, setSelectedPropertyId] = useState(initialSession.primaryProperty?.id || "");
@@ -443,6 +444,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || "Could not check translation engines.");
             setEngines(payload.engines || []);
+            setProviders(payload.providers || null);
         } catch (error) {
             setError(error instanceof Error ? error.message : "Could not check translation engines.");
         } finally {
@@ -450,8 +452,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     };
     useEffect(() => {
-        if (advancedOpen && isInterpreterMode) void checkEngines(false);
-    }, [advancedOpen, isInterpreterMode, session.id]);
+        void checkEngines(false);
+    }, [session.id]);
+    const readyForMode = isInterpreterMode
+        ? engines.some((engine) => engine.configured && engine.listed && (engineModel === "automatic" || engine.model === engineModel) && (twoWay ? engine.provider === "google_gemini_live" : true))
+        : Boolean(providers?.google || providers?.openai || (isAssistantMode && providers?.codex));
+    const missingModeConnection = providers !== null && !readyForMode;
     const selectedContact = quickContextOptions.contacts.find((contact) => contact.id === selectedContactId) || null;
     const contactLanguageHint = selectedContact?.preferredLang && languageCode(selectedContact.preferredLang) === languageCode(clientLanguage)
         ? `${languageLabel(selectedContact.preferredLang)} from contact`
@@ -1193,6 +1199,16 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             <Button type="button" variant={isTranscribeMode ? "default" : "outline"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
                             <Button type="button" variant={isAssistantMode ? "default" : "outline"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Assistant</Button>
                         </div>
+                        {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                            <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Assistant needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
+                            <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/gemini">Connect Google</Link></Button>
+                                <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/openai-api">Connect OpenAI API</Link></Button>
+                                {isAssistantMode && <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/chatgpt-subscription">Connect ChatGPT/Codex</Link></Button>}
+                                <Button type="button" size="sm" variant="ghost" onClick={() => void checkEngines(true)} disabled={engineChecking}>{engineChecking ? "Checking…" : "Check again"}</Button>
+                            </div>
+                        </div>}
                         {isInterpreterMode && <div className="grid grid-cols-2 gap-2" role="group" aria-label="Conversation direction">
                             <Button type="button" variant={twoWay ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter", "continuous")} disabled={modePending || micStreaming}>Two-way</Button>
                             <Button type="button" variant={!twoWay ? "default" : "outline"} onClick={() => switchMode("two_way_interpreter", "push_to_talk")} disabled={modePending || micStreaming}>One-way</Button>
@@ -1283,12 +1299,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
                         <div className="rounded-2xl border bg-white p-3">
                             <div className="flex flex-col gap-2 sm:flex-row">
-                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder} disabled={livePending}>
+                                <Button type="button" size="lg" className="min-h-12 flex-1" onClick={isInterpreterMode ? startInterpreterNow : toggleFallbackRecorder} disabled={livePending || (missingModeConnection && !micStreaming && !speechOn)}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                                     {(micStreaming || speechOn) ? "Stop" : "Start"}
                                 </Button>
                                 {isAssistantMode && (
-                                    <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending}>
+                                    <Button type="button" size="lg" variant="outline" className="min-h-12 sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending || missingModeConnection}>
                                         {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                         Send
                                     </Button>

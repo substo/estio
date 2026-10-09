@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
+import { resolveLocationOpenAiApiKey } from "@/lib/ai/location-openai-key";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/auth";
 
@@ -58,23 +59,50 @@ export async function POST(
         return NextResponse.json({ success: false, error: "Audio file is empty." }, { status: 400 });
     }
 
-    const apiKey = await resolveLocationGoogleAiApiKey(session.locationId);
-    if (!apiKey) {
-        return NextResponse.json({ success: false, error: "No Google AI API key configured for this location." }, { status: 503 });
+    const [apiKey, openaiKey] = await Promise.all([
+        resolveLocationGoogleAiApiKey(session.locationId),
+        resolveLocationOpenAiApiKey(session.locationId),
+    ]);
+    if (!apiKey && !openaiKey) {
+        return NextResponse.json({ success: false, error: "Connect a Google or OpenAI API key for this location in Settings → Integrations." }, { status: 503 });
     }
 
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const modelName = asString(session.translationModel) || "gemini-2.5-flash";
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-            temperature: 0,
-            responseMimeType: "text/plain",
-        },
-    });
-
     try {
+        if (!apiKey && openaiKey) {
+            const body = new FormData();
+            body.set("file", file);
+            body.set("model", "gpt-4o-mini-transcribe");
+            const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${openaiKey}` },
+                body,
+                signal: AbortSignal.timeout(30_000),
+            });
+            if (!response.ok) throw new Error(`OpenAI transcription failed (${response.status}). Check the connection in Settings → Integrations.`);
+            const payload = await response.json();
+            const transcript = asString(payload?.text);
+            if (!transcript) return NextResponse.json({ success: false, error: "Transcript was empty." }, { status: 422 });
+            await securelyRecordAiUsage({
+                locationId: session.locationId,
+                resourceType: "viewing_session",
+                resourceId: session.id,
+                featureArea: "audio_transcription",
+                action: "viewing_session_audio_transcribe",
+                provider: "openai",
+                model: "gpt-4o-mini-transcribe",
+                inputTokens: 0,
+                outputTokens: 0,
+                metadata: { source: "viewing-session-audio-transcribe", sessionId: session.id, mimeType: asString(file.type) || "audio/webm", size: file.size },
+            });
+            return NextResponse.json({ success: true, transcript, mimeType: asString(file.type) || "audio/webm", size: file.size });
+        }
+
+        const bytes = Buffer.from(await file.arrayBuffer());
+        const modelName = asString(session.translationModel) || "gemini-2.5-flash";
+        const model = new GoogleGenerativeAI(apiKey!).getGenerativeModel({
+            model: modelName,
+            generationConfig: { temperature: 0, responseMimeType: "text/plain" },
+        });
         const result = await model.generateContent([
             { text: TRANSCRIBE_PROMPT },
             {
