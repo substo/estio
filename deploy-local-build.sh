@@ -200,7 +200,7 @@ esac
 # Opt-in releases can limit runtime changes to the web app and viewing relay.
 DEPLOY_RUNTIME_SCOPE="${DEPLOY_RUNTIME_SCOPE:-all}"
 case "$DEPLOY_RUNTIME_SCOPE" in
-    all|web-viewing) ;;
+    all|web-viewing|web-viewing-scrape) ;;
     *) echo "❌ Invalid DEPLOY_RUNTIME_SCOPE"; exit 1 ;;
 esac
 
@@ -246,6 +246,27 @@ rm -f .env.production.local
 
 # Step 2: Prepare Target Directory
 echo "📁 Preparing target directory ($TARGET_DIR)..."
+# A skipped worker may still have its kernel cwd in the inactive slot.
+# Refuse to erase its files unless this release also restarts that worker.
+ssh $SSH_OPTS $SERVER /bin/bash -s -- "$TARGET_DIR" "$DEPLOY_RUNTIME_SCOPE" "$SCRAPE_WORKER_APP_NAME" <<'WORKER_PREFLIGHT'
+    set -euo pipefail
+    target_dir="$1"
+    runtime_scope="$2"
+    worker_name="$3"
+    for worker_pid in $(pm2 pid "$worker_name"); do
+        case "$worker_pid" in ''|*[!0-9]*|0) continue ;; esac
+        worker_cwd=$(readlink -f "/proc/$worker_pid/cwd" || true)
+        if [ "$worker_cwd" = "$target_dir" ]; then
+            if [ "$runtime_scope" = "web-viewing" ]; then
+                echo "❌ Scrape worker still uses the target slot. Select web-viewing-scrape to restart it safely."
+                exit 1
+            fi
+            echo "🧠 Stopping scrape worker before replacing its release files..."
+            pm2 stop "$worker_name"
+            break
+        fi
+    done
+WORKER_PREFLIGHT
 ssh $SSH_OPTS $SERVER "rm -rf $TARGET_DIR || (echo '⚠️ First rm failed, retrying...' && rm -rf $TARGET_DIR) && mkdir -p $TARGET_DIR"
 
 # Step 3: Upload Code + Artifacts
@@ -502,7 +523,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     fi
     echo "✅ Post-switch soak checks passed"
 
-    if [ "\$DEPLOY_RUNTIME_SCOPE" = "all" ]; then
+    if [ "\$DEPLOY_RUNTIME_SCOPE" != "web-viewing" ]; then
     echo "🧠 Ensuring dedicated scraping worker is running (\$SCRAPE_WORKER_APP_NAME)..."
     if pm2 describe "\$SCRAPE_WORKER_APP_NAME" > /dev/null 2>&1; then
         pm2 delete "\$SCRAPE_WORKER_APP_NAME" || true
