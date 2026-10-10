@@ -34,6 +34,7 @@ export async function POST(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const startedAt = performance.now();
     const { id } = await params;
     const sessionId = String(id || "").trim();
     if (!sessionId) {
@@ -47,6 +48,7 @@ export async function POST(
         allowClientToken: false,
         allowAgentToken: false,
     });
+    const authenticatedAt = performance.now();
     if (!context) {
         return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
@@ -66,6 +68,7 @@ export async function POST(
                 select: { id: true },
             })
             : null;
+        const actorLoadedAt = performance.now();
 
         const result = await convertViewingSession({
             sessionId,
@@ -74,6 +77,7 @@ export async function POST(
             participantMode: parsed.data.participantMode,
             speechMode: parsed.data.speechMode,
         });
+        const convertedAt = performance.now();
         let join: ({
             token: string;
             pinCode: string;
@@ -96,7 +100,14 @@ export async function POST(
                 domain,
             };
         }
-        return NextResponse.json({ success: true, ...result, join });
+        const timing = [
+            `auth;dur=${(authenticatedAt - startedAt).toFixed(1)}`,
+            `actor;dur=${(actorLoadedAt - authenticatedAt).toFixed(1)}`,
+            `convert;dur=${(convertedAt - actorLoadedAt).toFixed(1)}`,
+            `join-url;dur=${(performance.now() - convertedAt).toFixed(1)}`,
+            `total;dur=${(performance.now() - startedAt).toFixed(1)}`,
+        ].join(", ");
+        return NextResponse.json({ success: true, ...result, join }, { headers: { "Server-Timing": timing } });
     } catch (error: any) {
         return NextResponse.json(
             { success: false, error: String(error?.message || "Failed to convert viewing session.") },

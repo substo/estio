@@ -11,6 +11,7 @@ import {
     ArrowRight,
     Info,
     Check,
+    ChevronDown,
     ChevronsUpDown,
     Loader2,
     Mic,
@@ -374,6 +375,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [error, setError] = useState<string | null>(null);
     const [livePending, startLiveTransition] = useTransition();
     const [modePending, startModeTransition] = useTransition();
+    const [modeSwitchPending, setModeSwitchPending] = useState(false);
+    const modeSwitchInFlightRef = useRef(false);
     const [savePending, startSaveTransition] = useTransition();
     const [sending, setSending] = useState(false);
     const [speechOn, setSpeechOn] = useState(false);
@@ -419,12 +422,19 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [agentLanguage, setAgentLanguage] = useState(languageCode(initialSession.agentLanguage || "en"));
     const [clientLanguage, setClientLanguage] = useState(languageCode(initialSession.clientLanguage || initialSession.contact?.preferredLang || "en"));
     const [spokenLanguage, setSpokenLanguage] = useState("auto");
+    const [languageControlsOpen, setLanguageControlsOpen] = useState(false);
     useEffect(() => {
         try {
             const saved = window.localStorage.getItem("estio:live-assist:spoken-language");
             if (saved === "auto" || LANGUAGE_OPTIONS.some((option) => option.value === saved)) setSpokenLanguage(saved!);
+            setLanguageControlsOpen(window.localStorage.getItem("estio:live-assist:language-controls-open") === "true");
         } catch { /* Storage may be unavailable in private browsing. */ }
     }, []);
+    const toggleLanguageControls = () => {
+        const next = !languageControlsOpen;
+        setLanguageControlsOpen(next);
+        try { window.localStorage.setItem("estio:live-assist:language-controls-open", String(next)); } catch { /* Keep the selection for this page. */ }
+    };
     const updateSpokenLanguage = (value: string) => {
         setSpokenLanguage(value);
         try { window.localStorage.setItem("estio:live-assist:spoken-language", value); } catch { /* Keep the selection for this page. */ }
@@ -877,7 +887,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
     const sendMessage = async (textOverride?: string, inputLanguage?: string) => {
         const text = String(textOverride ?? draft).trim();
-        if (!text || sending) return;
+        if (!text || sending || modeSwitchInFlightRef.current) return;
         const speaker = isTranscribeMode ? "agent" : getMessageSpeakerForSessionKind(session.sessionKind);
         setSending(true);
         setError(null);
@@ -998,6 +1008,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     const startInterpreterNow = () => {
+        if (modeSwitchInFlightRef.current) return;
         startLiveTransition(async () => {
             setError(null);
             try {
@@ -1114,42 +1125,48 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     };
 
-    const switchMode = (sessionKind: "quick_translate" | "listen_only" | "two_way_interpreter", requestedSpeechMode?: "continuous" | "push_to_talk") => {
-        startModeTransition(async () => {
-            setError(null);
-            try {
+    const switchMode = async (sessionKind: "quick_translate" | "listen_only" | "two_way_interpreter", requestedSpeechMode?: "continuous" | "push_to_talk") => {
+        if (modeSwitchInFlightRef.current || micStreaming || sending) return;
+        const speechMode = requestedSpeechMode || (sessionKind === "listen_only"
+            ? "listen_only"
+            : sessionKind === "two_way_interpreter" ? "continuous" : "push_to_talk");
+        if (session.sessionKind === sessionKind && session.speechMode === speechMode) return;
+        const previousMode = { sessionKind: session.sessionKind, speechMode: session.speechMode };
+        modeSwitchInFlightRef.current = true;
+        setModeSwitchPending(true);
+        setError(null);
+        setSession((current) => ({ ...current, sessionKind, speechMode }));
+        const startedAt = performance.now();
+        try {
                 const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/convert`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        sessionKind,
-                        speechMode: requestedSpeechMode || (sessionKind === "listen_only"
-                            ? "listen_only"
-                            : sessionKind === "two_way_interpreter"
-                                ? "continuous"
-                                : "push_to_talk"),
-                    }),
+                    body: JSON.stringify({ sessionKind, speechMode }),
                 });
                 const payload = await response.json().catch(() => null);
-                if (!response.ok || !payload?.success) {
-                    setError(payload?.error || "Failed to update quick mode.");
-                    return;
+                if (process.env.NODE_ENV === "development") {
+                    console.debug("Live Assist mode save", { clientMs: Math.round(performance.now() - startedAt), serverTiming: response.headers.get("Server-Timing") });
                 }
+                if (!response.ok || !payload?.success) throw new Error(payload?.error || "Failed to update quick mode.");
                 setSession((current) => ({
                     ...current,
                     sessionKind: payload?.session?.sessionKind || sessionKind,
-                    speechMode: payload?.session?.speechMode || current.speechMode,
+                    speechMode: payload?.session?.speechMode || speechMode,
                     audioPlaybackAgentEnabled: current.audioPlaybackAgentEnabled,
                 }));
                 relaySocketRef.current?.close();
                 relaySocketRef.current = null;
-            } catch (modeError: any) {
-                setError(modeError?.message || "Failed to update quick mode.");
-            }
-        });
+        } catch (modeError: any) {
+            setSession((current) => ({ ...current, ...previousMode }));
+            setError(modeError?.message || "Failed to update quick mode.");
+        } finally {
+            modeSwitchInFlightRef.current = false;
+            setModeSwitchPending(false);
+        }
     };
 
     const enableShareMode = () => {
+        if (modeSwitchInFlightRef.current) return;
         startModeTransition(async () => {
             setError(null);
             try {
@@ -1237,7 +1254,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             </header>
 
             {error && (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                     {error}
                 </div>
             )}
@@ -1259,10 +1276,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 <section className="flex min-h-0 flex-1 flex-col">
                     <div className="flex min-h-0 flex-1 flex-col gap-3">
                         <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Live Assist mode">
-                            <Button type="button" aria-pressed={isInterpreterMode} className="h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending || micStreaming || sending}>Translate</Button>
-                            <Button type="button" aria-pressed={isTranscribeMode} className="h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
-                            <Button type="button" aria-pressed={isAssistantMode} className="h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Ask AI</Button>
+                            <Button type="button" aria-pressed={isInterpreterMode} className="h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => void switchMode("two_way_interpreter")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Translate</Button>
+                            <Button type="button" aria-pressed={isTranscribeMode} className="h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => void switchMode("listen_only")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Transcribe</Button>
+                            <Button type="button" aria-pressed={isAssistantMode} className="h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => void switchMode("quick_translate")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Ask AI</Button>
                         </div>
+                        {modeSwitchPending && <div className="text-xs text-muted-foreground" role="status">Saving mode…</div>}
                         {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                             <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Ask AI needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
                             <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
@@ -1274,6 +1292,21 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             </div>
                         </div>}
                         <div className="shrink-0 rounded-xl border bg-background p-1">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                className="h-auto min-h-10 w-full justify-between gap-2 px-3 py-2 text-left"
+                                aria-expanded={languageControlsOpen}
+                                aria-controls="live-assist-language-controls"
+                                onClick={toggleLanguageControls}
+                            >
+                                <span className="min-w-0 truncate text-sm">
+                                    <span className="font-medium">Languages</span>
+                                    <span className="ml-2 text-muted-foreground">{isInterpreterMode ? `${languageLabel(agentLanguage)} ${twoWay ? "↔" : "→"} ${languageLabel(clientLanguage)}` : isAssistantMode ? `${spokenLanguage === "auto" ? "Auto-detect" : languageLabel(spokenLanguage)} · AI: ${languageLabel(agentLanguage)}` : spokenLanguage === "auto" ? "Auto-detect" : languageLabel(spokenLanguage)}</span>
+                                </span>
+                                <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", languageControlsOpen && "rotate-180")} aria-hidden="true" />
+                            </Button>
+                            <div id="live-assist-language-controls" hidden={!languageControlsOpen} className="border-t pt-1">
                             {isInterpreterMode ? <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] items-center gap-1">
                                 <LanguagePicker
                                     label={isInterpreterMode && !twoWay ? "From" : "Language 1"}
@@ -1289,8 +1322,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                         aria-pressed={twoWay}
                                         aria-label={`${twoWay ? "Two-way" : "One-way"} translation. Switch to ${twoWay ? "one-way" : "two-way"}.`}
                                         title={`${twoWay ? "Two-way" : "One-way"} translation · click to switch`}
-                                        onClick={() => switchMode("two_way_interpreter", twoWay ? "push_to_talk" : "continuous")}
-                                        disabled={modePending || micStreaming}
+                                        onClick={() => void switchMode("two_way_interpreter", twoWay ? "push_to_talk" : "continuous")}
+                                        disabled={modePending || modeSwitchPending || micStreaming}
                                     >
                                         {twoWay ? <ArrowLeftRight className="h-4 w-4 shrink-0" /> : <ArrowRight className="h-4 w-4 shrink-0" />}
                                         <span className="text-[10px]">{twoWay ? "Two-way" : "One-way"}</span>
@@ -1322,6 +1355,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     Both sides are set to {languageLabel(clientLanguage)}.
                                 </div>
                             )}
+                            </div>
                         </div>
 
                         {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea ref={transcriptScrollRef} className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
@@ -1384,12 +1418,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
                         <div className="shrink-0 space-y-3 border-t bg-background pt-3 pb-[env(safe-area-inset-bottom)]">
                             <div className="flex gap-2">
-                                <Button type="button" size="lg" className="min-h-14 flex-1 rounded-2xl text-base" onClick={startInterpreterNow} disabled={livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
+                                <Button type="button" size="lg" className="min-h-14 flex-1 rounded-2xl text-base" onClick={startInterpreterNow} disabled={modeSwitchPending || livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
                                     {(micStreaming || speechOn) ? "Stop" : "Start"}
                                 </Button>
                                 {isAssistantMode && (
-                                    <Button type="button" size="lg" variant="outline" className="min-h-14 rounded-2xl sm:w-32" onClick={() => sendMessage()} disabled={!draft.trim() || sending || missingModeConnection}>
+                                    <Button type="button" size="lg" variant="outline" className="min-h-14 rounded-2xl sm:w-32" onClick={() => sendMessage()} disabled={modeSwitchPending || !draft.trim() || sending || missingModeConnection}>
                                         {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                         Send
                                     </Button>
@@ -1516,7 +1550,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
                         <div className="flex items-center justify-between gap-3 rounded-xl border p-3">
                             <div className="text-xs text-muted-foreground">{session.participantMode === "agent_only" ? "Private conversation" : "Shared conversation"} · {session.transportStatus}<br />{session.assignmentStatus === "assigned" ? "Assigned" : "Not attached to a contact yet"}</div>
-                            <Button type="button" variant="outline" onClick={enableShareMode} disabled={modePending || session.participantMode === "shared_client"}><Share2 className="mr-2 h-4 w-4" />Share</Button>
+                            <Button type="button" variant="outline" onClick={enableShareMode} disabled={modePending || modeSwitchPending || session.participantMode === "shared_client"}><Share2 className="mr-2 h-4 w-4" />Share</Button>
                         </div>
                 <div className="space-y-4">
                     <Card>
