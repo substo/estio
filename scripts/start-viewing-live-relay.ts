@@ -7,6 +7,7 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { resolveLocationOpenAiApiKey } from "@/lib/ai/location-openai-key";
 import { OPENAI_TRANSLATE_MODEL } from "@/lib/viewings/sessions/translation-engines";
 import { mapGeminiTranslationMessage, mapOpenAiTranslationEvent } from "@/lib/viewings/sessions/live-translation-events";
+import { appendLiveCaptionText } from "@/lib/viewings/sessions/live-caption-preview";
 import { selectedLanguageMatches, translationTargets } from "@/lib/viewings/sessions/translation-conversation";
 import db from "@/lib/db";
 import { assembleViewingSessionContext } from "@/lib/viewings/sessions/context-assembler";
@@ -50,6 +51,8 @@ type RelayContext = {
     sockets: Set<any>;
     vendorSession: any | null;
     vendorConnectPromise: Promise<void> | null;
+    vendorGeneration: number;
+    audioStreamEnded: boolean;
     translationVendorSessions: Map<string, any>;
     vendorState: "idle" | "connecting" | "connected" | "reconnecting" | "degraded" | "failed" | "disconnected";
     reconnectAttempts: number;
@@ -99,18 +102,6 @@ const TOOL_CACHE_TTL_MS = {
 
 function asString(value: unknown): string {
     return String(value || "").trim();
-}
-
-function appendTranscriptText(previousText: unknown, nextText: unknown): string {
-    const previous = asString(previousText);
-    const next = asString(nextText);
-    if (!previous) return next;
-    if (!next) return previous;
-    if (next.startsWith(previous)) return next;
-    if (previous.endsWith(next)) return previous;
-
-    const needsSpace = !/\s$/.test(previous) && !/^[,.;:!?)]/.test(next);
-    return `${previous}${needsSpace ? " " : ""}${next}`.replace(/\s+/g, " ").trim();
 }
 
 function normalizeLanguageCode(value: unknown, fallback: string): string {
@@ -297,7 +288,7 @@ async function persistTranscript(args: {
     const targetLanguage = args.targetLanguage || context.translationTargetLanguage;
     const perTargetOutput = args.channel === "output" && isLiveTranslateMode(context.mode);
     const previousDraft = perTargetOutput ? context.outputDrafts.get(targetLanguage) || null : context[draftKey];
-    const text = appendTranscriptText(previousDraft?.text || "", args.text);
+    const text = appendLiveCaptionText(previousDraft?.text || "", args.text);
     if (!text) return;
 
     const sourceMessageId = nextSourceMessageId(
@@ -721,6 +712,7 @@ function activeVendorSessions(context: RelayContext): any[] {
 }
 
 function closeVendorSessions(context: RelayContext) {
+    context.vendorGeneration += 1;
     for (const timer of [context.openaiTranscript.inputTimer, context.openaiTranscript.outputTimer]) {
         if (timer) clearTimeout(timer);
     }
@@ -885,8 +877,10 @@ async function connectOpenAiTranslation(context: RelayContext, reconnecting: boo
             void forwardTransportStatus(context, "connected", { reconnecting, model: context.modelName });
             broadcast(context, { type: "relay.vendor.connected", model: context.modelName, mode: context.mode, translationTargetLanguage: context.translationTargetLanguage });
         } else if (mapped.kind === "inputText") {
+            broadcast(context, { type: "relay.transcript.preview", channel: "input", text: mapped.delta, targetLanguage: context.translationTargetLanguage, ts: new Date().toISOString() });
             queueOpenAiTranscript(context, "input", mapped.delta);
         } else if (mapped.kind === "outputText") {
+            broadcast(context, { type: "relay.transcript.preview", channel: "output", text: mapped.delta, targetLanguage: context.translationTargetLanguage, ts: new Date().toISOString() });
             queueOpenAiTranscript(context, "output", mapped.delta);
         } else if (mapped.kind === "audio") {
             broadcast(context, { type: "relay.audio.chunk", mimeType: mapped.mimeType, data: mapped.data });
@@ -946,12 +940,14 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
         }
 
         const ai = new GoogleGenAI({ apiKey });
+        const vendorGeneration = context.vendorGeneration;
         const liveTranslate = isLiveTranslateMode(context.mode);
         const targets = liveTranslate ? translationTargets(context) : [context.translationTargetLanguage];
 
         const createCallbacks = (targetLanguage: string, persistInputTranscript: boolean) => {
             return {
                 onopen: () => {
+                    if (context.vendorGeneration !== vendorGeneration) return;
                     context.vendorState = "connected";
                     context.reconnectAttempts = 0;
                     context.reconnectCycleStartedAt = null;
@@ -969,8 +965,24 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
                     });
                 },
                 onmessage: (message: any) => {
+                    if (context.vendorGeneration !== vendorGeneration) return;
                     const translationMessage = liveTranslate ? mapGeminiTranslationMessage(message) : null;
                     const { text: modelText, audioChunks } = extractModelTextAndAudio(message);
+                    if (liveTranslate) {
+                        const inputText = asString(translationMessage?.inputText);
+                        const outputText = asString(translationMessage?.outputText || modelText);
+                        const inputLanguage = normalizeLanguageCode(message?.serverContent?.inputTranscription?.languageCode || message?.serverContent?.inputTranscription?.language || "", "");
+                        const previewSourceLanguage = inputLanguage || context.detectedInputLanguage.get(targetLanguage) || "";
+                        const previewAllowed = context.broaderDetection || !previewSourceLanguage
+                            || selectedLanguageMatches(previewSourceLanguage, context.agentLanguage)
+                            || selectedLanguageMatches(previewSourceLanguage, context.clientLanguage);
+                        if (persistInputTranscript && inputText) {
+                            broadcast(context, { type: "relay.transcript.preview", channel: "input", text: inputText, targetLanguage, ts: new Date().toISOString() });
+                        }
+                        if (previewAllowed && outputText) {
+                            broadcast(context, { type: "relay.transcript.preview", channel: "output", text: outputText, targetLanguage, ts: new Date().toISOString() });
+                        }
+                    }
                     const audioSourceLanguage = context.detectedInputLanguage.get(targetLanguage);
                     for (const chunk of translationMessage?.audioChunks || audioChunks) {
                         if (liveTranslate && !context.broaderDetection && audioSourceLanguage
@@ -992,16 +1004,17 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
                         }
 
                         const inputTranscription = message?.serverContent?.inputTranscription;
+                        const turnComplete = !!message?.serverContent?.turnComplete || !!message?.serverContent?.generationComplete;
                         const inputTranscriptionText = asString(translationMessage?.inputText ?? inputTranscription?.text);
                         const detectedLanguage = normalizeLanguageCode(inputTranscription?.languageCode || inputTranscription?.language || "", "");
                         if (detectedLanguage) context.detectedInputLanguage.set(targetLanguage, detectedLanguage);
-                        if (persistInputTranscript && (inputTranscriptionText || (inputTranscription?.finished && context.inputDraft?.text))) {
+                        if (persistInputTranscript && (inputTranscriptionText || ((inputTranscription?.finished || turnComplete) && context.inputDraft?.text))) {
                             await persistTranscript({
                                 context,
                                 channel: "input",
                                 speaker: detectedLanguage && selectedLanguageMatches(detectedLanguage, context.clientLanguage) ? "client" : context.sourceSpeaker,
                                 text: inputTranscriptionText,
-                                isFinal: !!inputTranscription?.finished,
+                                isFinal: !!inputTranscription?.finished || turnComplete,
                                 originalLanguage: detectedLanguage || undefined,
                                 metadata: {
                                     transcriptionKind: "input",
@@ -1016,13 +1029,13 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
                         const allowedSource = context.broaderDetection || !currentSourceLanguage
                             || selectedLanguageMatches(currentSourceLanguage, context.agentLanguage)
                             || selectedLanguageMatches(currentSourceLanguage, context.clientLanguage);
-                        if (allowedSource && (outputTranscriptionText || (outputTranscription?.finished && context.outputDrafts.get(targetLanguage)?.text))) {
+                        if (allowedSource && (outputTranscriptionText || ((outputTranscription?.finished || turnComplete) && context.outputDrafts.get(targetLanguage)?.text))) {
                             await persistTranscript({
                                 context,
                                 channel: "output",
                                 speaker: "system",
                                 text: outputTranscriptionText,
-                                isFinal: !!outputTranscription?.finished,
+                                isFinal: !!outputTranscription?.finished || turnComplete,
                                 targetLanguage,
                                 metadata: {
                                     transcriptionKind: "output",
@@ -1030,8 +1043,6 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
                                 },
                             });
                         }
-
-                        const turnComplete = !!message?.serverContent?.turnComplete || !!message?.serverContent?.generationComplete;
 
                         if (allowedSource && modelText && !outputTranscriptionText) {
                             await persistTranscript({
@@ -1074,6 +1085,7 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
                     });
                 },
                 onerror: (error: any) => {
+                    if (context.vendorGeneration !== vendorGeneration) return;
                     context.vendorState = "degraded";
                     broadcast(context, {
                         type: "relay.vendor.error",
@@ -1086,6 +1098,7 @@ async function connectVendorSessionInternal(context: RelayContext, reconnecting:
                     });
                 },
                 onclose: () => {
+                    if (context.vendorGeneration !== vendorGeneration) return;
                     context.translationVendorSessions.delete(targetLanguage);
                     context.vendorSession = activeVendorSessions(context)[0] || null;
                     if (context.sockets.size > 0) {
@@ -1227,6 +1240,8 @@ async function ensureRelayContext(connectionState: RelayConnectionState): Promis
         sockets: new Set(),
         vendorSession: null,
         vendorConnectPromise: null,
+        vendorGeneration: 0,
+        audioStreamEnded: false,
         translationVendorSessions: new Map(),
         vendorState: "idle",
         reconnectAttempts: 0,
@@ -1313,6 +1328,12 @@ async function bootstrap() {
 
     wss.on("connection", async (ws: any, req: any, connectionState: RelayConnectionState) => {
         const context = await ensureRelayContext(connectionState);
+        if (context.sockets.size === 0 && context.audioStreamEnded) {
+            if (context.modelName === OPENAI_TRANSLATE_MODEL) await flushOpenAiTranscripts(context);
+            closeVendorSessions(context);
+            context.vendorState = "idle";
+            context.audioStreamEnded = false;
+        }
         context.sockets.add(ws);
         context.relaySessionToken = connectionState.relaySessionToken;
         clearIdleCloseTimer(context);
@@ -1375,6 +1396,7 @@ async function bootstrap() {
                     return;
                 }
                 if (eventType === "realtime_audio" || eventType === "audio_input") {
+                    if (payload.audioStreamEnd === true) context.audioStreamEnded = true;
                     if (context.vendorConnectPromise) await context.vendorConnectPromise;
                     if (activeVendorSessions(context).length === 0) {
                         await connectVendorSession(context, context.vendorState === "reconnecting");

@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import db from "@/lib/db";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { VIEWING_SESSION_KINDS } from "@/lib/viewings/sessions/types";
@@ -63,6 +63,20 @@ export default async function ViewingSessionPage(
 
     const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, session.locationId);
     if (!hasAccess) notFound();
+
+    if (session.status === "expired" && session.sessionKind !== VIEWING_SESSION_KINDS.structuredViewing) {
+        const activeSession = await db.viewingSession.findFirst({
+            where: {
+                sessionThreadId: session.sessionThreadId,
+                status: { in: ["active", "paused", "scheduled"] },
+            },
+            orderBy: [{ chainIndex: "desc" }, { createdAt: "desc" }],
+            select: { id: true },
+        });
+        if (activeSession && activeSession.id !== session.id) {
+            redirect(`/admin/live-assist/sessions/${encodeURIComponent(activeSession.id)}`);
+        }
+    }
 
     const [recentContacts, recentProperties, recentViewings] = await Promise.all([
         db.contact.findMany({

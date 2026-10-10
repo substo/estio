@@ -39,6 +39,7 @@ import {
     selectEffectiveViewingTranscriptMessages,
 } from "@/lib/viewings/sessions/transcript";
 import { selectAssistTranscriptRows } from "@/lib/viewings/sessions/assist-transcript-display";
+import { applyLiveCaptionPreview, reconcileLiveCaptionPreview, type LiveCaptionPreviews } from "@/lib/viewings/sessions/live-caption-preview";
 import { cn } from "@/lib/utils";
 
 type SessionMessage = {
@@ -376,6 +377,7 @@ function pcm16ToFloat32(bytes: Uint8Array) {
 export function QuickFieldAssist({ initialSession, initialMessages, initialSummary, quickContextOptions }: Props) {
     const [session, setSession] = useState(initialSession);
     const [messages, setMessages] = useState<SessionMessage[]>(initialMessages);
+    const [liveCaptions, setLiveCaptions] = useState<LiveCaptionPreviews>({});
     const [summary, setSummary] = useState<SessionSummary | null>(initialSummary);
     const [draft, setDraft] = useState("");
     const [error, setError] = useState<string | null>(null);
@@ -385,6 +387,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [sending, setSending] = useState(false);
     const [speechOn, setSpeechOn] = useState(false);
     const [micStreaming, setMicStreaming] = useState(false);
+    const [relayReady, setRelayReady] = useState(false);
     const [audioPlaybackEnabled, setAudioPlaybackEnabled] = useState(
         initialSession.sessionKind === "two_way_interpreter" ? true : initialSession.audioPlaybackAgentEnabled
     );
@@ -433,6 +436,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const recordingUploadRef = useRef<Promise<void>>(Promise.resolve());
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const relaySocketRef = useRef<WebSocket | null>(null);
+    const autoStartAttemptedRef = useRef(false);
+    const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+    const followLiveRef = useRef(true);
     const audioContextRef = useRef<AudioContext | null>(null);
     const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -452,6 +458,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const isTranscribeMode = session.sessionKind === "listen_only";
     const isAssistantMode = session.sessionKind === "quick_translate";
     const transcriptRows = selectAssistTranscriptRows(renderedMessages, { isTranslateMode: isInterpreterMode, textDisplay });
+    const visibleLiveCaptions = Object.values(liveCaptions).filter((caption) => textDisplay === "both" || caption.channel === "output");
     const twoWay = session.speechMode !== "push_to_talk";
     const checkEngines = async (refresh: boolean) => {
         setEngineChecking(true);
@@ -596,6 +603,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 if (type === "viewing_session.message.created" && payload?.message) {
                     const incoming = payload.message as SessionMessage;
                     setMessages((current) => (current.some((item) => item.id === incoming.id) ? current : [...current, incoming]));
+                    setLiveCaptions((current) => reconcileLiveCaptionPreview(current, incoming));
                     return;
                 }
                 if (type === "viewing_session.message.updated" && payload?.message?.id) {
@@ -662,6 +670,34 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     }, [session.id]);
 
     useEffect(() => {
+        const viewport = transcriptScrollRef.current?.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+        if (!viewport) return;
+        const trackScroll = () => {
+            followLiveRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
+        };
+        viewport.addEventListener("scroll", trackScroll);
+        const frame = requestAnimationFrame(() => { viewport.scrollTop = viewport.scrollHeight; });
+        return () => { cancelAnimationFrame(frame); viewport.removeEventListener("scroll", trackScroll); };
+    }, [isInterpreterMode, textDisplay]);
+
+    useEffect(() => {
+        if (!followLiveRef.current) return;
+        const viewport = transcriptScrollRef.current?.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+        if (viewport) viewport.scrollTop = viewport.scrollHeight;
+    }, [messages, liveCaptions]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const cutoff = Date.now() - 10_000;
+            setLiveCaptions((current) => {
+                if (!Object.values(current).some((caption) => caption.updatedAt < cutoff)) return current;
+                return Object.fromEntries(Object.entries(current).filter(([, caption]) => caption.updatedAt >= cutoff));
+            });
+        }, 2_000);
+        return () => clearInterval(timer);
+    }, []);
+
+    useEffect(() => {
         return () => {
             relaySocketRef.current?.close();
             mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -689,6 +725,12 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             throw new Error(payload?.error || "Failed to initialize live transport.");
         }
 
+        const activeSessionId = String(payload?.session?.id || "").trim();
+        if (activeSessionId && activeSessionId !== session.id) {
+            window.location.replace(`/admin/live-assist/sessions/${encodeURIComponent(activeSessionId)}?autostart=1`);
+            return null;
+        }
+
         setSession((current) => ({
             ...current,
             transportStatus: payload?.session?.transportStatus || current.transportStatus,
@@ -706,7 +748,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         const relayUrl = String(payload?.liveAuth?.relay?.websocketUrl || "").trim();
         const relaySessionToken = String(payload?.liveAuth?.relay?.relaySessionToken || "").trim();
         if (!relayUrl || !relaySessionToken) {
-            return null;
+            throw new Error("Live relay is unavailable.");
         }
 
         const socketUrl = relayUrl.includes("?")
@@ -714,6 +756,37 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             : `${relayUrl}?relaySessionToken=${encodeURIComponent(relaySessionToken)}`;
         relaySocketRef.current?.close();
         const socket = new WebSocket(socketUrl);
+        relaySocketRef.current = socket;
+        setRelayReady(false);
+        socket.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data || "{}");
+                if (payload?.type === "relay.vendor.connected") setRelayReady(true);
+                if (payload?.type === "relay.transcript.preview" && (payload?.channel === "input" || payload?.channel === "output") && typeof payload?.text === "string") {
+                    setLiveCaptions((current) => applyLiveCaptionPreview(current, {
+                        channel: payload.channel,
+                        targetLanguage: String(payload.targetLanguage || ""),
+                        text: payload.text,
+                        updatedAt: Date.now(),
+                    }));
+                }
+                if (payload?.type === "relay.audio.chunk" && audioPlaybackEnabledRef.current && payload?.mimeType && payload?.data) {
+                    void playPcmAudioChunk(String(payload.mimeType), String(payload.data)).catch(() => undefined);
+                }
+                if (payload?.type === "relay.error" || payload?.type === "relay.vendor.error" || payload?.type === "relay.vendor.connect_failed" || payload?.type === "relay.vendor.failed") {
+                    setRelayReady(false);
+                    setError(String(payload?.error || payload?.reason || "Relay transport error."));
+                }
+            } catch (relayError) {
+                console.error("Failed to parse relay websocket payload:", relayError);
+            }
+        };
+        socket.onclose = () => {
+            if (relaySocketRef.current !== socket) return;
+            relaySocketRef.current = null;
+            setRelayReady(false);
+            setSession((current) => ({ ...current, transportStatus: "disconnected" }));
+        };
         await new Promise<void>((resolve, reject) => {
             const handleOpen = () => {
                 cleanup();
@@ -731,24 +804,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             socket.addEventListener("error", handleError);
         });
         if (isInterpreterMode) socket.send(JSON.stringify({ eventType: "translation_detection", broaderDetection }));
-        socket.onmessage = (event) => {
-            try {
-                const payload = JSON.parse(event.data || "{}");
-                if (payload?.type === "relay.audio.chunk" && audioPlaybackEnabledRef.current && payload?.mimeType && payload?.data) {
-                    void playPcmAudioChunk(String(payload.mimeType), String(payload.data)).catch(() => undefined);
-                }
-                if (payload?.type === "relay.error" || payload?.type === "relay.vendor.error" || payload?.type === "relay.vendor.connect_failed" || payload?.type === "relay.vendor.failed") {
-                    setError(String(payload?.error || payload?.reason || "Relay transport error."));
-                }
-            } catch (relayError) {
-                console.error("Failed to parse relay websocket payload:", relayError);
-            }
-        };
-        socket.onclose = () => {
-            relaySocketRef.current = null;
-            setSession((current) => ({ ...current, transportStatus: "disconnected" }));
-        };
-        relaySocketRef.current = socket;
         return socket;
     };
 
@@ -756,9 +811,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         const socket = relaySocketRef.current && relaySocketRef.current.readyState === WebSocket.OPEN
             ? relaySocketRef.current
             : await connectLiveTransport();
-        if (!socket) {
-            throw new Error("Live relay is unavailable.");
-        }
+        if (!socket) return;
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
         const audioContext = new AudioContext();
@@ -787,13 +840,17 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     const stopLiveMicStream = () => {
-        if (relaySocketRef.current?.readyState === WebSocket.OPEN) {
-            relaySocketRef.current.send(JSON.stringify({
+        setRelayReady(false);
+        const socket = relaySocketRef.current;
+        relaySocketRef.current = null;
+        if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
                 eventType: "audio_input",
                 mimeType: "audio/pcm;rate=16000",
                 audioStreamEnd: true,
             }));
         }
+        socket?.close();
         mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
         mediaStreamRef.current = null;
         audioProcessorRef.current?.disconnect();
@@ -804,6 +861,17 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         audioContextRef.current = null;
         setMicStreaming(false);
     };
+
+    useEffect(() => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("autostart") !== "1" || autoStartAttemptedRef.current) return;
+        autoStartAttemptedRef.current = true;
+        url.searchParams.delete("autostart");
+        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+        void startLiveMicStream().catch((startError) => {
+            setError(startError instanceof Error ? startError.message : "Failed to resume live translation.");
+        });
+    }, []);
 
     const sendMessage = async (textOverride?: string) => {
         const text = String(textOverride ?? draft).trim();
@@ -1250,9 +1318,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             )}
                         </div>
 
-                        {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
+                        {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea ref={transcriptScrollRef} className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
                             <div className="space-y-3">
-                                {transcriptRows.length === 0 && (
+                                {transcriptRows.length === 0 && visibleLiveCaptions.length === 0 && (
                                     <div className="flex min-h-40 items-center justify-center px-4 py-8 text-center text-base text-muted-foreground">
                                         {isTranscribeMode ? "Press Start to capture speech as text." : isInterpreterMode && renderedMessages.length > 0 ? "Waiting for translation…" : isInterpreterMode ? "Press Start to translate both sides of the conversation." : "Ask a question or press Start to speak."}
                                     </div>
@@ -1279,6 +1347,14 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                         </div>
                                     );
                                 })}
+                                {isInterpreterMode && visibleLiveCaptions.map((caption) => (
+                                    <div key={`${caption.channel}:${caption.targetLanguage}`} className="rounded-2xl border border-primary/30 bg-background px-4 py-3" aria-live="polite">
+                                        <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                            {caption.channel === "output" ? `Live translation · ${languageLabel(caption.targetLanguage)}` : "Live original"}
+                                        </div>
+                                        <div className="text-base leading-relaxed">{caption.text}</div>
+                                    </div>
+                                ))}
                             </div>
                         </ScrollArea>}
 
@@ -1313,7 +1389,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     </Button>
                                 )}
                             </div>
-                            <div className="text-center text-xs text-muted-foreground" role="status">{(micStreaming || speechOn) ? "Listening…" : engineChecking ? "Checking models…" : isInterpreterMode ? "Speak naturally in either selected language." : isTranscribeMode ? "Capture speech as text." : "Type a question or use the microphone."}</div>
+                            <div className="text-center text-xs text-muted-foreground" role="status">{micStreaming && isInterpreterMode && !relayReady ? "Connecting to live translation…" : (micStreaming || speechOn) ? "Listening…" : engineChecking ? "Checking models…" : isInterpreterMode ? "Speak naturally in either selected language." : isTranscribeMode ? "Capture speech as text." : "Type a question or use the microphone."}</div>
                             {isInterpreterMode && <div className="flex items-center justify-between gap-2">
                                 <label className="flex shrink-0 items-center gap-2 text-sm"><Volume2 className="h-4 w-4" /><span>Voice {audioPlaybackEnabled ? "on" : "muted"}</span><Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} aria-label="Translated voice" /></label>
                                 <Select value={textDisplay} onValueChange={(value) => setTextDisplay(value as typeof textDisplay)}><SelectTrigger className="h-10 w-auto min-w-0 max-w-[55%] border-0 text-xs shadow-none" aria-label="Text display"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Original + translation</SelectItem><SelectItem value="translation">Translation</SelectItem><SelectItem value="hidden">Hide captions</SelectItem></SelectContent></Select>
