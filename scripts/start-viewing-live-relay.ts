@@ -728,6 +728,22 @@ function closeVendorSessions(context: RelayContext) {
     context.vendorSession = null;
 }
 
+async function finalizeRelayDrafts(context: RelayContext) {
+    await context.queue;
+    if (context.modelName === OPENAI_TRANSLATE_MODEL) await flushOpenAiTranscripts(context);
+    if (context.inputDraft?.text) {
+        await persistTranscript({ context, channel: "input", speaker: context.sourceSpeaker, text: context.inputDraft.text, isFinal: true });
+    }
+    if (context.outputDraft?.text) {
+        await persistTranscript({ context, channel: "output", speaker: "system", text: context.outputDraft.text, isFinal: true });
+    }
+    for (const [targetLanguage, draft] of context.outputDrafts) {
+        if (draft.text) {
+            await persistTranscript({ context, channel: "output", speaker: "system", text: draft.text, isFinal: true, targetLanguage });
+        }
+    }
+}
+
 function clearReconnectTimer(context: RelayContext) {
     if (!context.reconnectTimer) return;
     clearTimeout(context.reconnectTimer);
@@ -742,8 +758,11 @@ function clearIdleCloseTimer(context: RelayContext) {
 
 function scheduleIdleClose(context: RelayContext) {
     clearIdleCloseTimer(context);
-    context.idleCloseTimer = setTimeout(() => {
+    context.idleCloseTimer = setTimeout(async () => {
         context.idleCloseTimer = null;
+        if (context.sockets.size > 0) return;
+
+        if (context.audioStreamEnded) await finalizeRelayDrafts(context);
         if (context.sockets.size > 0) return;
 
         closeVendorSessions(context);
@@ -1199,13 +1218,7 @@ async function ensureRelayContext(connectionState: RelayConnectionState): Promis
         existing.relaySessionToken = connectionState.relaySessionToken;
         if (languagesChanged) {
             if (existing.vendorConnectPromise) await existing.vendorConnectPromise;
-            await existing.queue;
-            await flushOpenAiTranscripts(existing);
-            if (existing.inputDraft?.text) await persistTranscript({ context: existing, channel: "input", speaker: existing.sourceSpeaker, text: existing.inputDraft.text, isFinal: true });
-            if (existing.outputDraft?.text) await persistTranscript({ context: existing, channel: "output", speaker: "system", text: existing.outputDraft.text, isFinal: true });
-            for (const [targetLanguage, draft] of existing.outputDrafts) {
-                if (draft.text) await persistTranscript({ context: existing, channel: "output", speaker: "system", text: draft.text, isFinal: true, targetLanguage });
-            }
+            await finalizeRelayDrafts(existing);
             closeVendorSessions(existing);
             existing.vendorState = "idle";
         }
@@ -1328,15 +1341,15 @@ async function bootstrap() {
 
     wss.on("connection", async (ws: any, req: any, connectionState: RelayConnectionState) => {
         const context = await ensureRelayContext(connectionState);
+        clearIdleCloseTimer(context);
         if (context.sockets.size === 0 && context.audioStreamEnded) {
-            if (context.modelName === OPENAI_TRANSLATE_MODEL) await flushOpenAiTranscripts(context);
+            await finalizeRelayDrafts(context);
             closeVendorSessions(context);
             context.vendorState = "idle";
             context.audioStreamEnded = false;
         }
         context.sockets.add(ws);
         context.relaySessionToken = connectionState.relaySessionToken;
-        clearIdleCloseTimer(context);
 
         (ws as any).__relayState = connectionState;
         sendJson(ws, {
