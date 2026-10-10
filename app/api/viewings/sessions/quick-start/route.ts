@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
             status: result.session.status,
             join: result.join ? {
                 ...result.join,
-                url: domain ? `https://${domain}/viewings/session/${result.join.token}` : null,
+                url: domain ? `https://${domain}/live-assist/join/${result.join.token}` : null,
                 domain,
             } : null,
             modelRouting: result.modelRouting,

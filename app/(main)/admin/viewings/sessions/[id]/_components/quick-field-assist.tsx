@@ -7,6 +7,8 @@ import { QuickAssistUsagePanel, type QuickAssistUsageSnapshot } from "./quick-as
 import type { QuickAssistModelOption } from "@/lib/viewings/sessions/quick-assist-models";
 import {
     ArrowLeft,
+    ArrowLeftRight,
+    ArrowRight,
     Info,
     Check,
     ChevronsUpDown,
@@ -36,6 +38,7 @@ import {
     sortViewingTranscriptMessages,
     selectEffectiveViewingTranscriptMessages,
 } from "@/lib/viewings/sessions/transcript";
+import { selectAssistTranscriptRows } from "@/lib/viewings/sessions/assist-transcript-display";
 import { cn } from "@/lib/utils";
 
 type SessionMessage = {
@@ -444,10 +447,11 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         () => selectEffectiveViewingTranscriptMessages(sortViewingTranscriptMessages(messages)),
         [messages]
     );
-    const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unassigned session";
+    const participantLabel = session.contact?.name || session.viewing?.contact.name || session.clientName || "Unlinked session";
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
     const isTranscribeMode = session.sessionKind === "listen_only";
     const isAssistantMode = session.sessionKind === "quick_translate";
+    const transcriptRows = selectAssistTranscriptRows(renderedMessages, { isTranslateMode: isInterpreterMode, textDisplay });
     const twoWay = session.speechMode !== "push_to_talk";
     const checkEngines = async (refresh: boolean) => {
         setEngineChecking(true);
@@ -833,7 +837,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     body: JSON.stringify({ prompt: text, model: assistantModel }),
                 });
                 const answerPayload = await answerResponse.json().catch(() => null);
-                if (!answerResponse.ok || !answerPayload?.answer) throw new Error(answerPayload?.error || "Assistant could not answer.");
+                if (!answerResponse.ok || !answerPayload?.answer) throw new Error(answerPayload?.error || "AI could not answer.");
                 setLastUsedModel(`${answerPayload.provider} · ${answerPayload.model}`);
                 await refreshUsage(true);
                 const saveResponse = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/messages`, {
@@ -841,7 +845,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ speaker: "system", originalText: answerPayload.answer, translatedText: answerPayload.answer, originalLanguage: agentLanguage, targetLanguage: agentLanguage }),
                 });
-                if (!saveResponse.ok) throw new Error("Assistant answered, but the reply could not be saved.");
+                if (!saveResponse.ok) throw new Error("AI answered, but the reply could not be saved.");
             }
         } catch (sendError: any) {
             setError(sendError?.message || "Failed to send message.");
@@ -887,7 +891,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
 
         if (typeof window === "undefined" || typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-            setError("This browser cannot capture audio for the selected model. Use a browser with microphone recording support, or type an Assistant question.");
+            setError("This browser cannot capture audio for the selected model. Use a browser with microphone recording support, or type a question in Ask AI.");
             return;
         }
 
@@ -1146,10 +1150,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         <div className="-my-4 flex h-[calc(100dvh-3.5rem)] min-h-0 w-[calc(100%+2rem)] max-w-3xl self-center flex-col gap-3 px-3 py-3 sm:px-6">
             <header className="flex shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <Button asChild variant="ghost" size="icon" className="shrink-0"><Link href="/admin/contacts" aria-label="Back to contacts"><ArrowLeft className="h-5 w-5" /></Link></Button>
+                    <Button asChild variant="ghost" size="icon" className="shrink-0"><Link href="/admin/live-assist" aria-label="Back to Live Assist"><ArrowLeft className="h-5 w-5" /></Link></Button>
                     <div className="min-w-0">
-                        <h1 className="text-lg font-semibold tracking-tight">Quick Assist</h1>
-                        <p className="truncate text-xs text-muted-foreground">{participantLabel === "Unassigned session" ? "New conversation" : participantLabel} · {session.participantMode === "agent_only" ? "Private" : "Shared"}</p>
+                        <h1 className="text-lg font-semibold tracking-tight">Live Assist</h1>
+                        <p className="truncate text-xs text-muted-foreground">{participantLabel === "Unlinked session" ? "New session" : participantLabel} · {session.participantMode === "agent_only" ? "Private" : "Shared"}</p>
                     </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -1183,13 +1187,13 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             <div className="flex min-h-0 flex-1 flex-col">
                 <section className="flex min-h-0 flex-1 flex-col">
                     <div className="flex min-h-0 flex-1 flex-col gap-3">
-                        <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Quick Assist mode">
+                        <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Live Assist mode">
                             <Button type="button" aria-pressed={isInterpreterMode} className="h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => switchMode("two_way_interpreter")} disabled={modePending || micStreaming || sending}>Translate</Button>
                             <Button type="button" aria-pressed={isTranscribeMode} className="h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => switchMode("listen_only")} disabled={modePending || micStreaming || sending}>Transcribe</Button>
-                            <Button type="button" aria-pressed={isAssistantMode} className="h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Assistant</Button>
+                            <Button type="button" aria-pressed={isAssistantMode} className="h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => switchMode("quick_translate")} disabled={modePending || micStreaming || sending}>Ask AI</Button>
                         </div>
                         {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                            <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Assistant needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
+                            <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Ask AI needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
                             <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
                             <div className="mt-2 flex flex-wrap gap-2">
                                 <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/gemini">Connect Google</Link></Button>
@@ -1198,30 +1202,42 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 <Button type="button" size="sm" variant="ghost" onClick={() => void checkEngines(true)} disabled={engineChecking}>{engineChecking ? "Checking…" : "Check again"}</Button>
                             </div>
                         </div>}
-                        {isInterpreterMode && <div className="flex shrink-0 justify-center gap-1" role="group" aria-label="Conversation direction">
-                            <Button type="button" aria-pressed={twoWay} className="rounded-full px-5" size="sm" variant={twoWay ? "secondary" : "ghost"} onClick={() => switchMode("two_way_interpreter", "continuous")} disabled={modePending || micStreaming}>Two-way</Button>
-                            <Button type="button" aria-pressed={!twoWay} className="rounded-full px-5" size="sm" variant={!twoWay ? "secondary" : "ghost"} onClick={() => switchMode("two_way_interpreter", "push_to_talk")} disabled={modePending || micStreaming}>One-way</Button>
-                        </div>}
-                        {isInterpreterMode && !twoWay && <p className="text-xs text-muted-foreground">One-way translates from your language to the customer’s language. The engine can detect the spoken source language.</p>}
                         <div className="shrink-0 rounded-xl border bg-background p-1">
-                            <div className="grid grid-cols-[1fr,44px,1fr] items-center gap-1">
+                            <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] items-center gap-1">
                                 <LanguagePicker
-                                    label="Language 1"
+                                    label={isInterpreterMode && !twoWay ? "From" : "Language 1"}
                                     value={agentLanguage}
                                     onChange={(value) => void persistLanguagePair(value, clientLanguage)}
                                 />
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="mx-auto h-10 w-10 rounded-full"
-                                    onClick={swapLanguages}
-                                    aria-label="Swap languages"
-                                >
-                                    <Shuffle className="h-4 w-4" />
-                                </Button>
+                                <div className="flex h-16 flex-col items-center justify-center gap-1">
+                                    {isInterpreterMode && <Button
+                                        type="button"
+                                        variant={twoWay ? "secondary" : "outline"}
+                                        size="sm"
+                                        className="h-8 w-[72px] gap-1 rounded-full px-1"
+                                        aria-pressed={twoWay}
+                                        aria-label={`${twoWay ? "Two-way" : "One-way"} translation. Switch to ${twoWay ? "one-way" : "two-way"}.`}
+                                        title={`${twoWay ? "Two-way" : "One-way"} translation · click to switch`}
+                                        onClick={() => switchMode("two_way_interpreter", twoWay ? "push_to_talk" : "continuous")}
+                                        disabled={modePending || micStreaming}
+                                    >
+                                        {twoWay ? <ArrowLeftRight className="h-4 w-4 shrink-0" /> : <ArrowRight className="h-4 w-4 shrink-0" />}
+                                        <span className="text-[10px]">{twoWay ? "Two-way" : "One-way"}</span>
+                                    </Button>}
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 w-[72px] gap-1 rounded-full px-1 text-[10px]"
+                                        onClick={swapLanguages}
+                                        aria-label="Swap languages"
+                                    >
+                                        <Shuffle className="h-3.5 w-3.5" />
+                                        <span>Swap</span>
+                                    </Button>
+                                </div>
                                 <LanguagePicker
-                                    label="Language 2"
+                                    label={isInterpreterMode && !twoWay ? "To" : "Language 2"}
                                     value={clientLanguage}
                                     hint={contactLanguageHint}
                                     onChange={(value) => void persistLanguagePair(agentLanguage, value)}
@@ -1236,22 +1252,19 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
                         {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
                             <div className="space-y-3">
-                                {renderedMessages.length === 0 && (
+                                {transcriptRows.length === 0 && (
                                     <div className="flex min-h-40 items-center justify-center px-4 py-8 text-center text-base text-muted-foreground">
-                                        {isTranscribeMode ? "Press Start to capture speech as text." : isInterpreterMode ? "Press Start to translate both sides of the conversation." : "Ask a question or press Start to speak."}
+                                        {isTranscribeMode ? "Press Start to capture speech as text." : isInterpreterMode && renderedMessages.length > 0 ? "Waiting for translation…" : isInterpreterMode ? "Press Start to translate both sides of the conversation." : "Ask a question or press Start to speak."}
                                     </div>
                                 )}
-                                {renderedMessages.filter((message) => textDisplay !== "translation" || !(isInterpreterMode && message.origin === "relay_live_transcript" && message.speaker !== "system")).map((message, index) => {
+                                {transcriptRows.map(({ message, sourceOriginalText }, index) => {
                                     const display = getMessageDisplayState(message, agentLanguage, clientLanguage);
-                                    const sourceForTranslation = isInterpreterMode && message.speaker === "system" && message.origin === "relay_live_transcript"
-                                        ? renderedMessages.slice(0, renderedMessages.findIndex((item) => item.id === message.id)).reverse().find((item) => item.origin === "relay_live_transcript" && item.speaker !== "system" && item.originalText.trim())
-                                        : null;
                                     return (
                                         <div
                                             key={message.id}
                                             className={cn(
                                                 "rounded-2xl bg-background px-4 py-3",
-                                                index === renderedMessages.length - 1 && "ring-1 ring-border"
+                                                index === transcriptRows.length - 1 && "ring-1 ring-border"
                                             )}
                                         >
                                             <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -1262,7 +1275,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                                 <div className={cn("min-w-0 flex-1 text-base leading-relaxed", display.isWaitingForTranslation ? "text-muted-foreground" : "text-foreground")}>{display.primaryText}</div>
                                                 {isInterpreterMode && (message.speaker === "system" || (message.translatedText && message.translatedText !== message.originalText)) && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={() => replayTranslatedText(message)} aria-label="Replay translation"><Volume2 className="h-4 w-4" /></Button>}
                                             </div>
-                                            {textDisplay === "both" && (sourceForTranslation || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceForTranslation?.originalText || message.originalText}</div>}
+                                            {textDisplay === "both" && (sourceOriginalText || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceOriginalText || message.originalText}</div>}
                                         </div>
                                     );
                                 })}
@@ -1313,7 +1326,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
                         <DialogHeader><DialogTitle>Advanced</DialogTitle><DialogDescription>Models, conversation context, voice and saving.</DialogDescription></DialogHeader>
                         <div className="rounded-xl border p-3 space-y-2">
-                            <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "Assistant model"}</Label>
+                            <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "AI answer model"}</Label>
                             <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); } else if (isAssistantMode) setAssistantModel(value); else setTranscribeModel(value); }} disabled={micStreaming || sending || modePending || engineChecking}>
                                 <SelectTrigger id="quick-assist-model"><SelectValue /></SelectTrigger>
                                 <SelectContent>

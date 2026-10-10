@@ -168,7 +168,7 @@ export function AICostBadge() {
                         {formatCost(combinedThisMonthCost)}
                     </span>
                 </div>
-                {!!unifiedUsage.quickAssist?.unavailableCalls && <span className="text-[10px] text-amber-700" title="Some Quick Assist costs are unavailable and excluded from totals">+ unpriced</span>}
+                {!!unifiedUsage.quickAssist?.unavailableCalls && <span className="text-[10px] text-amber-700" title="Some Live Assist costs are unavailable and excluded from totals">+ unpriced</span>}
             </button>
 
             {/* Detailed Usage Modal */}
@@ -180,7 +180,7 @@ export function AICostBadge() {
                             AI Usage Dashboard
                         </DialogTitle>
                         <DialogDescription>
-                            Estimated AI costs and usage, including Quick Assist. Provider invoices may differ due to tax, free allowances, or account pricing.
+                            Estimated AI costs and usage, including Live Assist. Provider invoices may differ due to tax, free allowances, or account pricing.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -248,7 +248,7 @@ export function AICostBadge() {
                             </div>
                         </div>
 
-                        {unifiedUsage?.quickAssist && <div className="rounded-lg border p-3 space-y-1"><h4 className="text-sm font-semibold">Quick Assist</h4><p className="text-sm font-mono">Today {formatCost(unifiedUsage.quickAssist.todayCost)} · Month {formatCost(unifiedUsage.quickAssist.monthCost)}</p><p className="text-xs text-muted-foreground">{unifiedUsage.quickAssist.calls} recorded uses this month · already included in the totals above.</p>{unifiedUsage.quickAssist.unavailableCalls > 0 && <p className="text-xs text-amber-700">{unifiedUsage.quickAssist.unavailableCalls} uses have unavailable costs, excluded from the estimate.</p>}{unifiedUsage.quickAssist.subscriptionCalls > 0 && <p className="text-xs text-muted-foreground">{unifiedUsage.quickAssist.subscriptionCalls} Codex uses charged to the connected subscription; no per-call API amount assigned.</p>}</div>}
+                        {unifiedUsage?.quickAssist && <div className="rounded-lg border p-3 space-y-1"><h4 className="text-sm font-semibold">Live Assist</h4><p className="text-sm font-mono">Today {formatCost(unifiedUsage.quickAssist.todayCost)} · Month {formatCost(unifiedUsage.quickAssist.monthCost)}</p><p className="text-xs text-muted-foreground">{unifiedUsage.quickAssist.calls} recorded uses this month · already included in the totals above.</p>{unifiedUsage.quickAssist.unavailableCalls > 0 && <p className="text-xs text-amber-700">{unifiedUsage.quickAssist.unavailableCalls} uses have unavailable costs, excluded from the estimate.</p>}{unifiedUsage.quickAssist.subscriptionCalls > 0 && <p className="text-xs text-muted-foreground">{unifiedUsage.quickAssist.subscriptionCalls} Codex uses charged to the connected subscription; no per-call API amount assigned.</p>}</div>}
                         {/* Top Conversations by Cost */}
                         {displayUsage.topConversations.length > 0 && (
                             <div className="border-t pt-4">
@@ -350,12 +350,12 @@ export function AICostBadge() {
                             <div className="border-t pt-4">
                                 <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                                     <Sparkles className="h-4 w-4" />
-                                    AI usage, including Quick Assist (This Month)
+                                    AI usage, including Live Assist (This Month)
                                 </h4>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                     {unifiedUsage.byFeatureArea.map((f) => (
                                         <div key={f.featureArea} className="bg-muted/30 rounded-md p-2 border border-border/50">
-                                            <div className="text-xs text-muted-foreground uppercase">{f.featureArea === 'viewing_session' ? 'Quick Assist · Translate / sessions' : f.featureArea === 'viewing_session_assistant' ? 'Quick Assist · Assistant' : f.featureArea === 'audio_transcription' ? 'Speech transcription' : f.featureArea.replace(/_/g, ' ')}</div>
+                                            <div className="text-xs text-muted-foreground uppercase">{f.featureArea === 'viewing_session' ? 'Live Assist · Translate / sessions' : f.featureArea === 'viewing_session_assistant' ? 'Live Assist · Ask AI' : f.featureArea === 'audio_transcription' ? 'Speech transcription' : f.featureArea.replace(/_/g, ' ')}</div>
                                             <div className="text-sm font-medium">{f.count} calls</div>
                                             <div className="text-xs text-muted-foreground font-mono">{formatCost(f.costUsd)}</div>
                                         </div>
@@ -369,7 +369,7 @@ export function AICostBadge() {
                             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                                 <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-50" />
                                 <p className="text-sm">No AI usage yet</p>
-                                <p className="text-xs mt-1">Use Quick Assist or another AI tool to see usage here</p>
+                                <p className="text-xs mt-1">Use Live Assist or another AI tool to see usage here</p>
                             </div>
                         )}
                     </div>

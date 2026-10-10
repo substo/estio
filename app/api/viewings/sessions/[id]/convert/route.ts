@@ -92,7 +92,7 @@ export async function POST(
             const domain = String(location?.siteConfig?.domain || location?.domain || "").trim() || null;
             join = {
                 ...join,
-                url: domain ? `https://${domain}/viewings/session/${join.token}` : null,
+                url: domain ? `https://${domain}/live-assist/join/${join.token}` : null,
                 domain,
             };
         }

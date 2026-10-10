@@ -104,7 +104,7 @@ export default async function ContactViewPage({ params, searchParams }: { params
         <div className="p-6 max-w-6xl mx-auto">
             {canManage ? <div className="mb-4 flex justify-end">
                 <QuickAssistStartButton
-                    label="Start Quick Assist"
+                    label="Start Live Assist session"
                     locationId={locationId}
                     contactId={contact.id}
                     quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.contact}

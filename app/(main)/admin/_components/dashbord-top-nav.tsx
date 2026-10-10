@@ -57,7 +57,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
               </div>
               <div className="space-y-1">
                 <QuickAssistStartButton
-                  label="Start Quick Assist"
+                  label="Start Live Assist session"
                   mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
                   sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
                   variant="default"
@@ -78,7 +78,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
           <div className="hidden sm:flex">
             <QuickAssistStartButton
-              label="Quick Assist"
+              label="Live Assist"
               mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
               sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
               variant="outline"

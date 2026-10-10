@@ -516,7 +516,7 @@ export function ViewingSessionCockpit(props: Props) {
                         <ArrowLeft className="h-3.5 w-3.5" />
                         Back to Contacts
                     </Link>
-                    <h1 className="text-xl font-semibold">Viewing Session Copilot</h1>
+                    <h1 className="text-xl font-semibold">Live Assist · Viewing</h1>
                     <p className="text-xs text-muted-foreground">
                         {sessionTitle} • {sessionParticipant} • {formatSessionStatus(session.status)}
                     </p>

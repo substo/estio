@@ -51,10 +51,10 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         activePath: (pathname) => pathname.includes("/admin/conversations"),
       },
       {
-        href: "/admin/viewings/sessions",
-        label: "Quick Assist",
+        href: "/admin/live-assist",
+        label: "Live Assist",
         icon: Radio,
-        activePath: (pathname) => pathname.includes("/admin/viewings/sessions"),
+        activePath: (pathname) => pathname.startsWith("/admin/live-assist") || pathname.startsWith("/admin/viewings/sessions"),
       },
     ],
   },

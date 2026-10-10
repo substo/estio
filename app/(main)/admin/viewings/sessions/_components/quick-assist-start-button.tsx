@@ -83,13 +83,13 @@ export function QuickAssistStartButton({
                 });
                 const payload = await response.json().catch(() => null);
                 if (!response.ok || !payload?.success || !payload?.sessionId) {
-                    toast.error(payload?.error || "Failed to start quick assist.");
+                    toast.error(payload?.error || "Failed to start Live Assist session.");
                     return;
                 }
-                router.push(`/admin/viewings/sessions/${payload.sessionId}`);
+                router.push(`/admin/live-assist/sessions/${payload.sessionId}`);
                 router.refresh();
             } catch (error: any) {
-                toast.error(error?.message || "Failed to start quick assist.");
+                toast.error(error?.message || "Failed to start Live Assist session.");
             }
         });
     };

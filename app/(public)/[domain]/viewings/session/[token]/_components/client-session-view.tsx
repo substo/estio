@@ -77,10 +77,10 @@ function formatSpeaker(speaker: string) {
 }
 
 function formatSessionKindLabel(sessionKind: string | null) {
-    if (sessionKind === "listen_only") return "Listening session";
-    if (sessionKind === "two_way_interpreter") return "Two-way interpreter";
-    if (sessionKind === "quick_translate") return "Quick translation";
-    return "Viewing session";
+    if (sessionKind === "listen_only") return "Transcription";
+    if (sessionKind === "two_way_interpreter") return "Translation";
+    if (sessionKind === "quick_translate") return "Ask AI";
+    return "Viewing";
 }
 
 export function ClientSessionView({ token, preview }: Props) {
@@ -314,7 +314,7 @@ export function ClientSessionView({ token, preview }: Props) {
         <div className="mx-auto w-full max-w-xl space-y-4 px-4 py-6 sm:py-8">
             <Card>
                 <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">{preview.property?.title || "Live translation session"}</CardTitle>
+                    <CardTitle className="text-lg">{preview.property?.title || "Live Assist session"}</CardTitle>
                     <CardDescription>
                         Agent: {preview.agent.name} • {preview.property?.reference ? `Ref ${preview.property.reference}` : formatSessionKindLabel(preview.sessionKind)}
                     </CardDescription>
@@ -342,7 +342,7 @@ export function ClientSessionView({ token, preview }: Props) {
                                 />
                             </div>
                             <div className="rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-                                AI copilot may assist during this viewing session by processing transcript and language translation.
+                                Live Assist may process speech, transcripts, and translations during this session.
                             </div>
                             <label className="flex items-start gap-2 text-xs text-foreground">
                                 <input

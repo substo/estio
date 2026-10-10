@@ -875,7 +875,7 @@ export function ContactViewingManager({
                                                 Live
                                             </Button>
                                             <QuickAssistStartButton
-                                                label="Quick Assist"
+                                                label="Live Assist"
                                                 locationId={locationId}
                                                 viewingId={viewing.id}
                                                 quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.viewing}
@@ -1254,7 +1254,7 @@ export function ContactViewingManager({
                             type="button"
                             onClick={() => {
                                 if (!newSessionShare?.sessionId) return;
-                                window.open(`/admin/viewings/sessions/${newSessionShare.sessionId}`, "_blank");
+                                window.open(`/admin/live-assist/sessions/${newSessionShare.sessionId}`, "_blank");
                             }}
                         >
                             Open Agent Cockpit

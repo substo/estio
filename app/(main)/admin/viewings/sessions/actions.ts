@@ -56,7 +56,7 @@ function normalizeJoinUrl(input: { domain: string | null; token: string }) {
 
     const domain = asString(input.domain);
     if (!domain) return null;
-    return `https://${domain}/viewings/session/${token}`;
+    return `https://${domain}/live-assist/join/${token}`;
 }
 
 async function requireAccessToViewing(viewingId: string) {
@@ -292,7 +292,7 @@ export async function createViewingSession(
     });
 
     revalidatePath("/admin/contacts");
-    revalidatePath(`/admin/viewings/sessions/${session.id}`);
+    revalidatePath(`/admin/live-assist/sessions/${session.id}`);
 
     return {
         success: true,
@@ -354,7 +354,7 @@ export async function startViewingSession(sessionId: string) {
         },
     });
 
-    revalidatePath(`/admin/viewings/sessions/${updated.id}`);
+    revalidatePath(`/admin/live-assist/sessions/${updated.id}`);
     return { success: true, status: updated.status };
 }
 
@@ -393,7 +393,7 @@ export async function pauseViewingSession(sessionId: string) {
         source: "api",
     });
 
-    revalidatePath(`/admin/viewings/sessions/${updated.id}`);
+    revalidatePath(`/admin/live-assist/sessions/${updated.id}`);
     return { success: true, status: updated.status };
 }
 
@@ -411,7 +411,7 @@ export async function completeViewingSession(sessionId: string) {
     });
 
     revalidatePath("/admin/contacts");
-    revalidatePath(`/admin/viewings/sessions/${access.session.id}`);
+    revalidatePath(`/admin/live-assist/sessions/${access.session.id}`);
 
     return {
         success: true,

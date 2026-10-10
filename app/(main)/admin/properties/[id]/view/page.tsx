@@ -105,7 +105,7 @@ export default async function PropertyViewPage({ params }: { params: Promise<{ i
         <div className="p-6 max-w-6xl mx-auto">
             <div className="mb-4 flex justify-end">
                 <QuickAssistStartButton
-                    label="Start Quick Assist"
+                    label="Start Live Assist session"
                     locationId={locationId}
                     primaryPropertyId={property.id}
                     quickStartSource={VIEWING_SESSION_QUICK_START_SOURCES.property}
