@@ -19,13 +19,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 type SessionCardProps = {
     id: string;
     trashed: boolean;
-    active: boolean;
+    openSession: boolean;
     trashDays: number;
     details: ReactNode;
     badges: ReactNode;
 };
 
-export function SessionCard({ id, trashed, active, trashDays, details, badges }: SessionCardProps) {
+export function SessionCard({ id, trashed, openSession, trashDays, details, badges }: SessionCardProps) {
     const router = useRouter();
     const touchStart = useRef<{ x: number; y: number } | null>(null);
     const suppressNextClick = useRef(false);
@@ -34,7 +34,7 @@ export function SessionCard({ id, trashed, active, trashDays, details, badges }:
     const [pending, setPending] = useState(false);
     const [error, setError] = useState("");
 
-    const canSwipe = !trashed && !active;
+    const canSwipe = !trashed && !openSession;
 
     function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
         suppressNextClick.current = false;
@@ -62,6 +62,10 @@ export function SessionCard({ id, trashed, active, trashDays, details, badges }:
         try {
             const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(id)}/trash`, {
                 method: trashed ? "DELETE" : "POST",
+                ...(!trashed && openSession ? {
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ endOpen: true }),
+                } : {}),
             });
             const result = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "Could not update session.");
@@ -70,6 +74,7 @@ export function SessionCard({ id, trashed, active, trashDays, details, badges }:
             router.refresh();
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : "Could not update session.");
+            if (!trashed) router.refresh();
         } finally {
             setPending(false);
         }
@@ -130,14 +135,14 @@ export function SessionCard({ id, trashed, active, trashDays, details, badges }:
                                     size="icon"
                                     variant="ghost"
                                     disabled={pending}
-                                    aria-label={trashed ? "Restore session" : active ? "End session before moving to Trash" : "Move session to Trash"}
+                                    aria-label={trashed ? "Restore session" : openSession ? "End session and move to Trash" : "Move session to Trash"}
                                     className="ml-auto h-11 w-11 shrink-0 text-muted-foreground hover:text-destructive sm:ml-0"
                                     onClick={handleAction}
                                 >
                                     {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : trashed ? <RotateCcw className="h-4 w-4" aria-hidden="true" /> : <Trash2 className="h-4 w-4" aria-hidden="true" />}
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>{trashed ? "Restore session" : active ? "End session before moving to Trash" : "Move to Trash"}</TooltipContent>
+                            <TooltipContent>{trashed ? "Restore session" : openSession ? "End and move to Trash" : "Move to Trash"}</TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                 </div>
@@ -154,7 +159,7 @@ export function SessionCard({ id, trashed, active, trashDays, details, badges }:
                         <AlertDialogHeader>
                             <AlertDialogTitle>Move session to Trash?</AlertDialogTitle>
                             <AlertDialogDescription>
-                                {active ? "End the live session before moving it to Trash. " : ""}
+                                {openSession ? "This session is still open. Moving it to Trash will end it for everyone and stop new live connections. " : ""}
                                 Sessions in Trash can be restored for {trashDays} days. After that, their content is removed automatically.
                             </AlertDialogDescription>
                         </AlertDialogHeader>
@@ -162,14 +167,14 @@ export function SessionCard({ id, trashed, active, trashDays, details, badges }:
                         <AlertDialogFooter>
                             <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
                             <AlertDialogAction
-                                disabled={pending || active}
+                                disabled={pending}
                                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                                 onClick={(event) => {
                                     event.preventDefault();
                                     void updateSession();
                                 }}
                             >
-                                {pending ? "Moving…" : "Move to Trash"}
+                                {pending ? (openSession ? "Ending and moving…" : "Moving…") : openSession ? "End and Move to Trash" : "Move to Trash"}
                             </AlertDialogAction>
                         </AlertDialogFooter>
                     </AlertDialogContent>

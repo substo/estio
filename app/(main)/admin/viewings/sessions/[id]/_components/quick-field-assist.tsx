@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { QUICK_ASSIST_RATES, quickAssistRateLabel, formatQuickAssistCost } from "@/lib/viewings/sessions/quick-assist-cost";
 import { QuickAssistUsagePanel, type QuickAssistUsageSnapshot } from "./quick-assist-usage";
 import type { QuickAssistModelOption } from "@/lib/viewings/sessions/quick-assist-models";
@@ -25,6 +26,16 @@ import {
     Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -368,7 +379,9 @@ function pcm16ToFloat32(bytes: Uint8Array) {
 }
 
 export function QuickFieldAssist({ initialSession, initialMessages, initialSummary, quickContextOptions }: Props) {
+    const router = useRouter();
     const [session, setSession] = useState(initialSession);
+    const [exitOpen, setExitOpen] = useState(false);
     const [messages, setMessages] = useState<SessionMessage[]>(initialMessages);
     const [liveCaptions, setLiveCaptions] = useState<LiveCaptionPreviews>({});
     const [summary, setSummary] = useState<SessionSummary | null>(initialSummary);
@@ -870,8 +883,18 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     useEffect(() => {
+        if (session.status !== "completed" && session.status !== "expired") return;
+        if (mediaRecorderRef.current?.state === "recording") {
+            recorderActiveRef.current = false;
+            if (recorderTimerRef.current) clearTimeout(recorderTimerRef.current);
+            mediaRecorderRef.current.stop();
+        }
+        if (micStreaming || relaySocketRef.current) stopLiveMicStream();
+    }, [session.status]);
+
+    useEffect(() => {
         const url = new URL(window.location.href);
-        if (url.searchParams.get("autostart") !== "1" || autoStartAttemptedRef.current) return;
+        if (session.status === "completed" || session.status === "expired" || url.searchParams.get("autostart") !== "1" || autoStartAttemptedRef.current) return;
         autoStartAttemptedRef.current = true;
         url.searchParams.delete("autostart");
         window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
@@ -1003,7 +1026,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     const startInterpreterNow = () => {
-        if (modeSwitchInFlightRef.current) return;
+        if (modeSwitchInFlightRef.current || session.status === "completed" || session.status === "expired") return;
         startLiveTransition(async () => {
             setError(null);
             try {
@@ -1188,7 +1211,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         });
     };
 
-    const closeSession = (savePolicy: "save_transcript" | "save_summary_only" | "discard_on_close") => {
+    const closeSession = (savePolicy: "save_transcript" | "save_summary_only" | "discard_on_close", leaveAfter = false) => {
         startSaveTransition(async () => {
             setError(null);
             try {
@@ -1223,6 +1246,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     endedAt: payload?.session?.endedAt || new Date().toISOString(),
                     savePolicy,
                 }));
+                if (leaveAfter) {
+                    setExitOpen(false);
+                    router.push("/admin/live-assist");
+                }
             } catch (closeError: any) {
                 setError(closeError?.message || "Failed to close session.");
             }
@@ -1231,9 +1258,33 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
     return (
         <div className="-my-4 flex h-[calc(100dvh-3.5rem)] min-h-0 w-[calc(100%+2rem)] max-w-3xl self-center flex-col gap-3 px-3 py-3 sm:px-6">
+            <AlertDialog open={exitOpen} onOpenChange={(open) => { if (!savePending) setExitOpen(open); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Leave this session?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Leaving stops this device’s microphone, but the session stays open until you end it. End and save the transcript now, or leave it open to resume later.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={savePending}>Cancel</AlertDialogCancel>
+                        <Button type="button" variant="outline" disabled={savePending} onClick={() => router.push("/admin/live-assist")}>Leave Open</Button>
+                        <AlertDialogAction disabled={savePending} onClick={(event) => {
+                            event.preventDefault();
+                            closeSession("save_transcript", true);
+                        }}>
+                            {savePending ? "Ending…" : "End and Save"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
             <header className="flex shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <Button asChild variant="ghost" size="icon" className="shrink-0"><Link href="/admin/live-assist" aria-label="Back to Live Assist"><ArrowLeft className="h-5 w-5" /></Link></Button>
+                    <Button type="button" variant="ghost" size="icon" className="shrink-0" disabled={savePending} aria-label="Back to Live Assist" onClick={() => {
+                        if (session.status === "completed" || session.status === "expired") router.push("/admin/live-assist");
+                        else { setError(null); setExitOpen(true); }
+                    }}><ArrowLeft className="h-5 w-5" /></Button>
                     <div className="min-w-0">
                         <h1 className="text-lg font-semibold tracking-tight">Live Assist</h1>
                         <p className="truncate text-xs text-muted-foreground">{participantLabel === "Unlinked session" ? "New session" : participantLabel} · {session.participantMode === "agent_only" ? "Private" : "Shared"}</p>
@@ -1409,9 +1460,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
                         <div className="shrink-0 space-y-3 border-t bg-background pt-3 pb-[env(safe-area-inset-bottom)]">
                             <div className="flex gap-2">
-                                <Button type="button" size="lg" className="min-h-14 flex-1 rounded-2xl text-base" onClick={startInterpreterNow} disabled={modeSwitchPending || livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
+                                <Button type="button" size="lg" className="min-h-14 flex-1 rounded-2xl text-base" onClick={startInterpreterNow} disabled={session.status === "completed" || session.status === "expired" || modeSwitchPending || livePending || engineChecking || ((!readyForMode || (isAssistantMode && !modelOptions.transcribe.length)) && !micStreaming && !speechOn)}>
                                     {(micStreaming || speechOn) ? <MicOff className="mr-2 h-5 w-5" /> : <Mic className="mr-2 h-5 w-5" />}
-                                    {(micStreaming || speechOn) ? "Stop" : "Start"}
+                                    {session.status === "completed" || session.status === "expired" ? "Session ended" : (micStreaming || speechOn) ? "Stop" : "Start"}
                                 </Button>
                                 {isAssistantMode && (
                                     <Button type="button" size="lg" variant="outline" className="min-h-14 rounded-2xl sm:w-32" onClick={() => sendMessage()} disabled={modeSwitchPending || !draft.trim() || sending || missingModeConnection}>

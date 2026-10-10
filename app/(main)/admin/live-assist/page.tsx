@@ -147,7 +147,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                             key={session.id}
                             id={session.id}
                             trashed={filter === "trash"}
-                            active={session.status === "active"}
+                            openSession={session.status !== "completed" && session.status !== "expired"}
                             trashDays={VIEWING_SESSION_TRASH_DAYS}
                             details={<>
                                 <div className="font-medium">
@@ -165,7 +165,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                                     <Badge variant="secondary">Needs linking</Badge>
                                 )}
                                 <Badge variant={session.status === "active" ? "default" : "outline"}>
-                                    {session.status}
+                                    {session.status === "active" ? "Open" : session.status}
                                 </Badge>
                             </>}
                         />

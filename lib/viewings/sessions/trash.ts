@@ -12,7 +12,7 @@ export function canRestoreViewingSession(deletedAt: Date | null, trashPurgedAt: 
     return !!deletedAt && !trashPurgedAt && deletedAt.getTime() >= viewingSessionTrashCutoff(now).getTime();
 }
 
-export async function moveViewingSessionToTrash(args: { id: string; locationId: string; now?: Date }, database: typeof db = db) {
+export async function moveViewingSessionToTrash(args: { id: string; locationId: string; now?: Date; endOpen?: boolean }, database: typeof db = db) {
     // A thread may contain several sessions. Only the selected session is trashed.
     const now = args.now || new Date();
     return database.$transaction(async (tx) => {
@@ -22,11 +22,18 @@ export async function moveViewingSessionToTrash(args: { id: string; locationId: 
         });
         if (!session) return "not_found" as const;
         if (session.deletedAt) return "already_deleted" as const;
-        if (session.status !== "completed" && session.status !== "expired") return "active" as const;
+        const isOpen = session.status !== "completed" && session.status !== "expired";
+        if (isOpen && !args.endOpen) return "active" as const;
         const updated = await tx.viewingSession.updateMany({
-            where: { id: args.id, locationId: args.locationId, deletedAt: null, status: { in: ["completed", "expired"] } },
+            where: {
+                id: args.id,
+                locationId: args.locationId,
+                deletedAt: null,
+                status: isOpen ? { notIn: ["completed", "expired"] } : { in: ["completed", "expired"] },
+            },
             data: {
                 deletedAt: now,
+                ...(isOpen ? { status: "completed", endedAt: now } : {}),
                 sessionLinkTokenHash: null,
                 pinCodeHash: null,
                 pinCodeSalt: null,
@@ -34,7 +41,7 @@ export async function moveViewingSessionToTrash(args: { id: string; locationId: 
                 transportStatus: "disconnected",
             },
         });
-        if (updated.count) return "deleted" as const;
+        if (updated.count) return isOpen ? "ended_and_deleted" as const : "deleted" as const;
         const current = await tx.viewingSession.findFirst({
             where: { id: args.id, locationId: args.locationId },
             select: { deletedAt: true },
