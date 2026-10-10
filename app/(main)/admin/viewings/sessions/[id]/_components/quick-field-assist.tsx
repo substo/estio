@@ -11,7 +11,7 @@ import {
     ArrowRight,
     Info,
     Check,
-    ChevronDown,
+    Languages,
     ChevronsUpDown,
     Loader2,
     Mic,
@@ -33,6 +33,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { LIVE_ASSIST_LANGUAGE_OPTIONS as LANGUAGE_OPTIONS } from "@/lib/viewings/sessions/live-assist-languages";
 import { getReplyLanguageLabel, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
@@ -427,14 +428,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         try {
             const saved = window.localStorage.getItem("estio:live-assist:spoken-language");
             if (saved === "auto" || LANGUAGE_OPTIONS.some((option) => option.value === saved)) setSpokenLanguage(saved!);
-            setLanguageControlsOpen(window.localStorage.getItem("estio:live-assist:language-controls-open") === "true");
         } catch { /* Storage may be unavailable in private browsing. */ }
     }, []);
-    const toggleLanguageControls = () => {
-        const next = !languageControlsOpen;
-        setLanguageControlsOpen(next);
-        try { window.localStorage.setItem("estio:live-assist:language-controls-open", String(next)); } catch { /* Keep the selection for this page. */ }
-    };
     const updateSpokenLanguage = (value: string) => {
         setSpokenLanguage(value);
         try { window.localStorage.setItem("estio:live-assist:spoken-language", value); } catch { /* Keep the selection for this page. */ }
@@ -1250,70 +1245,25 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         <DialogContent className="max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Session cost</DialogTitle><DialogDescription>Usage for this conversation, included in your Today and Month totals.</DialogDescription></DialogHeader><QuickAssistUsagePanel usage={sessionUsage} error={usageError} />{resolvedModel && <p className="text-sm text-muted-foreground">Current model: {resolvedModel}<br />{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}</DialogContent>
                     </Dialog>
                     <Button type="button" variant="ghost" size="icon" aria-label="Advanced settings" onClick={() => setAdvancedOpen(true)}><Settings2 className="h-5 w-5" /></Button>
-                </div>
-            </header>
-
-            {error && (
-                <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                    {error}
-                </div>
-            )}
-
-            {shareInfo && (
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Share Link Ready</CardTitle>
-                        <CardDescription>Use this if you want the client to join the shared session.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                        <div className="text-xs text-muted-foreground">{shareInfo.url || "Link available in this browser session only."}</div>
-                        <div className="text-sm">PIN: <span className="font-semibold">{shareInfo.pinCode}</span></div>
-                    </CardContent>
-                </Card>
-            )}
-
-            <div className="flex min-h-0 flex-1 flex-col">
-                <section className="flex min-h-0 flex-1 flex-col">
-                    <div className="flex min-h-0 flex-1 flex-col gap-3">
-                        <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Live Assist mode">
-                            <Button type="button" aria-pressed={isInterpreterMode} className="h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => void switchMode("two_way_interpreter")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Translate</Button>
-                            <Button type="button" aria-pressed={isTranscribeMode} className="h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => void switchMode("listen_only")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Transcribe</Button>
-                            <Button type="button" aria-pressed={isAssistantMode} className="h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => void switchMode("quick_translate")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Ask AI</Button>
-                        </div>
-                        {modeSwitchPending && <div className="text-xs text-muted-foreground" role="status">Saving mode…</div>}
-                        {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                            <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Ask AI needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
-                            <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                                <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/gemini">Connect Google</Link></Button>
-                                <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/openai-api">Connect OpenAI API</Link></Button>
-                                {isAssistantMode && <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/chatgpt-subscription">Connect ChatGPT/Codex</Link></Button>}
-                                <Button type="button" size="sm" variant="ghost" onClick={() => void checkEngines(true)} disabled={engineChecking}>{engineChecking ? "Checking…" : "Check again"}</Button>
-                            </div>
-                        </div>}
-                        <div className="shrink-0 rounded-xl border bg-background p-1">
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-auto min-h-10 w-full justify-between gap-2 px-3 py-2 text-left"
-                                aria-expanded={languageControlsOpen}
-                                aria-controls="live-assist-language-controls"
-                                onClick={toggleLanguageControls}
-                            >
-                                <span className="min-w-0 truncate text-sm">
-                                    <span className="font-medium">Languages</span>
-                                    <span className="ml-2 text-muted-foreground">{isInterpreterMode ? `${languageLabel(agentLanguage)} ${twoWay ? "↔" : "→"} ${languageLabel(clientLanguage)}` : isAssistantMode ? `${spokenLanguage === "auto" ? "Auto-detect" : languageLabel(spokenLanguage)} · AI: ${languageLabel(agentLanguage)}` : spokenLanguage === "auto" ? "Auto-detect" : languageLabel(spokenLanguage)}</span>
-                                </span>
-                                <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", languageControlsOpen && "rotate-180")} aria-hidden="true" />
+                    <Sheet open={languageControlsOpen} onOpenChange={setLanguageControlsOpen}>
+                        <SheetTrigger asChild>
+                            <Button type="button" variant="ghost" size="icon" aria-label="Language settings" title="Language settings" className="hover:bg-muted data-[state=open]:bg-muted">
+                                <Languages className="h-5 w-5" aria-hidden="true" />
                             </Button>
-                            <div id="live-assist-language-controls" hidden={!languageControlsOpen} className="border-t pt-1">
-                            {isInterpreterMode ? <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] items-center gap-1">
+                        </SheetTrigger>
+                        <SheetContent side="right" className="w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">
+                            <SheetHeader className="mb-4 text-left">
+                                <SheetTitle>Languages</SheetTitle>
+                                <SheetDescription>{isInterpreterMode ? "Choose the conversation languages and translation direction." : isAssistantMode ? "Choose the spoken language and the language for AI replies." : "Choose the language to transcribe."}</SheetDescription>
+                            </SheetHeader>
+                            {error && <p role="alert" className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+                            {isInterpreterMode ? <div className="grid gap-2">
                                 <LanguagePicker
                                     label={isInterpreterMode && !twoWay ? "From" : "Language 1"}
                                     value={agentLanguage}
                                     onChange={(value) => void persistLanguagePair(value, clientLanguage)}
                                 />
-                                <div className="flex h-16 flex-col items-center justify-center gap-1">
+                                <div className="flex items-center justify-center gap-3">
                                     {isInterpreterMode && <Button
                                         type="button"
                                         variant={twoWay ? "secondary" : "outline"}
@@ -1346,7 +1296,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     hint={contactLanguageHint}
                                     onChange={(value) => void persistLanguagePair(agentLanguage, value)}
                                 />
-                            </div> : <div className={cn("grid gap-1", isAssistantMode && "sm:grid-cols-2")}>
+                            </div> : <div className="grid gap-2">
                                 <LanguagePicker label="Spoken language" value={spokenLanguage} autoLabel="Auto-detect" onChange={updateSpokenLanguage} disabled={micStreaming} hint={micStreaming ? "Stop recording to change" : "Microphone input · no translation"} />
                                 {isAssistantMode && <LanguagePicker label="AI reply language" value={agentLanguage} onChange={(value) => void persistLanguagePair(value, clientLanguage)} disabled={micStreaming || sending} hint="Language used for AI answers" />}
                             </div>}
@@ -1355,8 +1305,49 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     Both sides are set to {languageLabel(clientLanguage)}.
                                 </div>
                             )}
-                            </div>
+                        </SheetContent>
+                    </Sheet>
+                </div>
+            </header>
+
+            {error && (
+                <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {error}
+                </div>
+            )}
+
+            {shareInfo && (
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Share Link Ready</CardTitle>
+                        <CardDescription>Use this if you want the client to join the shared session.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                        <div className="text-xs text-muted-foreground">{shareInfo.url || "Link available in this browser session only."}</div>
+                        <div className="text-sm">PIN: <span className="font-semibold">{shareInfo.pinCode}</span></div>
+                    </CardContent>
+                </Card>
+            )}
+
+            <div className="flex min-h-0 flex-1 flex-col">
+                <section className="flex min-h-0 flex-1 flex-col">
+                    <div className="flex min-h-0 flex-1 flex-col gap-3">
+                        <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Live Assist mode">
+                            <Button type="button" aria-pressed={isInterpreterMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => void switchMode("two_way_interpreter")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Translate{modeSwitchPending && isInterpreterMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
+                            <Button type="button" aria-pressed={isTranscribeMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => void switchMode("listen_only")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Transcribe{modeSwitchPending && isTranscribeMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
+                            <Button type="button" aria-pressed={isAssistantMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => void switchMode("quick_translate")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Ask AI{modeSwitchPending && isAssistantMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
                         </div>
+                        <span className="sr-only" role="status">{modeSwitchPending ? "Saving mode…" : ""}</span>
+                        {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                            <p className="font-medium">{isInterpreterMode ? (twoWay ? "Two-way translation needs an available Google live model for this location." : "Translation needs an available live model for this location.") : isTranscribeMode ? "Transcribe needs a Google or OpenAI API connection for this location." : "Ask AI needs a Google, OpenAI API, or ChatGPT/Codex text connection."}</p>
+                            <p className="mt-1">Connect a provider in location settings, then return here and check again. A ChatGPT/Codex subscription can answer text questions, but does not enable live translation or audio transcription.</p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/gemini">Connect Google</Link></Button>
+                                <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/openai-api">Connect OpenAI API</Link></Button>
+                                {isAssistantMode && <Button asChild size="sm" variant="outline"><Link href="/admin/settings/integrations/chatgpt-subscription">Connect ChatGPT/Codex</Link></Button>}
+                                <Button type="button" size="sm" variant="ghost" onClick={() => void checkEngines(true)} disabled={engineChecking}>{engineChecking ? "Checking…" : "Check again"}</Button>
+                            </div>
+                        </div>}
 
                         {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea ref={transcriptScrollRef} className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
                             <div className="space-y-3">
