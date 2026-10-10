@@ -1371,6 +1371,8 @@ model ViewingSession {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  trashPurgedAt DateTime?
 
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -1466,6 +1468,8 @@ model ViewingSession {
   usages   ViewingSessionUsage[]
 
   @@index([locationId, status, createdAt(sort: Desc)])
+  @@index([locationId, deletedAt, updatedAt(sort: Desc)])
+  @@index([deletedAt, trashPurgedAt])
   @@index([locationId, assignmentStatus, createdAt(sort: Desc)])
   @@index([locationId, sessionKind, createdAt(sort: Desc)])
   @@index([locationId, participantMode, createdAt(sort: Desc)])

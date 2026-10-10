@@ -4,6 +4,7 @@ import { verifyCronAuthorization } from '@/lib/cron/auth';
 import db from '@/lib/db';
 import { publishConversationRealtimeEvent } from '@/lib/realtime/conversation-events';
 import { runConversationTrashRetentionPurge } from '@/lib/conversations/trash-retention';
+import { purgeViewingSessionTrash } from '@/lib/viewings/sessions/trash';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -60,16 +61,21 @@ export async function GET(request: NextRequest) {
       batchSize: Number(process.env.CONVERSATION_TRASH_PURGE_BATCH_SIZE || 100),
       maxBatches: Number(process.env.CONVERSATION_TRASH_PURGE_MAX_BATCHES || 20),
     });
+    const viewingSessions = await purgeViewingSessionTrash({
+      batchSize: Number(process.env.VIEWING_SESSION_TRASH_PURGE_BATCH_SIZE || 50),
+      maxBatches: Number(process.env.VIEWING_SESSION_TRASH_PURGE_MAX_BATCHES || 10),
+    });
     const locationsNotified = await publishPurgeNotifications(result.affectedLocationIds, result.cutoffAt);
     const { affectedLocationIds, ...publicResult } = result;
 
     return NextResponse.json({
       ...publicResult,
+      viewingSessions,
       locationsAffected: affectedLocationIds.length,
       locationsNotified,
-      message: result.limitReached
-        ? `Permanently deleted ${result.purged} expired conversations; the bounded run limit was reached and remaining rows will continue on the next run.`
-        : `Permanently deleted ${result.purged} conversations older than ${result.retentionDays} days in trash.`,
+      message: result.limitReached || viewingSessions.limitReached
+        ? `Permanently deleted ${result.purged} expired conversations and purged content from ${viewingSessions.sessions} Live Assist sessions; a bounded run limit was reached.`
+        : `Permanently deleted ${result.purged} expired conversations and purged content from ${viewingSessions.sessions} Live Assist sessions.`,
     });
   } catch (error: any) {
     return NextResponse.json(

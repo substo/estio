@@ -126,6 +126,7 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
         include: {
             nextSessions: {
                 where: {
+                    deletedAt: null,
                     status: {
                         in: [
                             VIEWING_SESSION_STATUSES.scheduled,
@@ -139,7 +140,7 @@ export async function ensureViewingSessionWithinLiveWindow(sessionId: string): P
             },
         },
     });
-    if (!session) {
+    if (!session || session.deletedAt) {
         throw new Error("Viewing session not found.");
     }
 

@@ -412,7 +412,7 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
             },
         },
     });
-    if (!session) {
+    if (!session || session.deletedAt) {
         throw new Error("Viewing session not found.");
     }
 
@@ -493,6 +493,11 @@ export async function upsertViewingSessionSummaryFromInsights(args: BuildSummary
     const now = new Date();
 
     const summary = await db.$transaction(async (tx) => {
+        const available = await tx.viewingSession.updateMany({
+            where: { id: session.id, deletedAt: null },
+            data: { updatedAt: new Date() },
+        });
+        if (!available.count) throw new Error("Viewing session is in Trash.");
         const summaryRow = await tx.viewingSessionSummary.upsert({
             where: { sessionId: session.id },
             create: {

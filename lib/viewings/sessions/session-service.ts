@@ -164,9 +164,10 @@ export async function ensureViewingSessionJoinSecrets(args: {
             pinCodeHash: true,
             pinCodeSalt: true,
             tokenExpiresAt: true,
+            deletedAt: true,
         },
     });
-    if (!session) throw new Error("Viewing session not found.");
+    if (!session || session.deletedAt) throw new Error("Viewing session not found.");
 
     const participantMode = normalizeViewingSessionParticipantMode(args.participantMode || session.participantMode);
     if (!shouldRequireViewingSessionJoinCredentials(participantMode)) {
@@ -433,9 +434,10 @@ export async function attachViewingSessionContext(args: {
             savePolicy: true,
             endedAt: true,
             assignmentStatus: true,
+            deletedAt: true,
         },
     });
-    if (!session) throw new Error("Viewing session not found.");
+    if (!session || session.deletedAt) throw new Error("Viewing session not found.");
 
     const validated = await validateViewingSessionContextRefs({
         locationId: session.locationId,
@@ -446,8 +448,8 @@ export async function attachViewingSessionContext(args: {
     });
 
     const nextViewing = validated.viewing || null;
-    const nextContactId = asString(args.contactId) || nextViewing?.contact.id || session.contactId || null;
-    const nextPrimaryPropertyId = asString(args.primaryPropertyId) || nextViewing?.property.id || session.primaryPropertyId || null;
+    const nextContactId = asString(args.contactId) || nextViewing?.contact?.id || session.contactId || null;
+    const nextPrimaryPropertyId = asString(args.primaryPropertyId) || nextViewing?.property?.id || session.primaryPropertyId || null;
     const nextRelatedPropertyIds = uniqIds(
         (args.relatedPropertyIds && args.relatedPropertyIds.length > 0)
             ? args.relatedPropertyIds
@@ -586,9 +588,10 @@ export async function convertViewingSession(args: {
             pinCodeHash: true,
             pinCodeSalt: true,
             tokenExpiresAt: true,
+            deletedAt: true,
         },
     });
-    if (!session) throw new Error("Viewing session not found.");
+    if (!session || session.deletedAt) throw new Error("Viewing session not found.");
 
     const nextSessionKind = normalizeViewingSessionKind(args.sessionKind || session.sessionKind);
     const nextParticipantMode = normalizeViewingSessionParticipantMode(args.participantMode || session.participantMode);
@@ -695,9 +698,10 @@ export async function closeViewingSession(args: {
             sessionKind: true,
             participantMode: true,
             status: true,
+            deletedAt: true,
         },
     });
-    if (!session) throw new Error("Viewing session not found.");
+    if (!session || session.deletedAt) throw new Error("Viewing session not found.");
 
     const now = new Date();
     const updated = await db.viewingSession.update({
@@ -810,6 +814,7 @@ export async function getViewingSessionThreadPreview(args: {
         where: {
             sessionThreadId,
             locationId,
+            deletedAt: null,
         },
         orderBy: [{ chainIndex: "asc" }, { createdAt: "asc" }],
         include: {

@@ -9,9 +9,10 @@ import { QuickFieldAssist } from "@/app/(main)/admin/viewings/sessions/[id]/_com
 export const dynamic = "force-dynamic";
 
 export default async function ViewingSessionPage(
-    { params }: { params: Promise<{ id: string }> }
+    { params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ review?: string }> }
 ) {
     const { id } = await params;
+    const { review } = await searchParams;
     const sessionId = String(id || "").trim();
     if (!sessionId) notFound();
 
@@ -48,6 +49,7 @@ export default async function ViewingSessionPage(
                     id: true,
                     name: true,
                     firstName: true,
+                    preferredLang: true,
                 },
             },
             primaryProperty: {
@@ -59,15 +61,16 @@ export default async function ViewingSessionPage(
             },
         },
     });
-    if (!session) notFound();
+    if (!session || session.deletedAt) notFound();
 
     const hasAccess = await verifyUserHasAccessToLocation(clerkUserId, session.locationId);
     if (!hasAccess) notFound();
 
-    if (session.status === "expired" && session.sessionKind !== VIEWING_SESSION_KINDS.structuredViewing) {
+    if (review !== "1" && session.status === "expired" && session.sessionKind !== VIEWING_SESSION_KINDS.structuredViewing) {
         const activeSession = await db.viewingSession.findFirst({
             where: {
                 sessionThreadId: session.sessionThreadId,
+                deletedAt: null,
                 status: { in: ["active", "paused", "scheduled"] },
             },
             orderBy: [{ chainIndex: "desc" }, { createdAt: "desc" }],

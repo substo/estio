@@ -78,6 +78,7 @@ export async function runViewingSessionRetentionCleanup(
 
     const candidates = await db.viewingSession.findMany({
         where: {
+            deletedAt: null,
             status: {
                 in: [VIEWING_SESSION_STATUSES.completed, VIEWING_SESSION_STATUSES.expired],
             },
@@ -146,6 +147,11 @@ export async function runViewingSessionRetentionCleanup(
         }
 
         const cleanup = await db.$transaction(async (tx) => {
+            const claimed = await tx.viewingSession.updateMany({
+                where: { id: candidate.id, deletedAt: null },
+                data: { updatedAt: new Date() },
+            });
+            if (!claimed.count) return null;
             const deletedMessages = await tx.viewingSessionMessage.deleteMany({
                 where: { sessionId: candidate.id },
             });
@@ -194,6 +200,8 @@ export async function runViewingSessionRetentionCleanup(
                 deletedSummaryCount,
             };
         });
+
+        if (!cleanup) continue;
 
         messagesDeleted += cleanup.deletedMessages;
         insightsDeleted += cleanup.deletedInsights;

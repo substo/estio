@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
         },
     });
 
-    if (!session) {
+    if (!session || session.deletedAt) {
         return NextResponse.json({ success: false, error: "Invalid session token or PIN." }, { status: 401 });
     }
 

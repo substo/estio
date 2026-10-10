@@ -249,9 +249,10 @@ async function resolveSessionRuntimeConfig(sessionId: string, role: "client" | "
             participantMode: true,
             agentLanguage: true,
             clientLanguage: true,
+            deletedAt: true,
         },
     });
-    if (!session) {
+    if (!session || session.deletedAt) {
         throw new Error("Viewing session not found for relay connection.");
     }
     const agentLanguage = normalizeLanguageCode(session.agentLanguage, "en");
@@ -1486,6 +1487,15 @@ async function bootstrap() {
 
             const payload = verifyViewingSessionAccessToken(relaySessionToken);
             if (!payload?.sessionId || !payload?.locationId || !payload?.role) {
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+            }
+            const allowedSession = await db.viewingSession.findFirst({
+                where: { id: payload.sessionId, locationId: payload.locationId, deletedAt: null },
+                select: { id: true },
+            });
+            if (!allowedSession) {
                 socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
                 socket.destroy();
                 return;

@@ -70,8 +70,9 @@ async function enqueueInsightsAfterTranslation(args: {
 }) {
     const session = await db.viewingSession.findUnique({
         where: { id: args.sessionId },
-        select: { sessionKind: true },
+        select: { sessionKind: true, deletedAt: true },
     });
+    if (!session || session.deletedAt) return;
     const policy = resolveViewingSessionPipelinePolicy({ sessionKind: session?.sessionKind });
     if (!policy.autoInsights) return;
 
@@ -106,6 +107,7 @@ export async function enqueueViewingSessionAnalysis(
         where: {
             id: messageId,
             sessionId,
+            session: { deletedAt: null },
         },
         select: {
             id: true,

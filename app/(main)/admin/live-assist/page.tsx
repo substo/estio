@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES, VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
+import { SessionTrashAction } from "@/app/(main)/admin/live-assist/_components/session-trash-action";
+import { VIEWING_SESSION_TRASH_DAYS } from "@/lib/viewings/sessions/trash";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 20;
@@ -22,7 +24,7 @@ function formatSessionKindLabel(value: string) {
 
 export default async function ViewingSessionsIndexPage({ searchParams }: PageProps) {
     const params = await searchParams;
-    const filter = params.filter === "unlinked" ? "unlinked" : "all";
+    const filter = params.filter === "unlinked" ? "unlinked" : params.filter === "trash" ? "trash" : "all";
     const requestedPage = Number(params.page);
     const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
     const locationContext = await getLocationContext();
@@ -51,17 +53,20 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                     VIEWING_SESSION_KINDS.twoWayInterpreter,
                 ],
             },
+            deletedAt: filter === "trash" ? { not: null } : null,
+            ...(filter === "trash" ? { trashPurgedAt: null } : {}),
             ...(filter === "unlinked" ? {
                 assignmentStatus: "unassigned",
                 savePolicy: { not: "discard_on_close" },
             } : {}),
         },
-        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        orderBy: filter === "trash" ? [{ deletedAt: "desc" }, { id: "desc" }] : [{ updatedAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE + 1,
         select: {
             id: true,
             updatedAt: true,
+            deletedAt: true,
             sessionKind: true,
             participantMode: true,
             status: true,
@@ -76,7 +81,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
     const visibleSessions = sessions.slice(0, PAGE_SIZE);
     const pageHref = (targetPage: number) => {
         const query = new URLSearchParams();
-        if (filter === "unlinked") query.set("filter", "unlinked");
+        if (filter !== "all") query.set("filter", filter);
         if (targetPage > 1) query.set("page", String(targetPage));
         const search = query.toString();
         return `/admin/live-assist${search ? `?${search}` : ""}`;
@@ -125,40 +130,44 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                         <Link href="/admin/live-assist?filter=unlinked" aria-current={filter === "unlinked" ? "page" : undefined} className={`rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-muted ${filter === "unlinked" ? "bg-muted text-foreground" : "text-muted-foreground"}`}>
                             Unlinked
                         </Link>
+                        <Link href="/admin/live-assist?filter=trash" aria-current={filter === "trash" ? "page" : undefined} className={`rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-muted ${filter === "trash" ? "bg-muted text-foreground" : "text-muted-foreground"}`}>
+                            Trash
+                        </Link>
                     </nav>
+                    {filter === "trash" && <CardDescription>Restore sessions within {VIEWING_SESSION_TRASH_DAYS} days. After that, session content is removed automatically.</CardDescription>}
                 </CardHeader>
                 <CardContent className="space-y-3">
                     {visibleSessions.length === 0 && (
                         <div className="rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                            {page > 1 ? "No sessions on this page." : filter === "unlinked" ? "No active or saved sessions need linking." : "No sessions yet. Start one above."}
+                            {page > 1 ? "No sessions on this page." : filter === "trash" ? "Trash is empty." : filter === "unlinked" ? "No active or saved sessions need linking." : "No sessions yet. Start one above."}
                         </div>
                     )}
                     {visibleSessions.map((session) => (
-                        <Link
+                        <div
                             key={session.id}
-                            href={`/admin/live-assist/sessions/${session.id}`}
-                            className="flex flex-col gap-2 rounded-lg border px-4 py-3 transition hover:border-foreground/30 hover:bg-muted/20 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                            className="flex flex-col gap-2 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                         >
                             <div className="space-y-1">
                                 <div className="font-medium">
-                                    {session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session"}
+                                    {filter === "trash" ? (session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session") : <Link className="hover:underline" href={`/admin/live-assist/sessions/${session.id}?review=1`}>{session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session"}</Link>}
                                 </div>
                                 <div className="text-sm text-muted-foreground">
                                     {formatSessionKindLabel(session.sessionKind)} • {session.participantMode === "agent_only" ? "Private" : "Shared"}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                    {session.contact?.name || session.contact?.firstName || "No contact attached"} • Updated {new Date(session.updatedAt).toLocaleString()}
+                                    {session.contact?.name || session.contact?.firstName || "No contact attached"} • {session.deletedAt ? `Deleted ${new Date(session.deletedAt).toLocaleString()} · Recover until ${new Date(session.deletedAt.getTime() + VIEWING_SESSION_TRASH_DAYS * 86400000).toLocaleString()}` : `Updated ${new Date(session.updatedAt).toLocaleString()}`}
                                 </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {session.assignmentStatus === "unassigned" && session.savePolicy !== "discard_on_close" && (
                                     <Badge variant="secondary">Needs linking</Badge>
                                 )}
                                 <Badge variant={session.status === "active" ? "default" : "outline"}>
                                     {session.status}
                                 </Badge>
+                                <SessionTrashAction id={session.id} trashed={filter === "trash"} />
                             </div>
-                        </Link>
+                        </div>
                     ))}
                     {(page > 1 || hasNextPage) && (
                         <nav aria-label="Session pages" className="flex items-center justify-between gap-3 pt-2 text-sm">

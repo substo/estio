@@ -44,9 +44,10 @@ async function resolveContextFromSessionToken(args: {
                 id: true,
                 locationId: true,
                 tokenExpiresAt: true,
+                deletedAt: true,
             },
         });
-        if (!session) return null;
+        if (!session || session.deletedAt) return null;
         if (session.locationId !== payload.locationId) return null;
         if (session.tokenExpiresAt && session.tokenExpiresAt.getTime() <= Date.now()) return null;
 
@@ -93,9 +94,10 @@ export async function resolveViewingSessionRequestContext(args: {
         select: {
             id: true,
             locationId: true,
+            deletedAt: true,
         },
     });
-    if (!session) return null;
+    if (!session || session.deletedAt) return null;
 
     const hasAccess = args.requireAdmin
         ? await verifyUserIsLocationAdmin(clerkUserId, session.locationId)

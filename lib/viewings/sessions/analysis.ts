@@ -220,6 +220,7 @@ async function getMessageWithSession(sessionId: string, messageId: string) {
         where: {
             id: messageId,
             sessionId,
+            session: { deletedAt: null },
         },
         include: {
             session: {
@@ -656,6 +657,8 @@ export async function runViewingSessionMessageTranslation(input: {
 
     try {
         const translation = await runTranslationStep(message);
+        const available = await db.viewingSession.findFirst({ where: { id: sessionId, deletedAt: null }, select: { id: true } });
+        if (!available) return { ok: false, messageId: message.id, skipped: true };
         const updated = await db.viewingSessionMessage.update({
             where: { id: message.id },
             data: {
@@ -841,6 +844,8 @@ export async function runViewingSessionMessageInsights(input: {
     try {
         const context = await assembleViewingSessionContext(sessionId);
         const insight = await runInsightsStep(message, context);
+        const available = await db.viewingSession.findFirst({ where: { id: sessionId, deletedAt: null }, select: { id: true } });
+        if (!available) return { ok: false, messageId: message.id, insightsCreated: 0, insightsSuperseded: 0, skipped: true };
         const supersededAt = new Date();
         const generationKey = `${message.id}:${supersededAt.toISOString()}`;
         const currentGeneratedInsights = await db.viewingSessionInsight.findMany({

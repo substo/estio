@@ -23,7 +23,7 @@ export async function GET(
     }
 
     const rootSession = await db.viewingSession.findFirst({
-        where: { sessionThreadId },
+        where: { sessionThreadId, deletedAt: null },
         select: { locationId: true },
     });
     if (!rootSession?.locationId) {

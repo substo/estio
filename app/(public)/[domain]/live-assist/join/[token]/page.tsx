@@ -21,6 +21,7 @@ export default async function PublicViewingSessionPage(
         where: {
             sessionLinkTokenHash: hashViewingSessionToken(normalizedToken),
             locationId: siteConfig.locationId,
+            deletedAt: null,
         },
         select: {
             id: true,
