@@ -33,7 +33,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { REPLY_LANGUAGE_OPTIONS, getReplyLanguageLabel, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
+import { LIVE_ASSIST_LANGUAGE_OPTIONS as LANGUAGE_OPTIONS } from "@/lib/viewings/sessions/live-assist-languages";
+import { getReplyLanguageLabel, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import {
     sortViewingTranscriptMessages,
     selectEffectiveViewingTranscriptMessages,
@@ -181,22 +182,6 @@ function getLiveModeForSessionKind(sessionKind: string) {
     return "assistant_live_tool_heavy";
 }
 
-const EXTRA_LANGUAGE_OPTIONS = [
-    { value: "nl", label: "Dutch (nl)" },
-    { value: "sv", label: "Swedish (sv)" },
-    { value: "fi", label: "Finnish (fi)" },
-    { value: "da", label: "Danish (da)" },
-    { value: "no", label: "Norwegian (no)" },
-    { value: "cs", label: "Czech (cs)" },
-    { value: "sk", label: "Slovak (sk)" },
-    { value: "sr", label: "Serbian (sr)" },
-    { value: "hr", label: "Croatian (hr)" },
-    { value: "hi", label: "Hindi (hi)" },
-    { value: "ur", label: "Urdu (ur)" },
-    { value: "fa", label: "Persian (fa)" },
-];
-
-const LANGUAGE_OPTIONS = [...REPLY_LANGUAGE_OPTIONS, ...EXTRA_LANGUAGE_OPTIONS];
 
 function languageLabel(value: string | null | undefined) {
     const normalized = normalizeReplyLanguage(value) || "en";
@@ -248,14 +233,18 @@ function LanguagePicker({
     onChange,
     label,
     hint,
+    autoLabel,
+    disabled = false,
 }: {
     value: string;
     onChange: (value: string) => void;
     label: string;
     hint?: string | null;
+    autoLabel?: string;
+    disabled?: boolean;
 }) {
     const [open, setOpen] = useState(false);
-    const resolved = languageCode(value);
+    const resolved = autoLabel && value === "auto" ? "auto" : languageCode(value);
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -264,11 +253,12 @@ function LanguagePicker({
                     variant="ghost"
                     role="combobox"
                     aria-expanded={open}
+                    disabled={disabled}
                     className="h-auto min-h-[64px] w-full justify-between rounded-lg px-3 py-2 text-left hover:bg-muted"
                 >
                     <span className="min-w-0">
                         <span className="block text-[11px] font-medium uppercase text-muted-foreground">{label}</span>
-                        <span className="block truncate text-base font-semibold text-foreground">{languageLabel(resolved)}</span>
+                        <span className="block truncate text-base font-semibold text-foreground">{resolved === "auto" ? autoLabel : languageLabel(resolved)}</span>
                         {hint && <span className="block truncate text-[11px] text-muted-foreground">{hint}</span>}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -280,6 +270,7 @@ function LanguagePicker({
                     <CommandList className="max-h-[320px]">
                         <CommandEmpty>No language found.</CommandEmpty>
                         <CommandGroup>
+                            {autoLabel && <CommandItem value={autoLabel} onSelect={() => { onChange("auto"); setOpen(false); }}><Check className={cn("mr-2 h-4 w-4", resolved === "auto" ? "opacity-100" : "opacity-0")} />{autoLabel}</CommandItem>}
                             {LANGUAGE_OPTIONS.map((option) => {
                                 const optionValue = languageCode(option.value);
                                 const selected = optionValue === resolved;
@@ -427,6 +418,17 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [selectedViewingId, setSelectedViewingId] = useState(initialSession.viewing?.id || "");
     const [agentLanguage, setAgentLanguage] = useState(languageCode(initialSession.agentLanguage || "en"));
     const [clientLanguage, setClientLanguage] = useState(languageCode(initialSession.clientLanguage || initialSession.contact?.preferredLang || "en"));
+    const [spokenLanguage, setSpokenLanguage] = useState("auto");
+    useEffect(() => {
+        try {
+            const saved = window.localStorage.getItem("estio:live-assist:spoken-language");
+            if (saved === "auto" || LANGUAGE_OPTIONS.some((option) => option.value === saved)) setSpokenLanguage(saved!);
+        } catch { /* Storage may be unavailable in private browsing. */ }
+    }, []);
+    const updateSpokenLanguage = (value: string) => {
+        setSpokenLanguage(value);
+        try { window.localStorage.setItem("estio:live-assist:spoken-language", value); } catch { /* Keep the selection for this page. */ }
+    };
     const [contextNotes, setContextNotes] = useState("");
     const recognizerRef = useRef<SpeechRecognizerLike | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -520,7 +522,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         if (!text?.trim()) return;
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = message.targetLanguage || (message.speaker === "system" ? clientLanguage : resolveMessageTargetLanguage(message, agentLanguage, clientLanguage));
+        utterance.lang = message.targetLanguage || (message.speaker === "system" ? agentLanguage : resolveMessageTargetLanguage(message, agentLanguage, clientLanguage));
         utterance.volume = voiceVolume;
         if (replayVoiceName !== "automatic") utterance.voice = replayVoices.find((voice) => voice.voiceURI === replayVoiceName) || null;
         window.speechSynthesis.speak(utterance);
@@ -873,7 +875,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         });
     }, []);
 
-    const sendMessage = async (textOverride?: string) => {
+    const sendMessage = async (textOverride?: string, inputLanguage?: string) => {
         const text = String(textOverride ?? draft).trim();
         if (!text || sending) return;
         const speaker = isTranscribeMode ? "agent" : getMessageSpeakerForSessionKind(session.sessionKind);
@@ -886,8 +888,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 body: JSON.stringify({
                     speaker,
                     originalText: text,
-                    ...(isTranscribeMode || isAssistantMode ? { translatedText: text, targetLanguage: agentLanguage, origin: "browser_stt" } : {}),
-                    originalLanguage: speaker === "client"
+                    ...(isTranscribeMode || isAssistantMode ? { translatedText: text, targetLanguage: inputLanguage, origin: textOverride ? "browser_stt" : "manual_text" } : {}),
+                    originalLanguage: isTranscribeMode || isAssistantMode ? inputLanguage : speaker === "client"
                         ? (session.clientLanguage || session.agentLanguage || "en")
                         : (session.agentLanguage || "en"),
                 }),
@@ -926,6 +928,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         const formData = new FormData();
         formData.append("file", file);
         formData.append("model", transcribeModel);
+        formData.append("language", spokenLanguage);
         const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/audio-transcribe`, {
             method: "POST",
             body: formData,
@@ -936,7 +939,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
         setLastUsedModel(`${payload.provider} · ${payload.model}`);
         await refreshUsage(true);
-        await sendMessage(payload.transcript);
+        await sendMessage(payload.transcript, spokenLanguage === "auto" ? undefined : spokenLanguage);
     };
 
     const toggleFallbackRecorder = async () => {
@@ -1271,7 +1274,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             </div>
                         </div>}
                         <div className="shrink-0 rounded-xl border bg-background p-1">
-                            <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] items-center gap-1">
+                            {isInterpreterMode ? <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] items-center gap-1">
                                 <LanguagePicker
                                     label={isInterpreterMode && !twoWay ? "From" : "Language 1"}
                                     value={agentLanguage}
@@ -1310,7 +1313,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     hint={contactLanguageHint}
                                     onChange={(value) => void persistLanguagePair(agentLanguage, value)}
                                 />
-                            </div>
+                            </div> : <div className={cn("grid gap-1", isAssistantMode && "sm:grid-cols-2")}>
+                                <LanguagePicker label="Spoken language" value={spokenLanguage} autoLabel="Auto-detect" onChange={updateSpokenLanguage} disabled={micStreaming} hint={micStreaming ? "Stop recording to change" : "Microphone input · no translation"} />
+                                {isAssistantMode && <LanguagePicker label="AI reply language" value={agentLanguage} onChange={(value) => void persistLanguagePair(value, clientLanguage)} disabled={micStreaming || sending} hint="Language used for AI answers" />}
+                            </div>}
                             {sameInterpreterLanguage && (
                                 <div className="px-3 pb-2 text-xs text-amber-700">
                                     Both sides are set to {languageLabel(clientLanguage)}.

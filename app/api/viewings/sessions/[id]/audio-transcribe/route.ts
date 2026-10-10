@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
+import { resolveTranscriptionLanguage, transcriptionPrompt } from "@/lib/viewings/sessions/transcription-language";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { resolveLocationOpenAiApiKey } from "@/lib/ai/location-openai-key";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
@@ -11,9 +12,6 @@ import { estimateQuickAssistCost, googleUsageCounts } from "@/lib/viewings/sessi
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const TRANSCRIBE_PROMPT =
-    "Transcribe this audio verbatim in the spoken language. Return plain text only. Do not summarize or translate.";
 
 function asString(value: unknown): string {
     return String(value || "").trim();
@@ -54,6 +52,8 @@ export async function POST(
     }
 
     const formData = await req.formData().catch(() => null);
+    const language = resolveTranscriptionLanguage(asString(formData?.get("language")));
+    if (language === undefined) return NextResponse.json({ success: false, error: "Choose a supported spoken language or Auto-detect." }, { status: 400 });
     const file = formData?.get("file");
     if (!(file instanceof File)) {
         return NextResponse.json({ success: false, error: "Missing audio file." }, { status: 400 });
@@ -76,6 +76,7 @@ export async function POST(
             const body = new FormData();
             body.set("file", file);
             body.set("model", selected.model);
+            if (language) body.set("language", language.split("-")[0]);
             const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
                 method: "POST",
                 headers: { Authorization: `Bearer ${openaiKey}` },
@@ -111,7 +112,7 @@ export async function POST(
             generationConfig: { temperature: 0, responseMimeType: "text/plain" },
         });
         const result = await model.generateContent([
-            { text: TRANSCRIBE_PROMPT },
+            { text: transcriptionPrompt(language) },
             {
                 inlineData: {
                     mimeType: asString(file.type) || "audio/webm",

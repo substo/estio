@@ -34,7 +34,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             locationId: true,
             sessionKind: true,
             agentLanguage: true,
-            clientLanguage: true,
             contact: { select: { name: true } },
             primaryProperty: { select: { title: true, reference: true } },
             messages: { orderBy: { createdAt: "desc" }, take: 12, select: { speaker: true, originalText: true } },
@@ -56,8 +55,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const selected = selectQuickAssistModel(quickAssistModelOptions({ google: !!apiKey, openai: !!openaiKey, codex: codexAvailable }).assistant, parsed.data.model);
         const recent = session.messages.reverse().map((message) => `${message.speaker}: ${message.originalText}`).join("\n");
         const prompt = [
-            "You assist a real estate agent during a live conversation. Answer the agent's latest request clearly and briefly. Do not invent property or contact facts. Reply in the agent's language.",
-            `Agent language: ${session.agentLanguage || "en"}; customer language: ${session.clientLanguage || "unknown"}.`,
+            "You assist a real estate agent during a live conversation. Answer the agent's latest request clearly and briefly. Do not invent property or contact facts. Reply in the configured AI reply language.",
+            `AI reply language: ${session.agentLanguage || "en"}.`,
             `Contact: ${session.contact?.name || "not attached"}. Property: ${session.primaryProperty?.title || "not attached"} (${session.primaryProperty?.reference || "no reference"}).`,
             `Recent conversation:\n${recent}`,
             `Latest agent request: ${parsed.data.prompt}`,
