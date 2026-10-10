@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button";
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES, VIEWING_SESSION_QUICK_START_SOURCES } from "@/lib/viewings/sessions/types";
-import { SessionTrashAction } from "@/app/(main)/admin/live-assist/_components/session-trash-action";
+import { SessionCard } from "@/app/(main)/admin/live-assist/_components/session-card";
 import { VIEWING_SESSION_TRASH_DAYS } from "@/lib/viewings/sessions/trash";
 
 export const dynamic = "force-dynamic";
@@ -143,11 +143,13 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                         </div>
                     )}
                     {visibleSessions.map((session) => (
-                        <div
+                        <SessionCard
                             key={session.id}
-                            className="flex flex-col gap-2 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
-                        >
-                            <div className="space-y-1">
+                            id={session.id}
+                            trashed={filter === "trash"}
+                            active={session.status === "active"}
+                            trashDays={VIEWING_SESSION_TRASH_DAYS}
+                            details={<>
                                 <div className="font-medium">
                                     {filter === "trash" ? (session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session") : <Link className="hover:underline" href={`/admin/live-assist/sessions/${session.id}?review=1`}>{session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session"}</Link>}
                                 </div>
@@ -157,17 +159,16 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                                 <div className="text-xs text-muted-foreground">
                                     {session.contact?.name || session.contact?.firstName || "No contact attached"} • {session.deletedAt ? `Deleted ${new Date(session.deletedAt).toLocaleString()} · Recover until ${new Date(session.deletedAt.getTime() + VIEWING_SESSION_TRASH_DAYS * 86400000).toLocaleString()}` : `Updated ${new Date(session.updatedAt).toLocaleString()}`}
                                 </div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
+                            </>}
+                            badges={<>
                                 {session.assignmentStatus === "unassigned" && session.savePolicy !== "discard_on_close" && (
                                     <Badge variant="secondary">Needs linking</Badge>
                                 )}
                                 <Badge variant={session.status === "active" ? "default" : "outline"}>
                                     {session.status}
                                 </Badge>
-                                <SessionTrashAction id={session.id} trashed={filter === "trash"} />
-                            </div>
-                        </div>
+                            </>}
+                        />
                     ))}
                     {(page > 1 || hasNextPage) && (
                         <nav aria-label="Session pages" className="flex items-center justify-between gap-3 pt-2 text-sm">
