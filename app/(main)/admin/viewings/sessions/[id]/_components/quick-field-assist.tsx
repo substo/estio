@@ -18,11 +18,14 @@ import {
     Mic,
     MicOff,
     MoreHorizontal,
+    Pause,
+    Play,
     Send,
     Settings2,
     Share2,
     Shuffle,
     Volume2,
+    Square,
     Trash2,
     Tag,
 } from "lucide-react";
@@ -58,6 +61,7 @@ import {
 import { selectAssistTranscriptRows } from "@/lib/viewings/sessions/assist-transcript-display";
 import { applyLiveCaptionPreview, reconcileLiveCaptionPreview, type LiveCaptionPreviews } from "@/lib/viewings/sessions/live-caption-preview";
 import { cn } from "@/lib/utils";
+import { REPLAY_SPEECH_MODELS, REPLAY_SPEECH_VOICES } from "@/lib/viewings/sessions/replay-speech-options";
 
 type SessionMessage = {
     id: string;
@@ -419,6 +423,14 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [voiceVolume, setVoiceVolume] = useState(1);
     const [replayVoiceName, setReplayVoiceName] = useState("automatic");
     const [replayVoices, setReplayVoices] = useState<SpeechSynthesisVoice[]>([]);
+    const [replayModel, setReplayModel] = useState<string>("device");
+    const [replayAiVoice, setReplayAiVoice] = useState<string>("Kore");
+    const [replayState, setReplayState] = useState<{ key: string; status: "loading" | "ready" | "playing" | "paused" } | null>(null);
+    const replayStateRef = useRef<{ key: string; status: "loading" | "ready" | "playing" | "paused" } | null>(null);
+    const replayAudioRef = useRef<HTMLAudioElement | null>(null);
+    const replayAbortRef = useRef<AbortController | null>(null);
+    const replayCacheRef = useRef<Map<string, string>>(new Map());
+    const replayEpochRef = useRef(0);
     const [broaderDetection, setBroaderDetection] = useState(false);
     const [shareInfo, setShareInfo] = useState<{ url: string | null; token: string; pinCode: string; expiresAt: string } | null>(null);
     const [contextDialogOpen, setContextDialogOpen] = useState(false);
@@ -427,6 +439,15 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         ? initialSession.liveModel : "automatic");
     const [engines, setEngines] = useState<Array<{ provider: string; model: string; configured: boolean; listed: boolean; checkedAt: string | null; error: string | null }>>([]);
     const [providers, setProviders] = useState<{ google: boolean; openai: boolean; codex: boolean } | null>(null);
+    useEffect(() => {
+        try {
+            const savedModel = window.localStorage.getItem("estio:live-assist:read-aloud-model");
+            if (savedModel === "device" || REPLAY_SPEECH_MODELS.some((model) => model === savedModel)) setReplayModel(savedModel!);
+        } catch { /* Keep the free default when storage is unavailable. */ }
+    }, []);
+    useEffect(() => {
+        if (providers && !providers.google && replayModel !== "device") setReplayModel("device");
+    }, [providers, replayModel]);
     const [modelOptions, setModelOptions] = useState<{ assistant: QuickAssistModelOption[]; transcribe: QuickAssistModelOption[] }>({ assistant: [], transcribe: [] });
     const [assistantModel, setAssistantModel] = useState("automatic");
     const [transcribeModel, setTranscribeModel] = useState("automatic");
@@ -547,19 +568,91 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         playbackCursorRef.current = 0;
     };
 
-    const replayTranslatedText = (message: SessionMessage) => {
-        if (typeof window === "undefined" || !window.speechSynthesis) {
-            setError("Synthesized replay is unavailable in this browser.");
+    const updateReplayState = (state: typeof replayState) => { replayStateRef.current = state; setReplayState(state); };
+    const stopReplay = () => {
+        replayEpochRef.current += 1;
+        replayAbortRef.current?.abort();
+        replayAbortRef.current = null;
+        replayAudioRef.current?.pause();
+        replayAudioRef.current = null;
+        if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+        updateReplayState(null);
+    };
+
+    const toggleReplay = async (message: SessionMessage, field: "original" | "translation", text: string, language: string) => {
+        if (!text.trim()) return;
+        const key = `${message.id}:${field}:${replayModel}:${replayAiVoice}:${replayVoiceName}:${text}`;
+        const current = replayStateRef.current;
+        if (current?.key === key && current.status === "playing") {
+            if (replayModel === "device") window.speechSynthesis.pause();
+            else replayAudioRef.current?.pause();
+            updateReplayState({ key, status: "paused" });
             return;
         }
-        const text = message.speaker === "system" ? message.originalText : message.translatedText;
-        if (!text?.trim()) return;
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = message.targetLanguage || (message.speaker === "system" ? agentLanguage : resolveMessageTargetLanguage(message, agentLanguage, clientLanguage));
-        utterance.volume = voiceVolume;
-        if (replayVoiceName !== "automatic") utterance.voice = replayVoices.find((voice) => voice.voiceURI === replayVoiceName) || null;
-        window.speechSynthesis.speak(utterance);
+        if (current?.key === key && (current.status === "paused" || current.status === "ready")) {
+            if (replayModel === "device") window.speechSynthesis.resume();
+            else await replayAudioRef.current?.play();
+            updateReplayState({ key, status: "playing" });
+            return;
+        }
+        stopReplay();
+        const epoch = replayEpochRef.current;
+        setError(null);
+        if (replayModel === "device") {
+            if (!window.speechSynthesis) { setError("Read aloud is unavailable in this browser."); return; }
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = language;
+            utterance.volume = voiceVolume;
+            const matchingVoice = replayVoices.find((voice) => voice.lang.toLowerCase().startsWith(languageCode(language).toLowerCase()));
+            utterance.voice = replayVoiceName === "automatic" ? matchingVoice || null : replayVoices.find((voice) => voice.voiceURI === replayVoiceName) || null;
+            utterance.onend = () => { if (replayEpochRef.current === epoch) updateReplayState(null); };
+            utterance.onerror = () => { if (replayEpochRef.current === epoch) updateReplayState(null); };
+            updateReplayState({ key, status: "playing" });
+            window.speechSynthesis.speak(utterance);
+            return;
+        }
+        if (!providers?.google) { setError("Connect Google AI for this location to use AI voice."); return; }
+        updateReplayState({ key, status: "loading" });
+        try {
+            let url = replayCacheRef.current.get(key);
+            if (!url) {
+                const abort = new AbortController();
+                replayAbortRef.current = abort;
+                const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/speech`, {
+                    method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
+                    body: JSON.stringify({ messageId: message.id, field, model: replayModel, voice: replayAiVoice }),
+                });
+                if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || "Could not generate audio."); }
+                const blob = await response.blob();
+                if (replayEpochRef.current !== epoch) return;
+                url = URL.createObjectURL(blob);
+                replayCacheRef.current.set(key, url);
+                if (replayCacheRef.current.size > 10) {
+                    const oldestKey = replayCacheRef.current.keys().next().value;
+                    if (oldestKey) {
+                        const oldestUrl = replayCacheRef.current.get(oldestKey);
+                        if (oldestUrl) URL.revokeObjectURL(oldestUrl);
+                        replayCacheRef.current.delete(oldestKey);
+                    }
+                }
+            }
+            if (replayEpochRef.current !== epoch) return;
+            const audio = new Audio(url);
+            audio.volume = voiceVolume;
+            audio.onended = () => { if (replayEpochRef.current === epoch) updateReplayState(null); };
+            audio.onerror = () => { if (replayEpochRef.current === epoch) { updateReplayState(null); setError("Could not play AI voice audio."); } };
+            replayAudioRef.current = audio;
+            try {
+                await audio.play();
+                if (replayEpochRef.current === epoch) updateReplayState({ key, status: "playing" });
+            } catch (cause) {
+                if (replayEpochRef.current !== epoch) return;
+                if (cause instanceof DOMException && cause.name === "NotAllowedError") updateReplayState({ key, status: "ready" });
+                else throw cause;
+            }
+        } catch (cause) {
+            if (replayEpochRef.current === epoch) { updateReplayState(null); setError(cause instanceof Error ? cause.message : "Could not play audio."); }
+        } finally { if (replayEpochRef.current === epoch) replayAbortRef.current = null; }
     };
 
     const playPcmAudioChunk = async (mimeType: string, data: string) => {
@@ -611,6 +704,14 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         updateVoices();
         window.speechSynthesis.addEventListener("voiceschanged", updateVoices);
         return () => window.speechSynthesis.removeEventListener("voiceschanged", updateVoices);
+    }, []);
+
+    useEffect(() => () => {
+        replayAbortRef.current?.abort();
+        replayAudioRef.current?.pause();
+        window.speechSynthesis?.cancel();
+        replayCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+        replayCacheRef.current.clear();
     }, []);
 
     useEffect(() => {
@@ -1600,6 +1701,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     const display = isInterpreterMode && !needsPastTranslation(message)
                                         ? getMessageDisplayState(message, agentLanguage, clientLanguage)
                                         : { primaryText: message.originalText, isWaitingForTranslation: false };
+                                    const replayField = isInterpreterMode && !needsPastTranslation(message) && !display.isWaitingForTranslation && (message.speaker === "system" && message.origin === "relay_live_transcript" || display.primaryText !== message.originalText) ? "translation" : "original";
+                                    const replayLanguage = replayField === "translation" ? resolveMessageTargetLanguage(message, agentLanguage, clientLanguage) : languageCode(message.originalLanguage || (spokenLanguage !== "auto" ? spokenLanguage : clientLanguage));
+                                    const replayKey = `${message.id}:${replayField}:${replayModel}:${replayAiVoice}:${replayVoiceName}:${display.primaryText}`;
+                                    const rowReplay = replayState?.key === replayKey ? replayState.status : null;
                                     return (
                                         <div
                                             key={message.id}
@@ -1615,7 +1720,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                             <div className="flex items-start gap-2">
                                                 <div className={cn("min-w-0 flex-1 text-base leading-relaxed", display.isWaitingForTranslation ? "text-muted-foreground" : "text-foreground")}>{display.primaryText}</div>
                                                 {isInterpreterMode && needsPastTranslation(message) && <Button type="button" size="icon" variant="ghost" className="shrink-0" disabled={translateAllPending || !!translationPendingId} onClick={() => void translateOnePastMessage(message)} aria-label={`Translate this text to ${languageLabel(clientLanguage)}`} title={`Translate to ${languageLabel(clientLanguage)}`}>{translationPendingId === message.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}</Button>}
-                                                {isInterpreterMode && (message.speaker === "system" || (message.translatedText && message.translatedText !== message.originalText)) && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={() => replayTranslatedText(message)} aria-label="Replay translation"><Volume2 className="h-4 w-4" /></Button>}
+                                                {!display.isWaitingForTranslation && !!display.primaryText.trim() && <Button type="button" size="icon" variant="ghost" className="shrink-0" disabled={rowReplay === "loading"} onClick={() => void toggleReplay(message, replayField, display.primaryText, replayLanguage)} aria-label={rowReplay === "playing" ? "Pause reading" : rowReplay === "paused" ? "Resume reading" : rowReplay === "ready" ? "Play prepared audio" : "Read text aloud"} title={rowReplay === "playing" ? "Pause" : rowReplay === "paused" ? "Resume" : rowReplay === "ready" ? "Play prepared audio" : "Read aloud"}>{rowReplay === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : rowReplay === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</Button>}
+                                                {rowReplay && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={stopReplay} aria-label="Stop reading" title="Stop"><Square className="h-3.5 w-3.5" /></Button>}
                                             </div>
                                             {isInterpreterMode && textDisplay === "both" && (sourceOriginalText || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceOriginalText || message.originalText}</div>}
                                         </div>
@@ -1704,9 +1810,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         <Card>
                             <CardHeader className="pb-2"><CardTitle className="text-base">Voice & Detection</CardTitle></CardHeader>
                             <CardContent className="space-y-4">
-                                <div className="space-y-1.5"><Label>Replay voice</Label><Select value={replayVoiceName} onValueChange={setReplayVoiceName}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic for language</SelectItem>{replayVoices.map((voice) => <SelectItem key={voice.voiceURI} value={voice.voiceURI}>{voice.name} ({voice.lang})</SelectItem>)}</SelectContent></Select></div>
+                                <div className="space-y-1.5"><Label>Read aloud model</Label><Select value={replayModel} onValueChange={(value) => { stopReplay(); setReplayModel(value); try { window.localStorage.setItem("estio:live-assist:read-aloud-model", value); } catch { /* Keep the page selection. */ } }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="device">Device voice · free</SelectItem><SelectItem value={REPLAY_SPEECH_MODELS[0]} disabled={!providers?.google}>Google Flash-Lite · lowest cost</SelectItem><SelectItem value={REPLAY_SPEECH_MODELS[1]} disabled={!providers?.google}>Google Flash · higher quality</SelectItem></SelectContent></Select>{!providers?.google && <p className="text-xs text-muted-foreground"><Link href="/admin/settings/integrations/gemini" className="underline">Connect Google AI</Link> to use AI voices.</p>}</div>
+                                {replayModel === "device" ? <div className="space-y-1.5"><Label>Device voice</Label><Select value={replayVoiceName} onValueChange={(value) => { stopReplay(); setReplayVoiceName(value); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic for language</SelectItem>{replayVoices.map((voice) => <SelectItem key={voice.voiceURI} value={voice.voiceURI}>{voice.name} ({voice.lang})</SelectItem>)}</SelectContent></Select></div> : <div className="space-y-1.5"><Label>AI voice</Label><Select value={replayAiVoice} onValueChange={(value) => { stopReplay(); setReplayAiVoice(value); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{REPLAY_SPEECH_VOICES.map((voice) => <SelectItem key={voice} value={voice}>{voice}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">AI voice is charged per generated clip and included in session usage. Replays on this page reuse that clip.</p></div>}
                                 <div className="space-y-1.5"><Label htmlFor="quick-assist-volume">Voice volume</Label><input id="quick-assist-volume" type="range" min="0" max="1" step="0.05" value={voiceVolume} onChange={(event) => setVoiceVolume(Number(event.target.value))} className="w-full" /></div>
-                                <p className="text-xs text-muted-foreground">Replay uses your device’s available voices. The live translated voice is chosen by the provider.</p>
+                                <p className="text-xs text-muted-foreground">Read aloud uses the chosen voice. Live translation audio is chosen by its live provider.</p>
                                 <label className="flex items-center justify-between gap-3 text-sm">Detect languages beyond the selected pair <Switch checked={broaderDetection} onCheckedChange={(value) => { setBroaderDetection(value); if (relaySocketRef.current?.readyState === WebSocket.OPEN) relaySocketRef.current.send(JSON.stringify({ eventType: "translation_detection", broaderDetection: value })); }} /></label>
                                 <p className="text-xs text-muted-foreground">Broader detection lets the engine translate other detected source languages into the selected targets.</p>
                             </CardContent>
