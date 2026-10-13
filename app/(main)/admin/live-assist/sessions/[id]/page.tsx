@@ -159,6 +159,7 @@ export default async function ViewingSessionPage(
         startedAt: session.startedAt ? session.startedAt.toISOString() : null,
         endedAt: session.endedAt ? session.endedAt.toISOString() : null,
         clientName: session.clientName || null,
+        label: session.label || null,
         clientLanguage: session.clientLanguage || null,
         agentLanguage: session.agentLanguage || null,
         audioPlaybackClientEnabled: session.audioPlaybackClientEnabled,

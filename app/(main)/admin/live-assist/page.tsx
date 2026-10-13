@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const PAGE_SIZE = 20;
 
 type PageProps = {
-    searchParams: Promise<{ filter?: string; page?: string }>;
+    searchParams: Promise<{ filter?: string; page?: string; label?: string }>;
 };
 
 function formatSessionKindLabel(value: string) {
@@ -25,6 +25,7 @@ function formatSessionKindLabel(value: string) {
 export default async function ViewingSessionsIndexPage({ searchParams }: PageProps) {
     const params = await searchParams;
     const filter = params.filter === "unlinked" ? "unlinked" : params.filter === "trash" ? "trash" : "all";
+    const labelFilter = filter === "trash" ? "" : String(params.label || "").trim().slice(0, 80);
     const requestedPage = Number(params.page);
     const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
     const locationContext = await getLocationContext();
@@ -43,7 +44,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
         );
     }
 
-    const sessions = await db.viewingSession.findMany({
+    const [sessions, labelOptions] = await Promise.all([db.viewingSession.findMany({
         where: {
             locationId,
             sessionKind: {
@@ -59,6 +60,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                 assignmentStatus: "unassigned",
                 savePolicy: { not: "discard_on_close" },
             } : {}),
+            ...(labelFilter ? { label: labelFilter } : {}),
         },
         orderBy: filter === "trash" ? [{ deletedAt: "desc" }, { id: "desc" }] : [{ updatedAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * PAGE_SIZE,
@@ -70,19 +72,40 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
             sessionKind: true,
             participantMode: true,
             status: true,
+            transportStatus: true,
             assignmentStatus: true,
             savePolicy: true,
+            label: true,
             clientName: true,
             contact: { select: { name: true, firstName: true } },
             primaryProperty: { select: { title: true } },
         },
-    });
+    }), db.viewingSession.findMany({
+        where: {
+            locationId,
+            deletedAt: null,
+            label: { not: null },
+            sessionKind: { in: [VIEWING_SESSION_KINDS.quickTranslate, VIEWING_SESSION_KINDS.listenOnly, VIEWING_SESSION_KINDS.twoWayInterpreter] },
+        },
+        distinct: ["label"],
+        select: { label: true },
+        orderBy: { label: "asc" },
+        take: 50,
+    })]);
     const hasNextPage = sessions.length > PAGE_SIZE;
     const visibleSessions = sessions.slice(0, PAGE_SIZE);
     const pageHref = (targetPage: number) => {
         const query = new URLSearchParams();
         if (filter !== "all") query.set("filter", filter);
+        if (labelFilter) query.set("label", labelFilter);
         if (targetPage > 1) query.set("page", String(targetPage));
+        const search = query.toString();
+        return `/admin/live-assist${search ? `?${search}` : ""}`;
+    };
+    const labelHref = (label: string) => {
+        const query = new URLSearchParams();
+        if (filter !== "all") query.set("filter", filter);
+        if (label) query.set("label", label);
         const search = query.toString();
         return `/admin/live-assist${search ? `?${search}` : ""}`;
     };
@@ -121,7 +144,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                 <CardHeader className="space-y-3 pb-3">
                     <div>
                         <CardTitle className="text-base">Sessions</CardTitle>
-                        <CardDescription>Resume active sessions or review past ones.</CardDescription>
+                        <CardDescription>Open any session to continue it. Final transcript text and replies save automatically.</CardDescription>
                     </div>
                     <nav aria-label="Filter sessions" className="flex flex-wrap gap-2">
                         <Link href="/admin/live-assist" aria-current={filter === "all" ? "page" : undefined} className={`rounded-md border px-3 py-1.5 text-sm font-medium transition hover:bg-muted ${filter === "all" ? "bg-muted text-foreground" : "text-muted-foreground"}`}>
@@ -134,7 +157,11 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                             Trash
                         </Link>
                     </nav>
-                    {filter === "trash" && <CardDescription>Restore sessions within {VIEWING_SESSION_TRASH_DAYS} days. After that, session content is removed automatically.</CardDescription>}
+                    {filter !== "trash" && labelOptions.length > 0 && <nav aria-label="Session labels" className="flex flex-wrap gap-2">
+                        <Link href={labelHref("")} aria-current={!labelFilter ? "page" : undefined} className={`rounded-md border px-3 py-1.5 text-sm ${!labelFilter ? "bg-muted text-foreground" : "text-muted-foreground"}`}>All labels</Link>
+                        {labelOptions.map(({ label }) => label && <Link key={label} href={labelHref(label)} aria-current={labelFilter === label ? "page" : undefined} className={`rounded-md border px-3 py-1.5 text-sm ${labelFilter === label ? "bg-muted text-foreground" : "text-muted-foreground"}`}>{label}</Link>)}
+                    </nav>}
+                    {filter === "trash" && <CardDescription>Restore sessions within {VIEWING_SESSION_TRASH_DAYS} days. After that, content is removed; usage totals remain in analytics.</CardDescription>}
                 </CardHeader>
                 <CardContent className="space-y-3">
                     {visibleSessions.length === 0 && (
@@ -151,7 +178,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                             trashDays={VIEWING_SESSION_TRASH_DAYS}
                             details={<>
                                 <div className="font-medium">
-                                    {filter === "trash" ? (session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session") : <Link className="hover:underline" href={`/admin/live-assist/sessions/${session.id}?review=1`}>{session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session"}</Link>}
+                                    {filter === "trash" ? (session.label || session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session") : <Link className="hover:underline" href={`/admin/live-assist/sessions/${session.id}?review=1`}>{session.label || session.primaryProperty?.title || session.contact?.name || session.contact?.firstName || session.clientName || "Live Assist session"}</Link>}
                                 </div>
                                 <div className="text-sm text-muted-foreground">
                                     {formatSessionKindLabel(session.sessionKind)} • {session.participantMode === "agent_only" ? "Private" : "Shared"}
@@ -164,8 +191,8 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
                                 {session.assignmentStatus === "unassigned" && session.savePolicy !== "discard_on_close" && (
                                     <Badge variant="secondary">Needs linking</Badge>
                                 )}
-                                <Badge variant={session.status === "active" ? "default" : "outline"}>
-                                    {session.status === "active" ? "Open" : session.status}
+                                <Badge variant={session.transportStatus === "connected" ? "default" : "outline"}>
+                                    {session.transportStatus === "connected" ? "Listening" : session.status === "active" ? "Ready" : session.status === "completed" || session.status === "expired" ? "Can continue" : session.status}
                                 </Badge>
                             </>}
                         />

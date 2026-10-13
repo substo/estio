@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canRestoreViewingSession, moveViewingSessionToTrash, restoreViewingSession, viewingSessionTrashCutoff } from "@/lib/viewings/sessions/trash";
+import { canRestoreViewingSession, moveViewingSessionToTrash, purgeViewingSessionTrash, restoreViewingSession, viewingSessionTrashCutoff } from "@/lib/viewings/sessions/trash";
 
 test("the 30-day recovery boundary is inclusive", () => {
     const now = new Date("2026-10-10T12:00:00.000Z");
@@ -10,6 +10,34 @@ test("the 30-day recovery boundary is inclusive", () => {
     assert.equal(canRestoreViewingSession(new Date(cutoff.getTime() - 1), null, now), false);
     assert.equal(canRestoreViewingSession(cutoff, now, now), false);
     assert.equal(canRestoreViewingSession(null, null, now), false);
+});
+
+test("purging session content retains the parent record and usage ledger", async () => {
+    let parentUpdated = false;
+    let labelCleared = false;
+    let usageDeleted = false;
+    const delegate = {
+        findMany: async () => [{ id: "session-1" }],
+        updateMany: async () => ({ count: 1 }),
+        update: async ({ data }: { data: { label?: string | null } }) => { parentUpdated = true; labelCleared = data.label === null; return { id: "session-1" }; },
+    };
+    const content = { deleteMany: async () => ({ count: 2 }) };
+    const usage = { deleteMany: async () => { usageDeleted = true; return { count: 0 }; } };
+    const tx = {
+        viewingSession: delegate,
+        viewingSessionInsight: content,
+        viewingSessionMessage: content,
+        viewingSessionSummary: content,
+        viewingSessionEvent: content,
+        viewingSessionUsage: usage,
+    };
+    const database = { ...tx, $transaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx) } as unknown as NonNullable<Parameters<typeof purgeViewingSessionTrash>[1]>;
+
+    const result = await purgeViewingSessionTrash({ now: new Date("2026-10-13T00:00:00Z"), batchSize: 2 }, database);
+    assert.equal(result.sessions, 1);
+    assert.equal(parentUpdated, true);
+    assert.equal(labelCleared, true);
+    assert.equal(usageDeleted, false);
 });
 
 test("delete and restore stay in the selected location and tolerate repeat requests", async () => {

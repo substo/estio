@@ -76,7 +76,7 @@ export async function restoreViewingSession(args: { id: string; locationId: stri
     return current && !current.deletedAt ? "already_restored" as const : "expired" as const;
 }
 
-export async function purgeViewingSessionTrash(args: { now?: Date; batchSize?: number; maxBatches?: number } = {}) {
+export async function purgeViewingSessionTrash(args: { now?: Date; batchSize?: number; maxBatches?: number } = {}, database: typeof db = db) {
     const now = args.now || new Date();
     const cutoff = viewingSessionTrashCutoff(now);
     const batchSize = Math.max(1, Math.min(100, Math.floor(args.batchSize || 50)));
@@ -89,7 +89,7 @@ export async function purgeViewingSessionTrash(args: { now?: Date; batchSize?: n
     let batches = 0;
     let lastBatchFull = false;
     while (batches < maxBatches) {
-        const candidates = await db.viewingSession.findMany({
+        const candidates = await database.viewingSession.findMany({
             where: { deletedAt: { lt: cutoff }, trashPurgedAt: null },
             orderBy: [{ deletedAt: "asc" }, { id: "asc" }],
             take: batchSize,
@@ -99,7 +99,7 @@ export async function purgeViewingSessionTrash(args: { now?: Date; batchSize?: n
         batches++;
         lastBatchFull = candidates.length === batchSize;
         for (const candidate of candidates) {
-            const result = await db.$transaction(async (tx) => {
+            const result = await database.$transaction(async (tx) => {
                 // The conditional claim and all content removal share one transaction. A restore
                 // that wins the race makes the claim fail; a purge that wins makes restore fail.
                 const claimed = await tx.viewingSession.updateMany({
@@ -115,7 +115,7 @@ export async function purgeViewingSessionTrash(args: { now?: Date; batchSize?: n
                 await tx.viewingSession.update({
                     where: { id: candidate.id },
                     data: {
-                        clientName: null, notes: null, aiSummary: null, objections: Prisma.DbNull,
+                        clientName: null, label: null, notes: null, aiSummary: null, objections: Prisma.DbNull,
                         keyPoints: Prisma.DbNull, recommendedNextActions: Prisma.DbNull, contextSnapshot: Prisma.DbNull,
                         joinAudit: Prisma.DbNull, relatedPropertyIds: [],
                         contactId: null, viewingId: null, primaryPropertyId: null,

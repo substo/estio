@@ -1395,6 +1395,7 @@ model ViewingSession {
   agent   User   @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   clientName     String?
+  label          String?  @db.VarChar(80)
   clientLanguage String?
   agentLanguage  String?
   sessionKind    String   @default("structured_viewing") // structured_viewing | quick_translate | listen_only | two_way_interpreter
@@ -1469,6 +1470,7 @@ model ViewingSession {
 
   @@index([locationId, status, createdAt(sort: Desc)])
   @@index([locationId, deletedAt, updatedAt(sort: Desc)])
+  @@index([locationId, label, updatedAt(sort: Desc)])
   @@index([deletedAt, trashPurgedAt])
   @@index([locationId, assignmentStatus, createdAt(sort: Desc)])
   @@index([locationId, sessionKind, createdAt(sort: Desc)])
