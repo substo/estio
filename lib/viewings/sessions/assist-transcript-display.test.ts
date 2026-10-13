@@ -19,16 +19,32 @@ test("original caption remains visible until its translation arrives", () => {
     );
 });
 
-test("translation mode and non-translate modes keep their existing row choices", () => {
+test("translate mode shows output while transcribe mode keeps only captured speech", () => {
     assert.deepEqual(
         selectAssistTranscriptRows([source, translation], { isTranslateMode: true, textDisplay: "translation" }),
         [{ message: translation, sourceOriginalText: "Hello" }]
     );
     assert.deepEqual(
-        selectAssistTranscriptRows([source, translation], { isTranslateMode: false, textDisplay: "both" }),
+        selectAssistTranscriptRows([source, translation], { isTranslateMode: false, isTranscribeMode: true, textDisplay: "both" }),
+        [{ message: source, sourceOriginalText: null }]
+    );
+});
+
+test("transcribe mode keeps the original field of a message with an embedded translation", () => {
+    const message = { id: "speech", origin: "browser_stt", speaker: "agent", originalText: "Hello", translatedText: "Γεια" };
+    assert.deepEqual(
+        selectAssistTranscriptRows([message], { isTranslateMode: false, isTranscribeMode: true, textDisplay: "both" }),
+        [{ message, sourceOriginalText: null }]
+    );
+});
+
+test("Ask AI keeps its answer while omitting relay-only translation rows", () => {
+    const answer = { id: "answer", origin: "manual_text", speaker: "system", originalText: "Here is the answer" };
+    assert.deepEqual(
+        selectAssistTranscriptRows([source, translation, answer], { isTranslateMode: false, textDisplay: "both" }),
         [
             { message: source, sourceOriginalText: null },
-            { message: translation, sourceOriginalText: null },
+            { message: answer, sourceOriginalText: null },
         ]
     );
 });

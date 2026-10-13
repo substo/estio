@@ -12,6 +12,7 @@ import {
     runViewingSessionMessageTranslation,
 } from "@/lib/viewings/sessions/analysis";
 import { runViewingSessionSynthesis } from "@/lib/queue/viewing-session-synthesis";
+import { LIVE_ASSIST_LANGUAGE_OPTIONS } from "@/lib/viewings/sessions/live-assist-languages";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,11 @@ const reprocessSchema = z.discriminatedUnion("target", [
     z.object({
         target: z.literal("message_analysis"),
         messageId: z.string().trim().min(1).max(120),
+    }),
+    z.object({
+        target: z.literal("translation"),
+        messageId: z.string().trim().min(1).max(120),
+        targetLanguage: z.string().trim().refine((value) => LIVE_ASSIST_LANGUAGE_OPTIONS.some((option) => option.value === value), "Unsupported language"),
     }),
     z.object({
         target: z.literal("summary"),
@@ -126,6 +132,16 @@ export async function POST(
 
     if (!effectiveMessage?.id) {
         return NextResponse.json({ success: false, error: "No effective transcript row found." }, { status: 409 });
+    }
+
+    if (parsed.data.target === "translation") {
+        const translation = await runViewingSessionMessageTranslation({
+            sessionId,
+            messageId: effectiveMessage.id,
+            targetLanguage: parsed.data.targetLanguage,
+            requireModel: true,
+        });
+        return NextResponse.json({ success: true, target: "translation", ...translation });
     }
 
     const translation = await runViewingSessionMessageTranslation({

@@ -332,15 +332,15 @@ type TranslationResult = {
     confidence: number | null;
 };
 
-async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageWithSession>>): Promise<TranslationResult> {
+async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageWithSession>>, options: { targetLanguage?: string; requireModel?: boolean } = {}): Promise<TranslationResult> {
     if (!message) {
         throw new Error("Viewing session message not found.");
     }
 
     const originalText = safeString(message.originalText);
-    const targetLanguage = message.speaker === VIEWING_SESSION_SPEAKERS.client
+    const targetLanguage = options.targetLanguage || (message.speaker === VIEWING_SESSION_SPEAKERS.client
         ? (message.session.agentLanguage || "en")
-        : (message.session.clientLanguage || "en");
+        : (message.session.clientLanguage || "en"));
     const primaryModelName = safeString(message.session.translationModel) || VIEWING_SESSION_STAGE_MODELS.translationDefault;
     const fallbackModelName = VIEWING_SESSION_STAGE_MODELS.translationDefault;
     const translationPromptText = prepareTranslationModelText(originalText);
@@ -376,6 +376,9 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
             locationId: message.session.locationId,
         });
         const parsed = parseJsonMaybe(result.text);
+        if (options.requireModel && !safeString(parsed?.translatedText)) {
+            throw new Error("The translation model did not return translated text.");
+        }
         const normalized = normalizeAnalysisOutput(parsed || {
             translatedText: originalText,
             originalLanguage: message.originalLanguage || null,
@@ -404,14 +407,17 @@ async function runTranslationStep(message: Awaited<ReturnType<typeof getMessageW
 
     try {
         return await tryTranslateWithModel(primaryModelName);
-    } catch {
+    } catch (error) {
         if (fallbackModelName !== primaryModelName) {
             try {
                 return await tryTranslateWithModel(fallbackModelName);
-            } catch {
+            } catch (fallbackError) {
+                if (options.requireModel) throw fallbackError;
                 // fall through to text-preserving fallback
             }
         }
+
+        if (options.requireModel) throw error;
 
         return {
             provider: null,
@@ -584,6 +590,8 @@ async function runInsightsStep(message: Awaited<ReturnType<typeof getMessageWith
 export async function runViewingSessionMessageTranslation(input: {
     sessionId: string;
     messageId: string;
+    targetLanguage?: string;
+    requireModel?: boolean;
 }) {
     const sessionId = safeString(input.sessionId);
     const messageId = safeString(input.messageId);
@@ -594,6 +602,12 @@ export async function runViewingSessionMessageTranslation(input: {
     const message = await getMessageWithSession(sessionId, messageId);
     if (!message) {
         throw new Error("Viewing session message not found.");
+    }
+
+    if (input.targetLanguage && message.targetLanguage === input.targetLanguage &&
+        message.translationStatus === VIEWING_SESSION_TRANSLATION_STATUSES.completed &&
+        safeString(message.translatedText) && safeString(message.translatedText) !== safeString(message.originalText)) {
+        return { ok: true, messageId: message.id, translatedText: message.translatedText, targetLanguage: message.targetLanguage, skipped: true };
     }
 
     if (
@@ -656,7 +670,7 @@ export async function runViewingSessionMessageTranslation(input: {
     });
 
     try {
-        const translation = await runTranslationStep(message);
+        const translation = await runTranslationStep(message, { targetLanguage: input.targetLanguage, requireModel: input.requireModel });
         const available = await db.viewingSession.findFirst({ where: { id: sessionId, deletedAt: null }, select: { id: true } });
         if (!available) return { ok: false, messageId: message.id, skipped: true };
         const updated = await db.viewingSessionMessage.update({
@@ -734,6 +748,7 @@ export async function runViewingSessionMessageTranslation(input: {
             ok: true,
             messageId: message.id,
             translatedText: updated.translatedText || null,
+            targetLanguage: updated.targetLanguage || null,
         };
     } catch (error: any) {
         await db.viewingSessionMessage.update({

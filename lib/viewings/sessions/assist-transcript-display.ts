@@ -7,10 +7,16 @@ type RelayTranscriptMessage = {
 
 export function selectAssistTranscriptRows<T extends RelayTranscriptMessage>(
     messages: T[],
-    options: { isTranslateMode: boolean; textDisplay: "both" | "translation" | "hidden" }
+    options: { isTranslateMode: boolean; isTranscribeMode?: boolean; textDisplay: "both" | "translation" | "hidden" }
 ): Array<{ message: T; sourceOriginalText: string | null }> {
     if (!options.isTranslateMode) {
-        return messages.map((message) => ({ message, sourceOriginalText: null }));
+        // Relay translations are separate system rows. Keep only the captured
+        // speech here; the renderer uses originalText for every remaining row.
+        return messages
+            .filter((message) => options.isTranscribeMode
+                ? message.speaker !== "system"
+                : message.origin !== "relay_live_transcript" || message.speaker !== "system")
+            .map((message) => ({ message, sourceOriginalText: null }));
     }
 
     const sourceByTranslationId = new Map<string, T>();

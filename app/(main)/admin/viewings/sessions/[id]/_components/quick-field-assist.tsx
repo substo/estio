@@ -404,6 +404,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [resumePending, setResumePending] = useState(false);
     const resumeInFlightRef = useRef<Promise<boolean> | null>(null);
     const [summaryPending, setSummaryPending] = useState(false);
+    const [translationPendingId, setTranslationPendingId] = useState<string | null>(null);
+    const [translateAllPending, setTranslateAllPending] = useState(false);
+    const [translateAllOpen, setTranslateAllOpen] = useState(false);
+    const [translationProgress, setTranslationProgress] = useState("");
     const [sending, setSending] = useState(false);
     const [speechOn, setSpeechOn] = useState(false);
     const [micStreaming, setMicStreaming] = useState(false);
@@ -489,7 +493,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const isInterpreterMode = session.sessionKind === "two_way_interpreter";
     const isTranscribeMode = session.sessionKind === "listen_only";
     const isAssistantMode = session.sessionKind === "quick_translate";
-    const transcriptRows = selectAssistTranscriptRows(renderedMessages, { isTranslateMode: isInterpreterMode, textDisplay });
+    const transcriptRows = selectAssistTranscriptRows(renderedMessages, { isTranslateMode: isInterpreterMode, isTranscribeMode, textDisplay });
     const visibleLiveCaptions = Object.values(liveCaptions).filter((caption) => textDisplay === "both" || caption.channel === "output");
     const twoWay = session.speechMode !== "push_to_talk";
     const checkEngines = async (refresh: boolean) => {
@@ -1159,7 +1163,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     };
 
     const switchMode = async (sessionKind: "quick_translate" | "listen_only" | "two_way_interpreter", requestedSpeechMode?: "continuous" | "push_to_talk") => {
-        if (modeSwitchInFlightRef.current || micStreaming || sending) return;
+        if (modeSwitchInFlightRef.current || micStreaming || sending || translateAllPending || !!translationPendingId) return;
         const speechMode = requestedSpeechMode || (sessionKind === "listen_only"
             ? "listen_only"
             : sessionKind === "two_way_interpreter" ? "continuous" : "push_to_talk");
@@ -1325,6 +1329,60 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     };
 
+    const needsPastTranslation = (message: SessionMessage) =>
+        message.speaker !== "system" && message.origin !== "relay_live_transcript" &&
+        !!message.originalText.trim() &&
+        (!message.originalLanguage || languageCode(message.originalLanguage) !== languageCode(clientLanguage)) &&
+        !(message.targetLanguage === clientLanguage && message.translatedText?.trim() && message.translatedText.trim() !== message.originalText.trim());
+
+    const translatePastMessage = async (message: SessionMessage) => {
+        if (!needsPastTranslation(message)) return;
+        const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/reprocess`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target: "translation", messageId: message.id, targetLanguage: clientLanguage }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success || !payload.translatedText) throw new Error(payload?.error || "Could not translate transcript text.");
+        setMessages((current) => current.map((item) => item.id === payload.messageId
+            ? { ...item, translatedText: payload.translatedText, targetLanguage: payload.targetLanguage, translationStatus: "completed" }
+            : item));
+        await refreshUsage(true);
+    };
+
+    const translateOnePastMessage = async (message: SessionMessage) => {
+        if (translationPendingId || translateAllPending) return;
+        setTranslationPendingId(message.id);
+        setError(null);
+        try {
+            await translatePastMessage(message);
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "Could not translate transcript text.");
+        } finally {
+            setTranslationPendingId(null);
+        }
+    };
+
+    const translatePastTranscript = async () => {
+        if (translationPendingId || translateAllPending) return;
+        const candidates = renderedMessages.filter(needsPastTranslation);
+        if (!candidates.length) return;
+        setTranslateAllOpen(false);
+        setTranslateAllPending(true);
+        setError(null);
+        try {
+            for (const [index, message] of candidates.entries()) {
+                setTranslationProgress(`Translating ${index + 1} of ${candidates.length} to ${languageLabel(clientLanguage)}…`);
+                await translatePastMessage(message);
+            }
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "Could not translate transcript text.");
+        } finally {
+            setTranslationProgress("");
+            setTranslateAllPending(false);
+        }
+    };
+
     const moveSessionToTrash = () => {
         startDeleteTransition(async () => {
             setError(null);
@@ -1347,6 +1405,20 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
     return (
         <div className="-my-4 flex h-[calc(100dvh-3.5rem)] min-h-0 w-[calc(100%+2rem)] max-w-3xl self-center flex-col gap-3 px-3 py-3 sm:px-6">
+            <AlertDialog open={translateAllOpen} onOpenChange={setTranslateAllOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Translate past transcript?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Translate {renderedMessages.filter(needsPastTranslation).length} saved entries to {languageLabel(clientLanguage)}. Existing translations in this language are skipped. AI usage will be added to this session.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={(event) => { event.preventDefault(); void translatePastTranscript(); }}>Translate</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
             <AlertDialog open={deleteOpen} onOpenChange={(open) => { if (!deletePending) setDeleteOpen(open); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -1390,7 +1462,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             </Dialog>
             <header className="flex shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <Button type="button" variant="ghost" size="icon" className="shrink-0" disabled={deletePending || leavingPending || sending} aria-label="Back to Live Assist" onClick={() => void leaveSession()}><ArrowLeft className="h-5 w-5" /></Button>
+                    <Button type="button" variant="ghost" size="icon" className="shrink-0" disabled={deletePending || leavingPending || sending || translateAllPending || !!translationPendingId} aria-label="Back to Live Assist" onClick={() => void leaveSession()}><ArrowLeft className="h-5 w-5" /></Button>
                     <div className="min-w-0">
                         <h1 className="text-lg font-semibold tracking-tight">Live Assist</h1>
                         <p className="truncate text-xs text-muted-foreground">{session.label || (participantLabel === "Unlinked session" ? "New session" : participantLabel)} · {session.participantMode === "agent_only" ? "Private" : "Shared"}</p>
@@ -1405,6 +1477,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label="Session menu"><MoreHorizontal className="h-5 w-5" /></Button></DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuItem onSelect={() => { setError(null); setSummaryOpen(true); }}>Summary</DropdownMenuItem>
+                            {isInterpreterMode && <DropdownMenuItem disabled={translateAllPending || !!translationPendingId || !renderedMessages.some(needsPastTranslation)} onSelect={() => setTranslateAllOpen(true)}><Languages className="mr-2 h-4 w-4" />Translate past transcript to {languageLabel(clientLanguage)}</DropdownMenuItem>}
                             <DropdownMenuItem onSelect={() => { setError(null); setLabelDraft(session.label || ""); setLabelOpen(true); }}><Tag className="mr-2 h-4 w-4" />Label session</DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => setAdvancedOpen(true)}><Settings2 className="mr-2 h-4 w-4" />Advanced settings</DropdownMenuItem>
                             <DropdownMenuSeparator />
@@ -1499,9 +1572,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 <section className="flex min-h-0 flex-1 flex-col">
                     <div className="flex min-h-0 flex-1 flex-col gap-3">
                         <div className="grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-muted p-1" role="group" aria-label="Live Assist mode">
-                            <Button type="button" aria-pressed={isInterpreterMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => void switchMode("two_way_interpreter")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Translate{modeSwitchPending && isInterpreterMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
-                            <Button type="button" aria-pressed={isTranscribeMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => void switchMode("listen_only")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Transcribe{modeSwitchPending && isTranscribeMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
-                            <Button type="button" aria-pressed={isAssistantMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => void switchMode("quick_translate")} disabled={modePending || modeSwitchPending || micStreaming || sending}>Ask AI{modeSwitchPending && isAssistantMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
+                            <Button type="button" aria-pressed={isInterpreterMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isInterpreterMode ? "default" : "ghost"} onClick={() => void switchMode("two_way_interpreter")} disabled={modePending || modeSwitchPending || micStreaming || sending || translateAllPending || !!translationPendingId}>Translate{modeSwitchPending && isInterpreterMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
+                            <Button type="button" aria-pressed={isTranscribeMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isTranscribeMode ? "default" : "ghost"} onClick={() => void switchMode("listen_only")} disabled={modePending || modeSwitchPending || micStreaming || sending || translateAllPending || !!translationPendingId}>Transcribe{modeSwitchPending && isTranscribeMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
+                            <Button type="button" aria-pressed={isAssistantMode} className="relative h-11 rounded-lg border-0 shadow-none" variant={isAssistantMode ? "default" : "ghost"} onClick={() => void switchMode("quick_translate")} disabled={modePending || modeSwitchPending || micStreaming || sending || translateAllPending || !!translationPendingId}>Ask AI{modeSwitchPending && isAssistantMode && <Loader2 className="absolute right-1 top-1 h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}</Button>
                         </div>
                         <span className="sr-only" role="status">{modeSwitchPending ? "Saving mode…" : ""}</span>
                         {missingModeConnection && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
@@ -1515,6 +1588,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             </div>
                         </div>}
 
+                        {translationProgress && <p role="status" className="text-xs text-muted-foreground">{translationProgress}</p>}
                         {(textDisplay !== "hidden" || !isInterpreterMode) && <ScrollArea ref={transcriptScrollRef} className="min-h-0 flex-1 rounded-2xl bg-muted/30 px-3 py-4" aria-label="Conversation transcript">
                             <div className="space-y-3">
                                 {transcriptRows.length === 0 && visibleLiveCaptions.length === 0 && (
@@ -1523,7 +1597,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                     </div>
                                 )}
                                 {transcriptRows.map(({ message, sourceOriginalText }, index) => {
-                                    const display = getMessageDisplayState(message, agentLanguage, clientLanguage);
+                                    const display = isInterpreterMode && !needsPastTranslation(message)
+                                        ? getMessageDisplayState(message, agentLanguage, clientLanguage)
+                                        : { primaryText: message.originalText, isWaitingForTranslation: false };
                                     return (
                                         <div
                                             key={message.id}
@@ -1538,9 +1614,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                             </div>
                                             <div className="flex items-start gap-2">
                                                 <div className={cn("min-w-0 flex-1 text-base leading-relaxed", display.isWaitingForTranslation ? "text-muted-foreground" : "text-foreground")}>{display.primaryText}</div>
+                                                {isInterpreterMode && needsPastTranslation(message) && <Button type="button" size="icon" variant="ghost" className="shrink-0" disabled={translateAllPending || !!translationPendingId} onClick={() => void translateOnePastMessage(message)} aria-label={`Translate this text to ${languageLabel(clientLanguage)}`} title={`Translate to ${languageLabel(clientLanguage)}`}>{translationPendingId === message.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}</Button>}
                                                 {isInterpreterMode && (message.speaker === "system" || (message.translatedText && message.translatedText !== message.originalText)) && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={() => replayTranslatedText(message)} aria-label="Replay translation"><Volume2 className="h-4 w-4" /></Button>}
                                             </div>
-                                            {textDisplay === "both" && (sourceOriginalText || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceOriginalText || message.originalText}</div>}
+                                            {isInterpreterMode && textDisplay === "both" && (sourceOriginalText || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceOriginalText || message.originalText}</div>}
                                         </div>
                                     );
                                 })}
