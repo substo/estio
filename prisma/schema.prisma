@@ -1447,6 +1447,8 @@ model ViewingSession {
   audioPlaybackAgentEnabled  Boolean @default(false)
 
   liveModel         String?
+  assistAnswerModel String? @db.VarChar(120)
+  assistTranscribeModel String? @db.VarChar(120)
   translationModel  String @default("gemini-2.5-flash")
   insightsModel     String @default("gemini-2.5-flash")
   summaryModel      String @default("gemini-2.5-flash")

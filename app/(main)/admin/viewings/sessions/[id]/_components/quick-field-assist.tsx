@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { QUICK_ASSIST_RATES, quickAssistRateLabel, formatQuickAssistCost } from "@/lib/viewings/sessions/quick-assist-cost";
+import { QUICK_ASSIST_RATES, quickAssistRateLabel, formatQuickAssistCost, type QuickAssistRate } from "@/lib/viewings/sessions/quick-assist-cost";
 import { QuickAssistUsagePanel, type QuickAssistUsageSnapshot } from "./quick-assist-usage";
 import type { QuickAssistModelOption } from "@/lib/viewings/sessions/quick-assist-models";
 import {
@@ -18,7 +18,6 @@ import {
     Mic,
     MicOff,
     MoreHorizontal,
-    Pause,
     Play,
     Send,
     Settings2,
@@ -425,18 +424,19 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [replayVoices, setReplayVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [replayModel, setReplayModel] = useState<string>("device");
     const [replayAiVoice, setReplayAiVoice] = useState<string>("Kore");
-    const [replayState, setReplayState] = useState<{ key: string; status: "loading" | "ready" | "playing" | "paused" } | null>(null);
-    const replayStateRef = useRef<{ key: string; status: "loading" | "ready" | "playing" | "paused" } | null>(null);
-    const replayAudioRef = useRef<HTMLAudioElement | null>(null);
+    const [replayState, setReplayState] = useState<{ key: string; status: "loading" | "playing" | "paused" } | null>(null);
+    const replayStateRef = useRef<{ key: string; status: "loading" | "playing" | "paused" } | null>(null);
+    const replayContextRef = useRef<AudioContext | null>(null);
+    const replaySourceRef = useRef<AudioBufferSourceNode | null>(null);
+    const replayGainRef = useRef<GainNode | null>(null);
     const replayAbortRef = useRef<AbortController | null>(null);
-    const replayCacheRef = useRef<Map<string, string>>(new Map());
+    const replayCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
     const replayEpochRef = useRef(0);
     const [broaderDetection, setBroaderDetection] = useState(false);
     const [shareInfo, setShareInfo] = useState<{ url: string | null; token: string; pinCode: string; expiresAt: string } | null>(null);
     const [contextDialogOpen, setContextDialogOpen] = useState(false);
     const [advancedOpen, setAdvancedOpen] = useState(false);
-    const [engineModel, setEngineModel] = useState(initialSession.liveModel && initialSession.liveModel !== "gemini-3.5-live-translate-preview"
-        ? initialSession.liveModel : "automatic");
+    const [engineModel, setEngineModel] = useState(initialSession.liveModel || "automatic");
     const [engines, setEngines] = useState<Array<{ provider: string; model: string; configured: boolean; listed: boolean; checkedAt: string | null; error: string | null }>>([]);
     const [providers, setProviders] = useState<{ google: boolean; openai: boolean; codex: boolean } | null>(null);
     useEffect(() => {
@@ -449,8 +449,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         if (providers && !providers.google && replayModel !== "device") setReplayModel("device");
     }, [providers, replayModel]);
     const [modelOptions, setModelOptions] = useState<{ assistant: QuickAssistModelOption[]; transcribe: QuickAssistModelOption[] }>({ assistant: [], transcribe: [] });
+    const [liveRates, setLiveRates] = useState<Record<string, QuickAssistRate>>({});
     const [assistantModel, setAssistantModel] = useState("automatic");
     const [transcribeModel, setTranscribeModel] = useState("automatic");
+    const modelPrefsLoadedRef = useRef(false);
     const [lastUsedModel, setLastUsedModel] = useState<string | null>(null);
     const [sessionUsage, setSessionUsage] = useState<QuickAssistUsageSnapshot | null>(null);
     const usageVersionRef = useRef<string | null>(null);
@@ -526,6 +528,21 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             setEngines(payload.engines || []);
             setProviders(payload.providers || null);
             setModelOptions(payload.modelOptions || { assistant: [], transcribe: [] });
+            const prices = payload.openaiPrices || {};
+            setLiveRates(Object.fromEntries(Object.entries(prices).flatMap(([model, raw]) => {
+                const price = raw as { inputPer1MTokens?: number; outputPer1MTokens?: number; cachedInputPer1MTokens?: number; perMinuteUsd?: number; fetchedAt?: string; sourceUrl?: string };
+                const fallback = QUICK_ASSIST_RATES[model];
+                if (!fallback || !price.fetchedAt) return [];
+                return [[model, { ...fallback, input: price.inputPer1MTokens ?? fallback.input, output: price.outputPer1MTokens ?? fallback.output,
+                    cachedInput: price.cachedInputPer1MTokens ?? fallback.cachedInput, perMinute: price.perMinuteUsd ?? fallback.perMinute,
+                    verifiedAt: price.fetchedAt.slice(0, 10), sourceUrl: price.sourceUrl || fallback.sourceUrl }]];
+            })));
+            if (!modelPrefsLoadedRef.current) {
+                modelPrefsLoadedRef.current = true;
+                setEngineModel(payload.selectedModel || "automatic");
+                setAssistantModel(payload.answerModel || "automatic");
+                setTranscribeModel(payload.transcribeModel || "automatic");
+            }
         } catch (error) {
             setError(error instanceof Error ? error.message : "Could not check translation engines.");
         } finally {
@@ -539,12 +556,21 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         return () => clearInterval(timer);
     }, [session.id]);
     const currentOptions = isAssistantMode ? modelOptions.assistant : modelOptions.transcribe;
+    const persistModel = async (kind: "answer" | "transcribe" | "translate", model: string) => {
+        const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/assist-model`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, model }),
+        });
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            setError(payload.error || "Could not save the model for this session.");
+        }
+    };
     const currentModel = isInterpreterMode ? engineModel : isAssistantMode ? assistantModel : transcribeModel;
     const resolvedOption = currentOptions.find(o => o.value === currentModel) || (currentModel === "automatic" ? currentOptions[0] : undefined);
     const resolvedEngine = engines.find(e => e.listed && e.configured && (!twoWay || e.provider === "google_gemini_live") && (engineModel === "automatic" || e.model === engineModel));
     const resolvedModel = isInterpreterMode ? resolvedEngine?.model : resolvedOption?.value;
 
-    const selectedRate = resolvedModel ? QUICK_ASSIST_RATES[resolvedModel.replace(/^openai:/, "")] : undefined;
+    const selectedRate = resolvedModel ? liveRates[resolvedModel.replace(/^openai:/, "")] || QUICK_ASSIST_RATES[resolvedModel.replace(/^openai:/, "")] : undefined;
     const readyForMode = isInterpreterMode
         ? engines.some((engine) => engine.configured && engine.listed && (engineModel === "automatic" || engine.model === engineModel) && (twoWay ? engine.provider === "google_gemini_live" : true))
         : Boolean(resolvedOption);
@@ -573,8 +599,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         replayEpochRef.current += 1;
         replayAbortRef.current?.abort();
         replayAbortRef.current = null;
-        replayAudioRef.current?.pause();
-        replayAudioRef.current = null;
+        try { replaySourceRef.current?.stop(); } catch { /* Source may have already ended. */ }
+        replaySourceRef.current = null;
         if (typeof window !== "undefined") window.speechSynthesis?.cancel();
         updateReplayState(null);
     };
@@ -585,13 +611,13 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         const current = replayStateRef.current;
         if (current?.key === key && current.status === "playing") {
             if (replayModel === "device") window.speechSynthesis.pause();
-            else replayAudioRef.current?.pause();
+            else if (replayContextRef.current?.state === "running") void replayContextRef.current.suspend();
             updateReplayState({ key, status: "paused" });
             return;
         }
-        if (current?.key === key && (current.status === "paused" || current.status === "ready")) {
+        if (current?.key === key && current.status === "paused") {
             if (replayModel === "device") window.speechSynthesis.resume();
-            else await replayAudioRef.current?.play();
+            else if (replayContextRef.current) void replayContextRef.current.resume();
             updateReplayState({ key, status: "playing" });
             return;
         }
@@ -612,10 +638,16 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
             return;
         }
         if (!providers?.google) { setError("Connect Google AI for this location to use AI voice."); return; }
+        const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextCtor) { setError("AI voice playback is unavailable in this browser."); return; }
+        const audioContext = replayContextRef.current || new AudioContextCtor();
+        replayContextRef.current = audioContext;
+        // Unlock audio during the tap. Safari can reject HTMLAudioElement.play() after an awaited download.
+        const resumeAudio = audioContext.resume();
         updateReplayState({ key, status: "loading" });
         try {
-            let url = replayCacheRef.current.get(key);
-            if (!url) {
+            let audioBuffer = replayCacheRef.current.get(key);
+            if (!audioBuffer) {
                 const abort = new AbortController();
                 replayAbortRef.current = abort;
                 const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/speech`, {
@@ -623,33 +655,30 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     body: JSON.stringify({ messageId: message.id, field, model: replayModel, voice: replayAiVoice }),
                 });
                 if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || "Could not generate audio."); }
-                const blob = await response.blob();
+                const bytes = await response.arrayBuffer();
                 if (replayEpochRef.current !== epoch) return;
-                url = URL.createObjectURL(blob);
-                replayCacheRef.current.set(key, url);
+                audioBuffer = await audioContext.decodeAudioData(bytes);
+                if (replayEpochRef.current !== epoch) return;
+                replayCacheRef.current.set(key, audioBuffer);
                 if (replayCacheRef.current.size > 10) {
                     const oldestKey = replayCacheRef.current.keys().next().value;
-                    if (oldestKey) {
-                        const oldestUrl = replayCacheRef.current.get(oldestKey);
-                        if (oldestUrl) URL.revokeObjectURL(oldestUrl);
-                        replayCacheRef.current.delete(oldestKey);
-                    }
+                    if (oldestKey) replayCacheRef.current.delete(oldestKey);
                 }
             }
             if (replayEpochRef.current !== epoch) return;
-            const audio = new Audio(url);
-            audio.volume = voiceVolume;
-            audio.onended = () => { if (replayEpochRef.current === epoch) updateReplayState(null); };
-            audio.onerror = () => { if (replayEpochRef.current === epoch) { updateReplayState(null); setError("Could not play AI voice audio."); } };
-            replayAudioRef.current = audio;
-            try {
-                await audio.play();
-                if (replayEpochRef.current === epoch) updateReplayState({ key, status: "playing" });
-            } catch (cause) {
-                if (replayEpochRef.current !== epoch) return;
-                if (cause instanceof DOMException && cause.name === "NotAllowedError") updateReplayState({ key, status: "ready" });
-                else throw cause;
-            }
+            await resumeAudio;
+            if (replayEpochRef.current !== epoch) return;
+            const gain = audioContext.createGain();
+            gain.gain.value = voiceVolume;
+            gain.connect(audioContext.destination);
+            replayGainRef.current = gain;
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(gain);
+            source.onended = () => { if (replayEpochRef.current === epoch) updateReplayState(null); };
+            replaySourceRef.current = source;
+            source.start();
+            updateReplayState({ key, status: "playing" });
         } catch (cause) {
             if (replayEpochRef.current === epoch) { updateReplayState(null); setError(cause instanceof Error ? cause.message : "Could not play audio."); }
         } finally { if (replayEpochRef.current === epoch) replayAbortRef.current = null; }
@@ -696,7 +725,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         }
     }, [audioPlaybackEnabled]);
 
-    useEffect(() => { voiceVolumeRef.current = voiceVolume; }, [voiceVolume]);
+    useEffect(() => { voiceVolumeRef.current = voiceVolume; if (replayGainRef.current) replayGainRef.current.gain.value = voiceVolume; }, [voiceVolume]);
 
     useEffect(() => {
         if (!window.speechSynthesis) return;
@@ -708,9 +737,9 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
 
     useEffect(() => () => {
         replayAbortRef.current?.abort();
-        replayAudioRef.current?.pause();
+        try { replaySourceRef.current?.stop(); } catch { /* Source may have already ended. */ }
+        void replayContextRef.current?.close();
         window.speechSynthesis?.cancel();
-        replayCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
         replayCacheRef.current.clear();
     }, []);
 
@@ -1572,7 +1601,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 <div className="flex shrink-0 items-center gap-1">
                     <Dialog>
                         <DialogTrigger asChild><Button type="button" variant="ghost" className="gap-1.5 px-2" aria-label="Session cost and usage details"><Info className="h-4 w-4" /><span className="font-mono text-xs">{sessionUsage ? formatQuickAssistCost(sessionUsage.totalCost) : usageError ? "—" : "…"}</span>{(usageError || !!sessionUsage?.unavailableCount) && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="Some costs unavailable" />}</Button></DialogTrigger>
-                        <DialogContent className="max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Session cost</DialogTitle><DialogDescription>Usage for this conversation, included in your Today and Month totals.</DialogDescription></DialogHeader><QuickAssistUsagePanel usage={sessionUsage} error={usageError} />{resolvedModel && <p className="text-sm text-muted-foreground">Current model: {resolvedModel}<br />{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}</DialogContent>
+                        <DialogContent className="max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Session cost</DialogTitle><DialogDescription>Usage for this conversation, included in your Today and Month totals.</DialogDescription></DialogHeader><QuickAssistUsagePanel usage={sessionUsage} error={usageError} />{resolvedModel && <p className="text-sm text-muted-foreground">Current model: {resolvedModel}<br />{quickAssistRateLabel(resolvedModel, !isAssistantMode, liveRates)}</p>}</DialogContent>
                     </Dialog>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label="Session menu"><MoreHorizontal className="h-5 w-5" /></Button></DropdownMenuTrigger>
@@ -1720,8 +1749,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                             <div className="flex items-start gap-2">
                                                 <div className={cn("min-w-0 flex-1 text-base leading-relaxed", display.isWaitingForTranslation ? "text-muted-foreground" : "text-foreground")}>{display.primaryText}</div>
                                                 {isInterpreterMode && needsPastTranslation(message) && <Button type="button" size="icon" variant="ghost" className="shrink-0" disabled={translateAllPending || !!translationPendingId} onClick={() => void translateOnePastMessage(message)} aria-label={`Translate this text to ${languageLabel(clientLanguage)}`} title={`Translate to ${languageLabel(clientLanguage)}`}>{translationPendingId === message.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}</Button>}
-                                                {!display.isWaitingForTranslation && !!display.primaryText.trim() && <Button type="button" size="icon" variant="ghost" className="shrink-0" disabled={rowReplay === "loading"} onClick={() => void toggleReplay(message, replayField, display.primaryText, replayLanguage)} aria-label={rowReplay === "playing" ? "Pause reading" : rowReplay === "paused" ? "Resume reading" : rowReplay === "ready" ? "Play prepared audio" : "Read text aloud"} title={rowReplay === "playing" ? "Pause" : rowReplay === "paused" ? "Resume" : rowReplay === "ready" ? "Play prepared audio" : "Read aloud"}>{rowReplay === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : rowReplay === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</Button>}
-                                                {rowReplay && <Button type="button" size="icon" variant="ghost" className="shrink-0" onClick={stopReplay} aria-label="Stop reading" title="Stop"><Square className="h-3.5 w-3.5" /></Button>}
+                                                {!display.isWaitingForTranslation && !!display.primaryText.trim() && <Button type="button" size="icon" variant="ghost" className="shrink-0" disabled={rowReplay === "loading"} onClick={() => void toggleReplay(message, replayField, display.primaryText, replayLanguage)} aria-label={rowReplay === "playing" ? "Stop reading" : rowReplay === "paused" ? "Resume reading" : "Read text aloud"} title={rowReplay === "playing" ? "Stop · tap again to resume" : rowReplay === "paused" ? "Resume" : "Read aloud"}>{rowReplay === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : rowReplay === "playing" ? <Square className="h-3.5 w-3.5" /> : <Play className="h-4 w-4" />}</Button>}
                                             </div>
                                             {isInterpreterMode && textDisplay === "both" && (sourceOriginalText || display.primaryText !== message.originalText) && <div className="mt-1 text-sm text-muted-foreground">{sourceOriginalText || message.originalText}</div>}
                                         </div>
@@ -1783,7 +1811,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         <DialogHeader><DialogTitle>Advanced</DialogTitle><DialogDescription>Models, conversation context, and voice.</DialogDescription></DialogHeader>
                         <div className="rounded-xl border p-3 space-y-2">
                             <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "AI answer model"}</Label>
-                            <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); } else if (isAssistantMode) setAssistantModel(value); else setTranscribeModel(value); }} disabled={micStreaming || sending || modePending || engineChecking}>
+                            <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); void persistModel("translate", value); } else if (isAssistantMode) { setAssistantModel(value); void persistModel("answer", value); } else { setTranscribeModel(value); void persistModel("transcribe", value); } }} disabled={micStreaming || sending || modePending || engineChecking}>
                                 <SelectTrigger id="quick-assist-model"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="automatic">Automatic{resolvedModel && currentModel === "automatic" ? ` · ${resolvedModel}` : ""}</SelectItem>
@@ -1791,9 +1819,10 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">{resolvedModel ? `${isInterpreterMode ? resolvedEngine?.provider === "google_gemini_live" ? "Google" : "OpenAI API" : resolvedOption?.provider} · ${resolvedModel}` : engineChecking ? "Checking connections…" : "No available model selected"}</p>
-                            {resolvedModel && <p className="text-xs text-muted-foreground">{quickAssistRateLabel(resolvedModel, !isAssistantMode)}</p>}
+                            {isInterpreterMode && twoWay && engines.some(engine => engine.provider !== "google_gemini_live" && engine.configured) && <p className="text-xs text-muted-foreground">OpenAI live translation supports this session in one-way mode. Choose One-way above to select it.</p>}
+                            {resolvedModel && <p className="text-xs text-muted-foreground">{quickAssistRateLabel(resolvedModel, !isAssistantMode, liveRates)}</p>}
                             {selectedRate && <a className="block text-xs underline text-muted-foreground" href={selectedRate.sourceUrl} target="_blank" rel="noreferrer">Provider rates · verified {selectedRate.verifiedAt}</a>}
-                            {isAssistantMode && <div className="space-y-2 border-t pt-2"><Label htmlFor="quick-assist-mic-model">Microphone transcription model</Label><Select value={transcribeModel} onValueChange={setTranscribeModel} disabled={micStreaming || sending}><SelectTrigger id="quick-assist-mic-model"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic · {modelOptions.transcribe[0]?.model || "not connected"}</SelectItem>{modelOptions.transcribe.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">{quickAssistRateLabel(transcribeModel === "automatic" ? modelOptions.transcribe[0]?.value || "" : transcribeModel, true)} Speech transcription is charged separately from the answer.</p></div>}
+                            {isAssistantMode && <div className="space-y-2 border-t pt-2"><Label htmlFor="quick-assist-mic-model">Microphone transcription model</Label><Select value={transcribeModel} onValueChange={value => { setTranscribeModel(value); void persistModel("transcribe", value); }} disabled={micStreaming || sending}><SelectTrigger id="quick-assist-mic-model"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="automatic">Automatic · {modelOptions.transcribe[0]?.model || "not connected"}</SelectItem>{modelOptions.transcribe.map(option => <SelectItem key={option.value} value={option.value}>{option.provider} · {option.model}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">{quickAssistRateLabel(transcribeModel === "automatic" ? modelOptions.transcribe[0]?.value || "" : transcribeModel, true, liveRates)} Your speech is turned into text before the answer model responds. These are separate calls so you can use a connected ChatGPT/Codex subscription for answers.</p></div>}
                             {isAssistantMode && !modelOptions.transcribe.length && <p className="text-xs text-amber-700">Connect Google or OpenAI API to speak a question. You can still type a question for Codex.</p>}
                             {lastUsedModel && <p className="text-xs">Last used: {lastUsedModel}</p>}
                         </div>

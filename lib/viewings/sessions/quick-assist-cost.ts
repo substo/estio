@@ -23,12 +23,18 @@ export function formatQuickAssistCost(amount: number) {
     return amount === 0 ? "$0.00" : amount < .01 ? `$${amount.toFixed(6)}` : `$${amount.toFixed(4)}`;
 }
 
-export function quickAssistRateLabel(model: string, audio = false): string {
+export function quickAssistRateLabel(model: string, audio = false, liveRates?: Record<string, QuickAssistRate>): string {
     if (model.startsWith("chatgpt_subscription:")) return "Uses your connected subscription; API cost is not assigned per call.";
-    const rate = QUICK_ASSIST_RATES[model.replace(/^openai:/, "")];
+    const rate = liveRates?.[model.replace(/^openai:/, "")] || QUICK_ASSIST_RATES[model.replace(/^openai:/, "")];
     if (!rate) return "Rate unavailable; usage will still be recorded.";
-    if (rate.perMinute !== undefined) return `$${rate.perMinute}/minute of input audio${model === "gpt-realtime-translate" ? " + $0.017/minute for original captions" : ""}`;
-    return `$${audio ? rate.audioInput ?? rate.input : rate.input} input / $${rate.audioOutput ?? rate.output} output per 1M tokens`;
+    if (rate.perMinute !== undefined) return `About $${rate.perMinute.toFixed(3)}/minute ($${(rate.perMinute * 60).toFixed(2)}/hour) of input audio${model === "gpt-realtime-translate" ? "; original captions can add $0.017/minute" : ""}`;
+    if (model === "gemini-3.5-live-translate-preview") return `About $${(1920 * rate.audioInput! / 1_000_000).toFixed(4)}/minute input audio; translated output is extra. $${rate.audioInput} audio input / $${rate.audioOutput} audio output per 1M tokens.`;
+    if (audio) {
+        const minute = (1920 * (rate.audioInput ?? rate.input) + 150 * rate.output) / 1_000_000;
+        return `About $${minute.toFixed(4)} for 1 minute of speech and 150 text tokens; actual cost varies. $${rate.audioInput ?? rate.input} audio input / $${rate.output} output per 1M tokens.`;
+    }
+    const answer = (500 * rate.input + 250 * rate.output) / 1_000_000;
+    return `About $${answer.toFixed(4)} for a 500-token question and 250-token answer; actual cost varies. $${rate.input} input / $${rate.output} output per 1M tokens.`;
 }
 
 const count = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;

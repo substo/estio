@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import db from "@/lib/db";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
@@ -6,6 +7,7 @@ import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/aut
 import { recordViewingSessionUsage } from "@/lib/viewings/sessions/usage";
 import { REPLAY_SPEECH_MODELS, REPLAY_SPEECH_VOICES } from "@/lib/viewings/sessions/replay-speech-options";
 import { estimateReplaySpeechTokens, replaySpeechAudio, replaySpeechCost, replaySpeechUsage } from "@/lib/viewings/sessions/replay-speech";
+import { getOrGenerateReplaySpeech } from "@/lib/viewings/sessions/replay-speech-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +39,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!apiKey) return NextResponse.json({ error: "Connect Google AI for this location to use AI voice." }, { status: 409 });
 
     try {
+        const key = createHash("sha256").update(JSON.stringify([context.locationId, sessionId, parsed.data.messageId, field, model, voice, text])).digest("hex");
+        const { audio } = await getOrGenerateReplaySpeech(key, async () => {
         const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -50,11 +54,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         });
         if (!response.ok) {
             console.error("[viewing-session-speech] Google TTS failed", response.status);
-            return NextResponse.json({ error: "AI voice is temporarily unavailable." }, { status: 502 });
+            throw new Error(`Google TTS HTTP ${response.status}`);
         }
         const payload = await response.json();
         const audio = replaySpeechAudio(payload);
-        if (!audio) return NextResponse.json({ error: "AI voice returned no playable audio." }, { status: 502 });
+        if (!audio) throw new Error("Google TTS returned no playable audio");
         const usage = replaySpeechUsage(payload);
         const derived = estimateReplaySpeechTokens(text, audio);
         const inputTokens = usage.inputTokens || derived.inputTokens;
@@ -67,6 +71,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             estimatedCostUsd: cost, actualCostUsd: cost,
             metadata: { stage: "speech_replay", messageId: parsed.data.messageId, field, voice,
                 pricingSource: "https://ai.google.dev/gemini-api/docs/pricing", pricingVerifiedAt: "2026-10-13" },
+        });
+        return audio;
         });
         return new NextResponse(new Uint8Array(audio), { headers: { "Content-Type": "audio/wav", "Cache-Control": "no-store" } });
     } catch (error) {
