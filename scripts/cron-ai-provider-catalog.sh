@@ -16,7 +16,10 @@ LOG_DIR="${SCRIPT_DIR}/../logs"
 LOG_FILE="${LOG_DIR}/ai-provider-catalog-cron.log"
 LOCK_FILE="/tmp/ai-provider-catalog-cron.lock"
 APP_URL="${APP_BASE_URL:-https://estio.co}"
-CRON_SECRET="${CRON_SECRET:-}"
+# Use the credential for the currently deployed app. Crontab values can lag
+# behind a rotated .env credential after a blue/green release.
+APP_CRON_SECRET="$(cd "${SCRIPT_DIR}/.." && node -e 'require("dotenv").config({path:".env"}); process.stdout.write(process.env.CRON_SECRET || "")' 2>/dev/null || true)"
+CRON_SECRET="${APP_CRON_SECRET:-${CRON_SECRET:-}}"
 TIMEOUT_SECONDS=240
 
 mkdir -p "${LOG_DIR}"
@@ -35,15 +38,13 @@ fi
 
 log "START: AI provider catalog refresh initiated"
 
-CURL_CMD="curl -s -m ${TIMEOUT_SECONDS} -w '%{http_code}'"
+CURL_ARGS=(-s -m "${TIMEOUT_SECONDS}" -w '%{http_code}')
 
 if [ -n "${CRON_SECRET}" ]; then
-    CURL_CMD="${CURL_CMD} -H 'Authorization: Bearer ${CRON_SECRET}'"
+    CURL_ARGS+=(-H "Authorization: Bearer ${CRON_SECRET}")
 fi
 
-CURL_CMD="${CURL_CMD} '${APP_URL}/api/cron/ai-provider-catalog'"
-
-RESPONSE=$(eval "${CURL_CMD}" 2>&1)
+RESPONSE=$(curl "${CURL_ARGS[@]}" "${APP_URL}/api/cron/ai-provider-catalog" 2>&1)
 HTTP_CODE="${RESPONSE: -3}"
 BODY="${RESPONSE:0:-3}"
 
