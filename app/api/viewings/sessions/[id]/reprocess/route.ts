@@ -86,6 +86,7 @@ export async function POST(
             target: "summary",
             summaryStatus,
             summaryId: summary.id,
+            summary,
         });
     }
 

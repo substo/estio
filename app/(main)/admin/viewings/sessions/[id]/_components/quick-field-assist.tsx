@@ -382,6 +382,8 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const router = useRouter();
     const [session, setSession] = useState(initialSession);
     const [exitOpen, setExitOpen] = useState(false);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [summaryOpen, setSummaryOpen] = useState(false);
     const [messages, setMessages] = useState<SessionMessage[]>(initialMessages);
     const [liveCaptions, setLiveCaptions] = useState<LiveCaptionPreviews>({});
     const [summary, setSummary] = useState<SessionSummary | null>(initialSummary);
@@ -392,6 +394,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
     const [modeSwitchPending, setModeSwitchPending] = useState(false);
     const modeSwitchInFlightRef = useRef(false);
     const [savePending, startSaveTransition] = useTransition();
+    const [summaryPending, setSummaryPending] = useState(false);
     const [sending, setSending] = useState(false);
     const [speechOn, setSpeechOn] = useState(false);
     const [micStreaming, setMicStreaming] = useState(false);
@@ -1211,7 +1214,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
         });
     };
 
-    const closeSession = (savePolicy: "save_transcript" | "save_summary_only" | "discard_on_close", leaveAfter = false) => {
+    const closeSession = (leaveAfter = false) => {
         startSaveTransition(async () => {
             setError(null);
             try {
@@ -1229,7 +1232,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        savePolicy,
+                        savePolicy: "save_transcript",
                         attachToContactId: selectedContactId || undefined,
                         attachToPropertyId: selectedPropertyId || undefined,
                         viewingId: selectedViewingId || undefined,
@@ -1244,7 +1247,7 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                     ...current,
                     status: payload?.session?.status || "completed",
                     endedAt: payload?.session?.endedAt || new Date().toISOString(),
-                    savePolicy,
+                    savePolicy: "save_transcript",
                 }));
                 if (leaveAfter) {
                     setExitOpen(false);
@@ -1252,6 +1255,59 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                 }
             } catch (closeError: any) {
                 setError(closeError?.message || "Failed to close session.");
+            }
+        });
+    };
+
+    const regenerateSummary = async () => {
+        if (summaryPending) return;
+        setSummaryOpen(true);
+        setSummaryPending(true);
+        setError(null);
+        try {
+            const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/reprocess`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    target: "summary",
+                    summaryStatus: session.status === "completed" || session.status === "expired" ? "final" : "draft",
+                }),
+            });
+            const payload = await response.json().catch(() => null);
+            if (!response.ok || !payload?.success) throw new Error(payload?.error || "Could not generate summary.");
+            if (payload.summary) setSummary(payload.summary as SessionSummary);
+        } catch (summaryError: any) {
+            setError(summaryError?.message || "Could not generate summary.");
+        } finally {
+            setSummaryPending(false);
+        }
+    };
+
+    const moveSessionToTrash = () => {
+        startSaveTransition(async () => {
+            setError(null);
+            try {
+                if (mediaRecorderRef.current?.state === "recording") {
+                    recorderActiveRef.current = false;
+                    if (recorderTimerRef.current) clearTimeout(recorderTimerRef.current);
+                    const recorder = mediaRecorderRef.current;
+                    const stopped = new Promise<void>((resolve) => recorder.addEventListener("stop", () => resolve(), { once: true }));
+                    recorder.stop();
+                    await stopped;
+                }
+                await recordingUploadRef.current;
+                if (micStreaming || relaySocketRef.current) stopLiveMicStream();
+                const response = await fetch(`/api/viewings/sessions/${encodeURIComponent(session.id)}/trash`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ endOpen: true }),
+                });
+                const payload = await response.json().catch(() => null);
+                if (!response.ok || !payload?.success) throw new Error(payload?.error || "Could not move session to Trash.");
+                setDeleteOpen(false);
+                router.push("/admin/live-assist");
+            } catch (deleteError: any) {
+                setError(deleteError?.message || "Could not move session to Trash.");
             }
         });
     };
@@ -1272,13 +1328,42 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                         <Button type="button" variant="outline" disabled={savePending} onClick={() => router.push("/admin/live-assist")}>Leave Open</Button>
                         <AlertDialogAction disabled={savePending} onClick={(event) => {
                             event.preventDefault();
-                            closeSession("save_transcript", true);
+                            closeSession(true);
                         }}>
                             {savePending ? "Ending…" : "End and Save"}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+            <AlertDialog open={deleteOpen} onOpenChange={(open) => { if (!savePending) setDeleteOpen(open); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Move session to Trash?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This ends the session and moves its transcript and summary to Trash. You can restore it for 30 days.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={savePending}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction disabled={savePending} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={(event) => {
+                            event.preventDefault();
+                            moveSessionToTrash();
+                        }}>
+                            {savePending ? "Moving…" : "Move to Trash"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+            <Dialog open={summaryOpen} onOpenChange={setSummaryOpen}>
+                <DialogContent className="max-h-[85dvh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Session summary</DialogTitle>
+                        <DialogDescription>The full transcript stays with this session.</DialogDescription>
+                    </DialogHeader>
+                    {summaryPending ? <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 animate-spin" />Generating summary…</p> : error ? <p role="alert" className="text-sm text-destructive">{error}</p> : summary?.sessionSummary ? <div className="space-y-3 text-sm"><p>{summary.sessionSummary}</p>{summary.recommendedNextActions?.length > 0 && <ul className="list-disc pl-4 text-muted-foreground">{summary.recommendedNextActions.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>}</div> : <p className="text-sm text-muted-foreground">No summary is available yet.</p>}
+                </DialogContent>
+            </Dialog>
             <header className="flex shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                     <Button type="button" variant="ghost" size="icon" className="shrink-0" disabled={savePending} aria-label="Back to Live Assist" onClick={() => {
@@ -1476,13 +1561,24 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                                 <label className="flex shrink-0 items-center gap-2 text-sm"><Volume2 className="h-4 w-4" /><span>Voice {audioPlaybackEnabled ? "on" : "muted"}</span><Switch checked={audioPlaybackEnabled} onCheckedChange={setAudioPlaybackEnabled} aria-label="Translated voice" /></label>
                                 <Select value={textDisplay} onValueChange={(value) => setTextDisplay(value as typeof textDisplay)}><SelectTrigger className="h-10 w-auto min-w-0 max-w-[55%] border-0 text-xs shadow-none" aria-label="Text display"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="both">Original + translation</SelectItem><SelectItem value="translation">Translation</SelectItem><SelectItem value="hidden">Hide captions</SelectItem></SelectContent></Select>
                             </div>}
+                            <div className="grid grid-cols-3 gap-2" role="group" aria-label="Session actions">
+                                <Button type="button" variant="outline" className="h-11 min-w-0 px-1 text-xs" onClick={() => closeSession()} disabled={savePending || session.status === "completed" || session.status === "expired"} aria-label="Save and end session" title="End the session and keep its full transcript">
+                                    <Save className="mr-1 h-4 w-4 shrink-0" />{session.status === "completed" || session.status === "expired" ? "Saved" : savePending ? "Saving…" : "Save"}
+                                </Button>
+                                <Button type="button" variant="outline" className="h-11 min-w-0 whitespace-normal px-1 text-xs leading-tight" onClick={() => renderedMessages.length > 0 ? void regenerateSummary() : setSummaryOpen(true)} disabled={summaryPending || savePending || (renderedMessages.length === 0 && !summary?.sessionSummary)} title="Generate a summary from the current transcript">
+                                    {summaryPending ? <Loader2 className="mr-1 h-4 w-4 shrink-0 animate-spin" /> : null}{summary?.sessionSummary ? renderedMessages.length > 0 ? "Regenerate summary" : "View summary" : "Generate summary"}
+                                </Button>
+                                <Button type="button" variant="outline" className="h-11 min-w-0 px-1 text-xs text-destructive hover:text-destructive" onClick={() => { setError(null); setDeleteOpen(true); }} disabled={savePending} title="Move this session to Trash">
+                                    <Trash2 className="mr-1 h-4 w-4 shrink-0" />Delete
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </section>
 
                 <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
                     <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
-                        <DialogHeader><DialogTitle>Advanced</DialogTitle><DialogDescription>Models, conversation context, voice and saving.</DialogDescription></DialogHeader>
+                        <DialogHeader><DialogTitle>Advanced</DialogTitle><DialogDescription>Models, conversation context, and voice.</DialogDescription></DialogHeader>
                         <div className="rounded-xl border p-3 space-y-2">
                             <Label htmlFor="quick-assist-model">{isInterpreterMode ? "Translation model" : isTranscribeMode ? "Transcription model" : "AI answer model"}</Label>
                             <Select value={currentModel} onValueChange={value => { setLastUsedModel(null); if (isInterpreterMode) { setEngineModel(value); relaySocketRef.current?.close(); } else if (isAssistantMode) setAssistantModel(value); else setTranscribeModel(value); }} disabled={micStreaming || sending || modePending || engineChecking}>
@@ -1594,52 +1690,6 @@ export function QuickFieldAssist({ initialSession, initialMessages, initialSumma
                             <div className="text-xs text-muted-foreground">{session.participantMode === "agent_only" ? "Private conversation" : "Shared conversation"} · {session.transportStatus}<br />{session.assignmentStatus === "assigned" ? "Assigned" : "Not attached to a contact yet"}</div>
                             <Button type="button" variant="outline" onClick={enableShareMode} disabled={modePending || modeSwitchPending || session.participantMode === "shared_client"}><Share2 className="mr-2 h-4 w-4" />Share</Button>
                         </div>
-                <div className="space-y-4">
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Save Options</CardTitle>
-                            <CardDescription>Close now and decide how much of the session to retain.</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                            <Button type="button" variant="default" className="w-full justify-start" onClick={() => closeSession("save_transcript")} disabled={savePending}>
-                                <Save className="mr-2 h-4 w-4" />
-                                Save Transcript
-                            </Button>
-                            <Button type="button" variant="outline" className="w-full justify-start" onClick={() => closeSession("save_summary_only")} disabled={savePending}>
-                                <Save className="mr-2 h-4 w-4" />
-                                Save Summary Only
-                            </Button>
-                            <Button type="button" variant="outline" className="w-full justify-start text-red-600" onClick={() => closeSession("discard_on_close")} disabled={savePending}>
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Discard On Close
-                            </Button>
-                        </CardContent>
-                    </Card>
-
-                    {summary?.sessionSummary && <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-base">Summary</CardTitle>
-                            <CardDescription>Generated after save or when manually refreshed by the server pipeline.</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2 text-sm">
-                            {summary?.sessionSummary ? (
-                                <>
-                                    <div className="font-medium">{summary.sessionSummary}</div>
-                                    {summary.recommendedNextActions?.length > 0 && (
-                                        <ul className="list-disc pl-4 text-muted-foreground">
-                                            {summary.recommendedNextActions.slice(0, 3).map((item) => (
-                                                <li key={item}>{item}</li>
-                                            ))}
-                                        </ul>
-                                    )}
-                                </>
-                            ) : (
-                                <div className="text-muted-foreground">No saved summary yet.</div>
-                            )}
-                        </CardContent>
-                    </Card>}
-
-                </div>
                     </DialogContent>
                 </Dialog>
             </div>
