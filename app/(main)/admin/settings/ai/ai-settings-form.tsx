@@ -970,10 +970,10 @@ function ViewingSessionPolicySection({
         <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
             <div className="space-y-0.5">
                 <Label className="text-xs text-slate-500 uppercase tracking-wider">
-                    Viewing Sessions: Policy
+                    Live Assist: Policy
                 </Label>
                 <p className="text-[10px] text-muted-foreground">
-                    Applies only to live viewing-session transcripts, summaries, insights, and client join requirements.
+                    Applies only to Live Assist transcripts, summaries, insights, and client join requirements.
                     Conversation inbox translation uses the Conversation: Translation model above.
                 </p>
             </div>
@@ -981,7 +981,7 @@ function ViewingSessionPolicySection({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
                     <Label htmlFor="viewingSessionRetentionDays" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Viewing Transcript Retention
+                        Live Assist Transcript Retention
                     </Label>
                     <select
                         id="viewingSessionRetentionDays"
@@ -997,7 +997,7 @@ function ViewingSessionPolicySection({
 
                 <div className="grid gap-2">
                     <Label htmlFor="viewingSessionTranscriptVisibility" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Viewing Transcript Visibility
+                        Live Assist Transcript Visibility
                     </Label>
                     <select
                         id="viewingSessionTranscriptVisibility"
@@ -1048,7 +1048,7 @@ function ViewingSessionPolicySection({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
                     <Label htmlFor="viewingSessionAiDisclosureVersion" className="text-xs text-slate-500 uppercase tracking-wider">
-                        Viewing AI Disclosure Version
+                        Live Assist AI Disclosure Version
                     </Label>
                     <Input
                         id="viewingSessionAiDisclosureVersion"
@@ -1063,31 +1063,31 @@ function ViewingSessionPolicySection({
                 <OptionalModelSelect
                     id="viewingSessionTranslationModel"
                     name="viewingSessionTranslationModel"
-                    label="Viewing Sessions: Translation"
+                    label="Live Assist: Translation"
                     value={initialData?.viewingSessionTranslationModel}
                     models={modelOptions}
                     taskId="viewing.translation"
-                    description="Optional override for translating live viewing transcripts."
+                    description="Optional override for translating Live Assist transcripts."
                 />
 
                 <OptionalModelSelect
                     id="viewingSessionInsightsModel"
                     name="viewingSessionInsightsModel"
-                    label="Viewing Sessions: Insights"
+                    label="Live Assist: Insights"
                     value={initialData?.viewingSessionInsightsModel}
                     models={modelOptions}
                     taskId="viewing.insights"
-                    description="Optional override for extracting live viewing insights."
+                    description="Optional override for extracting Live Assist insights."
                 />
 
                 <OptionalModelSelect
                     id="viewingSessionSummaryModel"
                     name="viewingSessionSummaryModel"
-                    label="Viewing Sessions: Summary"
+                    label="Live Assist: Summary"
                     value={initialData?.viewingSessionSummaryModel}
                     models={modelOptions}
                     taskId="viewing.summary"
-                    description="Optional override for viewing-session summaries."
+                    description="Optional override for Live Assist summaries."
                 />
             </div>
         </div>

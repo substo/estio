@@ -19,9 +19,10 @@ const FEATURE_LABELS: Record<string, string> = {
     property_printing: "Property Printing",
     property_translation: "Property Translation",
     audio_transcription: "Audio Transcription",
-    viewing_translation: "Viewing Translation",
-    viewing_insights: "Viewing Insights",
-    viewing_session: "Viewing Sessions",
+    viewing_translation: "Live Assist · Translation",
+    viewing_insights: "Live Assist · Insights",
+    viewing_session: "Live Assist",
+    viewing_session_assistant: "Live Assist · Ask AI",
     smart_reply: "Smart Reply",
     smart_agent: "Smart Agent",
     prospect_classification: "Prospect Classification",
@@ -41,6 +42,9 @@ const ACTION_LABELS: Record<string, string> = {
     generate: "Generate",
     precision_remove: "Precision remove",
     predict_room_type: "Predict room type",
+    viewing_session_usage: "Live Assist session activity",
+    viewing_session_audio_transcribe: "Live Assist · Transcribe audio",
+    viewing_session_assistant_answer: "Live Assist · Ask AI answer",
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
