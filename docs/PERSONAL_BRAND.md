@@ -31,6 +31,6 @@ For a Short created directly from portrait footage, use `new "<video-name>.tande
 
 ## Later Studio integration
 
-Studio now creates a `.tandem` project for a content piece under its ignored `data/video-projects/` folder and opens it in Substo Video. Returning through **Open video edit** reuses that project. Studio stores only the project reference; Substo Video owns the timeline JSON. Studio's separate **Import your recording** flow copies and analyzes a source recording; it does not yet place that recording into the edit. Export status and the finished-video link are the next integration step.
+Studio now creates a `.tandem` project for a content piece under its ignored `data/video-projects/` folder and opens it in Substo Video. Returning through **Open video edit** reuses that project. Studio stores only the project reference; Substo Video owns the timeline JSON. Exports written to that project's `exports/` folder appear under **View exports** in Studio. Studio's separate **Import your recording** flow copies and analyzes a source recording; it does not yet place that recording into the edit.
 
 The inherited `skills/tandem/SKILL.md` contains detailed examples from Mike's videos. Treat those as historical examples only. Use the project state, media, and this workspace's content foundation when deciding edits for the Boyan One channel.
