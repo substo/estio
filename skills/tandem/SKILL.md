@@ -1,15 +1,16 @@
 ---
 name: tandem
-description: Edit Mike's videos in Tandem, his Mac video editor, through the `tandem` command. Use when a video folder has a .tandem project, or when asked to cut, trim, tighten, place B-roll, add titles, section cards, transitions, captions, stickers, music or sound effects, look at frames, render a review clip, check an edit, do Mike's comments on the timeline, or export a video in Tandem.
+description: Edit a local .tandem video project through the Tandem command. Use for timeline editing, captions, sound, review clips, checks, and exports.
 ---
 
 # Tandem
 
-Tandem is Mike's video editor, built for working in turns with an agent:
-you edit the project through the `tandem` command, Mike reviews in the
-app, and the timeline shows him exactly what you changed. The guide's
-entry point is `docs/AGENTS.md` in the Tandem repo
-(`~/dev/me/tandem/docs/AGENTS.md` on Mike's Mac): how editing works, the
+For the Personal Brand checkout, read `docs/PERSONAL_BRAND.md` before editing. The detailed creative recipes below document Mike Cann's videos and must not be treated as Boyan One branding or defaults. Use the current project's assets and the Personal Brand content foundation to choose its style.
+
+Tandem is a video editor built for working in turns with an agent:
+you edit the project through the `tandem` command, the creator reviews in the
+app, and the timeline shows exactly what you changed. The guide's
+entry point is `docs/AGENTS.md` in this Tandem repo: how editing works, the
 command index, and a table of recipes and topics in `docs/agents/` (B-roll,
 titles, cards, shorts, captions, sound, review and more). `tandem help
 <command>` gives a command's options, and `tandem help <edit command>`

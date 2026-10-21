@@ -655,7 +655,7 @@ struct CLI {
         let listed = try await client.call(CommentsRequest())
         let known = Set(listed.comments.map(\.id))
         if let stranger = ids.first(where: { !known.contains($0) }) {
-            throw UsageError(message: "\(stranger) isn't one of Mike's comments. tandem comments lists them.")
+            throw UsageError(message: "\(stranger) isn't a project comment. tandem comments lists them.")
         }
         let chosen = all ? listed.comments.map(\.id) : ids
         guard !chosen.isEmpty else {

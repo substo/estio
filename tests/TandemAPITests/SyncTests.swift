@@ -243,7 +243,8 @@ private struct SyncRoom {
         let start = Int(from * Self.rate)
         for n in 0..<count {
             state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-            let hiss = Float(Double(state >> 11) / Double(1 << 53) * 2 - 1) * 0.004
+            let randomValue = Double(state >> 11) / Double(1 << 53)
+            let hiss = Float(randomValue * 2 - 1) * 0.004
             buffer.floatChannelData![0][n] = (start + n < samples.count ? samples[start + n] : 0) + hiss
         }
         let file = try AVAudioFile(forWriting: url, settings: [

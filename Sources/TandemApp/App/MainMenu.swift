@@ -16,8 +16,8 @@ enum MainMenu {
     static func build(keymap: Keymap, recentDelegate: NSMenuDelegate) -> NSMenu {
         let main = EditorMainMenu()
 
-        let app = submenu(main, "Tandem")
-        app.addItem(withTitle: "About Tandem", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let app = submenu(main, "Substo Video")
+        app.addItem(withTitle: "About Substo Video", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
         let settings = app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
         settings.image = Icons.menuImage("gearshape")
@@ -26,12 +26,12 @@ enum MainMenu {
         app.addItem(withTitle: "Services", action: nil, keyEquivalent: "").submenu = services
         NSApp.servicesMenu = services
         app.addItem(.separator())
-        app.addItem(withTitle: "Hide Tandem", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        app.addItem(withTitle: "Hide Substo Video", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = app.addItem(withTitle: "Hide others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         app.addItem(withTitle: "Show all", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         app.addItem(.separator())
-        app.addItem(withTitle: "Quit Tandem", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        app.addItem(withTitle: "Quit Substo Video", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let file = submenu(main, "File")
         add(file, .newProject, keymap)

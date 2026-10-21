@@ -1,7 +1,9 @@
 # Tandem for agents
 
-Tandem is Mike's video editor. Anything he can do in the app, an agent can
-do through the `tandem` command, the local HTTP API or MCP. All three speak
+For this Personal Brand checkout, read [PERSONAL_BRAND.md](PERSONAL_BRAND.md) first. The examples below include Mike Cann's recording conventions and editorial choices; use the current project's media and the Personal Brand content foundation for new work.
+
+Tandem is a video editor a creator and agents can share. Anything done in the app can also be done
+through the `tandem` command, the local HTTP API or MCP. All three speak
 the same operations and the same edit commands, and every edit lands in the
 app's undo menu and activity feed under the agent's name.
 

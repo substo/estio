@@ -50,9 +50,9 @@ public struct CommentClip: Codable, Sendable {
 extension CommentsResult: ReadableResult {
     public var readableText: String {
         guard !comments.isEmpty else {
-            return "No comments (revision \(revision)). Mike adds them in Tandem with Add comment (Shift-C) or a double-click on an empty stretch; they show in a Comments strip under the ruler."
+            return "No comments (revision \(revision)). Add one in Tandem with Add comment (Shift-C) or a double-click on an empty stretch; comments show in a strip under the ruler."
         }
-        var lines = ["\(comments.count == 1 ? "1 comment" : "\(comments.count) comments") from Mike, earliest first (revision \(revision)):"]
+        var lines = ["\(comments.count == 1 ? "1 comment" : "\(comments.count) comments"), earliest first (revision \(revision)):"]
         let trackWidth = comments.flatMap(\.clips).map(\.track.count).max() ?? 0
         for comment in comments {
             lines.append("")

@@ -256,19 +256,19 @@ public final class MCPServer: @unchecked Sendable {
     ])
 
     static let instructions = """
-    Tandem is Mike's video editor, built for working in turns: you edit, then Mike reviews what you changed in the app, where your edits \
-    stay highlighted until he plays through them or marks them reviewed. Before changing anything, check `status`: if edits are still \
-    waiting for his review, stop and ask him whether to continue with N unreviewed changes. These tools read and edit a .tandem project: the app's copy when the app has it open, \
+    Tandem is a video editor for working in turns: an agent edits, then the creator reviews changes in the app, where edits \
+    stay highlighted until they are played through or marked reviewed. Before changing anything, check `status`: if edits are still \
+    waiting for review, ask whether to continue with N unreviewed changes. These tools read and edit a .tandem project: the app's copy when the app has it open, \
     otherwise the file. Start with `timeline` (add words: true to see what's said in each voice clip). Change things with `apply`, a batch \
-    of edit commands applied atomically as one undo step credited to you; label it with what it does (Mike reads the labels), pass \
+    of edit commands applied atomically as one undo step credited to you; label it with what it does (the creator reads the labels), pass \
     expectedRevision from the read you based the edit on (not a fresh status right before applying) so you never edit a timeline that \
     changed under you; Tandem finding new media in the folder doesn't count as a change. Try dryRun: true when unsure. `undo` \
     reverts your last edit (count: n for several); only undo your own. `search` finds a phrase's timeline time, `pauses` lists silences and `tighten` shortens them \
     (a dry run unless apply: true). Look at your work with `frame` and `clip` (a review MP4), and before handing back run `check` with \
     changed: true and fix what it finds (black frames, flickers, green screen that didn't key); its notes (dead air, page changes with no \
-    transition, soft zooms) are judgement calls. Mike's saved segments (his intro, outro and \
-    calls to action) are in `segments_list` and go in with `segments_insert`. Mike leaves comments on the timeline for the next round \
-    ("cut the umm here"): when he asks you to look at them, `comments` lists them; do each, then remove it with removeMarker in the same \
+    transition, soft zooms) are judgement calls. Saved segments (intro, outro and \
+    calls to action) are in `segments_list` and go in with `segments_insert`. The creator can leave comments on the timeline for the next round \
+    ("cut the umm here"): when asked to look at them, `comments` lists them; do each, then remove it with removeMarker in the same \
     batch. A camera's picture lags its mic: `sync` sets how late (never slip clips by hand for it); `sync` with files lines \
     another angle or an external mic up with the camera by sound and places it. Transcripts, mattes and proxies are \
     made in the background: `wait` waits for them (never poll in a loop), and `transcribe` makes a transcript of any file with sound. Only change the project through \
@@ -505,7 +505,7 @@ enum MCPTools {
     static let all: [Tool] = [
         Tool(
             name: "status", title: "Project status",
-            description: "The project's name, revision, length, unsaved changes, who has it open, undo and redo, background jobs, and agent edits still waiting for Mike's review (reviewPending).",
+            description: "The project's name, revision, length, unsaved changes, who has it open, undo and redo, background jobs, and agent edits still waiting for review (reviewPending).",
             operation: .status, properties: [:], readOnly: true, idempotent: true
         ),
         Tool(
@@ -713,7 +713,7 @@ enum MCPTools {
             properties: [
                 "from": time("Start. Default 0."),
                 "to": time("End. Default the end of the timeline."),
-                "changed": S.boolean("Only the stretches agents changed that are waiting for Mike's review."),
+                "changed": S.boolean("Only the stretches agents changed that are waiting for review."),
                 "quick": S.boolean("Only the checks that need no rendering: gaps, slivers and pictures zoomed past their own pixels. No dead air or page changes."),
                 "cuts": S.boolean("Only the cuts on the speech tracks, from the files' own sound (nothing rendered): a clippedWord problem where the voice runs right up to a cut, full band or above 4 kHz (a final \"s\"). Each has cut.fix, a trim into the nearest real pause (0.08 s quiet in both bands) within 0.3 s; commands holds them all, latest first, to apply with expectedRevision: revision. Run it after cutting the take."),
                 "width": S.integer("How wide frames are rendered for the scan. Default 384.")
@@ -738,8 +738,8 @@ enum MCPTools {
             readOnly: false
         ),
         Tool(
-            name: "comments", title: "Mike's comments",
-            description: "The comments Mike left on the timeline for you, earliest first: each one's ID, time and what he asked, with what's said a few seconds either side and the clips playing there. Do what each asks, label the edit with what you did, and remove the comment in the same apply batch with {\"removeMarker\": {\"markerID\": \"<id>\"}}. Comments move with ripple edits, so read them again after one.",
+            name: "comments", title: "Project comments",
+            description: "Project comments, earliest first: each one's ID, time and request, with what's said a few seconds either side and the clips playing there. Do what each asks, label the edit with what you did, and remove the comment in the same apply batch with {\"removeMarker\": {\"markerID\": \"<id>\"}}. Comments move with ripple edits, so read them again after one.",
             operation: .comments, properties: [:], readOnly: true, idempotent: true
         ),
         Tool(
@@ -915,7 +915,7 @@ enum MCPTools {
         ),
         Tool(
             name: "segments_list", title: "List saved segments",
-            description: "Mike's saved segments (an intro, an outro, like and subscribe, comment below) in the shared library's Segments folder: each one's name, length, clips, the tracks it goes on and the fields it asks for.",
+            description: "Saved segments (an intro, an outro, calls to action) in the shared library's Segments folder: each one's name, length, clips, the tracks it goes on and the fields it asks for.",
             asset: .segments, properties: [:], readOnly: true, idempotent: true
         ),
         Tool(

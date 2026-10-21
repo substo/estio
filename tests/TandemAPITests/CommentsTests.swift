@@ -32,7 +32,7 @@ final class CommentsTests: XCTestCase {
         XCTAssertEqual(late.clips.map(\.clipID), ["clip_cam2", "clip_scr2", "clip_voc2", "clip_mus1"])
 
         let text = result.readableText
-        XCTAssertTrue(text.hasPrefix("2 comments from Mike, earliest first (revision 1):"), text)
+        XCTAssertTrue(text.hasPrefix("2 comments, earliest first (revision 1):"), text)
         XCTAssertTrue(text.contains("mk_early  00:05.200  \"B-roll here / the servers one\""), text)
         XCTAssertTrue(text.contains("  said: today we talk"), text)
         XCTAssertTrue(text.contains("V2 Camera  clip_cam1  00:00.000-00:30.000  take1-camera.mov [00:00.000-00:30.000]"), text)
@@ -78,7 +78,7 @@ final class CommentsCLITests: XCTestCase {
 
         let notAComment = try cli.tandem("comments", "resolve", "mk_s2", in: folder.url)
         XCTAssertEqual(notAComment.status, 2)
-        XCTAssertTrue(notAComment.stderr.contains("mk_s2 isn't one of Mike's comments"), notAComment.stderr)
+        XCTAssertTrue(notAComment.stderr.contains("mk_s2 isn't a project comment"), notAComment.stderr)
 
         let nothing = try cli.tandem("comments", "resolve", in: folder.url)
         XCTAssertEqual(nothing.status, 2)

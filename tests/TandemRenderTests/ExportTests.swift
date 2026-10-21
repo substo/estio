@@ -178,13 +178,17 @@ final class ExportTests: XCTestCase {
         // reaches the limiter, and AAC at the presets' 320 kbps put this
         // file at -0.73 dBTP before the margin.
         var previous = 0.0
-        let samples = (0..<(6 * 48_000)).map { i -> Float in
+        var samples: [Float] = []
+        samples.reserveCapacity(6 * 48_000)
+        for i in 0..<(6 * 48_000) {
             let beat = i % 4_800
             let white = noise()
             let bright = white - 0.5 * previous
             previous = white
-            let hit = exp(-Double(beat) / 900) * (0.5 * sin(2 * .pi * 180 * Double(beat) / 48_000) + 0.35 * bright)
-            return Float(hit + 0.12 * sin(2 * .pi * 330 * Double(i) / 48_000))
+            let decay = exp(-Double(beat) / 900)
+            let snare = 0.5 * sin(2 * .pi * 180 * Double(beat) / 48_000) + 0.35 * bright
+            let tone = 0.12 * sin(2 * .pi * 330 * Double(i) / 48_000)
+            samples.append(Float(decay * snare + tone))
         }
         try await media.movie("hits.mov", seconds: 6, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: { samples[$0] })
         let item = media.item("med_h", "hits.mov", seconds: 6, audio: true)

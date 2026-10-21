@@ -12,12 +12,12 @@ struct CommandHelp {
 
 enum Help {
     static let commands: [CommandHelp] = [
-        CommandHelp(name: "new", usage: "tandem new <path.tandem> [--name <name>] [--portrait | --size <width>x<height>]", summary: "Create a project with Mike's usual tracks and add the media in its folder.", options: ["name", "portrait", "size"],
+        CommandHelp(name: "new", usage: "tandem new <path.tandem> [--name <name>] [--portrait | --size <width>x<height>]", summary: "Create a project with Tandem's default tracks and add the media in its folder.", options: ["name", "portrait", "size"],
                     details: """
                     The canvas is 3840x2160 unless you say otherwise: --portrait makes a 1080x1920 short, --size any other size.
                     It says which file it took for the camera take and why: a record-it -camera file, or a video from a phone or camera (or in source/) with speech and a face in it. Live Photos stay one item each, the still, with its movie in livePhotoVideo.
                     """),
-        CommandHelp(name: "status", usage: "tandem status [--revision] [--json]", summary: "Revision, length, unsaved changes, who has it open, undo, background jobs and agent edits waiting for Mike's review.", options: ["revision"],
+        CommandHelp(name: "status", usage: "tandem status [--revision] [--json]", summary: "Revision, length, unsaved changes, who has it open, undo, background jobs and agent edits waiting for your review.", options: ["revision"],
                     details: "--revision prints just the revision number, to pass to --expect. Read it when you read the timeline you're about to edit, not right before applying, or --expect protects nothing. Tandem finding new files in the folder doesn't make it stale."),
         CommandHelp(name: "media", usage: "tandem media [--refresh]", summary: "Media files, how many clips use each, and analysis status.", options: ["refresh"],
                     details: "--refresh scans the project folder for new files first."),
@@ -39,7 +39,7 @@ enum Help {
                     Each clip that's different: added, removed, moved, trimmed (start +0.500s, end -1.000s), slipped, and changed settings like scale, position, gain, fades, effects and keyframes, with its timeline times and track. Clips that moved together by the same amount (riding a ripple) are one line. Media, markers, transitions and settings aren't compared.
                     --since a revision walks the edit history back, so the changes come grouped by edit, with who made each one and where it was. The history goes back to when this version of Tandem first opened the project; past that, a backup with that revision in .tandem/backups is used, or it says what to use instead.
                     --since a .tandem file compares with it: a backup, another version, or the snapshot every export writes beside itself (exports/v3.mp4.tandem). Give the export (exports/v3.mp4) and its snapshot is read.
-                    Use it to see what Mike changed since you last looked. --json has each clip before and after.
+                    Use it to see what changed since you last looked. --json has each clip before and after.
                     """),
         CommandHelp(name: "restore", usage: "tandem restore --from <revision | file.tandem | export.mp4> (--clips <id,id> | --from-time <time> --to-time <time> [--track <name>]) [--apply]", summary: "Put clips back as they were in a revision, a backup or an export (a dry run without --apply).", options: ["from", "clips", "from-time", "to-time", "track", "apply", "label", "expect"],
                     details: """
@@ -49,12 +49,12 @@ enum Help {
         CommandHelp(name: "clips", usage: "tandem clips [--track <name or id>] [--from <time>] [--to <time>] [--media <id or path>] [--ids] [--json]", summary: "Clips with their ID, track, start, end and what they play, filtered by track, time and media.", options: ["track", "from", "to", "media", "ids"],
                     details: "--track takes a track ID, name (Camera) or label (V2). --from and --to keep clips that overlap that stretch. --media takes a media ID, path or file name. --ids prints just the IDs, one a line. Use it to find clip IDs instead of reading the whole timeline JSON."),
         CommandHelp(name: "validate", usage: "tandem validate", summary: "Check the project for problems (exit code 1 if it has errors).", options: []),
-        CommandHelp(name: "check", usage: "tandem check [--changed | --from <time> --to <time>] [--quick | --cuts] [--width <pixels>]", summary: "Look for what Mike would catch in review: black frames, flickers, green screens that didn't key, white blocks and gaps (exit code 1 if it finds any), and notes on soft zooms, dead air, page changes with no transition and screen recordings at a low frame rate. --cuts checks for words clipped at cuts instead.", options: ["from", "to", "changed", "quick", "cuts", "width"],
+        CommandHelp(name: "check", usage: "tandem check [--changed | --from <time> --to <time>] [--quick | --cuts] [--width <pixels>]", summary: "Look for issues during review: black frames, flickers, green screens that didn't key, white blocks and gaps (exit code 1 if it finds any), and notes on soft zooms, dead air, page changes with no transition and screen recordings at a low frame rate. --cuts checks for words clipped at cuts instead.", options: ["from", "to", "changed", "quick", "cuts", "width"],
                     details: """
                     Renders every frame of the stretch small (384 wide, from proxies where they're ready) and measures it, and the screen recordings again on their own. It reads 10 s pieces side by side and keeps what it measured in .tandem/cache/check, so the next check renders only the pieces where something changed.
                     A flicker inside one clip of a video comes with the holdFrame that holds the frame before it, when the check can tell which picture flashed, and the last line is a `tandem apply` that makes them all.
                     Notes don't fail it. Dead air is 0.8 s or more of a still picture with nothing said and no sound effect or music swell: cut it, or keep it if the pause earns it. A page change is the screen recording turning to a new page at once with no transition over it: push it if it's a page in an explainer or slides. A sliver is a clip, or a gap between clips on a track, shorter than a frame. A low frame rate is a screen recording the viewer sees moving at under 12 frames a second (macOS records the screen as it changes) for a second or more: cover it with the camera full screen or B-roll, or cut it.
-                    --changed checks only what agents changed that's waiting for Mike's review, half a second either side: run it before handing back.
+                    --changed checks only what agents changed that's waiting for your review, half a second either side: run it before handing back.
                     --quick skips rendering: just the gaps, slivers and pictures zoomed past their own pixels.
                     --cuts checks only the cuts on the speech tracks, from the files' own sound (nothing rendered, so it's quick): a word is clipped where the voice runs right up to the cut, in the full band or above 4 kHz (a final "s"). A real pause is quiet for 0.08 s or more in both; a shorter gap is inside a word. Each clipped edge comes with the trim that moves it into the nearest pause within 0.3 s, and the last line is a `tandem apply` that makes them all. Run it after cutting the take.
                     """),
@@ -71,9 +71,9 @@ enum Help {
                       tandem sync "source/Ian close-up.mov" "source/Ian mic.wav"
                       tandem apply '{"showAngle": {"range": {"start": "4:57", "end": "5:18"}, "trackID": "Angle 2"}}'
                     """),
-        CommandHelp(name: "comments", usage: "tandem comments [resolve <id>... | resolve --all]", summary: "The comments Mike left on the timeline for you, with what's said and playing at each; resolve clears the ones you've done.", options: ["all", "label"],
+        CommandHelp(name: "comments", usage: "tandem comments [resolve <id>... | resolve --all]", summary: "Comments left on the timeline for the next edit round, with what's said and playing at each; resolve clears the ones you've done.", options: ["all", "label"],
                     details: """
-                    Mike adds comments in Tandem at the playhead (Add comment, Shift-C) while he reviews: notes like "cut the umm here" for the next round. Each shows its ID, time and words, what's said a few seconds either side (| marks the comment) and the clips playing there.
+                    Add comments in Tandem at the playhead (Add comment, Shift-C) during review: notes like "cut the umm here" for the next round. Each shows its ID, time and words, what's said a few seconds either side (| marks the comment) and the clips playing there.
                     Do what each asks and label the edit with what you did. Then remove the comment: in the same apply batch with {"removeMarker": {"markerID": "<id>"}}, or afterwards with tandem comments resolve <id>. Comments move with ripple edits, so list them again after one.
                     """),
         CommandHelp(name: "transcript", usage: "tandem transcript [<clip or media id>] [--from <time>] [--to <time>] [--make]", summary: "Word timings for a clip (timeline times), a file (file times) or the whole timeline.", options: ["from", "to", "make", "timeout"],

@@ -200,14 +200,14 @@ final class ReviewAPITests: XCTestCase {
         XCTAssertEqual(pending.map(\.label), ["Add push"])
         XCTAssertEqual(pending.first?.author, "claude")
         XCTAssertEqual(pending.first?.clipIDs.count, 1)
-        XCTAssertTrue(status.readableText.contains("waiting for Mike's review: 1 agent edit (Add push by claude)"), status.readableText)
+        XCTAssertTrue(status.readableText.contains("waiting for your review: 1 agent edit (Add push by claude)"), status.readableText)
         let decoded = try ServiceJSON.decoder().decode(StatusResult.self, from: ServiceJSON.encoder().encode(status))
         XCTAssertEqual(decoded.reviewPending, pending)
 
         // Mark reviewed in the app empties it.
         h.session.review.markReviewed()
         XCTAssertEqual(h.service.status().reviewPending, [])
-        XCTAssertFalse(h.service.status().readableText.contains("waiting for Mike's review"))
+        XCTAssertFalse(h.service.status().readableText.contains("waiting for your review"))
     }
 
     func testAnOldAppsStatusWithoutItStillReads() throws {

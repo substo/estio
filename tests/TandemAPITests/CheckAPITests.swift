@@ -99,11 +99,16 @@ final class CheckAPITests: XCTestCase {
     /// Still 32 x 18 frames at 30 fps from `start`, and with `turn` a new
     /// page from then on, as the screen recording on its own shows it.
     private func pages(from start: Double, to end: Double, turn: Double? = nil) -> [FrameStats] {
-        stride(from: start, to: end - 0.0001, by: 1.0 / 30).map { seconds in
+        var frames: [FrameStats] = []
+        for seconds in stride(from: start, to: end - 0.0001, by: 1.0 / 30) {
             let page = turn.map { seconds >= $0 - 0.0001 ? 1 : 0 } ?? 0
-            let tiles = (0..<(32 * 18)).map { (tile: Int) -> UInt8 in UInt8(20 + (tile * (page + 3) + page * 11) % 7 * 6) }
-            return FrameStats(time: Time(seconds: seconds), luma: 0.1, brightestTile: 0.2, flatGreen: 0, flatWhite: 0, thumbnail: tiles, columns: 32)
+            let tiles: [UInt8] = (0..<(32 * 18)).map { tile in
+                let shade = 20 + (tile * (page + 3) + page * 11) % 7 * 6
+                return UInt8(shade)
+            }
+            frames.append(FrameStats(time: Time(seconds: seconds), luma: 0.1, brightestTile: 0.2, flatGreen: 0, flatWhite: 0, thumbnail: tiles, columns: 32))
         }
+        return frames
     }
 
     func testDeadAirAndPageChangesAreNotes() async throws {
@@ -172,7 +177,7 @@ final class CheckAPITests: XCTestCase {
         defer { h.close() }
         let nothing = try await CheckRequest(changed: true).run(on: h.service, context: h.context)
         XCTAssertTrue(nothing.ranges.isEmpty)
-        XCTAssertEqual(nothing.readableText, "Nothing is waiting for Mike's review, so there was nothing to check.")
+        XCTAssertEqual(nothing.readableText, "Nothing is waiting for your review, so there was nothing to check.")
 
         // An agent moves the B-roll to 21 to 26.
         try h.apply(.moveClips(clipIDs: ["clip_brl1"], delta: t(1), includeLinked: false))

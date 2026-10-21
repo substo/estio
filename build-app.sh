@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_CONFIGURATION="${TANDEM_BUILD_CONFIGURATION:-release}"
-APP_NAME="Tandem"
+APP_NAME="Substo Video"
 FINAL_DIR="${TANDEM_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 # The bundle is built beside the installed one and swapped in at the end, so
 # a `tandem` command run meanwhile (an agent's, mid-install) never finds the
@@ -28,7 +28,7 @@ if ! command -v swift >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Building Tandem ($BUILD_CONFIGURATION)..."
+echo "Building Substo Video ($BUILD_CONFIGURATION)..."
 swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION"
 BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION" --show-bin-path)"
 
@@ -86,7 +86,7 @@ if [[ "$SIGNING_IDENTITY" == "-" ]]; then
 fi
 
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
-  --identifier "com.mikerosoft.tandem.cli" "$CLI_BIN" >/dev/null
+  --identifier "com.substo.video.cli" "$CLI_BIN" >/dev/null
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
   ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "$APP_DIR" >/dev/null
 

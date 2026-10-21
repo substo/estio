@@ -11,7 +11,11 @@ import TandemMedia
 final class RandomAccessTests: XCTestCase {
     /// Presentation time of each frame: 60 frames at 30 fps, a gap to 12 s
     /// (a static screen), then 30 more.
-    static let times: [Double] = (0..<60).map { Double($0) / 30 } + (0..<30).map { 12 + Double($0) / 30 }
+    static let times: [Double] = {
+        let initial: [Double] = (0..<60).map { Double($0) / 30 }
+        let afterGap: [Double] = (0..<30).map { 12 + Double($0) / 30 }
+        return initial + afterGap
+    }()
 
     /// Writes the frames with the hardware HEVC encoder (open GOPs, frame
     /// reordering, a keyframe every 60 frames, so frame 60 at 12 s is a

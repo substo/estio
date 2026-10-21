@@ -187,7 +187,7 @@ extension TandemService {
             ranges = session.review.log.changedRegions(in: project).compactMap { region in
                 TimeRange(start: region.start - Self.checkMargin, end: region.end + Self.checkMargin).intersection(timeline)
             }
-            if ranges.isEmpty { note = "Nothing is waiting for Mike's review, so there was nothing to check." }
+            if ranges.isEmpty { note = "Nothing is waiting for your review, so there was nothing to check." }
         } else {
             let start = request.from ?? .zero
             let end = min(request.to ?? project.duration, project.duration)

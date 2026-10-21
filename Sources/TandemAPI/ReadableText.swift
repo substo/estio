@@ -28,7 +28,7 @@ extension StatusResult: ReadableResult {
             var names = pending.suffix(3).map { "\($0.label) by \($0.author)" }
             if pending.count > names.count { names.append("\(pending.count - names.count) more") }
             let count = pending.count == 1 ? "1 agent edit" : "\(pending.count) agent edits"
-            lines.append("  waiting for Mike's review: \(count) (\(names.joined(separator: "; ")))")
+            lines.append("  waiting for your review: \(count) (\(names.joined(separator: "; ")))")
         }
         let active = jobs.filter { $0.state == .queued || $0.state == .running }
         if active.isEmpty {

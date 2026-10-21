@@ -221,7 +221,9 @@ final class ViewerAudioTests: XCTestCase {
         try wav(media, "chirp.wav", seconds: 10) { i in
             // A rising tone, so the order of the samples matters.
             let s = Double(i) / 48_000
-            return Float(0.1 * sin(2 * Double.pi * (200 * s + 40 * s * s)))
+            let phase = 200 * s + 40 * s * s
+            let amplitude = 0.1 * sin(2 * Double.pi * phase)
+            return Float(amplitude)
         }
         let item = MediaItem(id: "med_chirp", path: "chirp.wav", kind: .audio, role: .music, duration: t(10), hasAudio: true)
         var clip = Clip(id: "clip_chirp", content: .media(mediaID: item.id), start: .zero, duration: t(10))

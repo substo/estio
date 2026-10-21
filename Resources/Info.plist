@@ -7,11 +7,11 @@
     <key>CFBundleExecutable</key>
     <string>tandem-app</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mikerosoft.tandem</string>
+    <string>com.substo.video</string>
     <key>CFBundleName</key>
-    <string>Tandem</string>
+    <string>Substo Video</string>
     <key>CFBundleDisplayName</key>
-    <string>Tandem</string>
+    <string>Substo Video</string>
     <key>CFBundleIconFile</key>
     <string>tandem</string>
     <key>CFBundlePackageType</key>
@@ -27,14 +27,14 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Tandem transcribes your recordings on this Mac so you can edit by words.</string>
+    <string>Substo Video transcribes your recordings on this Mac so you can edit by words.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Tandem records voiceovers from the selected microphone.</string>
+    <string>Substo Video records voiceovers from the selected microphone.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Tandem Project</string>
+            <string>Substo Video Project</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
@@ -49,7 +49,7 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.mikerosoft.tandem</string>
+            <string>com.substo.video</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>tandem</string>

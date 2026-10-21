@@ -1,6 +1,6 @@
-# <img src="icons/tandem.png" width="32" alt=""> tandem
+# <img src="icons/tandem.png" width="32" alt=""> Substo Video
 
-A video editor that me and my AI agents can both work on
+A video editor for a creator and their AI agents
 
 macOS
 
@@ -10,28 +10,13 @@ macOS
 
 ## What it is
 
-This is the video editor I'm building for my Convex videos to replace Filmora. It's built so my agents can edit the same project as me, through a CLI and an MCP server, while I work in the app.
+Substo Video is a standalone macOS editor for the Personal Brand content workspace, based on Mike Cann's Tandem. A creator and their agents can work on the same project through the app, CLI, or MCP server. See [Personal Brand setup](docs/PERSONAL_BRAND.md) for this copy's workflow and integration boundary.
 
-A project is just a `.tandem` JSON file in the video's folder. Tandem finds the media there, pairs up my Record It camera and screen takes, and does transcripts, waveforms and the cutout in the background.
+A project is a `.tandem` JSON file in the video's folder. Tandem finds local media, recognises common camera and screen recording names, and runs transcripts, waveforms, and cutout work in the background. Check its media roles after import, since its original recording conventions may differ from yours.
 
-![Tandem editing the decision-models video](docs/header.jpg)
+![Upstream Tandem example editing a video](docs/header.jpg)
 
-## Get it
-
-Paste this into your AI coding agent (Claude Code, Codex, Cursor...):
-
-> Fork https://github.com/mikecann/tandem to my GitHub account and clone my fork
-> (if I don't use GitHub, or want to keep my copy private, just clone it instead),
-> then make it my own. It's one of Mike Cann's personal tools, so read the README
-> first, change anything specific to his setup to suit mine, then help me get it
-> running.
-
-Heads up, I'm not taking issues or pull requests on this one, so only I can open
-them. It's built around my setup and I don't want to be the one deciding what goes
-in, or accidentally breaking your version when I change something. Fork it and have
-your agent make it your own instead.
-
-### Or set it up by hand
+## Get it running
 
 You'll need macOS 15 or newer and Xcode 26 or newer with Swift 6. Some analysis
 features, such as SpeechAnalyzer transcription, need macOS 26. SwiftPM fetches
@@ -39,19 +24,21 @@ the Lottie dependency during the first build. Install ffmpeg if you want to
 import formats macOS can't decode, such as WebM (`brew install ffmpeg`).
 
 ```bash
-git clone https://github.com/mikecann/tandem.git
-cd tandem
+cd "/Users/martingreen/Documents/Personal Brand/tandem"
 bash setup_mac.sh
-bash install.sh
-tandem app
+TANDEM_SKILL_DIRS="" bash install.sh "$PWD/.local/bin"
+"$PWD/.local/bin/tandem" app
 ```
 
-`setup_mac.sh` builds and signs the release app at `~/Applications/Tandem.app`.
-`install.sh` links this clone's launcher into `~/.local/bin`; you can pass a
-custom bin directory. Add that directory to your PATH if it isn't there yet.
+`setup_mac.sh` builds and signs the app at `~/Applications/Substo Video.app`.
+This checkout defaults to a debug build because Xcode 26.3's Swift optimizer
+currently crashes in the timeline view during a release build. Set
+`TANDEM_BUILD_CONFIGURATION=release` when that compiler issue is resolved.
+`install.sh` links this clone's launcher into the supplied `.local/bin` directory
+(or `~/.local/bin` when no directory is supplied). Add that directory to your PATH if needed.
 Keep the clone in place, and rerun `install.sh` if you move it.
 
-`install.sh` also links [the Tandem skill](skills/tandem/SKILL.md) into
+Without `TANDEM_SKILL_DIRS=""`, `install.sh` also links [the Tandem skill](skills/tandem/SKILL.md) into
 `~/.claude/skills` and `~/.agents/skills`, so Claude Code and Codex know how
 to edit with Tandem whenever they're in a folder with a `.tandem` project:
 the loop of editing, checking and handing back for review, and the rules.
@@ -78,13 +65,11 @@ tandem timeline --summary
 For agents, add the MCP server once:
 
 ```bash
-claude mcp add tandem -- ~/Applications/Tandem.app/Contents/MacOS/tandem mcp
+claude mcp add tandem -- "$HOME/Applications/Substo Video.app/Contents/MacOS/tandem" mcp
 ```
 
 Old Filmora projects import with `tandem import filmora "Video v3.wfp"`.
-Agent EDLs import with `tandem import edl edit.json --recipe decision-models`.
-That recipe has paths and settings for my Decision Models video, so change
-it for your footage or add your own. The [agent guide](docs/AGENTS.md) is
+The built-in `decision-models` EDL recipe contains Mike's paths and style, so do not use it for Personal Brand footage. The [agent guide](docs/AGENTS.md) is
 the entry point for agents; its topic files in `docs/agents/` have the
 recipes, import options and troubleshooting.
 
@@ -102,7 +87,7 @@ bash restart.sh
 ```
 
 `restart.sh` builds a debug app and opens it. Set `TANDEM_APP_DIR` to build
-somewhere other than `~/Applications/Tandem.app`.
+somewhere other than `~/Applications/Substo Video.app`.
 
 Run `bash tests/install-tests.sh` to check the launcher installation without
 touching your app. The default Swift tests use synthetic media and fixtures.
@@ -134,9 +119,7 @@ test, which may install a language model and needs macOS 26.
 | `Sources/TandemCLI` | The `tandem` command |
 | `tests/` | XCTest targets, one per library |
 
-## More tools
+## Origin and licence
 
-You can find my other tools at [mikerosoft.app](https://mikerosoft.app).
-
-MIT licensed. See [LICENSE](LICENSE). Bundled fonts and other third-party
+Based on [Mike Cann's Tandem](https://github.com/mikecann/tandem). MIT licensed. See [LICENSE](LICENSE). Bundled fonts and other third-party
 assets retain their own licences, which ship alongside them.

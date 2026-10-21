@@ -168,9 +168,14 @@ enum CutCheck {
         let rate = project.settings.frameRate
         let ideal = (target - edge.mediaTime) / clip.speed
         let frame = rate.frameDuration.seconds
-        let snapped = [(ideal / frame).rounded(.down), (ideal / frame).rounded(.up)]
-            .filter { pause.contains(edge.mediaTime + $0 * frame * clip.speed) }
-            .min { abs($0 * frame - ideal) < abs($1 * frame - ideal) }
+        let framePosition = ideal / frame
+        let candidates: [Double] = [framePosition.rounded(.down), framePosition.rounded(.up)]
+        let withinPause = candidates.filter { candidate in
+            pause.contains(edge.mediaTime + candidate * frame * clip.speed)
+        }
+        let snapped = withinPause.min { lhs, rhs in
+            abs(lhs * frame - ideal) < abs(rhs * frame - ideal)
+        }
         let delta = snapped.map { Time.frames(Int64($0), at: rate) } ?? Time(seconds: ideal)
         guard delta != .zero else { return nil }
         let moved = delta.seconds * clip.speed

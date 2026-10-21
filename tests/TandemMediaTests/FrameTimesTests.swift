@@ -8,7 +8,9 @@ final class FrameTimesTests: TempFolderTestCase {
     func testReadsAScreenRecordingsUnevenFramesAndCachesThem() async throws {
         // 30 fps, then 5 a second, as a screen recording slows down while
         // nothing much changes.
-        let times = (0..<30).map { Double($0) / 30 } + (0..<10).map { 1 + Double($0) / 5 }
+        let initialTimes: [Double] = (0..<30).map { Double($0) / 30 }
+        let slowerTimes: [Double] = (0..<10).map { 1 + Double($0) / 5 }
+        let times = initialTimes + slowerTimes
         let url = file("source/demo-screen.mov")
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try await SyntheticMedia.writeMovie(to: url, .init(frameTimes: times, audio: nil))
