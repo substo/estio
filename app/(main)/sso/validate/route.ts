@@ -3,6 +3,7 @@ import { getGHLUser } from '@/lib/ghl/client';
 import { getAccessToken } from '@/lib/ghl/token';
 import { syncGHLUserToClerk } from '@/lib/clerk-sync';
 import db from '@/lib/db';
+import { realmEmailWhere } from '@/lib/auth/auth-realm';
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
@@ -313,8 +314,9 @@ export async function GET(request: NextRequest) {
 
         // Ensure User record exists and is linked
         if (ghlUser.email) {
+            // GHL SSO is Estio-realm only; never match another realm's email.
             const user = await db.user.upsert({
-                where: { email: ghlUser.email },
+                where: realmEmailWhere("estio", ghlUser.email),
                 update: {
                     name: ghlUser.name,
                     ghlUserId: ghlUser.id,
@@ -323,6 +325,7 @@ export async function GET(request: NextRequest) {
                     }
                 },
                 create: {
+                    authRealm: "estio",
                     email: ghlUser.email,
                     name: ghlUser.name,
                     ghlUserId: ghlUser.id,

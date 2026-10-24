@@ -1,5 +1,6 @@
 import { GHL_CONFIG } from "@/config/ghl";
 import db from "@/lib/db";
+import { realmEmailWhere } from "@/lib/auth/auth-realm";
 import { verifyOAuthState } from "@/lib/jwt-utils";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -127,9 +128,9 @@ export async function GET(request: NextRequest) {
                 if (userEmail) {
                     console.log(`[OAuth] Linking user ${userEmail} to location ${dbLocation.id}`);
 
-                    // Upsert User and connect to Location
+                    // Upsert User and connect to Location (GHL OAuth is Estio-realm only)
                     await db.user.upsert({
-                        where: { email: userEmail },
+                        where: realmEmailWhere("estio", userEmail),
                         update: {
                             name: userName,
                             ghlUserId: ghlUserId,
@@ -138,6 +139,7 @@ export async function GET(request: NextRequest) {
                             }
                         },
                         create: {
+                            authRealm: "estio",
                             email: userEmail,
                             name: userName,
                             ghlUserId: ghlUserId,

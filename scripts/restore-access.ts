@@ -8,7 +8,7 @@ async function restoreAccess() {
     console.log(`Restoring access for ${email} to location ${targetLocationId}...`);
 
     const user = await db.user.update({
-        where: { email },
+        where: { authRealm_email: { authRealm: "estio", email } },
         data: {
             locations: {
                 connect: { id: targetLocationId }

@@ -44,6 +44,8 @@ import {
     type AssignmentRecoveryCounts,
 } from '@/lib/team/assignment-recovery';
 import { resolveActiveLocation } from '@/lib/auth/active-location';
+import { realmEmailWhere } from '@/lib/auth/auth-realm';
+import { getRequestAuthRealm } from '@/lib/auth/request-realm';
 
 type OffboardingPreview = {
     asOf: string;
@@ -161,8 +163,10 @@ export async function previewAssignmentRecovery(input: { sourceEmail: string }):
         const targetEmail = normalizeOffboardingEmail(input.sourceEmail || '');
         if (!targetEmail) throw new Error('Target email is required');
 
+        // Equal emails in another identity realm are different people.
+        const realm = await getRequestAuthRealm();
         const [targetRecords, clerk] = await Promise.all([
-            db.user.findMany({ where: { email: { equals: targetEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
+            db.user.findMany({ where: { authRealm: realm, email: { equals: targetEmail, mode: 'insensitive' } }, select: previewIdentitySelect }),
             clerkClient(),
         ]);
         const clerkResult = await clerk.users.getUserList({ emailAddress: [targetEmail], limit: 10 });
@@ -813,8 +817,9 @@ export async function inviteUserToLocation(formData: FormData) {
     try {
         const normalizedEmail = email.toLowerCase().trim();
 
-        // 1. Check if user already exists in OUR DB
-        let user = await db.user.findUnique({ where: { email: normalizedEmail } });
+        // 1. Check if user already exists in OUR DB, within this host's identity realm only
+        const realm = await getRequestAuthRealm();
+        let user = await db.user.findUnique({ where: realmEmailWhere(realm, normalizedEmail) });
 
         const client = await clerkClient();
 
@@ -933,6 +938,7 @@ export async function inviteUserToLocation(formData: FormData) {
                 // Create user in DB and connect
                 user = await db.user.create({
                     data: {
+                        authRealm: realm,
                         email: normalizedEmail,
                         clerkId: clerkUser.id,
                         locations: { connect: { id: locationId } }

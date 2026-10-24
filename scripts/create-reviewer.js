@@ -9,7 +9,7 @@ async function setup() {
     }
 
     const user = await db.user.upsert({
-        where: { email: 'metareviewer@estio.co' },
+        where: { authRealm_email: { authRealm: 'estio', email: 'metareviewer@estio.co' } },
         create: {
             email: 'metareviewer@estio.co',
             name: 'Meta Reviewer',

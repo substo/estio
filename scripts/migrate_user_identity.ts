@@ -12,7 +12,7 @@ async function main() {
 
     // 1. Get the "Duplicate/New" user (we will delete this one, but first check we are deleting the right thing)
     const conflictingUser = await prisma.user.findUnique({
-        where: { email: newEmail }
+        where: { authRealm_email: { authRealm: "estio", email: newEmail } }
     });
 
     if (conflictingUser) {
@@ -27,7 +27,7 @@ async function main() {
 
     // 2. Update the "Original/Correct" user with the new Identity details
     const originalUser = await prisma.user.findUnique({
-        where: { email: oldEmail }
+        where: { authRealm_email: { authRealm: "estio", email: oldEmail } }
     });
 
     if (!originalUser) {

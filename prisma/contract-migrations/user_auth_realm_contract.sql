@@ -1,0 +1,18 @@
+-- Contract step for realm-scoped Business identity (CRM on Substo, slice 1).
+-- NOT a Prisma migration yet: `prisma migrate deploy` only reads
+-- prisma/migrations, so this file is inert until it is promoted.
+--
+-- Promote only in a later release, after the expand release
+-- (20261024160000_user_auth_realm_expand) is live and verified and no release
+-- older than it is a rollback target: older code resolves users by email
+-- alone, which is only safe while email is globally unique.
+--
+-- To promote:
+--   1. Copy this file to prisma/migrations/<timestamp>_user_auth_realm_contract/migration.sql.
+--   2. In prisma/schema.prisma change `email String @unique` on User to `email String`.
+--   3. Follow documentation/crm-realm-identity-rollout.md.
+--
+-- "User_clerkId_key" is kept deliberately: a Clerk user ID maps to at most one
+-- row in any realm. ("authRealm", "email") uniqueness remains via
+-- "User_authRealm_email_key".
+DROP INDEX IF EXISTS "User_email_key";

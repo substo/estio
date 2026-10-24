@@ -8,7 +8,7 @@ async function main() {
 
     // Find the user
     const user = await prisma.user.findUnique({
-        where: { email },
+        where: { authRealm_email: { authRealm: "estio", email } },
     });
 
     if (!user) {

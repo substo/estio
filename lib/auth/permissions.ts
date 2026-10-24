@@ -1,4 +1,5 @@
 import db from '@/lib/db';
+import { businessClerkIdWhere } from '@/lib/auth/auth-realm';
 
 /**
  * Verifies if a user has access to a specific location.
@@ -15,7 +16,7 @@ export async function verifyUserHasAccessToLocation(userId: string, locationId: 
 
     try {
         const user = await db.user.findUnique({
-            where: { clerkId: userId },
+            where: businessClerkIdWhere(userId),
             select: {
                 locations: {
                     where: { id: locationId },
@@ -45,7 +46,7 @@ export async function verifyUserIsLocationAdmin(userId: string, locationId: stri
 
     try {
         const user = await db.user.findUnique({
-            where: { clerkId: userId },
+            where: businessClerkIdWhere(userId),
             select: { id: true }
         });
 

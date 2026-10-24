@@ -11,6 +11,8 @@ import {
   type AuthorizedLocation,
 } from "@/lib/auth/active-location-policy";
 import { extractImpersonationClaim } from "@/lib/auth/impersonation-policy";
+import { isBusinessRealm, realmClerkIdWhere } from "@/lib/auth/auth-realm";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
 
 export const ACTIVE_LOCATION_COOKIE = "active_location_id";
@@ -48,15 +50,21 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
     return { status: "unauthenticated", clerkUserId: null, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
 
+  // Resolve only within the host's identity realm; Business is closed to
+  // realms without a Business tenancy (Substo until slice 3).
+  const realm = await getRequestAuthRealm();
+  if (!isBusinessRealm(realm)) {
+    return { status: "no_access", clerkUserId, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
+  }
   const user = await db.user.findUnique({
-    where: { clerkId: clerkUserId },
+    where: realmClerkIdWhere(realm, clerkUserId),
     select: {
-      id: true, clerkId: true, firstName: true, lastName: true, phone: true, timeZone: true, platformRole: true,
+      id: true, authRealm: true, clerkId: true, firstName: true, lastName: true, phone: true, timeZone: true, platformRole: true,
       locations: { select: { id: true, name: true, isPlatformMaster: true } },
       locationRoles: { select: { locationId: true, role: true, contactAccessScope: true } },
     },
   });
-  if (!user?.clerkId || user.clerkId !== clerkUserId) {
+  if (!user?.clerkId || user.clerkId !== clerkUserId || user.authRealm !== realm) {
     return { status: "no_access", clerkUserId, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
 

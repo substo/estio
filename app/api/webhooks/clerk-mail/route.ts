@@ -5,10 +5,18 @@ import { WebhookEvent } from '@clerk/nextjs/server'
 import db from '@/lib/db'
 import { sendGHLEmail } from '@/lib/ghl/email'
 import { checkGHLSMTPStatus } from '@/lib/ghl/email'
+import { authRealmForHostBrand, realmEmailWhere } from '@/lib/auth/auth-realm'
+import { getHostBrandConfig, resolveHostBrand } from '@/lib/auth/host-brand'
 
 // Simple in-memory cache for idempotency removed in favor of Metadata Tagging
 
 export async function POST(req: Request) {
+    // GHL email delivery serves Estio's Clerk realm only. Substo emails are
+    // never resolved against Estio users, even when the address is equal.
+    if (authRealmForHostBrand(resolveHostBrand(req.headers.get('host'), getHostBrandConfig())) !== 'estio') {
+        return new Response('Not found', { status: 404 })
+    }
+
     const WEBHOOK_SECRET = process.env.CLERK_MAIL_WEBHOOK_SECRET || process.env.CLERK_WEBHOOK_SECRET
 
     if (!WEBHOOK_SECRET) {
@@ -92,7 +100,7 @@ export async function POST(req: Request) {
         // 1. Fallback: Check if it's an existing user in our DB
         if (!locationId) {
             const connectedUser = await db.user.findUnique({
-                where: { email: toEmail },
+                where: realmEmailWhere('estio', toEmail),
                 include: { locations: true }
             });
 

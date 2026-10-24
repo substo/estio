@@ -5,7 +5,8 @@ export type ScheduleRest = <T>(path: string, init?: RequestInit) => Promise<T>;
 /** Same direct-location intersection/platform-admin scope as an own Estio session. */
 export async function currentEstioScheduleAuthority(userId: string, locationId: string): Promise<boolean> {
   const { default: db } = await import("../db");
-  const user = await db.user.findUnique({ where: { clerkId: userId }, select: { clerkId: true, platformRole: true,
+  // Estio actors only: the Business user must be in the estio realm.
+  const user = await db.user.findUnique({ where: { authRealm_clerkId: { authRealm: "estio", clerkId: userId } }, select: { clerkId: true, platformRole: true,
     locations: { select: { id: true, name: true, isPlatformMaster: true } },
     locationRoles: { select: { locationId: true, role: true, contactAccessScope: true } } } });
   if (!user || user.clerkId !== userId) return false;

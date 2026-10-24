@@ -3,6 +3,8 @@ import "server-only";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { APP_URL } from "@/lib/app-config";
+import { isBusinessRealm, realmClerkIdWhere } from "@/lib/auth/auth-realm";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { describeImpersonationStartError, extractImpersonationClaim, identitiesAgree, type ActorClaim } from "@/lib/auth/impersonation-policy";
 
 export const ACTOR_TOKEN_TTL_SECONDS = 5 * 60;
@@ -41,21 +43,24 @@ export async function startImpersonation(input: { targetUserId: string; location
   const authState = await auth();
   if (!authState.userId || authState.actor) throw new Error("Not authorized to use master login.");
 
+  // Actor and target must both belong to the host's Business realm.
+  const realm = await getRequestAuthRealm();
+  if (!isBusinessRealm(realm)) throw new Error("Not authorized to use master login.");
   const [actor, target] = await Promise.all([
     db.user.findUnique({
-      where: { clerkId: authState.userId },
-      select: { id: true, clerkId: true, email: true, platformRole: true },
+      where: realmClerkIdWhere(realm, authState.userId),
+      select: { id: true, authRealm: true, clerkId: true, email: true, platformRole: true },
     }),
     db.user.findUnique({
       where: { id: String(input.targetUserId || "").trim() },
       select: {
-        id: true, clerkId: true, email: true, firstName: true, lastName: true,
+        id: true, authRealm: true, clerkId: true, email: true, firstName: true, lastName: true,
         locations: { where: { id: String(input.locationId || "").trim() }, select: { id: true, name: true } },
         locationRoles: { where: { locationId: String(input.locationId || "").trim() }, select: { locationId: true } },
       },
     }),
   ]);
-  if (!actor || actor.platformRole !== "PLATFORM_ADMIN" || !actor.clerkId || !target?.clerkId) {
+  if (!actor || actor.authRealm !== realm || actor.platformRole !== "PLATFORM_ADMIN" || !actor.clerkId || !target?.clerkId || target.authRealm !== realm) {
     throw new Error("Not authorized to use master login.");
   }
   if (actor.id === target.id || actor.clerkId === target.clerkId) throw new Error("You cannot impersonate your own account.");
@@ -132,10 +137,10 @@ export async function getImpersonationContextFromAuth(authState: AuthState): Pro
     select: {
       id: true, actorClerkId: true, targetClerkId: true, targetUserId: true, locationId: true,
       reason: true, sessionExpiresAt: true,
-      actor: { select: { clerkId: true, platformRole: true } },
+      actor: { select: { authRealm: true, clerkId: true, platformRole: true } },
       target: {
         select: {
-          id: true, clerkId: true, email: true, firstName: true, lastName: true,
+          id: true, authRealm: true, clerkId: true, email: true, firstName: true, lastName: true,
           locations: { where: { id: claim.locationId }, select: { id: true } },
           locationRoles: { where: { locationId: claim.locationId }, select: { locationId: true } },
         },
@@ -153,6 +158,8 @@ export async function getImpersonationContextFromAuth(authState: AuthState): Pro
   }
   if (
     audit.actor.clerkId !== claim.actorClerkId
+    || audit.actor.authRealm !== audit.target.authRealm
+    || !isBusinessRealm(audit.target.authRealm)
     || audit.actor.platformRole !== "PLATFORM_ADMIN"
     || audit.target.id !== audit.targetUserId
     || audit.target.clerkId !== authState.userId

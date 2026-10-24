@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { realmEmailWhere } from "@/lib/auth/auth-realm";
 import { MediaKind } from "@prisma/client";
 import { refreshGhlAccessToken } from "@/lib/location";
 import { syncToGHL } from "@/lib/properties/repository";
@@ -365,10 +366,11 @@ export async function savePropertyRecord(input: SavePropertyRecordInput) {
     if (!normalizedId) {
         if (propertyData.originalCreatorEmail) {
             const email = String(propertyData.originalCreatorEmail);
-            let existingUser = await db.user.findUnique({ where: { email } });
+            let existingUser = await db.user.findUnique({ where: realmEmailWhere("estio", email) });
             if (!existingUser) {
                 existingUser = await db.user.create({
                     data: {
+                        authRealm: "estio",
                         email,
                         name: propertyData.originalCreatorName || email.split("@")[0],
                     },

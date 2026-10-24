@@ -1,5 +1,16 @@
 # Shared Studio implementation progress
 
+## Latest local slice: realm-scoped Business identity (CRM on Substo, slice 1)
+
+Decision 2026-10-24 (user): Substo gets the same CRM as Estio, shown as-is first and generalised per niche later. Equal emails must never merge identities or data across realms. This slice makes Prisma `User` realm-aware. It is implemented locally on `feature/crm-realm-identity`, based on `release/studio-go-live`. No production data change, migration or deployment occurred.
+
+- **Schema:** `User.authRealm` (`estio` | `substo`, default `estio`) plus unique `(authRealm, email)` and `(authRealm, clerkId)`. The additive migration `20261024160000_user_auth_realm_expand` is safe for the running and previous release. The contract step that drops the global email index is staged in `prisma/contract-migrations/` for a later release. `clerkId` stays globally unique on purpose.
+- **Resolution and linking:** the realm comes from the verified host brand (tenant satellites count as Estio). Active location, platform admin, impersonation, `ensureUserExists`, permission helpers and Studio schedule authority are realm-scoped. Business access is `estio`-only until slice 3. Email claims (sign-in, team invite, GHL, property creators, scripts) happen only within one realm. A conflicting row in the other realm fails closed.
+- **Webhooks:** `/api/webhooks/clerk` verifies raw bytes with the host realm's secret (`CLERK_WEBHOOK_SECRET`, `SUBSTO_CLERK_WEBHOOK_SECRET`). It rejects identical secrets and other Clerk instances. Substo events cannot add Business members or tenant contacts. `clerk-mail` is Estio-only. All Business webhooks stay blocked on the Substo host.
+- **Rollout:** see [the realm identity rollout runbook](crm-realm-identity-rollout.md) for pre-checks, migration order, verification queries, rollback and the call-site audit.
+- **Validation:** 23 new unit/contract tests. The focused auth/platform/Studio/team suites pass except one pre-existing failure (`assignment-recovery-contract`, which also fails on the base). `bash scripts/test-user-auth-realm-db.sh` passes all 15 disposable-PostgreSQL checks (`/tmp/crm-realm-pg.log`). The changed files show no new compiler diagnostics: 7 pre-existing ones remain in `team/actions.ts` and `sso/validate` (`/tmp/crm-realm-types.log`). `npm run build` exits 0 with only public `NEXT_PUBLIC_*` values and an unreachable dummy database URL in the environment (`/tmp/crm-realm-build.log`). Not yet checked in a signed-in browser.
+- **Next:** release A (expand) under separate authorization, then release B (contract). Then slice 2, a Substo Business location per workspace; slice 3, the Substo `/admin` firewall with generic modules only and isolation tests; and slice 4, the CRM switch option on Substo with niche vocabulary.
+
 ## Latest local combined-rollback slice
 
 **Web + Studio worker roll back together, and a fastest go-live plan** are implemented locally. No production change or deployment occurred.

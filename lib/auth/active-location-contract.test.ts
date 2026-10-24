@@ -22,7 +22,8 @@ const platformMasterProvisioner = read("scripts/provision-platform-master-locati
 const activeLocationRoute = read("app/api/active-location/route.ts");
 
 test("resolver uses immutable Clerk mapping and local connection-role intersection", () => {
-  assert.match(resolver, /where: \{ clerkId: clerkUserId \}/);
+  assert.match(resolver, /where: realmClerkIdWhere\(realm, clerkUserId\)/);
+  assert.match(resolver, /if \(!isBusinessRealm\(realm\)\)/);
   assert.match(resolver, /intersectAuthorizedLocations/);
   assert.doesNotMatch(resolver, /publicMetadata|crm_location_id|searchParams|localStorage/);
   assert.match(resolver, /httpOnly: true/);
@@ -47,7 +48,8 @@ test("one-location header renders no label or disabled selector and multi-locati
 });
 
 test("platform access is role-based, tenant-independent, and offers location-user master login", () => {
-  assert.match(platformAccess, /where: \{ clerkId: userId \}/);
+  assert.match(platformAccess, /where: realmClerkIdWhere\(realm, userId\)/);
+  assert.match(platformAccess, /if \(!isBusinessRealm\(realm\)\) return null/);
   assert.match(platformAccess, /platformRole !== "PLATFORM_ADMIN"/);
   assert.doesNotMatch(platformAccess, /email|locations|cookie|metadata/);
   assert.match(platformAccess, /!userId \|\| actor/);

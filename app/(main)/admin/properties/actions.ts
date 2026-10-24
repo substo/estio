@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { currentUser } from "@clerk/nextjs/server";
 import { ensureUserExists } from "@/lib/auth/sync-user";
+import { realmEmailWhere } from "@/lib/auth/auth-realm";
 import {
     requireAuthenticatedLocationContext,
     requirePropertyInActiveLocation,
@@ -576,7 +577,8 @@ export async function linkPropertyCreator(propertyId: string, email: string) {
     });
     if (!property) throw new Error("Property access denied");
 
-    const dbUser = await db.user.findUnique({ where: { email } });
+    // Property creators are Estio Business users; match only within that realm.
+    const dbUser = await db.user.findUnique({ where: realmEmailWhere("estio", email) });
 
     let targetUserId = dbUser?.id;
 
@@ -590,6 +592,7 @@ export async function linkPropertyCreator(propertyId: string, email: string) {
         // For efficiency, let's fetch property first or just use email as name fallback.
         const newUser = await db.user.create({
             data: {
+                authRealm: "estio",
                 email,
                 name: property.originalCreatorName || email.split('@')[0],
                 // No clerkId yet. 

@@ -23,7 +23,7 @@ async function fixIdentityMismatch() {
 
     // 2. Find the "Restored" User (with the correct email but no/wrong Clerk ID)
     const targetUser = await db.user.findUnique({
-        where: { email: CORRECT_EMAIL },
+        where: { authRealm_email: { authRealm: "estio", email: CORRECT_EMAIL } },
         include: { locations: true }
     });
 

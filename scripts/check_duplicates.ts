@@ -12,7 +12,7 @@ async function main() {
     // Or maybe there are users with same email but different ClerkIDs?
 
     const users = await prisma.user.findMany({
-        where: { email },
+        where: { email }, // all realms: diagnostic listing
         include: { locations: true }
     });
 

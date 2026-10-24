@@ -5,7 +5,7 @@ async function auditUserAccess() {
     console.log(`Auditing access for user: ${email}`);
 
     const user = await db.user.findUnique({
-        where: { email },
+        where: { authRealm_email: { authRealm: "estio", email } },
         include: {
             locations: true,
             locationRoles: { include: { location: true } },

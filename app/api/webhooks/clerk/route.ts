@@ -1,54 +1,27 @@
-import { Webhook } from 'svix'
-import { headers } from 'next/headers'
 import { WebhookEvent } from '@clerk/nextjs/server'
 import db from '@/lib/db'
 import { NextResponse } from 'next/server'
 import { isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate'
 import { verifyPublicSignupLocationToken } from '@/lib/jwt-utils'
+import {
+    claimInvitedRealmUser,
+    type InvitedUserStore,
+    realmAcceptsTeamInvites,
+    realmHandlesTenantContacts,
+    verifyClerkBusinessWebhook,
+} from '@/lib/auth/clerk-business-webhook'
+
+const invitedUserStore: InvitedUserStore = {
+    user: { upsert: (args) => db.user.upsert(args as Parameters<typeof db.user.upsert>[0]) },
+};
 
 export async function POST(req: Request) {
-    // You can find this in the Clerk Dashboard -> Webhooks -> choose the webhook
-    const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET
-
-    if (!WEBHOOK_SECRET) {
-        throw new Error('Please add CLERK_WEBHOOK_SECRET from Clerk Dashboard to .env or .env.local')
-    }
-
-    // Get the headers
-    const headerPayload = await headers();
-    const svix_id = headerPayload.get("svix-id");
-    const svix_timestamp = headerPayload.get("svix-timestamp");
-    const svix_signature = headerPayload.get("svix-signature");
-
-    // If there are no headers, error out
-    if (!svix_id || !svix_timestamp || !svix_signature) {
-        return new Response('Error occured -- no svix headers', {
-            status: 400
-        })
-    }
-
-    // Get the body
-    const payload = await req.json()
-    const body = JSON.stringify(payload);
-
-    // Create a new Svix instance with your secret.
-    const wh = new Webhook(WEBHOOK_SECRET);
-
-    let evt: WebhookEvent
-
-    // Verify the payload with the headers
-    try {
-        evt = wh.verify(body, {
-            "svix-id": svix_id,
-            "svix-timestamp": svix_timestamp,
-            "svix-signature": svix_signature,
-        }) as WebhookEvent
-    } catch (err) {
-        console.error('Error verifying webhook:', err);
-        return new Response('Error occured', {
-            status: 400
-        })
-    }
+    // The host's realm selects the signing secret (Clerk Dashboard -> Webhooks).
+    // Every write below is scoped to that realm, never to the payload's email alone.
+    const verified = await verifyClerkBusinessWebhook(req);
+    if (verified instanceof Response) return verified;
+    const { realm } = verified;
+    const evt: WebhookEvent = verified.event;
 
     // Handle the event
     const eventType = evt.type;
@@ -73,6 +46,10 @@ export async function POST(req: Request) {
                 // BRANCH 1: Public Lead (Contact Only)
                 // If signed up on tenant domain (unsafe_metadata), they are a Lead/Contact.
                 if (publicLocationId && !isTeamInvite) {
+                    if (!realmHandlesTenantContacts(realm)) {
+                        console.warn(`[Webhook] Public sign-up metadata from the ${realm} realm for ${id}. Skipping contact creation.`);
+                        return new Response('Skipped (Realm has no tenant sites)', { status: 200 });
+                    }
                     if (!publicLocationToken) {
                         console.warn(`[Webhook] Public sign-up for ${id} missing signed location token. Skipping contact creation.`);
                         return new Response('Skipped (Invalid Public Signup Metadata)', { status: 200 });
@@ -111,29 +88,19 @@ export async function POST(req: Request) {
 
                 // BRANCH 2: Team Invitation (User + Role)
                 if (isTeamInvite && inviteLocationId) {
+                    if (!realmAcceptsTeamInvites(realm)) {
+                        console.warn(`[Webhook] Team invite metadata from the ${realm} realm for ${id}. No Business access yet; skipping.`);
+                        return new Response('Skipped (Realm has no Business access)', { status: 200 });
+                    }
                     console.log(`[Webhook] Team Invite Accepted: ${email}`);
 
-                    // Upsert User Record and connect to Location
-                    const user = await db.user.upsert({
-                        where: { email: email },
-                        update: {
-                            clerkId: id,
-                            firstName: first_name || undefined,
-                            lastName: last_name || undefined,
-                            // Also connect to location if not already connected
-                            locations: {
-                                connect: { id: inviteLocationId }
-                            }
-                        },
-                        create: {
-                            email: email,
-                            clerkId: id,
-                            firstName: first_name || null,
-                            lastName: last_name || null,
-                            locations: {
-                                connect: { id: inviteLocationId }
-                            }
-                        }
+                    // Claim the invited user by email within this realm only, and connect to Location
+                    const user = await claimInvitedRealmUser(invitedUserStore, realm, {
+                        clerkId: id,
+                        email,
+                        firstName: first_name,
+                        lastName: last_name,
+                        locationId: inviteLocationId,
                     });
 
                     const role = (public_metadata?.role as string) || 'MEMBER';
@@ -257,7 +224,7 @@ export async function POST(req: Request) {
         const verifiedPhoneObj = phone_numbers?.find((p: any) => p.verification?.status === 'verified');
         const verifiedPhone = verifiedPhoneObj?.phone_number;
 
-        if (verifiedPhone) {
+        if (verifiedPhone && realmHandlesTenantContacts(realm)) {
             console.log(`[Webhook] User ${id} updated with Verified Phone: ${verifiedPhone}`);
 
             try {

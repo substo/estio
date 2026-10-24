@@ -36,7 +36,8 @@ async function main() {
 
   const [localMatches, clerkResponse] = await Promise.all([
     db.user.findMany({
-      where: { email: { equals: email, mode: "insensitive" } },
+      // Estio Clerk keys: only Estio-realm users. Equal emails elsewhere are different people.
+      where: { authRealm: "estio", email: { equals: email, mode: "insensitive" } },
       select: { id: true, clerkId: true, email: true, platformRole: true },
       take: 2,
     }),
