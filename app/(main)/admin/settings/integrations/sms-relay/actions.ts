@@ -122,7 +122,7 @@ export async function initiatePairing(
     const device = await (db as any).smsRelayDevice.create({
         data: {
             locationId: location.id,
-            label: label.trim() || "Android Device",
+            label: label.trim() || "Mobile Device",
             pairTokenHash,
             pairExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
             pairAttemptCount: 0,

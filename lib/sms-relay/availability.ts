@@ -22,6 +22,7 @@ export function deriveSmsRelayAvailability(input: {
         id?: string | null;
         paired?: boolean | null;
         status?: string | null;
+        capabilities?: string[] | null;
     } | null;
 }): SmsRelayAvailability {
     const phone = String(input.contactPhone || "").trim();
@@ -54,7 +55,7 @@ export function deriveSmsRelayAvailability(input: {
         return {
             available: false,
             reason: "sms_relay_disabled",
-            label: "Android SMS is disabled for this location.",
+            label: "Device SMS is disabled for this location.",
             deviceId: null,
         };
     }
@@ -64,7 +65,7 @@ export function deriveSmsRelayAvailability(input: {
         return {
             available: false,
             reason: "sms_relay_not_paired",
-            label: "No paired Android SMS device is available.",
+            label: "No paired SMS device is available.",
             deviceId: null,
         };
     }
@@ -72,7 +73,7 @@ export function deriveSmsRelayAvailability(input: {
         return {
             available: false,
             reason: "sms_relay_offline",
-            label: "Android SMS device is offline.",
+            label: "SMS device is offline.",
             deviceId: device.id || null,
         };
     }
@@ -91,9 +92,13 @@ export async function resolveSmsRelayAvailabilityForLocation(input: {
     contactPhone?: string | null;
 }): Promise<SmsRelayAvailability> {
     const device = await (db as any).smsRelayDevice.findFirst({
-        where: { locationId: input.locationId, paired: true },
+        where: {
+            locationId: input.locationId,
+            paired: true,
+            capabilities: { hasSome: ["sms_relay", "interactive_sms"] },
+        },
         orderBy: { lastSeenAt: "desc" },
-        select: { id: true, status: true, paired: true },
+        select: { id: true, status: true, paired: true, capabilities: true },
     });
 
     return deriveSmsRelayAvailability({

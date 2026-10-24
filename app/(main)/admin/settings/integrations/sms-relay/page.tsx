@@ -147,6 +147,7 @@ function PairingModal({
     onClose: () => void;
     onPaired: () => void;
 }) {
+    const [deviceKind, setDeviceKind] = useState<"android" | "ios">("android");
     const [label, setLabel] = useState("Android Device");
     const [step, setStep] = useState<"form" | "scanning" | "phone">("form");
     const [phoneNumber, setPhoneNumber] = useState("");
@@ -234,9 +235,9 @@ function PairingModal({
         <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
             <DialogContent className="max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-[640px] gap-0 overflow-x-hidden overflow-y-auto rounded-2xl p-0 sm:w-full">
                 <DialogHeader className="border-b border-slate-100 px-5 pb-4 pr-14 pt-5 text-left sm:px-7 sm:pt-6">
-                    <DialogTitle className="text-xl font-bold text-slate-900">Pair Android Device</DialogTitle>
+                    <DialogTitle className="text-xl font-bold text-slate-900">Pair Mobile Device</DialogTitle>
                     <DialogDescription className="text-sm text-slate-500">
-                        Connect a physical Android phone for SMS and WhatsApp network relay.
+                        Android can relay unattended SMS and STO traffic. iPhone requires approval for every SMS and cannot provide STO network relay.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -249,12 +250,27 @@ function PairingModal({
                         }}
                     >
                         <div style={styles.field}>
+                            <label style={styles.label}>Phone type</label>
+                            <select
+                                style={styles.input}
+                                value={deviceKind}
+                                onChange={(event) => {
+                                    const next = event.target.value === "ios" ? "ios" : "android";
+                                    setDeviceKind(next);
+                                    setLabel(next === "ios" ? "iPhone" : "Android Device");
+                                }}
+                            >
+                                <option value="android">Android (automatic relay)</option>
+                                <option value="ios">iPhone (user-approved SMS)</option>
+                            </select>
+                        </div>
+                        <div style={styles.field}>
                             <label style={styles.label}>Device Label</label>
                             <input
                                 style={styles.input}
                                 value={label}
                                 onChange={(e) => setLabel(e.target.value)}
-                                placeholder="e.g. Limassol Office Android"
+                                placeholder={deviceKind === "ios" ? "e.g. Limassol Office iPhone" : "e.g. Limassol Office Android"}
                                 autoFocus
                             />
                             <p style={styles.hint}>
@@ -310,12 +326,12 @@ function PairingModal({
                             </div>
                         </div>
                         <div style={styles.stepsList}>
-                            <p style={styles.stepsTitle}>Steps on the Android device:</p>
+                            <p style={styles.stepsTitle}>Steps on the {deviceKind === "ios" ? "iPhone" : "Android device"}:</p>
                             <ol style={styles.olList}>
-                                <li>Install the SIM Relay app (APK)</li>
-                                <li>Open the app → tap <strong>Pair with Estio</strong></li>
-                                <li>Scan the QR code or type the code above</li>
-                                <li>Grant the requested SMS and phone-number permissions</li>
+                                <li>{deviceKind === "ios" ? "Install Estio Relay through TestFlight or the App Store" : "Install the SIM Relay app (APK)"}</li>
+                                <li>Open the app and choose <strong>Pair with Estio</strong></li>
+                                <li>{deviceKind === "ios" ? "Type the code shown above" : "Scan the QR code or type the code above"}</li>
+                                <li>{deviceKind === "ios" ? "Keep the app available when messages need approval" : "Grant the requested SMS and phone-number permissions"}</li>
                             </ol>
                         </div>
                         <div className="flex items-center justify-center gap-2.5 text-center">
@@ -336,8 +352,9 @@ function PairingModal({
                         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <p className="m-0 text-sm font-semibold text-amber-950">Phone connected — one detail is missing</p>
                             <p className="mb-0 mt-1.5 text-sm leading-5 text-amber-900">
-                                Android could not read the number from the SIM. Some carriers do not store it on the SIM,
-                                even when phone permissions are granted.
+                                {deviceKind === "ios"
+                                    ? "Apple does not expose the SIM phone number to this app, so enter it manually."
+                                    : "Android could not read the number from the SIM. Some carriers do not store it on the SIM, even when phone permissions are granted."}
                             </p>
                         </div>
                         <div style={styles.field}>
@@ -461,10 +478,10 @@ function DeviceCard({
                                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                     <h3 style={styles.deviceLabelLg}>{device.label}</h3>
                                     <span style={styles.platformBadge}>
-                                        <svg style={{ width: 12, height: 12 }} viewBox="0 0 24 24" fill="currentColor">
+                                        {device.platform === "ios" ? null : <svg style={{ width: 12, height: 12 }} viewBox="0 0 24 24" fill="currentColor">
                                             <path d="M17.523 15.3414C17.523 15.3414 17.523 15.3414 17.523 15.3414C17.0673 15.3414 16.6974 14.9723 16.6974 14.5173C16.6974 14.0623 17.0673 13.6932 17.523 13.6932C17.9787 13.6932 18.3486 14.0623 18.3486 14.5173C18.3486 14.9723 17.9787 15.3414 17.523 15.3414ZM6.47701 15.3414C6.02127 15.3414 5.65139 14.9723 5.65139 14.5173C5.65139 14.0623 6.02127 13.6932 6.47701 13.6932C6.93275 13.6932 7.30263 14.0623 7.30263 14.5173C7.30263 14.9723 6.93275 15.3414 6.47701 15.3414ZM24 13.0645V14.6749C24 16.7165 22.345 18.3715 20.3033 18.3715H3.69666C1.655 18.3715 0 16.7165 0 14.6749V13.0645C0 11.2382 1.32833 9.72124 3.08415 9.42065L4.85177 6.13098C4.94589 5.95585 5.1668 5.88764 5.34193 5.98176C5.51706 6.07588 5.58527 6.29679 5.49115 6.47192L3.84439 9.53754C7.03926 10.3344 10.6033 10.767 14.3643 10.767C15.823 10.767 17.2415 10.7107 18.6127 10.6038L18.4907 10.3768L17.2023 7.97746C17.1082 7.80234 17.1764 7.58142 17.3515 7.4873C17.5266 7.39318 17.7476 7.46139 17.8417 7.63652L19.2625 10.2825C21.7203 10.9882 23.6337 12.8711 23.9515 15.2894H24V13.0645Z" />
-                                        </svg>
-                                        Android
+                                        </svg>}
+                                        {device.platform === "ios" ? "iPhone" : "Android"}
                                     </span>
                                 </div>
                                 <div style={styles.phoneBadgeContainer} onClick={copyPhone} title="Copy phone number">
@@ -854,12 +871,12 @@ export default function SmsRelaySettingsPage() {
                 <div style={styles.infoCardInner}>
                     <div style={styles.infoStep}>
                         <span style={styles.infoNum}>1</span>
-                        <p style={styles.infoText}>Pair an Android phone using the QR code</p>
+                        <p style={styles.infoText}>Pair an Android phone or iPhone</p>
                     </div>
                     <div style={styles.infoArrow}>→</div>
                     <div style={styles.infoStep}>
                         <span style={styles.infoNum}>2</span>
-                        <p style={styles.infoText}>Phone runs a background service to send & receive SMS</p>
+                        <p style={styles.infoText}>Android relays automatically; iPhone asks before each send</p>
                     </div>
                     <div style={styles.infoArrow}>→</div>
                     <div style={styles.infoStep}>
@@ -1032,7 +1049,7 @@ export default function SmsRelaySettingsPage() {
                         <p style={styles.emptyIcon}>📱</p>
                         <p style={styles.emptyTitle}>No devices paired yet</p>
                         <p style={styles.emptyBody}>
-                            Click <strong>+ Pair Device</strong> to connect your first Android phone.
+                            Click <strong>+ Pair Device</strong> to connect your first phone.
                         </p>
                         <button
                             style={styles.btnPrimary.default}

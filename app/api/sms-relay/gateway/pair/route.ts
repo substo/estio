@@ -16,6 +16,10 @@ import db from "@/lib/db";
 import { hashPairCode, generateDeviceToken, hashDeviceToken } from "@/lib/sms-relay/auth";
 import { validateTunnelPublicKey } from "@/lib/device-tunnel/auth";
 import { normalizeSmsRelayPhoneNumber } from "@/lib/sms-relay/phone-number";
+import {
+    acceptedSmsRelayCapabilities,
+    normalizeSmsRelayPlatform,
+} from "@/lib/sms-relay/device-capabilities";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +34,7 @@ export async function POST(req: NextRequest) {
             tunnel_public_key,
             app_version,
             capabilities,
+            platform,
         } = body ?? {};
 
         if (!pair_code || typeof pair_code !== "string") {
@@ -43,14 +48,16 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Invalid tunnel public key" }, { status: 400 });
         }
 
-        const requestedCapabilities = Array.isArray(capabilities)
-            ? capabilities.map((item: unknown) => String(item || "").trim()).filter(Boolean)
-            : [];
-        const acceptedCapabilities = Array.from(new Set([
-            "sms_relay",
-            ...(tunnelPublicKey && requestedCapabilities.includes("whatsapp_egress") ? ["whatsapp_egress"] : []),
-        ]));
+        const normalizedPlatform = normalizeSmsRelayPlatform(platform);
+        const acceptedCapabilities = acceptedSmsRelayCapabilities({
+            platform: normalizedPlatform,
+            requestedCapabilities: capabilities,
+            hasValidTunnelPublicKey: Boolean(tunnelPublicKey),
+        });
         const detectedPhoneNumber = normalizeSmsRelayPhoneNumber(phone_number);
+        const acceptedTunnelPublicKey = acceptedCapabilities.includes("whatsapp_egress")
+            ? tunnelPublicKey
+            : "";
 
         // Find the device awaiting pairing with this code
         const device = await (db as any).smsRelayDevice.findFirst({
@@ -90,10 +97,11 @@ export async function POST(req: NextRequest) {
                 devicePushToken: device_push_token ?? null,
                 label: device_label ?? device.label,
                 phoneNumber: detectedPhoneNumber ?? device.phoneNumber ?? null,
+                platform: normalizedPlatform,
                 capabilities: acceptedCapabilities,
                 appVersion: typeof app_version === "string" ? app_version.trim().slice(0, 64) || null : null,
-                tunnelPublicKey: tunnelPublicKey || null,
-                ...(tunnelPublicKey ? { tunnelCredentialVersion: { increment: 1 } } : {}),
+                tunnelPublicKey: acceptedTunnelPublicKey || null,
+                ...(acceptedTunnelPublicKey ? { tunnelCredentialVersion: { increment: 1 } } : {}),
                 tunnelRevokedAt: null,
                 status: "online",
                 lastSeenAt: new Date(),
