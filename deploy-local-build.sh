@@ -16,6 +16,7 @@ GREEN_PORT=3002
 APP_NAME_PREFIX="estio-app"
 SCRAPE_WORKER_APP_NAME="estio-scrape-worker"
 VIEWING_RELAY_APP_NAME="estio-viewing-live-relay"
+STUDIO_WORKER_APP_NAME="estio-studio-worker"
 VIEWING_RELAY_DEFAULT_PORT=8788
 WHATSAPP_BRIDGE_APP_NAME="estio-whatsapp-web-bridge"
 WHATSAPP_BRIDGE_DEFAULT_PORT=3218
@@ -34,9 +35,8 @@ LEGACY_SCRAPE_WORKER_PORT=3010
 PRISMA_CLI_VERSION="${PRISMA_CLI_VERSION:-6.19.0}"
 # Schema sync modes:
 # - migrate-only: strict migration deploy, fail on any migration error.
-# - db-push: force schema sync with db push.
-# - migrate-then-push: try migrate deploy first, fall back to db push on drift/errors.
-PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-migrate-then-push}"
+# - db-push: explicitly synchronize schema with db push; Prisma will refuse destructive changes.
+PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-migrate-only}"
 
 # Keep previous color process alive briefly after traffic switch to reduce abrupt cutovers.
 # Override with DRAIN_SECONDS=0 for immediate cleanup.
@@ -70,6 +70,22 @@ cleanup() {
     ssh -S "$SSH_CONTROL_PATH" -O exit $SERVER 2>/dev/null || true
 }
 trap cleanup EXIT
+
+# Fail fast, before the local build, if the server cannot hold this release.
+ssh $SSH_OPTS $SERVER /bin/bash -s << DISKCHECK
+    set -euo pipefail
+    NPM_CACHE_KB=\$(du -sk /root/.npm/_cacache 2>/dev/null | cut -f1 || echo 0)
+    if [ "\${NPM_CACHE_KB:-0}" -gt 3145728 ]; then
+        echo "🧹 npm cache exceeds 3 GiB; cleaning..."
+        npm cache clean --force >/dev/null 2>&1 || true
+    fi
+    AVAIL_KB=\$(df -Pk / | awk 'NR==2 {print \$4}')
+    if [ \$AVAIL_KB -lt 3145728 ]; then
+        echo "❌ Less than 3 GiB free on the server root disk. Free disk space before deploying."
+        df -h /
+        exit 1
+    fi
+DISKCHECK
 
 echo "🔎 Ensuring local Redis dependency is available..."
 ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
@@ -222,6 +238,37 @@ fi
 
 echo "✅ Found .env.prod"
 
+# Studio activates only when .env.prod names a Substo host. Its server-held secrets
+# then come from a second owner-only overlay; refuse to build without it.
+SERVER_SECRET_ENV_FILE="${SERVER_SECRET_ENV_FILE:-/root/.config/estio/whatsapp-session-auth-node.env}"
+STUDIO_SECRET_ENV_FILE="${STUDIO_SECRET_ENV_FILE:-/root/.config/estio/studio.env}"
+STUDIO_ACTIVATION=$(node -e 'const v=require("node:fs").readFileSync(".env.prod","utf8").split(/\r?\n/).map(l=>l.match(/^\s*(?:export\s+)?SUBSTO_APP_HOSTS=(.*)$/)).filter(Boolean).pop()?.[1]?.trim().replace(/^[\x27"]|[\x27"]$/g,"");process.stdout.write(v?"1":"")')
+if [ -n "$STUDIO_ACTIVATION" ]; then
+    echo "🎬 SUBSTO_APP_HOSTS is set; checking the server Studio secret overlay..."
+    ssh $SSH_OPTS $SERVER /bin/bash -s -- "$STUDIO_SECRET_ENV_FILE" <<'STUDIO_ENV_CHECK'
+    set -euo pipefail
+    studio_env="$1"
+    if [ ! -f "$studio_env" ] || [ -L "$studio_env" ]; then
+        echo "❌ Studio secret overlay is missing on the server."
+        exit 1
+    fi
+    if [ $(( 0$(stat -c %a "$studio_env") & 077 )) -ne 0 ]; then
+        echo "❌ Studio secret overlay must be owner-only (chmod 600)."
+        exit 1
+    fi
+    missing=""
+    for key in STUDIO_SUPABASE_URL STUDIO_SUPABASE_SERVICE_ROLE_KEY STUDIO_SECRETS_KEY STUDIO_SECRETS_KEY_ID \
+        SUBSTO_CLERK_PUBLISHABLE_KEY SUBSTO_CLERK_SECRET_KEY CLERK_ENCRYPTION_KEY; do
+        grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=[^[:space:]]" "$studio_env" || missing="$missing $key"
+    done
+    if [ -n "$missing" ]; then
+        echo "❌ Studio secret overlay lacks:$missing"
+        exit 1
+    fi
+    echo "✅ Studio secret overlay present (owner-only, required keys set)"
+STUDIO_ENV_CHECK
+fi
+
 BUILD_SOURCE_HASH=$(node scripts/deploy-build-fingerprint.cjs)
 if [ -n "${DEPLOY_PREBUILT_BUILD_ID:-}" ]; then
     if [ "$(cat .next/BUILD_ID 2>/dev/null)" != "$DEPLOY_PREBUILT_BUILD_ID" ] || \
@@ -248,11 +295,23 @@ rm -f .env.production.local
 echo "📁 Preparing target directory ($TARGET_DIR)..."
 # A skipped worker may still have its kernel cwd in the inactive slot.
 # Refuse to erase its files unless this release also restarts that worker.
-ssh $SSH_OPTS $SERVER /bin/bash -s -- "$TARGET_DIR" "$DEPLOY_RUNTIME_SCOPE" "$SCRAPE_WORKER_APP_NAME" <<'WORKER_PREFLIGHT'
+ssh $SSH_OPTS $SERVER /bin/bash -s -- "$TARGET_DIR" "$DEPLOY_RUNTIME_SCOPE" "$SCRAPE_WORKER_APP_NAME" "$STUDIO_WORKER_APP_NAME" <<'WORKER_PREFLIGHT'
     set -euo pipefail
     target_dir="$1"
     runtime_scope="$2"
     worker_name="$3"
+    studio_worker_name="$4"
+    # The Studio worker drains on SIGTERM and its job leases recover, so it is
+    # stopped here before replacing its files; configured Studio must pass the
+    # pre-cutover worker readiness gate in every scope.
+    for studio_pid in $(pm2 pid "$studio_worker_name" 2>/dev/null || true); do
+        case "$studio_pid" in ''|*[!0-9]*|0) continue ;; esac
+        if [ "$(readlink -f "/proc/$studio_pid/cwd" || true)" = "$target_dir" ]; then
+            echo "🎬 Stopping Studio worker before replacing its release files..."
+            pm2 stop "$studio_worker_name"
+            break
+        fi
+    done
     for worker_pid in $(pm2 pid "$worker_name"); do
         case "$worker_pid" in ''|*[!0-9]*|0) continue ;; esac
         worker_cwd=$(readlink -f "/proc/$worker_pid/cwd" || true)
@@ -302,8 +361,23 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
 echo "🔧 Setting up environment variables..."
 # Upload the env file directly via SSH pipe (more robust with multiplexing)
 ssh $SSH_OPTS $SERVER "cat > $TARGET_DIR/.env" < .env.prod
-SERVER_SECRET_ENV_FILE="${SERVER_SECRET_ENV_FILE:-/root/.config/estio/whatsapp-session-auth-node.env}"
-ssh $SSH_OPTS $SERVER "if [ -f '$SERVER_SECRET_ENV_FILE' ]; then node '$TARGET_DIR/scripts/ops/merge-secret-env.js' '$TARGET_DIR/.env' '$SERVER_SECRET_ENV_FILE' --runtime-owner; fi"
+# One atomic merge; a key present in both overlays is rejected rather than overridden.
+ssh $SSH_OPTS $SERVER /bin/bash -s -- "$TARGET_DIR" "$SERVER_SECRET_ENV_FILE" "$STUDIO_SECRET_ENV_FILE" "$STUDIO_ACTIVATION" <<'MERGE_SECRET_ENV'
+    set -euo pipefail
+    target_dir="$1"
+    server_env="$2"
+    studio_env="$3"
+    studio_activation="$4"
+    overlays=()
+    if [ -f "$server_env" ]; then overlays+=("$server_env"); fi
+    if [ -n "$studio_activation" ]; then
+        if [ ! -f "$studio_env" ]; then echo "❌ Studio secret overlay disappeared before merge."; exit 1; fi
+        overlays+=("$studio_env")
+    fi
+    if [ "${#overlays[@]}" -gt 0 ]; then
+        node "$target_dir/scripts/ops/merge-secret-env.js" "$target_dir/.env" "${overlays[@]}" --runtime-owner
+    fi
+MERGE_SECRET_ENV
 
 # Step 4.5: Ensure Log Rotation is Configured
 echo "🔄 Verifying Log Rotation Configuration..."
@@ -330,20 +404,11 @@ ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
             npx prisma@"\$PRISMA_CLI_VERSION" migrate deploy
             ;;
         db-push)
-            npx prisma@"\$PRISMA_CLI_VERSION" db push --skip-generate --accept-data-loss
-            ;;
-        migrate-then-push)
-            if npx prisma@"\$PRISMA_CLI_VERSION" migrate deploy; then
-                echo "✅ Prisma migrate deploy succeeded."
-            else
-                echo "⚠️ Prisma migrate deploy failed (likely migration history drift). Falling back to db push..."
-                npx prisma@"\$PRISMA_CLI_VERSION" db push --skip-generate --accept-data-loss
-                echo "✅ Prisma db push fallback completed."
-            fi
+            npx prisma@"\$PRISMA_CLI_VERSION" db push --skip-generate
             ;;
         *)
             echo "❌ Unknown PRISMA_SCHEMA_SYNC_MODE='\$PRISMA_SCHEMA_SYNC_MODE'."
-            echo "   Allowed: migrate-only | db-push | migrate-then-push"
+            echo "   Allowed: migrate-only | db-push"
             exit 1
             ;;
     esac
@@ -372,6 +437,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     ACTIVE_COLOR="$ACTIVE_COLOR"
     SCRAPE_WORKER_APP_NAME="$SCRAPE_WORKER_APP_NAME"
     VIEWING_RELAY_APP_NAME="$VIEWING_RELAY_APP_NAME"
+    STUDIO_WORKER_APP_NAME="$STUDIO_WORKER_APP_NAME"
     VIEWING_RELAY_DEFAULT_PORT="$VIEWING_RELAY_DEFAULT_PORT"
     WHATSAPP_BRIDGE_APP_NAME="$WHATSAPP_BRIDGE_APP_NAME"
     WHATSAPP_BRIDGE_DEFAULT_PORT="$WHATSAPP_BRIDGE_DEFAULT_PORT"
@@ -449,6 +515,10 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         sleep 1
     done
 
+    # Studio readiness must pass before the public symlink/Caddy traffic switch.
+    # The helper checks dependencies before replacing a worker and requires this exact release/instance.
+    bash "\$TARGET_DIR/scripts/studio-deploy-readiness.sh" "\$TARGET_DIR" "\$ACTIVE_DIR" "\$STUDIO_WORKER_APP_NAME"
+
     # Keep symlink aligned with active release directory for operational visibility.
     ln -sfn "\$TARGET_DIR" "\$SYMLINK_PATH"
 
@@ -516,6 +586,9 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
                 PORT="\$ACTIVE_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$ACTIVE_APP_NAME" -- start
             fi
         fi
+
+        # The Studio worker was already replaced before the switch; roll it back with the web release.
+        bash "\$TARGET_DIR/scripts/studio-worker-restore.sh" "\$ACTIVE_DIR" "\$TARGET_DIR" "\$STUDIO_WORKER_APP_NAME" || true
 
         echo "↩️  Rollback complete (previous upstream port: \${PREVIOUS_CADDY_PORT:-unknown}, restored to: \${ACTIVE_PORT:-none})"
         pm2 logs "\$TARGET_APP_NAME" --lines 120 || true

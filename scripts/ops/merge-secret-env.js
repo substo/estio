@@ -7,21 +7,31 @@ function envKey(line) {
     return match?.[1] || null;
 }
 
-function mergeSecretEnv(targetPath, overlayPath, options = {}) {
+function readOverlay(overlayPath, keys) {
     const overlayStat = fs.statSync(overlayPath);
     if (!overlayStat.isFile() || (overlayStat.mode & 0o077) !== 0) {
         throw new Error("secret_env_permissions_invalid");
     }
     const overlayLines = fs.readFileSync(overlayPath, "utf8").split(/\r?\n/);
-    const keys = new Set();
+    let overlayKeyCount = 0;
     for (const line of overlayLines) {
         if (!line.trim() || line.trimStart().startsWith("#")) continue;
         const key = envKey(line);
         if (!key) throw new Error("secret_env_line_invalid");
+        // Also rejects a key repeated across overlays, so no overlay silently overrides another.
         if (keys.has(key)) throw new Error("secret_env_key_duplicate");
         keys.add(key);
+        overlayKeyCount += 1;
     }
-    if (!keys.size) throw new Error("secret_env_empty");
+    if (!overlayKeyCount) throw new Error("secret_env_empty");
+    return overlayLines.filter((line, index) => line || index < overlayLines.length - 1);
+}
+
+function mergeSecretEnv(targetPath, overlayPaths, options = {}) {
+    const paths = Array.isArray(overlayPaths) ? overlayPaths : [overlayPaths];
+    if (!paths.length) throw new Error("secret_env_paths_required");
+    const keys = new Set();
+    const overlays = paths.map((overlayPath) => readOverlay(overlayPath, keys));
 
     const targetLines = fs.readFileSync(targetPath, "utf8").split(/\r?\n/);
     const retained = targetLines.filter((line) => {
@@ -29,13 +39,8 @@ function mergeSecretEnv(targetPath, overlayPath, options = {}) {
         return !key || !keys.has(key);
     });
     while (retained.length && !retained[retained.length - 1]) retained.pop();
-    const normalizedOverlay = overlayLines.filter((line, index) => line || index < overlayLines.length - 1);
-    const combined = [
-        ...retained,
-        "",
-        "# Server-managed secret overlay",
-        ...normalizedOverlay,
-    ];
+    const combined = [...retained];
+    for (const overlay of overlays) combined.push("", "# Server-managed secret overlay", ...overlay);
     let runtimeOwnerGenerated = false;
     if (options.generateRuntimeOwner) {
         const runtimeEnforcement = [...combined].reverse().find((line) => envKey(line) === "DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT");
@@ -57,9 +62,9 @@ function mergeSecretEnv(targetPath, overlayPath, options = {}) {
 }
 
 if (require.main === module) {
-    const [targetPath, overlayPath] = process.argv.slice(2);
-    if (!targetPath || !overlayPath) throw new Error("secret_env_paths_required");
-    process.stdout.write(`${JSON.stringify(mergeSecretEnv(targetPath, overlayPath, {
+    const [targetPath, ...overlayPaths] = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
+    if (!targetPath || !overlayPaths.length) throw new Error("secret_env_paths_required");
+    process.stdout.write(`${JSON.stringify(mergeSecretEnv(targetPath, overlayPaths, {
         generateRuntimeOwner: process.argv.includes("--runtime-owner"),
     }))}\n`);
 }

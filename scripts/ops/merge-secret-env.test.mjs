@@ -48,3 +48,29 @@ test("server secret overlay rejects group-readable files and duplicate keys", ()
     assert.throws(() => mergeSecretEnv(target, overlay), /secret_env_key_duplicate/);
     fs.rmSync(directory, { recursive: true, force: true });
 });
+
+test("multiple overlays merge in order and cannot override each other", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "merge-secret-env-"));
+    const target = path.join(directory, ".env");
+    const first = path.join(directory, "first.env");
+    const second = path.join(directory, "second.env");
+    fs.writeFileSync(target, "KEEP=yes\nSTUDIO_SECRETS_KEY=from-base\nSUBSTO_APP_HOSTS=substo.com\n", { mode: 0o600 });
+    fs.writeFileSync(first, "WHATSAPP_TOKEN=a\n", { mode: 0o600 });
+    fs.writeFileSync(second, "STUDIO_SECRETS_KEY=from-overlay\nSUBSTO_CLERK_SECRET_KEY=b\n", { mode: 0o600 });
+    const result = mergeSecretEnv(target, [first, second]);
+    assert.deepEqual(result, { merged: true, keyCount: 3, runtimeOwnerGenerated: false });
+    const contents = fs.readFileSync(target, "utf8");
+    assert.match(contents, /KEEP=yes/);
+    assert.match(contents, /SUBSTO_APP_HOSTS=substo\.com/);
+    assert.doesNotMatch(contents, /from-base/);
+    assert.equal(contents.match(/^STUDIO_SECRETS_KEY=/gm).length, 1);
+    assert.ok(contents.indexOf("WHATSAPP_TOKEN=a") < contents.indexOf("STUDIO_SECRETS_KEY=from-overlay"));
+
+    fs.writeFileSync(target, "KEEP=yes\n", { mode: 0o600 });
+    fs.writeFileSync(second, "WHATSAPP_TOKEN=other\n", { mode: 0o600 });
+    assert.throws(() => mergeSecretEnv(target, [first, second]), /secret_env_key_duplicate/);
+    assert.equal(fs.readFileSync(target, "utf8"), "KEEP=yes\n");
+    fs.chmodSync(second, 0o644);
+    assert.throws(() => mergeSecretEnv(target, [first, second]), /secret_env_permissions_invalid/);
+    fs.rmSync(directory, { recursive: true, force: true });
+});
