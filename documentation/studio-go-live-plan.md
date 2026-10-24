@@ -61,7 +61,11 @@ not approval. Recheck the observations in
   Renew or retire that canary before the next full-scope deploy, or the deploy
   will stop at the same step after cutover (skipping the bridge, drain and
   `pm2 save` steps).
-- `https://substo.com` loops (Cloudflare 308 to the same URL): the apex is already
+- Follow-up release `39a37942` (build `Bsu-6iWBcggPJ76Z2tFl9`, blue :3001, deployed with
+  `DEPLOY_RUNTIME_SCOPE=web-viewing-scrape` to skip the expired gateway step) fixes a
+  post-sign-in loop on Substo: a signed-in sign-in page now hands off with one guarded
+  full page load instead of client navigation.
+- Resolved: `https://substo.com` looped (Cloudflare 308 to the same URL): the apex is already
   proxied and the zone SSL mode must be **Full (strict)**. The origin serves
   correctly with its Let's Encrypt certificate.
 
