@@ -185,15 +185,15 @@ return { success: true };
 ## Key Files
 
 ### Pattern implementations
-- [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/(main)/admin/tasks/actions.ts) — Gold standard Tier 1 reference
-- [`app/(main)/admin/contacts/actions.ts`](/Users/martingreen/Projects/IDX/app/(main)/admin/contacts/actions.ts) — Tier 2 reference (createContact, updateContactCore)
+- [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/Estio/app/(main)/admin/tasks/actions.ts) — Gold standard Tier 1 reference
+- [`app/(main)/admin/contacts/actions.ts`](/Users/martingreen/Projects/Estio/app/(main)/admin/contacts/actions.ts) — Tier 2 reference (createContact, updateContactCore)
 
 ### Sync infrastructure
-- [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/tasks/sync-engine.ts) — Outbox enqueue + worker drain
-- [`lib/ghl/stakeholders.ts`](/Users/martingreen/Projects/IDX/lib/ghl/stakeholders.ts) — GHL contact/company sync
-- [`lib/google/automation.ts`](/Users/martingreen/Projects/IDX/lib/google/automation.ts) — Google auto-sync orchestrator
+- [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/Estio/lib/tasks/sync-engine.ts) — Outbox enqueue + worker drain
+- [`lib/ghl/stakeholders.ts`](/Users/martingreen/Projects/Estio/lib/ghl/stakeholders.ts) — GHL contact/company sync
+- [`lib/google/automation.ts`](/Users/martingreen/Projects/Estio/lib/google/automation.ts) — Google auto-sync orchestrator
 
 ### Related documentation
-- [`tasks-implementation-reference.md`](/Users/martingreen/Projects/IDX/documentation/tasks-implementation-reference.md) — Task outbox pattern details
-- [`whatsapp-integration.md`](/Users/martingreen/Projects/IDX/documentation/whatsapp-integration.md) — WhatsApp outbound outbox
-- [`conversations-speed-architecture-and-roadmap.md`](/Users/martingreen/Projects/IDX/documentation/conversations-speed-architecture-and-roadmap.md) — Conversation speed optimizations
+- [`tasks-implementation-reference.md`](/Users/martingreen/Projects/Estio/documentation/tasks-implementation-reference.md) — Task outbox pattern details
+- [`whatsapp-integration.md`](/Users/martingreen/Projects/Estio/documentation/whatsapp-integration.md) — WhatsApp outbound outbox
+- [`conversations-speed-architecture-and-roadmap.md`](/Users/martingreen/Projects/Estio/documentation/conversations-speed-architecture-and-roadmap.md) — Conversation speed optimizations

@@ -4,7 +4,7 @@
 ## Overview
 This document is the source of truth for task deadline reminders, in-app notifications, browser push subscriptions, and task deep-link behavior.
 
-For the broader task domain, sync-out model, and AI task suggestion flow, see [tasks-implementation-reference.md](/Users/martingreen/Projects/IDX/documentation/tasks-implementation-reference.md).
+For the broader task domain, sync-out model, and AI task suggestion flow, see [tasks-implementation-reference.md](/Users/martingreen/Projects/Estio/documentation/tasks-implementation-reference.md).
 
 ## Product Scope
 
@@ -62,7 +62,7 @@ flowchart TD
 
 ## Schema
 
-Primary schema lives in [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma).
+Primary schema lives in [`prisma/schema.prisma`](/Users/martingreen/Projects/Estio/prisma/schema.prisma).
 
 ### `ContactTask` reminder fields
 
@@ -175,7 +175,7 @@ Key fields:
 
 ## Write Path and Job Rebuilds
 
-Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/tasks/actions.ts)
+Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/tasks/actions.ts)
 
 ### Task mutations that rebuild reminder jobs
 
@@ -194,7 +194,7 @@ Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/
 
 ## Scheduling Logic
 
-Primary file: [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminders.ts)
+Primary file: [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminders.ts)
 
 ### Offset expansion
 
@@ -222,7 +222,7 @@ Primary file: [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tas
 
 ## Cron Processing
 
-Route: [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-reminders/route.ts)
+Route: [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/Estio/app/api/cron/task-reminders/route.ts)
 
 - endpoint: `GET /api/cron/task-reminders`
 - auth: standard cron authorization via `verifyCronAuthorization(...)`
@@ -230,8 +230,8 @@ Route: [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/IDX/
 - feature flag: `TASK_REMINDERS_CRON_ENABLED`
 - worker entrypoint: `processTaskReminderBatch({ batchSize: 50 })`
 - production scheduler requirement: a system cron must call the route every minute
-- canonical server script: [`scripts/cron-task-reminders.sh`](/Users/martingreen/Projects/IDX/scripts/cron-task-reminders.sh)
-- install helper: [`scripts/install-cron.sh`](/Users/martingreen/Projects/IDX/scripts/install-cron.sh)
+- canonical server script: [`scripts/cron-task-reminders.sh`](/Users/martingreen/Projects/Estio/scripts/cron-task-reminders.sh)
+- install helper: [`scripts/install-cron.sh`](/Users/martingreen/Projects/Estio/scripts/install-cron.sh)
 
 ### Retry rules
 
@@ -247,9 +247,9 @@ Route: [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/IDX/
 
 Files:
 
-- [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminders.ts)
-- [`lib/realtime/notification-events.ts`](/Users/martingreen/Projects/IDX/lib/realtime/notification-events.ts)
-- [`app/api/notifications/events/route.ts`](/Users/martingreen/Projects/IDX/app/api/notifications/events/route.ts)
+- [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminders.ts)
+- [`lib/realtime/notification-events.ts`](/Users/martingreen/Projects/Estio/lib/realtime/notification-events.ts)
+- [`app/api/notifications/events/route.ts`](/Users/martingreen/Projects/Estio/app/api/notifications/events/route.ts)
 
 Behavior:
 
@@ -263,9 +263,9 @@ Behavior:
 
 Files:
 
-- [`lib/notifications/push.ts`](/Users/martingreen/Projects/IDX/lib/notifications/push.ts)
-- [`app/api/notifications/subscriptions/route.ts`](/Users/martingreen/Projects/IDX/app/api/notifications/subscriptions/route.ts)
-- [`public/sw.js`](/Users/martingreen/Projects/IDX/public/sw.js)
+- [`lib/notifications/push.ts`](/Users/martingreen/Projects/Estio/lib/notifications/push.ts)
+- [`app/api/notifications/subscriptions/route.ts`](/Users/martingreen/Projects/Estio/app/api/notifications/subscriptions/route.ts)
+- [`public/sw.js`](/Users/martingreen/Projects/Estio/public/sw.js)
 
 Behavior:
 
@@ -284,8 +284,8 @@ Behavior:
 
 Files:
 
-- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/IDX/components/notifications/admin-notification-bell.tsx)
-- [`app/(main)/admin/_components/dashbord-top-nav.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/_components/dashbord-top-nav.tsx)
+- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/Estio/components/notifications/admin-notification-bell.tsx)
+- [`app/(main)/admin/_components/dashbord-top-nav.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/_components/dashbord-top-nav.tsx)
 
 Capabilities:
 
@@ -302,12 +302,12 @@ Capabilities:
 
 Files:
 
-- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/notifications/page.tsx)
-- [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/IDX/components/notifications/notification-settings-page.tsx)
-- [`components/notifications/notification-preferences-card.tsx`](/Users/martingreen/Projects/IDX/components/notifications/notification-preferences-card.tsx)
-- [`components/notifications/notification-current-browser-card.tsx`](/Users/martingreen/Projects/IDX/components/notifications/notification-current-browser-card.tsx)
-- [`components/notifications/notification-devices-card.tsx`](/Users/martingreen/Projects/IDX/components/notifications/notification-devices-card.tsx)
-- [`components/notifications/use-notification-preferences.ts`](/Users/martingreen/Projects/IDX/components/notifications/use-notification-preferences.ts)
+- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/settings/notifications/page.tsx)
+- [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-settings-page.tsx)
+- [`components/notifications/notification-preferences-card.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-preferences-card.tsx)
+- [`components/notifications/notification-current-browser-card.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-current-browser-card.tsx)
+- [`components/notifications/notification-devices-card.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-devices-card.tsx)
+- [`components/notifications/use-notification-preferences.ts`](/Users/martingreen/Projects/Estio/components/notifications/use-notification-preferences.ts)
 
 Capabilities:
 
@@ -320,7 +320,7 @@ Capabilities:
 
 ### Task editor
 
-File: [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-editor-dialog.tsx)
+File: [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/Estio/components/tasks/task-editor-dialog.tsx)
 
 Capabilities:
 
@@ -336,7 +336,7 @@ Capabilities:
 
 ### Task detail modal
 
-File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-detail-dialog.tsx)
+File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/Estio/components/tasks/task-detail-dialog.tsx)
 
 Shows:
 
@@ -353,8 +353,8 @@ Shows:
 
 Files:
 
-- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
-- [`app/(main)/admin/conversations/_components/conversation-interface.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/conversation-interface.tsx)
+- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
+- [`app/(main)/admin/conversations/_components/conversation-interface.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/conversation-interface.tsx)
 
 Behavior:
 
@@ -364,7 +364,7 @@ Behavior:
 
 ## Deep Links and Notification Click Behavior
 
-Primary helper: [`lib/tasks/reminder-links.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-links.ts)
+Primary helper: [`lib/tasks/reminder-links.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminder-links.ts)
 
 Generated URL format:
 
@@ -374,7 +374,7 @@ Generated URL format:
 
 ### Browser click handling
 
-File: [`public/sw.js`](/Users/martingreen/Projects/IDX/public/sw.js)
+File: [`public/sw.js`](/Users/martingreen/Projects/Estio/public/sw.js)
 
 - on `notificationclick`, the service worker:
   - closes the browser notification
@@ -392,7 +392,7 @@ File: [`public/sw.js`](/Users/martingreen/Projects/IDX/public/sw.js)
 
 ### Feature flags
 
-Defined in [`lib/notifications/feature-flags.ts`](/Users/martingreen/Projects/IDX/lib/notifications/feature-flags.ts):
+Defined in [`lib/notifications/feature-flags.ts`](/Users/martingreen/Projects/Estio/lib/notifications/feature-flags.ts):
 
 - `TASK_REMINDERS_UI_ENABLED`
 - `TASK_REMINDERS_CRON_ENABLED`
@@ -403,7 +403,7 @@ Defined in [`lib/notifications/feature-flags.ts`](/Users/martingreen/Projects/ID
 
 ### VAPID configuration
 
-Defined in [`lib/notifications/push.ts`](/Users/martingreen/Projects/IDX/lib/notifications/push.ts):
+Defined in [`lib/notifications/push.ts`](/Users/martingreen/Projects/Estio/lib/notifications/push.ts):
 
 - `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`
 - `WEB_PUSH_VAPID_PUBLIC_KEY`
@@ -419,8 +419,8 @@ Runtime behavior:
 
 Files:
 
-- [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx)
-- [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/actions.ts)
+- [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx)
+- [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/actions.ts)
 
 Rules:
 
@@ -433,8 +433,8 @@ Rules:
 
 ### Added tests
 
-- [`lib/tasks/reminder-config.test.mjs`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-config.test.mjs)
-- [`lib/tasks/reminder-links.test.mjs`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-links.test.mjs)
+- [`lib/tasks/reminder-config.test.mjs`](/Users/martingreen/Projects/Estio/lib/tasks/reminder-config.test.mjs)
+- [`lib/tasks/reminder-links.test.mjs`](/Users/martingreen/Projects/Estio/lib/tasks/reminder-links.test.mjs)
 
 Command:
 

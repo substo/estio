@@ -246,7 +246,7 @@ The orchestrator and classifier are modified to read dynamic configuration along
 
 #### Database Schema
 
-##### [MODIFY] [schema.prisma](file:///Users/martingreen/Projects/IDX/prisma/schema.prisma)
+##### [MODIFY] [schema.prisma](file:///Users/martingreen/Projects/Estio/prisma/schema.prisma)
 - Expand `PlaybookEntry` model with `subcategory`, `intent`, `skillName`, `priority`, `isActive`, `source`, `metadata`, `updatedAt` fields
 - Add `DynamicIntent` model
 - Add `LearningSession` model
@@ -256,7 +256,7 @@ The orchestrator and classifier are modified to read dynamic configuration along
 
 #### Dynamic Configuration Layer
 
-##### [NEW] [dynamic-config.ts](file:///Users/martingreen/Projects/IDX/lib/ai/dynamic-config.ts)
+##### [NEW] [dynamic-config.ts](file:///Users/martingreen/Projects/Estio/lib/ai/dynamic-config.ts)
 New module that provides runtime access to dynamic intents and playbook entries:
 - `getDynamicIntents()` — Returns all active `DynamicIntent` records
 - `getPlaybookForSkill(skillName, intent)` — Returns relevant playbook entries for a skill execution
@@ -268,7 +268,7 @@ New module that provides runtime access to dynamic intents and playbook entries:
 
 #### Learning Agent
 
-##### [NEW] [learning-agent.ts](file:///Users/martingreen/Projects/IDX/lib/ai/learning-agent.ts)
+##### [NEW] [learning-agent.ts](file:///Users/martingreen/Projects/Estio/lib/ai/learning-agent.ts)
 The Meta-Agent that analyzes conversations and proposes improvements:
 - `analyzeConversation(conversationId)` — Reads full conversation, runs gap analysis
 - `analyzeTranscript(text)` — Analyzes pasted text (phone call transcript, etc.)
@@ -283,19 +283,19 @@ The Meta-Agent that analyzes conversations and proposes improvements:
 
 #### Classifier Integration
 
-##### [MODIFY] [classifier.ts](file:///Users/martingreen/Projects/IDX/lib/ai/classifier.ts)
+##### [MODIFY] [classifier.ts](file:///Users/martingreen/Projects/Estio/lib/ai/classifier.ts)
 - Fetch dynamic intents at classification time
 - Inject dynamic intent names and few-shot examples into the classifier prompt
 - Fall back to static `INTENTS` map if dynamic lookup fails
 
-##### [MODIFY] [intents.ts](file:///Users/martingreen/Projects/IDX/lib/ai/intents.ts)
+##### [MODIFY] [intents.ts](file:///Users/martingreen/Projects/Estio/lib/ai/intents.ts)
 - Add `mergeWithDynamic(dynamicIntents)` helper that combines static intents with DB-backed ones
 
 ---
 
 #### Skill Execution Integration
 
-##### [MODIFY] [loader.ts](file:///Users/martingreen/Projects/IDX/lib/ai/skills/loader.ts)
+##### [MODIFY] [loader.ts](file:///Users/martingreen/Projects/Estio/lib/ai/skills/loader.ts)
 - In `executeSkill()`, fetch relevant playbook entries and inject into the skill's system prompt
 - Playbook entries act as dynamic knowledge that supplements the static `SKILL.md` instructions
 
@@ -307,7 +307,7 @@ The Meta-Agent that analyzes conversations and proposes improvements:
 
 #### Server Actions
 
-##### [MODIFY] [actions.ts](file:///Users/martingreen/Projects/IDX/app/(main)/admin/conversations/actions.ts)
+##### [MODIFY] [actions.ts](file:///Users/martingreen/Projects/Estio/app/(main)/admin/conversations/actions.ts)
 - Add `analyzeConversationAction(conversationId)` — Triggers the Learning Agent
 - Add `analyzeTranscriptAction(text)` — Analyzes pasted transcript
 - Add `applyProposalAction(proposalId)` — Applies a single proposal
@@ -318,7 +318,7 @@ The Meta-Agent that analyzes conversations and proposes improvements:
 
 #### UI Components
 
-##### [MODIFY] [coordinator-panel.tsx](file:///Users/martingreen/Projects/IDX/app/(main)/admin/conversations/_components/coordinator-panel.tsx)
+##### [MODIFY] [coordinator-panel.tsx](file:///Users/martingreen/Projects/Estio/app/(main)/admin/conversations/_components/coordinator-panel.tsx)
 - Add "📚 Learn from This" button next to the existing "🧠 Orchestrate" button
 - Add learning results display section showing:
   - Coverage analysis (which messages were handled well, which weren't)
@@ -326,7 +326,7 @@ The Meta-Agent that analyzes conversations and proposes improvements:
   - Proposal cards with Apply/Dismiss buttons
 - Add "Paste Transcript" option for phone call analysis
 
-##### [NEW] [learning-results.tsx](file:///Users/martingreen/Projects/IDX/app/(main)/admin/conversations/_components/learning-results.tsx)
+##### [NEW] [learning-results.tsx](file:///Users/martingreen/Projects/Estio/app/(main)/admin/conversations/_components/learning-results.tsx)
 Dedicated component for rendering learning analysis results:
 - Proposal cards with type badges (intent, playbook, policy)
 - Apply/Dismiss/Edit workflow per proposal

@@ -9,10 +9,12 @@ import type { Metadata } from 'next'
 import '@/app/globals.css'
 import { APP_URL } from '@/lib/app-config';
 import { getRuntimeBuildId } from "@/lib/runtime/build-id";
+import { headers } from "next/headers";
+import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 
 console.log('[MainLayout] Rendering');
 
-export const metadata: Metadata = {
+const estioMetadata: Metadata = {
   metadataBase: new URL(APP_URL),
   manifest: "/manifest.webmanifest",
   title: {
@@ -36,27 +38,44 @@ export const metadata: Metadata = {
   },
 }
 
+export async function generateMetadata(): Promise<Metadata> {
+  const host = (await headers()).get("host") || "";
+  if (resolveHostBrand(host, getHostBrandConfig()) === "substo") {
+    return {
+      title: { default: "Substo Studio", template: "%s | Substo Studio" },
+      description: "Research, develop, and manage your content in Substo Studio.",
+    };
+  }
+  return estioMetadata;
+}
+
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const host = (await headers()).get("host") || "";
+  const isSubsto = resolveHostBrand(host, getHostBrandConfig()) === "substo";
   const initialBuildId = await getRuntimeBuildId();
 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="theme-color" content="#2563eb" />
-        <link
-          rel="preload"
-          href="https://utfs.io/f/31dba2ff-6c3b-4927-99cd-b928eaa54d5f-5w20ij.png"
-          as="image"
-        />
-        <link
-          rel="preload"
-          href="https://utfs.io/f/69a12ab1-4d57-4913-90f9-38c6aca6c373-1txg2.png"
-          as="image"
-        />
+        <meta name="theme-color" content={isSubsto ? "#111827" : "#2563eb"} />
+        {!isSubsto ? (
+          <>
+            <link
+              rel="preload"
+              href="https://utfs.io/f/31dba2ff-6c3b-4927-99cd-b928eaa54d5f-5w20ij.png"
+              as="image"
+            />
+            <link
+              rel="preload"
+              href="https://utfs.io/f/69a12ab1-4d57-4913-90f9-38c6aca6c373-1txg2.png"
+              as="image"
+            />
+          </>
+        ) : null}
       </head>
       <body className={GeistSans.className}>
         <AuthWrapper>
@@ -67,8 +86,8 @@ export default async function RootLayout({
               enableSystem
               disableTransitionOnChange
             >
-              <LiveDeployGuard initialBuildId={initialBuildId} />
-              <NotificationServiceWorker />
+              {!isSubsto ? <LiveDeployGuard initialBuildId={initialBuildId} /> : null}
+              {!isSubsto ? <NotificationServiceWorker /> : null}
               {children}
               <Toaster />
             </ThemeProvider>

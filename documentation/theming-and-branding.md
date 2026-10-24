@@ -8,7 +8,7 @@ Estio allows agencies (Tenants) to fully customize the look and feel of their pu
 
 Legacy `SiteConfig` writes may still occur during migration windows when dual-write is enabled.
 
-For the canonical storage/encryption/migration model, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
+For the canonical storage/encryption/migration model, see [site-settings-platform.md](/Users/martingreen/Projects/Estio/documentation/site-settings-platform.md).
 
 ## 1. Logo System (Dual Logo Support)
 

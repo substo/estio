@@ -11,7 +11,7 @@ This document is the current implementation reference for contact tasks in Estio
 - AI task suggestion generate/apply flow
 
 > [!NOTE]
-> The dedicated source of truth for the reminder subsystem is [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md). This document keeps only the task-domain context needed to understand where reminders fit.
+> The dedicated source of truth for the reminder subsystem is [task-deadline-reminders.md](/Users/martingreen/Projects/Estio/documentation/task-deadline-reminders.md). This document keeps only the task-domain context needed to understand where reminders fit.
 
 ## Scope Summary
 
@@ -49,7 +49,7 @@ flowchart LR
 
 ## Data Model
 
-Primary schema lives in [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma).
+Primary schema lives in [`prisma/schema.prisma`](/Users/martingreen/Projects/Estio/prisma/schema.prisma).
 
 ### `ContactTask`
 
@@ -92,11 +92,11 @@ Primary schema lives in [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX
 - `WebPushSubscription`
 - `UserTaskReminderPreference`
 
-Full schema and lifecycle details for these models live in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md).
+Full schema and lifecycle details for these models live in [task-deadline-reminders.md](/Users/martingreen/Projects/Estio/documentation/task-deadline-reminders.md).
 
 ## Server Actions
 
-Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/tasks/actions.ts)
+Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/tasks/actions.ts)
 
 ### Auth and scope
 
@@ -132,7 +132,7 @@ Primary file: [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/
 
 ## Provider Sync-Out
 
-Primary file: [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/tasks/sync-engine.ts)
+Primary file: [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/Estio/lib/tasks/sync-engine.ts)
 
 ### Important reminder-related rule
 
@@ -158,7 +158,7 @@ Primary file: [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/t
 
 ## Reminder Integration
 
-Reminder scheduling and delivery are implemented in [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminders.ts).
+Reminder scheduling and delivery are implemented in [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminders.ts).
 
 ### Core rules
 
@@ -179,25 +179,25 @@ Reminder scheduling and delivery are implemented in [`lib/tasks/reminders.ts`](/
 - guarded by `CronGuard`
 - processes all due `TaskReminderJob` rows
 
-For the full reminder architecture, delivery flow, feature flags, env vars, and deep-link behavior, see [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md).
+For the full reminder architecture, delivery flow, feature flags, env vars, and deep-link behavior, see [task-deadline-reminders.md](/Users/martingreen/Projects/Estio/documentation/task-deadline-reminders.md).
 
 ## UI Surfaces
 
 ### Contact modal tasks tab
 
-File: [`app/(main)/admin/contacts/_components/edit-contact-dialog.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/contacts/_components/edit-contact-dialog.tsx)
+File: [`app/(main)/admin/contacts/_components/edit-contact-dialog.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/contacts/_components/edit-contact-dialog.tsx)
 
 - `Tasks` tab renders `ContactTaskManager`
 
 ### Mission Control coordinator panel
 
-File: [`app/(main)/admin/conversations/_components/coordinator-panel.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/coordinator-panel.tsx)
+File: [`app/(main)/admin/conversations/_components/coordinator-panel.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/coordinator-panel.tsx)
 
 - Renders `ContactTaskManager` for the selected conversation contact
 
 ### Shared task editor dialog
 
-File: [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-editor-dialog.tsx)
+File: [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/Estio/components/tasks/task-editor-dialog.tsx)
 
 - used by both contact-level and Mission Control task surfaces
 - supports:
@@ -210,7 +210,7 @@ File: [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/ID
 
 ### Shared task detail dialog
 
-File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-detail-dialog.tsx)
+File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/Estio/components/tasks/task-detail-dialog.tsx)
 
 - shown from the Mission Control tasks workspace
 - includes:
@@ -226,8 +226,8 @@ File: [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/ID
 
 Files:
 
-- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
-- [`app/(main)/admin/conversations/_components/conversation-interface.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/conversation-interface.tsx)
+- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
+- [`app/(main)/admin/conversations/_components/conversation-interface.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/conversation-interface.tsx)
 
 - Mission Control now supports a dedicated tasks view in the left pane
 - URL-driven selection is supported with:
@@ -242,8 +242,8 @@ Files:
 
 Files:
 
-- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/IDX/components/notifications/admin-notification-bell.tsx)
-- [`app/(main)/admin/_components/dashbord-top-nav.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/_components/dashbord-top-nav.tsx)
+- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/Estio/components/notifications/admin-notification-bell.tsx)
+- [`app/(main)/admin/_components/dashbord-top-nav.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/_components/dashbord-top-nav.tsx)
 
 - shows unread deadline reminders
 - allows mark-read actions
@@ -255,19 +255,19 @@ Files:
 
 Files:
 
-- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/notifications/page.tsx)
-- [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/IDX/components/notifications/notification-settings-page.tsx)
+- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/settings/notifications/page.tsx)
+- [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-settings-page.tsx)
 
 - this is the source of truth for user-level reminder settings
 - reuses the existing notification actions, subscription APIs, and reminder preference models
-- full reminder UX and delivery behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md)
+- full reminder UX and delivery behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/Estio/documentation/task-deadline-reminders.md)
 
 ## Message Selection Task Actions (AI + manual)
 
 Files:
 
-- [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx)
-- [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/actions.ts)
+- [`app/(main)/admin/conversations/_components/message-selection-actions.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/message-selection-actions.tsx)
+- [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/actions.ts)
 
 ### Manual quick-create from selection
 
@@ -285,7 +285,7 @@ Files:
 
 ## AI Task Suggestions and Telemetry
 
-Primary file: [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/actions.ts)
+Primary file: [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/actions.ts)
 
 ### Generation
 
@@ -311,7 +311,7 @@ Primary file: [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/P
 
 ## Google Task List Settings
 
-File: [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/settings/integrations/google/tasklist-settings.tsx)
+File: [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/settings/integrations/google/tasklist-settings.tsx)
 
 - loads available Google tasklists for the connected user
 - saves preferred tasklist id/title to the local user record
@@ -322,31 +322,31 @@ File: [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/U
 
 ### Schema
 
-- [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
+- [`prisma/schema.prisma`](/Users/martingreen/Projects/Estio/prisma/schema.prisma)
 
 ### Core task domain logic
 
-- [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/tasks/actions.ts)
-- [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/IDX/lib/tasks/sync-engine.ts)
-- [`lib/tasks/providers/ghl.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/ghl.ts)
-- [`lib/tasks/providers/google.ts`](/Users/martingreen/Projects/IDX/lib/tasks/providers/google.ts)
+- [`app/(main)/admin/tasks/actions.ts`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/tasks/actions.ts)
+- [`lib/tasks/sync-engine.ts`](/Users/martingreen/Projects/Estio/lib/tasks/sync-engine.ts)
+- [`lib/tasks/providers/ghl.ts`](/Users/martingreen/Projects/Estio/lib/tasks/providers/ghl.ts)
+- [`lib/tasks/providers/google.ts`](/Users/martingreen/Projects/Estio/lib/tasks/providers/google.ts)
 
 ### Reminder subsystem
 
-- [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminders.ts)
-- [`lib/tasks/reminder-config.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-config.ts)
-- [`lib/tasks/reminder-links.ts`](/Users/martingreen/Projects/IDX/lib/tasks/reminder-links.ts)
-- [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-reminders/route.ts)
-- [`app/api/notifications/events/route.ts`](/Users/martingreen/Projects/IDX/app/api/notifications/events/route.ts)
-- [`app/api/notifications/subscriptions/route.ts`](/Users/martingreen/Projects/IDX/app/api/notifications/subscriptions/route.ts)
+- [`lib/tasks/reminders.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminders.ts)
+- [`lib/tasks/reminder-config.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminder-config.ts)
+- [`lib/tasks/reminder-links.ts`](/Users/martingreen/Projects/Estio/lib/tasks/reminder-links.ts)
+- [`app/api/cron/task-reminders/route.ts`](/Users/martingreen/Projects/Estio/app/api/cron/task-reminders/route.ts)
+- [`app/api/notifications/events/route.ts`](/Users/martingreen/Projects/Estio/app/api/notifications/events/route.ts)
+- [`app/api/notifications/subscriptions/route.ts`](/Users/martingreen/Projects/Estio/app/api/notifications/subscriptions/route.ts)
 
 ### UI
 
-- [`components/tasks/contact-task-manager.tsx`](/Users/martingreen/Projects/IDX/components/tasks/contact-task-manager.tsx)
-- [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-editor-dialog.tsx)
-- [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/IDX/components/tasks/task-detail-dialog.tsx)
-- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/IDX/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
-- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/IDX/components/notifications/admin-notification-bell.tsx)
+- [`components/tasks/contact-task-manager.tsx`](/Users/martingreen/Projects/Estio/components/tasks/contact-task-manager.tsx)
+- [`components/tasks/task-editor-dialog.tsx`](/Users/martingreen/Projects/Estio/components/tasks/task-editor-dialog.tsx)
+- [`components/tasks/task-detail-dialog.tsx`](/Users/martingreen/Projects/Estio/components/tasks/task-detail-dialog.tsx)
+- [`app/(main)/admin/conversations/_components/global-task-list.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/conversations/_components/global-task-list.tsx)
+- [`components/notifications/admin-notification-bell.tsx`](/Users/martingreen/Projects/Estio/components/notifications/admin-notification-bell.tsx)
 
 ## Current Limitations
 

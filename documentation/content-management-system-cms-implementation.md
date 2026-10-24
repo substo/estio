@@ -3,7 +3,7 @@
 ## Overview
 The application now includes a "Simple CMS" (Content Management System) that allows Tenants (Agencies) to create generic content pages and manage a blog. This transforms the app from a pure "Listing Engine" into a "Website Builder".
 
-Settings storage details for CMS-linked system pages are defined in [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
+Settings storage details for CMS-linked system pages are defined in [site-settings-platform.md](/Users/martingreen/Projects/Estio/documentation/site-settings-platform.md).
 
 ## Data Model
 

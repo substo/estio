@@ -157,7 +157,7 @@ The same active model selection is also reused by message text-selection actions
 
 This keeps selection-based outputs aligned with the tone/capability of the current draft model.
 
-Viewing-specific extraction rules such as message-timestamp anchoring for `today`/`tomorrow`, exact property reference matching, and timezone-safe apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
+Viewing-specific extraction rules such as message-timestamp anchoring for `today`/`tomorrow`, exact property reference matching, and timezone-safe apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/Estio/documentation/viewing-creation-architecture.md).
 
 ### Configuration
 -   **Default Model**: Resolved server-side for AI Draft (`Settings > AI Agent` override first; else `gemini-flash-latest`; fallback to pinned Flash if alias unavailable).

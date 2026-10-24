@@ -7,7 +7,7 @@ The Navigation Menu system allows Tenants (Agencies) to customize the links in t
 
 The system features a **Drag-and-Drop** interface for intuitive reordering.
 
-Storage and migration model details are documented in [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
+Storage and migration model details are documented in [site-settings-platform.md](/Users/martingreen/Projects/Estio/documentation/site-settings-platform.md).
 
 ## Data Model
 Menus are persisted in `settings_documents` through `SettingsService`:

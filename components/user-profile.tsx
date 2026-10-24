@@ -47,6 +47,7 @@ function UserProfileContent() {
                             <DropdownMenuShortcut>⇧⌘P</DropdownMenuShortcut>
                         </DropdownMenuItem>
                     </Link>
+                    <Link href="/account/connections"><DropdownMenuItem><User className="mr-2 h-4 w-4" /><span>My connections</span></DropdownMenuItem></Link>
                 </DropdownMenuGroup>
                 <SignOutButton>
                     <DropdownMenuItem>

@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   BriefcaseBusiness,
   Building2,
+  Clapperboard,
   House,
   Inbox,
   LayoutDashboard,
@@ -55,6 +56,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         label: "Live Assist",
         icon: Radio,
         activePath: (pathname) => pathname.startsWith("/admin/live-assist") || pathname.startsWith("/admin/viewings/sessions"),
+      },
+      {
+        href: "/studio",
+        label: "Studio",
+        icon: Clapperboard,
+        activePath: (pathname) => pathname === "/studio" || pathname.startsWith("/studio/"),
       },
     ],
   },

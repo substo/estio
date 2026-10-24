@@ -5,8 +5,10 @@ import { toast } from 'sonner';
 import { subscribe } from '@/app/actions/subscription';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
+import { useBrandExperience } from '@/components/wrapper/brand-experience';
 
 export default function Footer() {
+    const brand = useBrandExperience();
     const {
         register,
         handleSubmit,
@@ -28,6 +30,8 @@ export default function Footer() {
             toast.error(result.message);
         }
     };
+    if (brand === 'substo') return null;
+
     return (
         <footer className="border-t dark:bg-black">
             <div className="mx-auto max-w-screen-xl px-4 sm:px-6 lg:px-8">

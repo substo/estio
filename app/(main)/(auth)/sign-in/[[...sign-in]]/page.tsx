@@ -5,12 +5,11 @@ import { SignIn, useAuth, useClerk, useSignIn } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-
-function safeRedirectUrl(value: string | null): string {
-    return value?.startsWith("/") && !value.startsWith("//") ? value : "/admin";
-}
+import { useBrandExperience } from "@/components/wrapper/brand-experience";
+import { safeAuthRedirect } from "@/lib/auth/host-routing-policy";
 
 function SignInContent() {
+    const brand = useBrandExperience();
     const router = useRouter();
     const clerk = useClerk();
     const { isLoaded: authLoaded, isSignedIn } = useAuth();
@@ -40,7 +39,7 @@ function SignInContent() {
         ticketAttempted.current = true;
         setIsProcessingTicket(true);
         const ticketUrl = window.location.href;
-        const redirectUrl = safeRedirectUrl(params.get("redirect_url"));
+        const redirectUrl = safeAuthRedirect(params.get("redirect_url"), brand);
 
         void (async () => {
             try {
@@ -62,7 +61,7 @@ function SignInContent() {
                 setIsProcessingTicket(false);
             }
         })();
-    }, [authLoaded, clerk, isMounted, isSignedIn, setActive, signIn, signInLoaded]);
+    }, [authLoaded, brand, clerk, isMounted, isSignedIn, setActive, signIn, signInLoaded]);
 
     return (
         <PageWrapper >

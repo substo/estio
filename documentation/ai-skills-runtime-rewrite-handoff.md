@@ -112,10 +112,10 @@
 - Legacy docs remain reference-only after canonical rewrite docs land.
 
 ## Repo Evidence (Current State)
-- Strict template-bounded automation config in [config.ts](/Users/martingreen/Projects/IDX/lib/ai/automation/config.ts).
-- Template-specific planner/worker collectors in [hub.ts](/Users/martingreen/Projects/IDX/lib/ai/automation/hub.ts).
-- Existing skill runtime and loader in [loader.ts](/Users/martingreen/Projects/IDX/lib/ai/skills/loader.ts) and [orchestrator.ts](/Users/martingreen/Projects/IDX/lib/ai/orchestrator.ts).
-- Legacy parallel runtime still present in [agent.ts](/Users/martingreen/Projects/IDX/lib/ai/agent.ts) and [predictor.ts](/Users/martingreen/Projects/IDX/lib/ai/semi-auto/predictor.ts).
+- Strict template-bounded automation config in [config.ts](/Users/martingreen/Projects/Estio/lib/ai/automation/config.ts).
+- Template-specific planner/worker collectors in [hub.ts](/Users/martingreen/Projects/Estio/lib/ai/automation/hub.ts).
+- Existing skill runtime and loader in [loader.ts](/Users/martingreen/Projects/Estio/lib/ai/skills/loader.ts) and [orchestrator.ts](/Users/martingreen/Projects/Estio/lib/ai/orchestrator.ts).
+- Legacy parallel runtime still present in [agent.ts](/Users/martingreen/Projects/Estio/lib/ai/agent.ts) and [predictor.ts](/Users/martingreen/Projects/Estio/lib/ai/semi-auto/predictor.ts).
 
 ## Research Sources
 - Anthropic Claude Code overview: [docs.anthropic.com/en/docs/claude-code/overview](https://docs.anthropic.com/en/docs/claude-code/overview)

@@ -1,8 +1,14 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { APP_DOMAIN, APP_URL, SYSTEM_DOMAINS } from "@/lib/app-config";
+import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
+import { getClerkBrandKeys, getSubstoClerkConfigConflicts, hasClerkEncryptionKey } from "@/lib/auth/clerk-runtime";
+import { hasStudioSupabaseConfig } from "@/lib/studio/config";
+import { CLERK_PROFILE_WEBHOOK_PATH, classifySubstoRoute, skipsLegacyEstioMiddleware } from "@/lib/auth/host-routing-policy";
 
-const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)"]);
+const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)", "/studio(.*)", "/account/connections(.*)"]);
+const getRequestBrand = (req: NextRequest) =>
+  resolveHostBrand(req.headers.get("host"), getHostBrandConfig());
 
 const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   let hostname = req.headers.get("host");
@@ -10,6 +16,23 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   // Remove port if present (robust regex)
   hostname = hostname ? hostname.replace(/:\d+$/, "") : "";
   const url = req.nextUrl;
+
+  // Substo is a separate Clerk realm and has no Estio tenant-site or Business routes.
+  // Enforce this before the Estio tenant rewrite loop-protection bypass.
+  if (getRequestBrand(req) === "substo") {
+    const routeKind = classifySubstoRoute(url.pathname);
+    if (routeKind === "root") {
+      return NextResponse.redirect(new URL("/studio", req.url));
+    }
+    if (routeKind === "blocked") {
+      return new NextResponse("Not Found", { status: 404 });
+    }
+    if (routeKind === "studio" || routeKind === "profile") await auth.protect();
+    // Studio API handlers validate their Clerk user and workspace access, returning
+    // JSON errors to clients instead of Clerk's page-oriented protect redirect.
+
+    return NextResponse.next();
+  }
 
   if (hostname === `www.${APP_DOMAIN}`) {
     const destination = new URL(req.url);
@@ -46,7 +69,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   };
 
   // 1. System/Admin Domain Logic (estio.co, localhost)
-  if (SYSTEM_DOMAINS.includes(hostname || "") || hostname === "clerk.estio.co") {
+  if (getRequestBrand(req) === "estio" || SYSTEM_DOMAINS.includes(hostname || "") || hostname === "clerk.estio.co") {
     if (isProtectedRoute(req)) {
       await auth.protect();
     }
@@ -152,18 +175,50 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     const mappedPath = `/${hostname}${url.pathname}${searchParams.length > 0 ? `?${searchParams}` : ""}`;
     return createInternalRewrite(mappedPath);
   }
+}, (req) => {
+  if (getRequestBrand(req) !== "substo") return {};
+  const keys = getClerkBrandKeys("substo");
+  return keys ? {
+    publishableKey: keys.publishableKey,
+    secretKey: keys.secretKey,
+    signInUrl: "/sign-in",
+    signUpUrl: "/sign-up",
+  } : {};
 });
 
 // Standard Middleware for Production (Live Keys)
 // With Live Keys, Clerk handles domain logic natively.
 export default async function middleware(req: NextRequest, evt: any) {
+  // Exact profile-only webhook uses its realm signature, independent of browser
+  // Clerk/Studio readiness. No tenant or adjacent API path shares this bypass.
+  if (req.nextUrl.pathname === CLERK_PROFILE_WEBHOOK_PATH) {
+    return getRequestBrand(req) === "tenant" ? new NextResponse("Not Found", { status: 404 }) : NextResponse.next();
+  }
+  if (getRequestBrand(req) === "substo") {
+    if (classifySubstoRoute(req.nextUrl.pathname) === "blocked") {
+      return new NextResponse("Not Found", { status: 404 });
+    }
+    const conflicts = getSubstoClerkConfigConflicts();
+    if (conflicts.length) {
+      console.error("[Substo auth] Remove conflicting global Clerk settings", conflicts);
+      return new NextResponse("Substo Clerk configuration conflicts with shared routing settings", { status: 503 });
+    }
+    if (!getClerkBrandKeys("substo") || !hasClerkEncryptionKey() || !hasStudioSupabaseConfig()) {
+      return new NextResponse("Substo Studio is not configured", {
+        status: 503,
+        headers: { "Retry-After": "60" },
+      });
+    }
+  } else if (skipsLegacyEstioMiddleware(req.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
   const res = await clerkHandler(req, evt);
   return res;
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|images/|api/health|.*\\.(?:css|js|png|jpg|jpeg|gif|webp|svg|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    '/(trpc)(.*)',
+    '/((?!_next/static/|_next/image|favicon\\.ico$|images/).*)',
+    '/(api|trpc)(.*)',
   ],
 };

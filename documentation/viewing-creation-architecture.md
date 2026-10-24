@@ -6,7 +6,7 @@ The Viewings system in Estio allows agents and administrators to schedule proper
 
 This document is the source of truth for viewing scheduling, timezone handling, and provider sync behavior.
 
-For the newer live translation and copilot layer built on top of scheduled viewings, use [`documentation/viewing-intelligence-live-copilot-implementation-tracking.md`](/Users/martingreen/Projects/IDX/documentation/viewing-intelligence-live-copilot-implementation-tracking.md) as the source of truth. This document intentionally stays focused on `Viewing` creation, editing, timezone semantics, and external provider sync.
+For the newer live translation and copilot layer built on top of scheduled viewings, use [`documentation/viewing-intelligence-live-copilot-implementation-tracking.md`](/Users/martingreen/Projects/Estio/documentation/viewing-intelligence-live-copilot-implementation-tracking.md) as the source of truth. This document intentionally stays focused on `Viewing` creation, editing, timezone semantics, and external provider sync.
 
 ## Relationship To Viewing Sessions
 
@@ -43,9 +43,9 @@ The feature uses a durable outbox architecture so local DB writes finish first a
 
 Current Prisma schema reference:
 
-- `Viewing`: [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
-- `ViewingSync`: [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
-- `ViewingOutbox`: [`prisma/schema.prisma`](/Users/martingreen/Projects/IDX/prisma/schema.prisma)
+- `Viewing`: [`prisma/schema.prisma`](/Users/martingreen/Projects/Estio/prisma/schema.prisma)
+- `ViewingSync`: [`prisma/schema.prisma`](/Users/martingreen/Projects/Estio/prisma/schema.prisma)
+- `ViewingOutbox`: [`prisma/schema.prisma`](/Users/martingreen/Projects/Estio/prisma/schema.prisma)
 
 ## Timezone Source of Truth
 
@@ -70,17 +70,17 @@ Current admin surfaces:
 The sync path is intentionally split into local mutation, enqueue, and worker execution.
 
 1. **Server Actions**
-   - `createViewing` and `updateViewing` in [`app/(main)/admin/contacts/actions.ts`](/Users/martingreen/Projects/IDX/app/(main)/admin/contacts/actions.ts) write to Prisma first.
+   - `createViewing` and `updateViewing` in [`app/(main)/admin/contacts/actions.ts`](/Users/martingreen/Projects/Estio/app/(main)/admin/contacts/actions.ts) write to Prisma first.
 2. **Enqueueing**
    - After the write succeeds, the action calls `enqueueViewingSyncJobs({ viewingId, operation })`.
 3. **Immediate Trigger**
-   - On viewing update, the app also sends an authenticated best-effort request to `GET /api/cron/task-sync` via [`lib/cron/task-sync-trigger.ts`](/Users/martingreen/Projects/IDX/lib/cron/task-sync-trigger.ts).
+   - On viewing update, the app also sends an authenticated best-effort request to `GET /api/cron/task-sync` via [`lib/cron/task-sync-trigger.ts`](/Users/martingreen/Projects/Estio/lib/cron/task-sync-trigger.ts).
    - This reduces visible lag without making the save path depend on provider API latency.
 4. **Cron Worker**
-   - [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/IDX/app/api/cron/task-sync/route.ts) processes both task outbox jobs and viewing outbox jobs.
+   - [`app/api/cron/task-sync/route.ts`](/Users/martingreen/Projects/Estio/app/api/cron/task-sync/route.ts) processes both task outbox jobs and viewing outbox jobs.
 5. **Provider Adapters**
-   - Google Calendar: [`lib/viewings/providers/google-calendar.ts`](/Users/martingreen/Projects/IDX/lib/viewings/providers/google-calendar.ts)
-   - GHL: [`lib/viewings/providers/ghl.ts`](/Users/martingreen/Projects/IDX/lib/viewings/providers/ghl.ts)
+   - Google Calendar: [`lib/viewings/providers/google-calendar.ts`](/Users/martingreen/Projects/Estio/lib/viewings/providers/google-calendar.ts)
+   - GHL: [`lib/viewings/providers/ghl.ts`](/Users/martingreen/Projects/Estio/lib/viewings/providers/ghl.ts)
 6. **Provider Registration**
    - The assigned agent chooses a preferred Google Calendar, stored on `User.googleCalendarId`.
    - Existing synced viewings stay on their original remote calendar using `ViewingSync.providerContainerId`.

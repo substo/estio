@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SYSTEM_DOMAINS } from "@/lib/app-config";
 import { isPublicSiteDomainAuthorized } from "@/lib/public-site-domains/service";
+import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -16,6 +17,11 @@ export async function GET(req: NextRequest) {
     // These are required for the dashboard and API to function.
     if (SYSTEM_DOMAINS.includes(domain) || (domain.startsWith("www.") && SYSTEM_DOMAINS.includes(domain.slice(4)))) {
         return new NextResponse("Allowed (System)", { status: 200 });
+    }
+
+    // Caddy's on-demand TLS ask endpoint approves only exact first-party Substo hosts.
+    if (resolveHostBrand(domain, getHostBrandConfig()) === "substo") {
+        return new NextResponse("Allowed (Substo)", { status: 200 });
     }
 
     try {

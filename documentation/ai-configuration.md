@@ -22,7 +22,7 @@ Google AI settings write through `SettingsService`:
   - Google: `google_ai_api_key`
 - During migration windows, legacy `SiteConfig` dual-write may still be enabled via feature flags.
 
-For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/IDX/documentation/site-settings-platform.md).
+For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/Estio/documentation/site-settings-platform.md).
 
 ### Skill Runtime Hub (Admin)
 

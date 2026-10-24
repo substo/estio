@@ -1,3 +1,4 @@
+import Link from "next/link";
 import config from "@/config";
 import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
@@ -39,6 +40,7 @@ const UserProfilePage = async () => {
                 <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">My profile</h1>
                 <p className="text-muted-foreground">Manage your personal details and sign-in security.</p>
             </div>
+            <Link href="/account/connections" className="text-sm text-primary hover:underline">Manage my connected accounts</Link>
             <UserProfileForm initialData={initialData} primaryEmail={primaryEmail} />
         </main>
     )

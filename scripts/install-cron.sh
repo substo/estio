@@ -174,6 +174,10 @@ else
     (crontab -l 2>/dev/null; echo "${CRON_ENTRY_SMS_RELAY_OUTBOX}") | crontab -
 fi
 
+# Studio dispatch is service-authorized and SQL-fenced across concurrent hosts.
+# Installing this owner is a separately authorized production operation.
+(crontab -l 2>/dev/null | grep -v -E "run-cron-endpoint\.sh studio-schedules|api/cron/studio-schedules"; echo "*/1 * * * * ${SCRIPT_DIR}/run-cron-endpoint.sh studio-schedules 110") | crontab -
+
 # Remove retired schedules that must never be reinstalled.
 (crontab -l 2>/dev/null \
     | grep -v -E "api/cron/whatsapp-reconciliation|api/cron/contact-sync|api/cron/scheduled-tasks") \
@@ -200,6 +204,7 @@ echo "   - Check logs: tail -f ${APP_DIR}/logs/purge-trash-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/sync-feeds-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/task-sync-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/sms-relay-outbox-cron.log"
+echo "   - Check logs: tail -f ${APP_DIR}/logs/studio-schedules-cron.log"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-gmail-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-outlook-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-ai-automations.sh"
@@ -215,5 +220,6 @@ echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh purge-trash 300"
 echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh sync-feeds 300"
 echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh task-sync 120"
 echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh sms-relay-outbox 120"
+echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh studio-schedules 110"
 echo ""
 echo "🔐 Don't forget to set CRON_SECRET in your environment!"

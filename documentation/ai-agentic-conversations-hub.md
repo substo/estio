@@ -45,7 +45,7 @@ We chose to build this **internally** rather than relying on GoHighLevel's nativ
     *   **Unified Hub**: A single interface managing both individual "Chats" and multi-party "Deals".
     *   **Deal Mode Toggle**: Users can switch between standard chat view and "Deal Mode" to manage complex negotiations.
     *   **Instant Switching**: The UI uses internal state caching to switch conversations instantly, showing a loader only for the message content.
-    *   **Mobile Contract**: Mobile uses full-screen panes for list, thread/timeline, and Mission Control. Exact mobile layout, gesture arbitration, and overflow rules are documented in [conversation-management.md](/Users/martingreen/Projects/IDX/documentation/conversation-management.md).
+    *   **Mobile Contract**: Mobile uses full-screen panes for list, thread/timeline, and Mission Control. Exact mobile layout, gesture arbitration, and overflow rules are documented in [conversation-management.md](/Users/martingreen/Projects/Estio/documentation/conversation-management.md).
 
 ### Mar 2026 Performance Rollout
 The hub now has a performance-oriented read path for larger inboxes:
@@ -58,7 +58,7 @@ The hub now has a performance-oriented read path for larger inboxes:
 *   **Ranked Search**: search now uses a hybrid full-text + trigram SQL ranking path with a Prisma fallback.
 
 Source of truth for the exact UI/API behavior and feature flags:
-[conversation-management.md](/Users/martingreen/Projects/IDX/documentation/conversation-management.md)
+[conversation-management.md](/Users/martingreen/Projects/Estio/documentation/conversation-management.md)
 
 ### Key Components
 
@@ -96,7 +96,7 @@ We have evolved the system from a 1:1 chat interface to a **Many-to-One Persiste
 6.  **Participant Routing (Mar 2026)**: Mission Control now shows all unique contacts linked to the deal, lets the agent switch the active participant, and routes sends/draft approvals to that selected participant instead of a single proxy conversation.
 
 Source of truth for exact timeline coverage and AI draft context rules:
-[conversation-management.md](/Users/martingreen/Projects/IDX/documentation/conversation-management.md) and [ai-draft-feature.md](/Users/martingreen/Projects/IDX/documentation/ai-draft-feature.md)
+[conversation-management.md](/Users/martingreen/Projects/Estio/documentation/conversation-management.md) and [ai-draft-feature.md](/Users/martingreen/Projects/Estio/documentation/ai-draft-feature.md)
 
 ### Workflow
 1.  **Toggle "Deals"**: In `/admin/conversations`, switch to Deals mode.

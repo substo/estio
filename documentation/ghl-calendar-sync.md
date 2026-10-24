@@ -5,7 +5,7 @@
 This feature integrates GoHighLevel (GHL) Calendars into the IDX application for viewing synchronization. This document covers GHL-specific setup and operator expectations only.
 
 > [!NOTE]
-> The full viewing scheduling architecture, timezone model, Google sync behavior, and outbox worker flow are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
+> The full viewing scheduling architecture, timezone model, Google sync behavior, and outbox worker flow are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/Estio/documentation/viewing-creation-architecture.md).
 
 ## Implementation Details
 

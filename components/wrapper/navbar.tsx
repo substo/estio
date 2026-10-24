@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useAuth, ClerkLoaded } from "@clerk/nextjs";
 import { Dialog, DialogClose } from "@radix-ui/react-dialog";
 import { AppLogo, APP_NAME } from "../app-logo";
+import { useBrandExperience } from "@/components/wrapper/brand-experience";
 
 const components: { title: string; href: string; description: string }[] = [
     {
@@ -47,6 +48,7 @@ interface NavBarProps {
 }
 
 export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
+    const brand = useBrandExperience();
     const [mounted, setMounted] = React.useState(false);
 
     React.useEffect(() => {
@@ -65,6 +67,14 @@ export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
             <div className="flex min-w-full h-[55px] items-center fixed justify-between px-3 border-b z-10 dark:bg-black dark:bg-opacity-50 bg-white">
                 {/* Placeholder to prevent layout shift */}
             </div>
+        );
+    }
+
+    if (brand === "substo") {
+        return (
+            <header className="flex min-w-full h-[55px] items-center fixed justify-between px-6 border-b z-10 bg-background">
+                <Link href="/studio" className="font-semibold tracking-tight">Substo Studio</Link>
+            </header>
         );
     }
 

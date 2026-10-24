@@ -109,7 +109,7 @@ Timeline rendering and AI draft context now share one normalized assembler servi
   - chats mode timeline = selected conversation + related contact activity scope
   - deal mode timeline = merged deal-aware participant timeline
 
-This shared event model is also the source used by AI Draft context assembly. For prompt compaction details, see [ai-draft-feature.md](/Users/martingreen/Projects/IDX/documentation/ai-draft-feature.md).
+This shared event model is also the source used by AI Draft context assembly. For prompt compaction details, see [ai-draft-feature.md](/Users/martingreen/Projects/Estio/documentation/ai-draft-feature.md).
 
 ### 1.3 Live Inbox Refresh, Reordering, and Unread State
 The inbox updates on-page without requiring a manual refresh:
@@ -232,7 +232,7 @@ The Hetzner schedule is installed by `scripts/install-cron.sh`. See `documentati
 - **Task Workspace Deep Links**:
   - `?view=tasks&task=<taskId>` highlights the task row and opens the shared task detail dialog
   - `?view=tasks&task=<taskId>&id=<conversationId>` also hydrates the related conversation in the background workspace
-  - full reminder and notification behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/IDX/documentation/task-deadline-reminders.md)
+  - full reminder and notification behavior is documented in [task-deadline-reminders.md](/Users/martingreen/Projects/Estio/documentation/task-deadline-reminders.md)
 - **Infinite Scroll**: The left list auto-loads more conversations near the bottom using a sentinel + `IntersectionObserver`, with a visible "Load more" fallback.
 - **Deep-Link Stability**: URL-selected conversations are preserved during list refreshes and view changes, preventing the center panel from dropping back to "Select a conversation" when the selected item is older than the first page.
 - **Live Inbox Reordering**: Inbox updates are merged with incoming-first ordering so newly active conversations move to top in real time.
@@ -300,7 +300,7 @@ The Hetzner schedule is installed by `scripts/install-cron.sh`. See `documentati
   - `Suggest Viewing` to open the AI viewing suggestion dialog from selected text.
   - `Summarize` to generate and save a CRM log note into contact history.
   - `Custom` to run a user-provided prompt against selected text and optionally save the output to CRM log.
-- **Viewing Suggestion Reference**: Relative-date anchoring, exact property auto-match, and timezone-safe `scheduledAtIso` apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/IDX/documentation/viewing-creation-architecture.md).
+- **Viewing Suggestion Reference**: Relative-date anchoring, exact property auto-match, and timezone-safe `scheduledAtIso` apply behavior are documented in [viewing-creation-architecture.md](/Users/martingreen/Projects/Estio/documentation/viewing-creation-architecture.md).
 - **Selection Trigger Strategy (Apr 2026)**: Selection detection uses `document.addEventListener('selectionchange')` with 200ms debounce instead of per-element `onMouseUp`/`onKeyUp`. This approach works universally on desktop (mouse drag) and mobile (touch selection handles). Each `MessageBubble` checks `range.intersectsNode()` against its content ref to claim ownership of the selection.
 - **Per-Message Context Menu (Apr 2026)**: Every message bubble has a three-dot (⋯) context menu providing direct access to all selection actions (Paste Lead, Find Contact, Summarize, Custom, Create Task, AI Tasks, Suggest Viewings, Add to Batch) without requiring text selection. When no text is selected, the full message body is used as action input. The menu is always visible on mobile and hover-revealed on desktop (`sm:opacity-0 sm:group-hover:opacity-100`). This resolves the issue where structured content (VCard contact cards, media messages) couldn't trigger the selection toolbar since they don't produce browser text selections.
 - **Cross-Message Selection (Phase 1 Quick Win)**: Drag-selection can span multiple message bubbles/email blocks in the visible chat window; the toolbar accepts the combined selection text.
@@ -432,6 +432,6 @@ Conversation search now prefers a SQL-ranked search path over the older Prisma-o
   - `npm run test:conversations:realtime`
 
 ## Related Docs
-- High-level product/AI framing: [ai-agentic-conversations-hub.md](/Users/martingreen/Projects/IDX/documentation/ai-agentic-conversations-hub.md)
-- Model picker / AI defaults: [ai-configuration.md](/Users/martingreen/Projects/IDX/documentation/ai-configuration.md)
-- AI draft prompt construction and timeline compaction: [ai-draft-feature.md](/Users/martingreen/Projects/IDX/documentation/ai-draft-feature.md)
+- High-level product/AI framing: [ai-agentic-conversations-hub.md](/Users/martingreen/Projects/Estio/documentation/ai-agentic-conversations-hub.md)
+- Model picker / AI defaults: [ai-configuration.md](/Users/martingreen/Projects/Estio/documentation/ai-configuration.md)
+- AI draft prompt construction and timeline compaction: [ai-draft-feature.md](/Users/martingreen/Projects/Estio/documentation/ai-draft-feature.md)
