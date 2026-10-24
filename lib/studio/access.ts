@@ -11,10 +11,12 @@ import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
 import { isStudioLocationAllowedForSession } from "./access-policy";
 import {
   getEstioStudioWorkspaceById,
-  getSubstoStudioWorkspaceForUser,
+  getSubstoStudioWorkspace,
   type StudioWorkspace,
   type SubstoStudioWorkspace,
 } from "./supabase-service";
+import { resolveBrandWorkspaceAccess } from "@/lib/brands/brand-service";
+import { substoBrandDeps } from "@/lib/brands/substo-brands";
 
 type AuthState = Awaited<ReturnType<typeof auth>>;
 
@@ -35,6 +37,8 @@ export type StudioWorkspaceAccess = {
   userId: string;
   workspace: SubstoStudioWorkspace;
   role: SubstoStudioWorkspace["role"];
+  /** The brand (Prisma Location) this workspace belongs to. */
+  brandId: string;
 };
 
 async function requestBrand() {
@@ -74,8 +78,14 @@ export async function getStudioWorkspaceAccess(workspaceId: string): Promise<Stu
   if (await isPlatformProfileDeleted(studioRest, brand, state.userId)) return null;
 
   if (brand === "substo") {
-    const workspace = await getSubstoStudioWorkspaceForUser(workspaceId, state.userId);
-    return workspace ? { brand, userId: state.userId, workspace, role: workspace.role } : null;
+    // The brand team decides; the Studio membership row is re-synced to it
+    // (added, re-roled or removed) so Studio's SQL checks agree.
+    const brandAccess = await resolveBrandWorkspaceAccess(substoBrandDeps(), workspaceId, state.userId);
+    if (!brandAccess) return null;
+    const workspace = await getSubstoStudioWorkspace(workspaceId);
+    return workspace
+      ? { brand, userId: state.userId, workspace: { ...workspace, role: brandAccess.studioRole }, role: brandAccess.studioRole, brandId: brandAccess.brand.id }
+      : null;
   }
 
   const workspace = await getEstioStudioWorkspaceById(workspaceId);

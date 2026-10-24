@@ -1,19 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
-import { listSubstoStudioWorkspaces } from "@/lib/studio/supabase-service";
-import { createSubstoWorkspaceAction, openEstioStudioLocation } from "./actions";
+import { ensureBrandWorkspace } from "@/lib/brands/brand-service";
+import { prepareCurrentSubstoUser, substoBrandDeps } from "@/lib/brands/substo-brands";
+import { createSubstoBrandAction, openEstioStudioLocation, openSubstoBrandStudioAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudioWorkspaceSelector({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; choose?: string }>;
 }) {
   const host = (await headers()).get("host");
   const brand = resolveHostBrand(host, getHostBrandConfig());
@@ -21,52 +21,64 @@ export default async function StudioWorkspaceSelector({
   if (brand === "substo") {
     const { userId } = await auth();
     if (!userId) redirect("/sign-in?redirect_url=%2Fstudio");
-    const workspaces = await listSubstoStudioWorkspaces(userId);
+    let prepared: Awaited<ReturnType<typeof prepareCurrentSubstoUser>>;
+    try {
+      prepared = await prepareCurrentSubstoUser();
+    } catch (error) {
+      console.error("[Substo] Brand setup failed", error);
+      return <SubstoSetupError />;
+    }
+    if (!prepared) return <SubstoSetupError reason="verified-email" />;
+    const { brands } = prepared;
+
+    // One brand: open its Studio directly (attaching the workspace on first use).
+    if (brands.length === 1 && !params.choose && !params.error) {
+      const workspaceId = await ensureBrandWorkspace(substoBrandDeps(), brands[0], userId);
+      redirect(`/studio/workspace/${workspaceId}`);
+    }
 
     return (
-      <main className="mx-auto flex min-h-[calc(100vh-56px)] w-full max-w-4xl flex-col gap-8 p-6 md:p-10">
+      <main className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6 md:p-10">
         <header className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">Substo</p>
-          <h1 className="text-3xl font-semibold tracking-tight">Choose a Studio workspace</h1>
-          <p className="text-muted-foreground">Your research, ideas, scripts, and production work stay inside the workspace you choose.</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Choose a brand</h1>
+          <p className="text-muted-foreground">Each brand has its own team, Studio research and content.</p>
         </header>
 
-        {workspaces.length > 0 ? (
-          <section className="grid gap-3 sm:grid-cols-2" aria-label="Your workspaces">
-            {workspaces.map((workspace) => (
-              <Link
-                key={workspace.id}
-                href={`/studio/workspace/${workspace.id}`}
-                className="rounded-xl border bg-card p-5 transition hover:border-primary/50 hover:bg-accent/40"
-              >
-                <span className="block font-medium">{workspace.name}</span>
-                <span className="mt-1 block text-sm capitalize text-muted-foreground">{workspace.role}</span>
-              </Link>
+        {params.error === "access" ? <p className="text-sm text-destructive">You no longer have access to that brand.</p> : null}
+        {brands.length > 0 ? (
+          <section className="grid gap-3 sm:grid-cols-2" aria-label="Your brands">
+            {brands.map((item) => (
+              <form key={item.id} action={openSubstoBrandStudioAction}>
+                <input type="hidden" name="brandId" value={item.id} />
+                <button type="submit" className="w-full rounded-xl border bg-card p-5 text-left transition hover:border-primary/50 hover:bg-accent/40">
+                  <span className="block font-medium">{item.name}</span>
+                  <span className="mt-1 block text-sm text-muted-foreground">{item.role === "ADMIN" ? "Admin" : "Member"}</span>
+                </button>
+              </form>
             ))}
           </section>
         ) : (
           <p className="rounded-xl border bg-muted/20 p-5 text-sm text-muted-foreground">
-            You are not a member of a workspace yet. Create one or open an invitation link.
+            You are not on a brand&apos;s team. Create a brand, or ask a brand admin to invite your email address.
           </p>
         )}
 
         <section className="max-w-xl rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-medium">Create a workspace</h2>
-          <p className="mt-1 text-sm text-muted-foreground">You will become its owner and can invite teammates later.</p>
-          {params.error === "workspace" ? <p className="mt-3 text-sm text-destructive">Enter a name up to 100 characters.</p> : null}
-          <form action={createSubstoWorkspaceAction} className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <input type="hidden" name="workspaceRequestId" value={randomUUID()} />
-            <label className="sr-only" htmlFor="studio-workspace-name">Workspace name</label>
+          <h2 className="text-lg font-medium">Create a brand</h2>
+          <p className="mt-1 text-sm text-muted-foreground">You will be its admin and can invite your team from the Team page.</p>
+          {params.error === "brand" ? <p className="mt-3 text-sm text-destructive">Enter a name up to 100 characters.</p> : null}
+          <form action={createSubstoBrandAction} className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <label className="sr-only" htmlFor="brand-name">Brand name</label>
             <input
-              id="studio-workspace-name"
+              id="brand-name"
               name="name"
               required
               maxLength={100}
-              placeholder="e.g. Personal Studio"
+              placeholder="e.g. My channel"
               className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
             />
             <button type="submit" className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">
-              Create workspace
+              Create brand
             </button>
           </form>
         </section>
@@ -110,6 +122,19 @@ export default async function StudioWorkspaceSelector({
       )}
 
       <p><Link className="text-sm text-primary underline-offset-4 hover:underline" href="/admin">Return to Estio Business</Link></p>
+    </main>
+  );
+}
+
+function SubstoSetupError({ reason }: { reason?: "verified-email" }) {
+  return (
+    <main className="mx-auto flex w-full max-w-xl flex-col gap-3 p-6 md:p-10">
+      <h1 className="text-2xl font-semibold tracking-tight">We couldn&apos;t open your brand</h1>
+      <p className="text-muted-foreground">
+        {reason === "verified-email"
+          ? "Verify your email address in your account settings, then reload this page."
+          : "Something went wrong while setting up your brand. Reload the page to try again."}
+      </p>
     </main>
   );
 }

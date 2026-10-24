@@ -32,6 +32,31 @@ export function AdminSidebarPreferenceScript() {
   return <script dangerouslySetInnerHTML={{ __html: script }} />
 }
 
+/** Sidebar collapse state shared by every product shell (stored once per browser). */
+export function useSidebarCollapsed(): [boolean, (collapsed: boolean) => void] {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  useEffect(() => {
+    try {
+      const nextCollapsed = window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true"
+      setSidebarCollapsed(nextCollapsed)
+      setSidebarWidth(nextCollapsed)
+    } catch {
+      setSidebarWidth(false)
+    }
+  }, [])
+
+  function update(nextCollapsed: boolean) {
+    setSidebarCollapsed(nextCollapsed)
+    setSidebarWidth(nextCollapsed)
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(nextCollapsed))
+    } catch {}
+  }
+
+  return [sidebarCollapsed, update]
+}
+
 export function AdminShellLayout({
   children,
   logoUrl,
@@ -49,29 +74,9 @@ export function AdminShellLayout({
   platformLoginLocations: PlatformLocationLoginOption[] | null
   impersonation: ImpersonationBannerData | null
 }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, handleSidebarCollapsedChange] = useSidebarCollapsed()
   const layoutPolicy = useResolvedAdminLayoutPolicy()
   const { appSurface } = layoutPolicy
-
-  useEffect(() => {
-    try {
-      const storedValue = window.localStorage.getItem(SIDEBAR_STORAGE_KEY)
-      const nextCollapsed = storedValue === "true"
-      setSidebarCollapsed(nextCollapsed)
-      setSidebarWidth(nextCollapsed)
-    } catch {
-      setSidebarWidth(false)
-    }
-  }, [])
-
-  function handleSidebarCollapsedChange(nextCollapsed: boolean) {
-    setSidebarCollapsed(nextCollapsed)
-    setSidebarWidth(nextCollapsed)
-
-    try {
-      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(nextCollapsed))
-    } catch {}
-  }
 
   return (
     <>

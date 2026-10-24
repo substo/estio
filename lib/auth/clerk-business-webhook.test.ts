@@ -111,7 +111,7 @@ test("legacy Estio configuration without instance or Substo settings keeps worki
   assert.equal(result.realm, "estio");
 });
 
-test("Substo events cannot create Business members or tenant contacts in slice 1", () => {
+test("Substo events cannot create Business members or tenant contacts through the webhook", () => {
   assert.equal(realmAcceptsTeamInvites("estio"), true);
   assert.equal(realmHandlesTenantContacts("estio"), true);
   assert.equal(realmAcceptsTeamInvites("substo"), false);

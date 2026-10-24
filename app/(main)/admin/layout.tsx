@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AdminShellLayout, AdminSidebarPreferenceScript } from "./_components/admin-shell-layout";
 import { AdminContentFrame } from "./_components/admin-content-frame";
 import { OnboardingWrapper } from "@/components/onboarding-wrapper";
@@ -12,8 +12,12 @@ import { activateCurrentImpersonation } from "@/lib/auth/impersonation";
 import { auth } from "@clerk/nextjs/server";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
 import { listPlatformLocationLoginOptions } from "@/lib/auth/platform-location-options";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  // The CRM is Estio-only until its Substo route firewall exists (slice 3);
+  // middleware already blocks /admin on Substo, this is a second guard.
+  if (await getRequestAuthRealm() !== "estio") notFound();
   const platformAdmin = await getPlatformAdminContext();
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect("/sign-in");

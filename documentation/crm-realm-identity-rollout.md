@@ -1,6 +1,15 @@
-# Realm-scoped Business identity: rollout runbook
+# Realm-scoped identity and Substo brands: rollout runbook
 
-Slice 1 of "CRM on Substo". `User` gains an `authRealm` (`estio` | `substo`), so equal email addresses in the Estio and Substo Clerk applications never resolve to, link to or merge with the same Business user. Nothing in this runbook has been run against production. Each release below needs its own authorization.
+Slices 0–2 of "CRM on Substo" ([design](substo-crm-design.md)). `User` gains an `authRealm` (`estio` | `substo`), so equal email addresses in the Estio and Substo Clerk applications never resolve to, link to or merge with the same Business user. Substo then gets brands (Prisma `Location`) with their own team and invitations, and Substo Studio sits on top of the brand. Nothing in this runbook has been run against production. Each release below needs its own authorization.
+
+There are **two releases, in this order, never combined**:
+
+| Release | Commit | Migrations | Code |
+| --- | --- | --- | --- |
+| A | `9e2d34ad` | `20261024160000_user_auth_realm_expand` | realm-aware user resolution, linking and webhooks (slice 0) |
+| B | branch head | `20261024170000_substo_brands`, `20261024180000_user_auth_realm_contract` | brands, brand team and invitations on Substo, Studio on top of the brand, shared sidebar layout, CRM/Studio switch (slices 1–2) |
+
+The contract migration refuses to run unless the expand migration finished at least 10 minutes earlier. A deploy of B straight from a pre-A release therefore aborts before the traffic switch, rather than leaving a rollback target that links users by email alone.
 
 ## What changes
 
@@ -22,11 +31,11 @@ About 50 Business call sites still use `findUnique({ where: { clerkId } })` afte
 3. They sit behind the realm-gated chokepoints above.
 4. Middleware keeps `/admin` and the Business APIs off the Substo host.
 
-`realm-identity-contract.test.ts` pins the global `clerkId` uniqueness this relies on, and fails if any `db.user.findUnique/upsert/update/delete({ where: { email ... } })` without a realm reappears in `app/`, `lib/` or `scripts/`. Location-scoped user lists (`platform-location-options`, `inbound-whatsapp`) need no realm: Locations are Estio-only until slice 2.
+`realm-identity-contract.test.ts` pins the global `clerkId` uniqueness this relies on, and fails if any `db.user.findUnique/upsert/update/delete({ where: { email ... } })` without a realm reappears in `app/`, `lib/` or `scripts/`. Location-scoped user lists need no realm, because the database rejects cross-app memberships (release B). `platform-location-options` (Estio platform-admin login) is filtered to Estio brands and users.
 
 Production state today: the Substo host never reaches Prisma `User`. The Studio page branches before `resolveActiveLocation`, and middleware blocks `/admin` and the Business webhooks. So no Substo identity can have been linked to an Estio user yet. Query 5 below confirms this.
 
-## Release A: expand (this branch)
+## Release A: expand (commit `9e2d34ad`)
 
 Migration `20261024160000_user_auth_realm_expand` is additive. `deploy-local-build.sh` applies it with `prisma migrate deploy` (`PRISMA_SCHEMA_SYNC_MODE=migrate-only`) **before** the traffic switch, so the previous release runs against it during build, soak and the 900-second drain. That is safe: the previous release never reads `authRealm`, and its inserts default to `estio`. Both global unique indexes remain, so its email lookups behave exactly as before. The two `CREATE UNIQUE INDEX` statements briefly block writes to `User` (a small table). They cannot fail, because `email` and `clerkId` are already globally unique.
 
@@ -99,35 +108,78 @@ Smoke tests:
   COMMIT;
   ```
 
-## Release B: contract (later, separately authorized)
+## Release B: brands and contract (branch head)
 
-`prisma/contract-migrations/user_auth_realm_contract.sql` drops `User_email_key`. That is what lets a Substo user have the same email as an Estio user. Until then, such a Substo sign-in fails closed and never links. `prisma migrate deploy` does not read that directory.
+Deploy only after release A is live and verified, and once no release older than A remains a rollback target (check the deploy state's previous slot).
 
-Preconditions:
+What it adds:
 
-- Release A is live and verified.
-- No release older than A remains a rollback target (check the deploy state's previous slot).
-- Slice 2 has not started creating Substo-realm users yet.
+- **`20261024170000_substo_brands`** (additive): `Location.authRealm` (default `estio`), `Location.studioWorkspaceId` (unique; links a Substo brand to its Studio workspace), `Location.autoCreatedForUserId` (unique; at most one automatic brand per user) and the `BrandInvitation` table. Triggers reject any membership, role or invitation whose user and brand belong to different apps, and any change to a user's or brand's app. Every existing and newly inserted row from earlier releases is Estio, so A keeps working.
+- **`20261024180000_user_auth_realm_contract`**: drops `User_email_key`, so the same email can exist once per app. Without it, a Substo sign-in whose email also exists in Estio cannot create its Substo user, and Substo Studio would show a setup error for that person.
+- No Studio (Supabase) migration. Substo Studio membership rows stay, as a mirror of the brand team that the app keeps in step, so Studio's SQL checks keep working.
 
-Steps:
+Behaviour on Substo after release B:
 
-1. Copy the file to `prisma/migrations/<timestamp>_user_auth_realm_contract/migration.sql`.
-2. Change `email String @unique` to `email String` on `User` in `prisma/schema.prisma`. No application code changes are needed, because all email lookups already use `authRealm_email`.
-3. Run `bash scripts/test-user-auth-realm-db.sh`, then deploy.
+- At each `/studio` entry, the app links the Substo Business user and claims pending brand invitations addressed to the user's verified emails. It then adopts pre-brand Studio workspaces: the first member to sign in turns each one into a brand, and all of its current Studio members are imported once. If the user is still in no brand and has no invitation, the app creates their brand ("<first name>'s brand"), at most once per user.
+- Team management lives at `/brand/team` (invite by email, change role, remove, leave), and the name at `/brand/settings`. Invitations are sent by Substo's own Clerk application. Old `/studio/invite/<token>` links only explain that invitations now come by email.
+- Studio and brand pages use the CRM's sidebar shell in both apps. On Estio, the CRM/Studio switch sits under the logo. `/admin` stays blocked on Substo (middleware, plus a second check in the admin layout) until slice 3.
 
-Pre-check: `SELECT "authRealm", email, count(*) FROM "User" GROUP BY 1, 2 HAVING count(*) > 1;` returns 0 rows.
+### Before deploying B (read-only)
 
-Post-check: `User_email_key` is absent, and `User_clerkId_key`, `User_authRealm_email_key` and `User_authRealm_clerkId_key` are present.
+```sql
+-- A is live, verified, and older than 10 minutes.
+SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations WHERE migration_name = '20261024160000_user_auth_realm_expand';
+-- No duplicates the contract step would expose within one app.
+SELECT "authRealm", email, count(*) FROM "User" GROUP BY 1, 2 HAVING count(*) > 1;  -- expect 0 rows
+-- Pre-brand Substo Studio workspaces that will be adopted at first sign-in (run against the Studio database).
+SELECT w.id, w.name, count(m.id) AS members FROM studio_workspaces w LEFT JOIN studio_workspace_memberships m ON m.workspace_id = w.id WHERE w.brand = 'substo' GROUP BY 1, 2;
+```
 
-Roll back release B:
+Substo Clerk application (dashboard):
 
-- Rolling back the web/worker to release A is always safe.
-- Restoring the global index is only possible while no email exists in both realms: `SELECT email FROM "User" GROUP BY email HAVING count(*) > 1;` must return 0 rows, then run `CREATE UNIQUE INDEX "User_email_key" ON "User"("email");`. Release A does not need this index; only pre-realm releases do.
+- Sign-ups are allowed, at least by invitation.
+- `https://substo.com/sign-up` is a permitted redirect.
+- The invitation email template is enabled.
+
+Take the usual database backup immediately before the deploy.
+
+### Verify after deploying B
+
+```sql
+SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations WHERE migration_name IN ('20261024170000_substo_brands', '20261024180000_user_auth_realm_contract');  -- both finished
+SELECT count(*) FROM pg_indexes WHERE tablename = 'User' AND indexname = 'User_email_key';  -- 0
+SELECT tgname FROM pg_trigger WHERE tgname IN ('UserLocationRole_same_auth_realm', '_LocationToUser_same_auth_realm', 'BrandInvitation_same_auth_realm', 'User_auth_realm_immutable', 'Location_auth_realm_immutable');  -- 5 rows
+SELECT "authRealm", count(*) FROM "Location" GROUP BY 1;  -- estio unchanged; substo only after Substo sign-ins
+-- Isolation invariants: both must be 0, now and at any later time.
+SELECT count(*) FROM "UserLocationRole" r JOIN "User" u ON u.id = r."userId" JOIN "Location" l ON l.id = r."locationId" WHERE u."authRealm" <> l."authRealm";
+SELECT count(*) FROM "_LocationToUser" m JOIN "User" u ON u.id = m."B" JOIN "Location" l ON l.id = m."A" WHERE u."authRealm" <> l."authRealm";
+```
+
+Smoke tests:
+
+- On estio.co: `/admin` is unchanged, and the CRM/Studio switch under the logo opens the location's Studio with the sidebar.
+- On substo.com:
+  - Sign in. You land in your brand's Studio with the same sidebar; a pre-brand workspace appears as a brand with its name.
+  - `/brand/team` invites a second test address. That person signs up from the email and lands in the same brand as a member, without getting a brand of their own.
+  - Removing them takes their Studio access away.
+  - `/admin` returns 404.
+
+### Roll back release B
+
+- **Web/worker rollback to A** is safe. A ignores brands and resolves Substo Studio access from Studio membership rows, which B keeps in step. Note: someone removed from a brand under B has no Studio row, so A also denies them. A never uses email uniqueness.
+- **Never roll back to a release older than A** once the contract step has run.
+- **Failed migration**: the deploy aborts before the switch. Inspect `_prisma_migrations`, run `npx prisma@6.19.0 migrate resolve --rolled-back <name>` for the failed one, and fix the problem before retrying. If the contract guard fired, deploy and verify A first.
+- **Schema reversal of brands** (only while A is serving, and only if `SELECT count(*) FROM "Location" WHERE "authRealm" <> 'estio'` returns 0): drop the five triggers and their `estio_*` functions, the `BrandInvitation` table and `BrandInvitationStatus` type, and the three new `Location` columns, then delete the migration's `_prisma_migrations` row.
+- **Restoring the global email index** is only possible while no email exists in both apps: `SELECT email FROM "User" GROUP BY email HAVING count(*) > 1;` must return 0 rows, then run `CREATE UNIQUE INDEX "User_email_key" ON "User"("email");`. Releases A and B do not need it.
 
 ## Local validation
 
-- `bash scripts/test-user-auth-realm-db.sh` runs 15 checks on a disposable PostgreSQL cluster:
-  - It loads the previous release's schema (`release/studio-go-live`) with legacy users, applies the expand migration, and confirms there is no drift against `prisma/schema.prisma`.
-  - It checks previous-release inserts and lookups, the fail-closed same-email Substo insert, and global `clerkId` uniqueness.
-  - It then applies the contract step and checks drift against the contracted schema, one row per realm for the same email, and same-realm duplicate rejection.
-- Unit tests: `npx tsx --test lib/auth/realm-user-link.test.ts lib/auth/clerk-business-webhook.test.ts lib/auth/realm-identity-contract.test.ts`.
+- `bash scripts/test-user-auth-realm-db.sh` builds a disposable PostgreSQL cluster from the previous release's schema (`release/studio-go-live`) with legacy users, an Estio brand and a membership, then applies the three migrations in order. It checks:
+  - No drift before and after the contract step.
+  - Writes in the previous release's style still work.
+  - The same-email Substo insert fails closed before the contract step and succeeds after it, once per app.
+  - `clerkId` stays globally unique.
+  - All realm triggers fire.
+  - The contract guard rejects a same-deploy run.
+  - The brand service integration tests (`lib/brands/brand-service.db.test.ts`) pass against the migrated database.
+- Unit and contract tests: `npx tsx --test lib/auth/realm-user-link.test.ts lib/auth/clerk-business-webhook.test.ts lib/auth/realm-identity-contract.test.ts lib/brands/brand-policy.test.ts`.

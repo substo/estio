@@ -26,6 +26,16 @@ model Location {
   timeZone                      String? // IANA timezone, e.g. "Europe/Nicosia"
   lastSsoValidation             DateTime?
   lastSsoUserId                 String?
+  // App (Clerk realm) that owns this brand. Members must belong to the same
+  // realm; a database trigger enforces this. "Location" in code = brand.
+  authRealm                     AuthRealm                      @default(estio)
+  // Substo brands keep their Studio workspace here; Estio maps the other way
+  // (studio_workspaces.estio_location_id in the Studio database).
+  studioWorkspaceId             String?                        @unique
+  // Set only on the brand created automatically at a user's first Substo
+  // sign-in, so that creation happens at most once per user.
+  autoCreatedForUserId          String?                        @unique
+  brandInvitations              BrandInvitation[]
   companies                     Company[]
   contacts                      Contact[]
   properties                    Property[]
@@ -138,6 +148,38 @@ model Location {
   legacyCrmLeadEmailPinConversation       Boolean  @default(true)
   legacyCrmLeadEmailAutoProcess           Boolean  @default(false)
   legacyCrmLeadEmailAutoDraftFirstContact Boolean  @default(false)
+
+  @@index([authRealm])
+}
+
+/// Invitation to join one brand in one app. A row per (brand, email) cycles
+/// between statuses; acceptance requires a verified email in the same realm.
+model BrandInvitation {
+  id                String                @id @default(cuid())
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  locationId        String
+  location          Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  authRealm         AuthRealm
+  email             String // normalized: trimmed, lower case
+  role              UserRole              @default(MEMBER)
+  status            BrandInvitationStatus @default(PENDING)
+  invitedById       String?
+  invitedBy         User?                 @relation("BrandInvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedById      String?
+  acceptedBy        User?                 @relation("BrandInvitationAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+  acceptedAt        DateTime?
+  revokedAt         DateTime?
+  clerkInvitationId String?
+
+  @@unique([locationId, email])
+  @@index([authRealm, email, status])
+}
+
+enum BrandInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
 }
 
 model LeadSource {
@@ -209,9 +251,9 @@ model User {
   // Identity realm (Clerk application) that owns this user. Equal emails in
   // different realms are different people; never link or merge across realms.
   authRealm     AuthRealm @default(estio)
-  // Global uniqueness is retained only until the contract migration; code must
-  // look users up by `authRealm_email`.
-  email         String   @unique
+  // Unique per realm only (`authRealm_email`); the same email in the other
+  // app is a different person.
+  email         String
   name          String? // Legacy - kept for backward compatibility
   firstName     String?
   lastName      String?
@@ -247,6 +289,8 @@ model User {
   locationSessionActivities    LocationSessionActivity[]
   impersonationsStarted        ImpersonationAudit[] @relation("ImpersonationActor")
   impersonationsReceived       ImpersonationAudit[] @relation("ImpersonationTarget")
+  brandInvitationsSent         BrandInvitation[]    @relation("BrandInvitationInvitedBy")
+  brandInvitationsAccepted     BrandInvitation[]    @relation("BrandInvitationAcceptedBy")
   taskReminderJobs             TaskReminderJob[]
   taskReminderPreference       UserTaskReminderPreference?
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")

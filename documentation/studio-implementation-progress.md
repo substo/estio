@@ -1,10 +1,36 @@
 # Shared Studio implementation progress
 
-## Latest local slice: realm-scoped Business identity (CRM on Substo, slice 1)
+## Latest local slices: brands on Substo and Studio on top of the brand (CRM on Substo, slices 1–2)
+
+Implemented locally on `feature/crm-realm-identity` per [the Substo CRM design](substo-crm-design.md). No production data change, migration or deployment occurred.
+
+- **Brands (slice 1):**
+  - A brand is a Prisma `Location` with `authRealm`.
+  - Database triggers reject any membership, role or invitation across apps, and any change of a user's or brand's app.
+  - At each Substo `/studio` entry, the app claims pending brand invitations for the user's verified emails and adopts pre-brand Studio workspaces as brands, importing their members once. If the user is still in no brand, it creates their brand automatically, at most once per user.
+  - `/brand/team` invites by email through Substo's own Clerk application; existing Substo accounts are added immediately. It also changes roles, removes members and lets people leave, and a brand always keeps an admin. `/brand/settings` renames the brand.
+  - Estio platform-admin login lists Estio brands only. `/admin` stays Estio-only: blocked in middleware, with a second check in the admin layout.
+- **Studio on top of the brand (slice 2):**
+  - Substo Studio access is resolved from the brand team. The Studio membership row is re-synced on each access (added, re-roled or removed) and removed before a member is taken off the team, so Studio's SQL checks and worker paths agree. No Studio migration is needed.
+  - Studio invite links and their actions are retired.
+  - The Substo chooser lists brands and opens a single brand directly.
+- **Layout:** Studio and brand pages in both apps use the CRM's collapsible sidebar shell: logo, product switch and menu, plus a top bar with the brand switcher. Estio's admin shell gained optional props only. The CRM/Studio product-switch slice from the main checkout is included unchanged (commit `2ef443e0`).
+- **Migrations and rollout:**
+  - The contract step now ships in release B. It is guarded: it refuses to run in the same deploy that applied the expand step.
+  - Order: release A (`9e2d34ad`), then release B (branch head). See [the rollout runbook](crm-realm-identity-rollout.md).
+- **Validation:**
+  - `bash scripts/test-user-auth-realm-db.sh` passes all disposable-PostgreSQL checks plus 9 brand-service integration tests against the migrated database (`/tmp/crm-realm-pg.log`).
+  - Focused auth, brand, platform, Studio, team and switcher tests pass, except the pre-existing `assignment-recovery-contract` failure.
+  - Four conversations component tests fail identically on `release/studio-go-live` (`server-only` import).
+  - Compiler check: 0 diagnostics in 244 related files (`/tmp/crm-slice12-wide-types.log`).
+  - `npm run build` exits 0 with only public `NEXT_PUBLIC_*` values and an unreachable dummy database URL (`/tmp/crm-slice12-build.log`).
+- **Not verified:** a signed-in browser session, real Clerk invitation emails, and the real Studio database writes (the integration tests use in-memory Studio and Clerk fakes).
+
+## Local slice: realm-scoped Business identity (CRM on Substo, slice 0)
 
 Decision 2026-10-24 (user): Substo gets the same CRM as Estio, shown as-is first and generalised per niche later. Equal emails must never merge identities or data across realms. This slice makes Prisma `User` realm-aware. It is implemented locally on `feature/crm-realm-identity`, based on `release/studio-go-live`. No production data change, migration or deployment occurred.
 
-- **Schema:** `User.authRealm` (`estio` | `substo`, default `estio`) plus unique `(authRealm, email)` and `(authRealm, clerkId)`. The additive migration `20261024160000_user_auth_realm_expand` is safe for the running and previous release. The contract step that drops the global email index is staged in `prisma/contract-migrations/` for a later release. `clerkId` stays globally unique on purpose.
+- **Schema:** `User.authRealm` (`estio` | `substo`, default `estio`) plus unique `(authRealm, email)` and `(authRealm, clerkId)`. The additive migration `20261024160000_user_auth_realm_expand` is safe for the running and previous release. The contract step that drops the global email index ships in release B (see the slices 1–2 entry above). `clerkId` stays globally unique on purpose.
 - **Resolution and linking:** the realm comes from the verified host brand (tenant satellites count as Estio). Active location, platform admin, impersonation, `ensureUserExists`, permission helpers and Studio schedule authority are realm-scoped. Business access is `estio`-only until slice 3. Email claims (sign-in, team invite, GHL, property creators, scripts) happen only within one realm. A conflicting row in the other realm fails closed.
 - **Webhooks:** `/api/webhooks/clerk` verifies raw bytes with the host realm's secret (`CLERK_WEBHOOK_SECRET`, `SUBSTO_CLERK_WEBHOOK_SECRET`). It rejects identical secrets and other Clerk instances. Substo events cannot add Business members or tenant contacts. `clerk-mail` is Estio-only. All Business webhooks stay blocked on the Substo host.
 - **Rollout:** see [the realm identity rollout runbook](crm-realm-identity-rollout.md) for pre-checks, migration order, verification queries, rollback and the call-site audit.

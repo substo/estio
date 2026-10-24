@@ -1,11 +1,9 @@
 import type { ReactNode } from "react";
-import { StudioHeader } from "./_components/studio-header";
+import { StudioShell } from "./_components/studio-shell";
+import { getStudioShellData } from "./_components/studio-shell-data";
 
-export default function StudioLayout({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-screen bg-background text-foreground">
-      <StudioHeader />
-      {children}
-    </div>
-  );
+export default async function StudioLayout({ children }: { children: ReactNode }) {
+  const shell = await getStudioShellData();
+  if (!shell) return <div className="min-h-screen bg-background text-foreground">{children}</div>;
+  return <StudioShell {...shell}>{children}</StudioShell>;
 }

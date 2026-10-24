@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getStudioWorkspaceAccess } from "@/lib/studio/access";
-import { StudioInviteForm } from "../../_components/studio-invite-form";
 import { openEstioStudioBusinessAction } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -21,13 +20,13 @@ export default async function StudioWorkspacePage({
 
   if (access.brand === "substo") {
     return (
-      <main className="mx-auto flex min-h-[calc(100vh-56px)] w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-muted-foreground">Substo Studio · {access.role}</p>
+            <p className="text-sm text-muted-foreground">Studio · {access.role}</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">{workspace.name}</h1>
           </div>
-          <Link className="text-sm text-primary underline-offset-4 hover:underline" href="/studio">Switch workspace</Link>
+          <Link className="text-sm text-primary underline-offset-4 hover:underline" href="/brand/team">Invite your team</Link>
         </div>
         <section className="rounded-xl border bg-card p-6">
           <h2 className="text-lg font-medium">Research library</h2>
@@ -45,13 +44,12 @@ export default async function StudioWorkspacePage({
           <Link className="mt-4 inline-block text-sm font-medium text-primary hover:underline" href={`/studio/workspace/${workspace.id}/knowledge`}>Open knowledge</Link>
           <Link className="ml-4 text-sm font-medium text-primary hover:underline" href={`/studio/workspace/${workspace.id}/schedules`}>Schedule drafts</Link>
         </section>
-        {access.role === "owner" || access.role === "admin" ? <StudioInviteForm workspaceId={workspace.id} canInviteAdmins={access.role === "owner"} /> : null}
       </main>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">Estio Studio · {access.role}</p>

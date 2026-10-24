@@ -11,13 +11,17 @@ export type PlatformLocationLoginOption = {
 
 export async function listPlatformLocationLoginOptions(platformAdminUserId: string): Promise<PlatformLocationLoginOption[]> {
   const [locations, membershipRoles] = await Promise.all([
+    // Estio platform admins sign in through Estio's Clerk: only Estio brands
+    // and users can be impersonated, never Substo ones.
     db.location.findMany({
+      where: { authRealm: "estio" },
       orderBy: [{ isPlatformMaster: "desc" }, { name: "asc" }, { id: "asc" }],
       select: { id: true, name: true, isPlatformMaster: true },
     }),
     db.userLocationRole.findMany({
       where: {
         user: {
+          authRealm: "estio",
           clerkId: { not: null },
         },
       },

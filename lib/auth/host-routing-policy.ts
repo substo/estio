@@ -6,7 +6,7 @@ function isPathOrNested(pathname: string, root: string): boolean {
 
 export const CLERK_PROFILE_WEBHOOK_PATH = "/api/webhooks/clerk-profile";
 
-export type SubstoRouteKind = "root" | "auth" | "studio" | "studio-api" | "profile" | "webhook" | "blocked";
+export type SubstoRouteKind = "root" | "auth" | "studio" | "studio-api" | "brand" | "profile" | "webhook" | "blocked";
 
 /** Application routes on Substo never reach Estio's APIs or tenant resolver. */
 export function classifySubstoRoute(pathname: string): SubstoRouteKind {
@@ -15,6 +15,8 @@ export function classifySubstoRoute(pathname: string): SubstoRouteKind {
   if (isPathOrNested(pathname, "/sign-in") || isPathOrNested(pathname, "/sign-up")) return "auth";
   if (isPathOrNested(pathname, "/account/connections")) return "profile";
   if (isPathOrNested(pathname, "/studio")) return "studio";
+  // Brand pages (team, settings). The CRM (/admin) stays blocked until slice 3.
+  if (isPathOrNested(pathname, "/brand")) return "brand";
   if (isPathOrNested(pathname, "/api/studio")) return "studio-api";
   return "blocked";
 }
@@ -33,7 +35,7 @@ export function safeAuthRedirect(value: string | null, brand: HostBrand): string
   try {
     const target = new URL(value, "https://auth.invalid");
     if (target.origin !== "https://auth.invalid") return fallback;
-    if (brand === "substo" && !isPathOrNested(target.pathname, "/studio") && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
+    if (brand === "substo" && !isPathOrNested(target.pathname, "/studio") && !isPathOrNested(target.pathname, "/brand") && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
     return `${target.pathname}${target.search}${target.hash}`;
   } catch {
     return fallback;

@@ -18,10 +18,11 @@ export function authRealmForHostBrand(brand: HostBrand): AuthRealm {
 }
 
 /**
- * Realms whose users may reach Business (/admin, Prisma locations).
- * Substo is added in slice 3, after its tenancy and route firewall exist.
+ * Realms whose users can be members of brands (Prisma locations). Both apps
+ * have brands; which Business routes a realm may open is decided by the host
+ * route firewall (`classifySubstoRoute`), not here.
  */
-const BUSINESS_REALMS: ReadonlySet<AuthRealm> = new Set(["estio"]);
+const BUSINESS_REALMS: ReadonlySet<AuthRealm> = new Set(["estio", "substo"]);
 
 export function isBusinessRealm(realm: AuthRealm): boolean {
   return BUSINESS_REALMS.has(realm);

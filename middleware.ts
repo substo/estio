@@ -27,7 +27,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     if (routeKind === "blocked") {
       return new NextResponse("Not Found", { status: 404 });
     }
-    if (routeKind === "studio" || routeKind === "profile") await auth.protect();
+    if (routeKind === "studio" || routeKind === "brand" || routeKind === "profile") await auth.protect();
     // Studio API handlers validate their Clerk user and workspace access, returning
     // JSON errors to clients instead of Clerk's page-oriented protect redirect.
 

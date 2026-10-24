@@ -67,13 +67,13 @@ function fakeUsers(phase: "expand" | "contract", seed: Omit<Row, "locationIds">[
 
 const legacyEstio = { id: "estio-1", authRealm: "estio" as const, email: "shared@example.com", clerkId: "user_estio", firstName: "Ada", lastName: "Estio" };
 
-test("host brands map to realms; tenant satellites are Estio; only Estio has Business access in slice 1", () => {
+test("host brands map to realms; tenant satellites are Estio; both apps have brands", () => {
   assert.equal(authRealmForHostBrand("estio"), "estio");
   assert.equal(authRealmForHostBrand("tenant"), "estio");
   assert.equal(authRealmForHostBrand("substo"), "substo");
   assert.equal(isBusinessRealm("estio"), true);
-  assert.equal(isBusinessRealm("substo"), false);
-  assert.deepEqual(businessClerkIdWhere("user_x"), { clerkId: "user_x", authRealm: { in: ["estio"] } });
+  assert.equal(isBusinessRealm("substo"), true);
+  assert.deepEqual(businessClerkIdWhere("user_x"), { clerkId: "user_x", authRealm: { in: ["estio", "substo"] } });
 });
 
 test("legacy Estio users resolve by (estio, clerkId) and keep their identity", async () => {

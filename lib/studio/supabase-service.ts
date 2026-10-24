@@ -1,8 +1,6 @@
 import "server-only";
 import { isPlatformProfileDeleted } from "../platform/profile-lifecycle";
-import { createHash } from "node:crypto";
 import { queryPath, studioRest, studioRestAll } from "./rest";
-import type { StudioInvitationState } from "./invitation-policy";
 
 type WorkspaceBrand = "estio" | "substo";
 type WorkspaceType = "estio_location" | "substo_standalone";
@@ -79,6 +77,10 @@ export async function ensureEstioStudioWorkspace(
   throw new Error("Studio workspace could not be created for this Estio location.");
 }
 
+/**
+ * Pre-brand Substo workspaces a Clerk user is a member of. Used only to adopt
+ * them as brands; access is never granted from Studio membership directly.
+ */
 export async function listSubstoStudioWorkspaces(clerkUserId: string): Promise<SubstoStudioWorkspace[]> {
   if (await isPlatformProfileDeleted(studioRest, "substo", clerkUserId)) return [];
   const memberships = await studioRestAll<WorkspaceMembershipRow>("studio_workspace_memberships", {
@@ -103,31 +105,6 @@ export async function listSubstoStudioWorkspaces(clerkUserId: string): Promise<S
     const role = roleByWorkspace.get(workspace.id);
     return role ? [{ ...workspace, role }] : [];
   });
-}
-
-export async function getSubstoStudioWorkspaceForUser(
-  workspaceId: string,
-  clerkUserId: string,
-): Promise<SubstoStudioWorkspace | null> {
-  if (await isPlatformProfileDeleted(studioRest, "substo", clerkUserId)) return null;
-  const memberships = await studioRest<WorkspaceMembershipRow[]>(queryPath("studio_workspace_memberships", {
-    select: "workspace_id,role",
-    workspace_brand: "eq.substo",
-    workspace_id: `eq.${workspaceId}`,
-    clerk_user_id: `eq.${clerkUserId}`,
-    limit: "1",
-  }));
-  const membership = memberships[0];
-  if (!membership) return null;
-
-  const rows = await studioRest<StudioWorkspace[]>(queryPath("studio_workspaces", {
-    select: "id,brand,workspace_type,name,estio_location_id,created_at",
-    id: `eq.${workspaceId}`,
-    brand: "eq.substo",
-    workspace_type: "eq.substo_standalone",
-    limit: "1",
-  }));
-  return rows[0] ? { ...rows[0], role: membership.role } : null;
 }
 
 export async function createSubstoStudioWorkspace(
@@ -155,66 +132,70 @@ export async function createSubstoStudioWorkspace(
   return result;
 }
 
-export async function createSubstoStudioInvitation(input: {
-  workspaceId: string;
-  clerkUserId: string;
-  email: string;
-  role: "admin" | "member";
-  token: string;
-}): Promise<void> {
-  const email = input.email.trim().toLowerCase();
-  const tokenHash = createHash("sha256").update(input.token).digest("hex");
-  await studioRest<unknown>("studio_workspace_invitations", {
-    method: "POST",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({
-      workspace_id: input.workspaceId,
-      workspace_brand: "substo",
-      email,
-      role: input.role,
-      token_hash: tokenHash,
-      invited_by_clerk_user_id: input.clerkUserId,
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    }),
-  });
+const WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireWorkspaceId(workspaceId: string) {
+  if (!WORKSPACE_ID.test(workspaceId)) throw new Error("Studio workspace ID is invalid.");
 }
 
-export async function acceptSubstoStudioInvitation(input: {
-  token: string;
-  verifiedEmail: string;
-  clerkUserId: string;
-}): Promise<string> {
-  const tokenHash = createHash("sha256").update(input.token).digest("hex");
-  const membershipId = await studioRest<string>("rpc/studio_accept_substo_invitation", {
-    method: "POST",
-    body: JSON.stringify({
-      p_token_hash: tokenHash,
-      p_verified_email: input.verifiedEmail.trim().toLowerCase(),
-      p_clerk_user_id: input.clerkUserId,
-    }),
-  });
-  if (!/^[0-9a-f-]{36}$/i.test(membershipId)) {
-    throw new Error("Invitation acceptance returned an invalid membership identifier.");
-  }
-
-  const rows = await studioRest<Array<{ workspace_id: string }>>(queryPath("studio_workspace_memberships", {
-    select: "workspace_id",
-    id: `eq.${membershipId}`,
-    workspace_brand: "eq.substo",
-    clerk_user_id: `eq.${input.clerkUserId}`,
-    limit: "1",
+export async function substoStudioWorkspaceExists(workspaceId: string): Promise<boolean> {
+  requireWorkspaceId(workspaceId);
+  const rows = await studioRest<Array<{ id: string }>>(queryPath("studio_workspaces", {
+    select: "id", id: `eq.${workspaceId}`, brand: "eq.substo", workspace_type: "eq.substo_standalone", limit: "1",
   }));
-  if (!rows[0]?.workspace_id) throw new Error("Invitation membership could not be resolved.");
-  return rows[0].workspace_id;
+  return rows.length === 1;
 }
 
-export async function getSubstoStudioInvitation(token: string): Promise<StudioInvitationState | null> {
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const rows = await studioRest<StudioInvitationState[]>(queryPath("studio_workspace_invitations", {
-    select: "email,expires_at,revoked_at,accepted_at,accepted_by_clerk_user_id",
-    token_hash: `eq.${tokenHash}`,
-    workspace_brand: "eq.substo",
-    limit: "1",
+export async function getSubstoStudioWorkspace(workspaceId: string): Promise<StudioWorkspace | null> {
+  requireWorkspaceId(workspaceId);
+  const rows = await studioRest<StudioWorkspace[]>(queryPath("studio_workspaces", {
+    select: "id,brand,workspace_type,name,estio_location_id,created_at",
+    id: `eq.${workspaceId}`, brand: "eq.substo", workspace_type: "eq.substo_standalone", limit: "1",
   }));
   return rows[0] ?? null;
+}
+
+export async function renameSubstoStudioWorkspace(workspaceId: string, name: string): Promise<void> {
+  requireWorkspaceId(workspaceId);
+  await studioRest<unknown>(queryPath("studio_workspaces", { id: `eq.${workspaceId}`, brand: "eq.substo" }), {
+    method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ name: name.trim() }),
+  });
+}
+
+/**
+ * Studio membership rows for Substo are a mirror of the brand team (the source
+ * of truth in Business). They are kept because Studio's SQL functions lock and
+ * check them on every write.
+ */
+export async function listSubstoWorkspaceMembers(workspaceId: string): Promise<Array<{ clerkUserId: string; role: SubstoStudioWorkspace["role"] }>> {
+  requireWorkspaceId(workspaceId);
+  const rows = await studioRestAll<{ clerk_user_id: string; role: SubstoStudioWorkspace["role"] }>("studio_workspace_memberships", {
+    select: "clerk_user_id,role", workspace_id: `eq.${workspaceId}`, workspace_brand: "eq.substo", order: "created_at.asc,id.asc",
+  });
+  return rows.map((row) => ({ clerkUserId: row.clerk_user_id, role: row.role }));
+}
+
+export async function getSubstoMembershipRole(workspaceId: string, clerkUserId: string): Promise<SubstoStudioWorkspace["role"] | null> {
+  requireWorkspaceId(workspaceId);
+  const rows = await studioRest<WorkspaceMembershipRow[]>(queryPath("studio_workspace_memberships", {
+    select: "workspace_id,role", workspace_id: `eq.${workspaceId}`, workspace_brand: "eq.substo", clerk_user_id: `eq.${clerkUserId}`, limit: "1",
+  }));
+  return rows[0]?.role ?? null;
+}
+
+export async function upsertSubstoMembership(workspaceId: string, clerkUserId: string, role: SubstoStudioWorkspace["role"]): Promise<void> {
+  requireWorkspaceId(workspaceId);
+  if (await isPlatformProfileDeleted(studioRest, "substo", clerkUserId)) throw new Error("This profile was deleted.");
+  await studioRest<unknown>(`studio_workspace_memberships?on_conflict=workspace_id,clerk_user_id`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ workspace_id: workspaceId, workspace_brand: "substo", clerk_user_id: clerkUserId, role }),
+  });
+}
+
+export async function deleteSubstoMembership(workspaceId: string, clerkUserId: string): Promise<void> {
+  requireWorkspaceId(workspaceId);
+  await studioRest<unknown>(queryPath("studio_workspace_memberships", {
+    workspace_id: `eq.${workspaceId}`, workspace_brand: "eq.substo", clerk_user_id: `eq.${clerkUserId}`,
+  }), { method: "DELETE", headers: { Prefer: "return=minimal" } });
 }

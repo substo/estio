@@ -1,6 +1,6 @@
 import { Webhook } from "svix";
 import type { WebhookEvent } from "@clerk/nextjs/server";
-import { authRealmForHostBrand, isBusinessRealm, realmEmailWhere, type AuthRealm } from "./auth-realm";
+import { authRealmForHostBrand, realmEmailWhere, type AuthRealm } from "./auth-realm";
 import { getHostBrandConfig, resolveHostBrand } from "./host-brand";
 
 /**
@@ -74,9 +74,12 @@ export function realmHandlesTenantContacts(realm: AuthRealm): boolean {
   return realm === "estio";
 }
 
-/** Team invitations may link a user to a Business location only in a Business realm. */
+/**
+ * The webhook's team-invite branch is Estio's (GHL sync, location from
+ * invitation metadata). Substo claims brand invitations at sign-in instead.
+ */
 export function realmAcceptsTeamInvites(realm: AuthRealm): boolean {
-  return isBusinessRealm(realm);
+  return realm === "estio";
 }
 
 export type InvitedUserClaim = {

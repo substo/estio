@@ -227,16 +227,19 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
 export function AdminNavigationGroups({
   variant = "desktop",
   collapsed = false,
+  groups = ADMIN_NAV_GROUPS,
 }: {
   variant?: "desktop" | "mobile"
   collapsed?: boolean
+  /** Defaults to the CRM menu; Studio passes its own groups with the same look. */
+  groups?: AdminNavGroup[]
 }) {
   const compact = variant === "desktop" && collapsed
 
   return (
     <TooltipProvider delayDuration={150}>
       <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-3.5 text-sm" : "space-y-4 px-3 text-sm")}>
-        {ADMIN_NAV_GROUPS.map((group, index) => (
+        {groups.map((group, index) => (
           <div key={group.label || `primary-${index}`} className={clsx(compact ? "space-y-1.5" : "space-y-1")}>
             {group.label && (
               <h4
@@ -249,7 +252,7 @@ export function AdminNavigationGroups({
               </h4>
             )}
             {group.items.map((item) => (
-              <AdminNavLink key={item.href} item={item} variant={variant} collapsed={compact} />
+              <AdminNavLink key={`${item.label}:${item.href}`} item={item} variant={variant} collapsed={compact} />
             ))}
           </div>
         ))}
