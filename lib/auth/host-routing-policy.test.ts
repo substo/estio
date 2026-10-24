@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import middleware, { config } from "../../middleware";
-import { classifySubstoRoute, safeAuthRedirect, skipsLegacyEstioMiddleware } from "./host-routing-policy";
+import { classifySubstoRoute, safeAuthRedirect, signedInHandoff, SIGNED_IN_HANDOFF_WINDOW_MS, skipsLegacyEstioMiddleware } from "./host-routing-policy";
 
 test("API and application paths with file suffixes still run the brand firewall", () => {
   for (const pathname of [
@@ -136,4 +136,14 @@ test("exact profile webhook bypasses browser auth readiness on first-party realm
   const response = await middleware(new NextRequest("https://customer.example/api/webhooks/clerk-profile", { method: "POST", headers: { host: "customer.example" } }), undefined);
   assert.ok(response); assert.equal(response.status, 404);
  } finally { if (previous === undefined) delete process.env.SUBSTO_APP_HOSTS; else process.env.SUBSTO_APP_HOSTS = previous; }
+});
+
+test("signed-in Substo sign-in pages hand off once with a full load, then stop", () => {
+  const now = 1_000_000;
+  assert.equal(signedInHandoff("estio", null, now), "none");
+  assert.equal(signedInHandoff("tenant", null, now), "none");
+  assert.equal(signedInHandoff("substo", null, now), "redirect");
+  assert.equal(signedInHandoff("substo", now - 2_000, now), "stalled");
+  assert.equal(signedInHandoff("substo", now - SIGNED_IN_HANDOFF_WINDOW_MS, now), "redirect");
+  assert.equal(signedInHandoff("substo", now + 5_000, now), "redirect");
 });

@@ -39,3 +39,16 @@ export function safeAuthRedirect(value: string | null, brand: HostBrand): string
     return fallback;
   }
 }
+
+/** A recent hard handoff that returned to sign-in means the server rejected the session. */
+export const SIGNED_IN_HANDOFF_WINDOW_MS = 15_000;
+
+/**
+ * Substo leaves a signed-in sign-in page with a full document load: in-app
+ * navigation can replay a redirect cached while signed out and loop forever.
+ */
+export function signedInHandoff(brand: HostBrand, lastAttemptAt: number | null, now: number): "none" | "redirect" | "stalled" {
+  if (brand !== "substo") return "none";
+  if (lastAttemptAt !== null && now - lastAttemptAt >= 0 && now - lastAttemptAt < SIGNED_IN_HANDOFF_WINDOW_MS) return "stalled";
+  return "redirect";
+}
