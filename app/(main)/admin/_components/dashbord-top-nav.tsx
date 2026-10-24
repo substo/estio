@@ -12,6 +12,7 @@ import { ReactNode } from 'react'
 import { APP_NAME } from "@/components/app-logo"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
 import { AdminNavigationGroups } from "./admin-navigation"
+import { AdminProductSwitcher } from "./admin-product-switcher"
 import { cn } from "@/lib/utils"
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
 import { ActiveLocationSwitcher } from "./active-location-switcher"
@@ -66,6 +67,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
                   icon="languages"
                 />
               </div>
+              <AdminProductSwitcher locationId={activeLocation.id} />
               <AdminNavigationGroups variant="mobile" />
             </div>
           </SheetContent>

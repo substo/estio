@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { AdminNavigationGroups } from "./admin-navigation"
+import { AdminProductSwitcher } from "./admin-product-switcher"
 import { cn } from "@/lib/utils"
 
 export default function DashboardSideBar({
@@ -12,12 +13,14 @@ export default function DashboardSideBar({
   logoUrl,
   lightUrl,
   appSurface = false,
+  activeLocationId,
   onCollapsedChange,
 }: {
   collapsed: boolean
   logoUrl?: string
   lightUrl?: string
   appSurface?: boolean
+  activeLocationId: string
   onCollapsedChange: (collapsed: boolean) => void
 }) {
   const ToggleIcon = collapsed ? ChevronRight : ChevronLeft
@@ -41,7 +44,8 @@ export default function DashboardSideBar({
             className={collapsed ? "justify-center" : "min-w-0"}
           />
         </div>
-        <div className="flex-1 overflow-auto py-3">
+        <AdminProductSwitcher locationId={activeLocationId} compact={collapsed} className={collapsed ? "mx-3.5" : "mx-3"} />
+        <div className="flex-1 overflow-auto py-1">
           <AdminNavigationGroups collapsed={collapsed} />
         </div>
       </div>

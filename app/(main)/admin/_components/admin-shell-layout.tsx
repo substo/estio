@@ -89,6 +89,7 @@ export function AdminShellLayout({
           logoUrl={logoUrl}
           lightUrl={lightUrl}
           appSurface={appSurface}
+          activeLocationId={activeLocation.id}
           onCollapsedChange={handleSidebarCollapsedChange}
         />
         <DashboardTopNav appSurface={appSurface} activeLocation={activeLocation} availableLocations={availableLocations} platformLoginLocations={platformLoginLocations}>{children}</DashboardTopNav>

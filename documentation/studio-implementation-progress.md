@@ -11,6 +11,14 @@ Decision 2026-10-24 (user): Substo gets the same CRM as Estio, shown as-is first
 - **Validation:** 23 new unit/contract tests. The focused auth/platform/Studio/team suites pass except one pre-existing failure (`assignment-recovery-contract`, which also fails on the base). `bash scripts/test-user-auth-realm-db.sh` passes all 15 disposable-PostgreSQL checks (`/tmp/crm-realm-pg.log`). The changed files show no new compiler diagnostics: 7 pre-existing ones remain in `team/actions.ts` and `sso/validate` (`/tmp/crm-realm-types.log`). `npm run build` exits 0 with only public `NEXT_PUBLIC_*` values and an unreachable dummy database URL in the environment (`/tmp/crm-realm-build.log`). Not yet checked in a signed-in browser.
 - **Next:** release A (expand) under separate authorization, then release B (contract). The approved direction and the following slices (brands on Substo, Studio on top of the brand, opening the CRM, generic look, website) are in [the Substo CRM design](substo-crm-design.md).
 
+## Local slice: CRM/Studio product switch (post go-live)
+
+Studio is live on `https://substo.com` and `https://estio.co` from `release/studio-go-live` (see [the go-live plan](studio-go-live-plan.md#first-activation-record-2026-10-24)). This slice is local and not yet deployed. It was written in the main checkout and carried onto `feature/crm-realm-identity` unchanged.
+
+- **Switch under the logo:** `components/product-switcher.tsx` is a shared segmented **CRM | Studio** control. In Estio CRM it sits directly below the logo in the desktop sidebar (icon-only when collapsed) and at the top of the mobile menu. **Studio** opens the active location's Studio workspace directly through `openEstioStudioLocation`, which re-checks location access server-side instead of trusting the client. The separate "Studio" sidebar item is replaced by the switch. In the Studio header on Estio, the same switch replaces the "Business" link. **CRM** returns to the workspace's location through `openEstioStudioBusinessAction`, or to `/admin` from the workspace chooser.
+- **Substo:** the switch shows only products that have a target, so it stays hidden on Substo until Substo has a CRM. No dead CRM link appears.
+- **Validation:** 3 render tests (`npx tsx --test components/product-switcher.test.tsx`); zero compiler diagnostics in the 8 affected files (`/tmp/estio-switcher-types.cjs`); `npm run build` exit 0 (`/tmp/estio-switcher-build.log`). Not yet checked in a signed-in browser.
+
 ## Latest local combined-rollback slice
 
 **Web + Studio worker roll back together, and a fastest go-live plan** are implemented locally. No production change or deployment occurred.
