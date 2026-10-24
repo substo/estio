@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { upsertProject } from "@/lib/projects/repository";
@@ -17,6 +19,7 @@ export type ActionState = {
 };
 
 export async function upsertProjectAction(prevState: ActionState, formData: FormData): Promise<ActionState> {
+    await assertCrmActionAllowed("projects/actions.ts", "upsertProjectAction");
     const locationId = formData.get("locationId") as string;
     const name = formData.get("name") as string;
     const ghlProjectId = formData.get("ghlProjectId") as string;

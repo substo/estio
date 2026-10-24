@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import db from '@/lib/db';
@@ -130,6 +132,7 @@ export async function listContactTasks(
   statusFilter?: ContactTaskStatusFilter,
   options: ListContactTasksOptions = {},
 ) {
+    await assertCrmActionAllowed("tasks/actions.ts", "listContactTasks");
   const { location } = await getAuthContext();
   const resolvedContact = await resolveContact(location.id, String(contactId || '').trim());
   if (!resolvedContact) {
@@ -199,6 +202,7 @@ export async function listLocationTasks(
   statusFilter?: ContactTaskStatusFilter,
   options: ListLocationTasksOptions = {},
 ) {
+    await assertCrmActionAllowed("tasks/actions.ts", "listLocationTasks");
   const { location } = await getAuthContext();
   const filter = statusFilterSchema.parse(statusFilter || 'all') as ContactTaskStatusFilter;
   const includeCounts = options.includeCounts ?? true;
@@ -289,6 +293,7 @@ export async function listLocationTasks(
 }
 
 export async function listTaskAssignableUsers() {
+    await assertCrmActionAllowed("tasks/actions.ts", "listTaskAssignableUsers");
   const { location, userId, currentUserTimeZone } = await getAuthContext();
 
   const users = await db.user.findMany({
@@ -321,6 +326,7 @@ export async function listTaskAssignableUsers() {
 }
 
 export async function getTaskDetail(taskId: string) {
+    await assertCrmActionAllowed("tasks/actions.ts", "getTaskDetail");
   const { location } = await getAuthContext();
   const id = String(taskId || '').trim();
   if (!id) {
@@ -451,6 +457,7 @@ export async function getTaskDetail(taskId: string) {
 }
 
 export async function createContactTask(input: z.input<typeof createTaskSchema>) {
+    await assertCrmActionAllowed("tasks/actions.ts", "createContactTask");
   const { location, userId, currentUserTimeZone } = await getAuthContext();
   const parsed = createTaskSchema.parse(input);
 
@@ -523,6 +530,7 @@ export async function createContactTask(input: z.input<typeof createTaskSchema>)
 }
 
 export async function updateContactTask(input: z.input<typeof updateTaskSchema>) {
+    await assertCrmActionAllowed("tasks/actions.ts", "updateContactTask");
   const { location, userId, currentUserTimeZone } = await getAuthContext();
   const parsed = updateTaskSchema.parse(input);
 
@@ -595,6 +603,7 @@ export async function updateContactTask(input: z.input<typeof updateTaskSchema>)
 }
 
 export async function setContactTaskCompletion(taskId: string, completed: boolean) {
+    await assertCrmActionAllowed("tasks/actions.ts", "setContactTaskCompletion");
   const { location, userId } = await getAuthContext();
 
   const existing = await db.contactTask.findFirst({
@@ -633,6 +642,7 @@ export async function setContactTaskCompletion(taskId: string, completed: boolea
 }
 
 export async function deleteContactTask(taskId: string) {
+    await assertCrmActionAllowed("tasks/actions.ts", "deleteContactTask");
   const { location, userId } = await getAuthContext();
 
   const existing = await db.contactTask.findFirst({

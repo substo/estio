@@ -1,5 +1,16 @@
 # Shared Studio implementation progress
 
+## Latest local slice: open the generic CRM on Substo (slice 3)
+
+Implemented locally on `feature/crm-realm-identity`; no production data change, migration or deployment occurred.
+
+- Substo opens the dashboard, contacts/pipeline, companies, projects, conversations/deals/tasks, page/post editors, notifications, profile and team entry. Team delegates to the existing brand team. Direct CRM entry performs the same invitation/first-brand setup as Studio.
+- A default-deny host policy admits only reviewed pages and supporting APIs. Property/listing/prospecting/viewing/live-assist routes, GHL, platform tools, public-site configuration, provider connections/sends/imports and operational endpoints stay closed. Website addressing is slice 5; the content editors are available now. AI drafts, translation and summaries use the existing tenant-authorized paths; provider onboarding and automated tools are not opened here.
+- All 413 exported non-Studio/brand Server Actions have an app guard, with an explicit list of the generic actions allowed on Substo. A blocked action cannot be invoked by posting its ID to an allowed page. Unknown exports fail closed. Contact CRUD also rejects property workflow payloads.
+- Active location resolution filters memberships by the verified host realm and rechecks the selected tenant's realm. Foreign cookies and posted location IDs cannot select an Estio brand. Platform administration stays Estio-only.
+- Desktop/mobile navigation and shared contact/inbox controls hide unavailable modules. The CRM product switch and generic branding/vocabulary remain slice 4.
+- Validation: 135 auth/brand/contact-access tests (38 new isolation tests), disposable migration checks plus 10 integration tests, 19 realtime and 2 header tests pass. Studio/switcher/team: 106/107, with the documented pre-existing assignment-recovery failure. Zero new compiler diagnostics (47 unchanged diagnostics across 79 files). Build passes, 129/129 pages. See [the route audit and rollout](substo-crm-route-firewall.md). Signed-in two-app browser acceptance remains pending.
+
 ## Latest local slices: brands on Substo and Studio on top of the brand (CRM on Substo, slices 1–2)
 
 Implemented locally on `feature/crm-realm-identity` per [the Substo CRM design](substo-crm-design.md). No production data change, migration or deployment occurred.

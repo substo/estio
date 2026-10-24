@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { getActiveContactsAccess } from "@/lib/contacts/active-location-access";
 import {
   listSoftDeletedAssets,
@@ -18,6 +20,7 @@ async function requireMediaAdminLocation() {
  * Lists all soft-deleted (trashed) media assets for the admin UI.
  */
 export async function listTrashedMediaAction() {
+    await assertCrmActionAllowed("settings/media/actions.ts", "listTrashedMediaAction");
   const locationId = await requireMediaAdminLocation();
 
   const { assets, total, expiredTotal } = await listSoftDeletedAssets({
@@ -51,6 +54,7 @@ export async function listTrashedMediaAction() {
  * Calls Cloudflare API to delete the physical file, then removes DB record.
  */
 export async function purgeExpiredMediaAction() {
+    await assertCrmActionAllowed("settings/media/actions.ts", "purgeExpiredMediaAction");
   const locationId = await requireMediaAdminLocation();
 
   const result = await purgeExpiredMediaAssets(locationId);
@@ -67,6 +71,7 @@ export async function purgeExpiredMediaAction() {
 export async function restoreMediaAssetAction(
   cloudflareImageId: string
 ) {
+    await assertCrmActionAllowed("settings/media/actions.ts", "restoreMediaAssetAction");
   const locationId = await requireMediaAdminLocation();
 
   await restoreMediaAsset(locationId, cloudflareImageId);

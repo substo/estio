@@ -1,9 +1,14 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from '@/lib/db';
 import { buildContactManageWhere, buildContactVisibilityWhere, getActiveContactsAccess } from '@/lib/contacts/active-location-access';
 
 export async function getPropertiesForSelect(locationId: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getPropertiesForSelect");
+    if (await getRequestAuthRealm() === "substo") return [];
     try {
         const access = await getActiveContactsAccess(locationId);
         if (!access) return [];
@@ -22,6 +27,7 @@ export async function getPropertiesForSelect(locationId: string) {
 
 
 export async function getCompaniesForSelect(locationId: string, type?: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getCompaniesForSelect");
     try {
         const access = await getActiveContactsAccess(locationId);
         if (!access) return [];
@@ -44,6 +50,7 @@ export async function getCompaniesForSelect(locationId: string, type?: string) {
 }
 
 export async function getContactsForSelect(locationId: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getContactsForSelect");
     try {
         const access = await getActiveContactsAccess(locationId);
         if (!access) return [];
@@ -62,6 +69,7 @@ export async function getContactsForSelect(locationId: string) {
 
 
 export async function getUsersForSelect(locationId: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getUsersForSelect");
     try {
         const access = await getActiveContactsAccess(locationId);
         if (!access) return [];
@@ -93,6 +101,7 @@ export async function getUsersForSelect(locationId: string) {
 }
 
 export async function getViewingFormOptions(locationId: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getViewingFormOptions");
     try {
         const access = await getActiveContactsAccess(locationId);
         if (!access) return { properties: [], users: [], contacts: [] };
@@ -140,6 +149,7 @@ export async function getViewingFormOptions(locationId: string) {
 }
 
 export async function getContactViewings(contactId: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getContactViewings");
     try {
         const access = await getActiveContactsAccess();
         if (!access) return { viewings: [], currentUserId: null, interestedProperties: [] };
@@ -175,6 +185,7 @@ export async function getContactViewings(contactId: string) {
 }
 
 export async function getContactHistory(contactId: string) {
+    await assertCrmActionAllowed("contacts/fetch-helpers.ts", "getContactHistory");
     try {
         const access = await getActiveContactsAccess();
         if (!access) return [];

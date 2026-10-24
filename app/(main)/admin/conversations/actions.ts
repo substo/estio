@@ -1,5 +1,8 @@
 'use server';
 
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { getConversations, getMessages, getConversation, sendMessage, getMessage, Conversation, Message } from "@/lib/ghl/conversations";
 import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
@@ -2000,6 +2003,7 @@ async function getAuthenticatedLocationActorFastReadOnly(options?: { requireGhlT
 }
 
 async function getAuthenticatedLocationExternal() {
+    if (await getRequestAuthRealm() === "substo") return getAuthenticatedLocationReadOnly();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: true });
     try {
         return await refreshGhlAccessToken(location);
@@ -2047,6 +2051,7 @@ export async function fetchConversations(
     selectedConversationId?: string | null,
     options?: { cursor?: string | null; limit?: number | null; scope?: "my" | "location" }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "fetchConversations");
     const traceId = createTraceId();
     try {
         const DEFAULT_PAGE_SIZE = 50;
@@ -2105,12 +2110,13 @@ export async function fetchMessages(
     conversationId: string,
     options?: FetchMessagesOptions
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "fetchMessages");
     const startedAtMs = Date.now();
     const timings: Record<string, number> = {};
     const markTiming = (key: string, sinceMs: number) => {
         timings[key] = Date.now() - sinceMs;
     };
-    const ensureHistory = !!options?.ensureHistory;
+    const ensureHistory = !!options?.ensureHistory && await getRequestAuthRealm() !== "substo";
     const authStartedAtMs = Date.now();
     const { access, location: readOnlyLocation } = await getAuthenticatedConversationContext("location");
     const location = ensureHistory
@@ -2134,7 +2140,7 @@ export async function fetchMessages(
         requestedConversationId: conversationId,
         location,
         conversation,
-        options,
+        options: { ...options, ensureHistory },
         reusedConversationContext: false,
         initialTimings: timings,
         startedAtMs,
@@ -2173,6 +2179,7 @@ export async function getConversationWorkspaceCore(
     conversationId: string,
     options?: ConversationWorkspaceCoreOptions
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationWorkspaceCore");
     const traceId = createTraceId();
     const trimmedConversationId = String(conversationId || "").trim();
 
@@ -2276,6 +2283,7 @@ export async function getConversationWorkspaceCore(
 }
 
 export async function getConversationWorkspaceSidebar(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationWorkspaceSidebar");
     const traceId = createTraceId();
     const trimmedConversationId = String(conversationId || "").trim();
 
@@ -2348,6 +2356,7 @@ export async function getConversationWorkspace(
     conversationId: string,
     options?: ConversationWorkspaceOptions
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationWorkspace");
     const traceId = createTraceId();
     const includeMessages = options?.includeMessages !== false;
     const includeActivity = options?.includeActivity !== false;
@@ -2408,6 +2417,7 @@ export async function getConversationListDelta(
     activeConversationId?: string | null,
     options?: { limit?: number; scope?: "my" | "location" }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationListDelta");
     const traceId = createTraceId();
 
     try {
@@ -2478,6 +2488,7 @@ export async function refreshConversationOnDemand(
     conversationId: string,
     mode: "metadata_only" | "full_sync" = "metadata_only"
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "refreshConversationOnDemand");
     const traceId = createTraceId();
     const trimmedConversationId = String(conversationId || "").trim();
     if (!trimmedConversationId) {
@@ -2673,6 +2684,7 @@ export async function searchConversationTranscriptMatches(
     conversationId: string,
     input?: z.input<typeof TranscriptSearchInputSchema>
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "searchConversationTranscriptMatches");
     const parsed = TranscriptSearchInputSchema.safeParse(input || {});
     if (!parsed.success) {
         return { success: false as const, error: "Invalid search query." };
@@ -2831,6 +2843,7 @@ export async function searchConversationTranscriptMatches(
 export async function getAudioTranscriptMonthlyReport(
     input?: z.input<typeof TranscriptMonthlyReportInputSchema>
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAudioTranscriptMonthlyReport");
     const parsed = TranscriptMonthlyReportInputSchema.safeParse(input || {});
     if (!parsed.success) {
         return { success: false as const, error: "Invalid report query." };
@@ -3180,6 +3193,7 @@ export async function refetchWhatsAppMediaAttachment(
         batchSize?: number;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "refetchWhatsAppMediaAttachment");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
@@ -3285,6 +3299,7 @@ const getCachedTranscriptOnDemandEligibilityBase = unstable_cache(
 );
 
 export async function getWhatsAppTranscriptOnDemandEligibility(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getWhatsAppTranscriptOnDemandEligibility");
     try {
         const location = await getAuthenticatedLocationReadOnly();
         const trimmedConversationId = String(conversationId || "").trim();
@@ -3357,6 +3372,7 @@ export async function requestWhatsAppAudioTranscript(
         priority?: WhatsAppTranscriptOnDemandPriority;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "requestWhatsAppAudioTranscript");
     try {
         const location = await getAuthenticatedLocation();
         const force = !!options?.force;
@@ -3569,6 +3585,7 @@ export async function bulkRequestWhatsAppAudioTranscripts(
         priority?: WhatsAppTranscriptOnDemandPriority;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "bulkRequestWhatsAppAudioTranscripts");
     try {
         const location = await getAuthenticatedLocation();
         const window = options?.window === "all" ? "all" : "30d";
@@ -3815,6 +3832,7 @@ export async function extractWhatsAppViewingNotes(
         allowInlineFallback?: boolean;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "extractWhatsAppViewingNotes");
     try {
         const location = await getAuthenticatedLocation();
         const force = !!options?.force;
@@ -4082,6 +4100,7 @@ export async function retryWhatsAppAudioTranscript(
     messageId: string,
     attachmentId: string
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "retryWhatsAppAudioTranscript");
     try {
         const location = await getAuthenticatedLocation();
         const manualAccess = await resolveTranscriptManualActionAccess(location.id);
@@ -4246,6 +4265,7 @@ export async function retryWhatsAppAudioTranscript(
 }
 
 export async function syncWhatsAppHistory(conversationId: string, limit: number = 20, ignoreDuplicates: boolean = false, _offset: number = 0) {
+    await assertCrmActionAllowed("conversations/actions.ts", "syncWhatsAppHistory");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const conversation = await db.conversation.findFirst({
@@ -4593,6 +4613,7 @@ export async function createWhatsAppMediaUploadUrl(
     contactId: string,
     file: { fileName: string; contentType: string; size: number }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createWhatsAppMediaUploadUrl");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const transportState = await resolveWhatsAppOutboundTransport(location.id);
     if (transportState.transport === "web_bridge" && !transportState.webBridgeConfigured) {
@@ -4681,6 +4702,7 @@ export async function createWhatsAppImageUploadUrl(
     contactId: string,
     file: { fileName: string; contentType: string; size: number }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createWhatsAppImageUploadUrl");
     const mediaKind = getWhatsAppMediaKind(file.contentType, file.fileName);
     if (mediaKind !== "image") {
         return { success: false, error: `Unsupported image type: ${String(file.contentType || "").toLowerCase() || "unknown"}` };
@@ -4700,6 +4722,7 @@ export async function sendWhatsAppMediaReply(
         clientSentAt?: string | null;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "sendWhatsAppMediaReply");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const cleanCaption = String(options?.caption || "").trim();
@@ -4889,6 +4912,7 @@ export async function sendWhatsAppImageReply(
     caption: string,
     upload: WhatsAppImageUploadRef
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "sendWhatsAppImageReply");
     return sendWhatsAppMediaReply(conversationId, contactId, {
         ...upload,
         kind: "image",
@@ -4908,6 +4932,7 @@ export async function sendWhatsAppTemplateReply(
     },
     options?: { clientMessageId?: string | null }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "sendWhatsAppTemplateReply");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const transportState = await resolveWhatsAppOutboundTransport(location.id, "cloud_api");
@@ -5098,6 +5123,7 @@ export async function sendReply(
         retryMessageId?: string | null;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "sendReply");
     try {
         const { access: sendAccess, location: sendLocation } = await getAuthenticatedConversationContext("location");
         const authorizedConversation = await db.conversation.findFirst({
@@ -5714,6 +5740,7 @@ export async function generateAIDraft(
     model?: string,
     options?: GenerateAIDraftOptions
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "generateAIDraft");
     const overallStartedAt = Date.now();
     logAIDraftTiming("generateAIDraft_start", {
         conversationId,
@@ -5841,6 +5868,7 @@ export async function generateComposerAIDraft(
     model?: string,
     options?: GenerateAIDraftOptions
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "generateComposerAIDraft");
     const overallStartedAt = Date.now();
     logAIDraftTiming("generateComposerAIDraft_start", {
         conversationId,
@@ -5980,6 +6008,7 @@ export async function setConversationReplyLanguageOverride(
     conversationId: string,
     replyLanguage: string | null
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "setConversationReplyLanguageOverride");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedConversationId = String(conversationId || "").trim();
 
@@ -6028,6 +6057,7 @@ export async function previewTranslatedReply(
     targetLanguage?: string | null,
     requestedModelId?: string | null
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "previewTranslatedReply");
     const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedConversationId = String(conversationId || "").trim();
@@ -6162,6 +6192,7 @@ export async function translateSelectedText(
     text: string,
     targetLanguage?: string | null
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "translateSelectedText");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedConversationId = String(conversationId || "").trim();
     const sourceText = String(text || "").trim();
@@ -6229,6 +6260,7 @@ export async function translateConversationMessage(
     messageId: string,
     targetLanguage?: string | null
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "translateConversationMessage");
     const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedMessageId = String(messageId || "").trim();
@@ -6460,6 +6492,7 @@ export async function translateConversationThread(
     targetLanguage?: string | null,
     visibleMessageIds?: string[] | null
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "translateConversationThread");
     const startedAt = Date.now();
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const trimmedConversationId = String(conversationId || "").trim();
@@ -6775,6 +6808,7 @@ export async function translateConversationThread(
 }
 
 export async function orchestrateAction(conversationId: string, contactId: string, dealStage?: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "orchestrateAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const requestedConversationId = String(conversationId || "").trim();
 
@@ -6935,6 +6969,7 @@ export async function orchestrateAction(conversationId: string, contactId: strin
 }
 
 export async function createDealContext(title: string, conversationIds: string[]) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createDealContext");
     const { access, location } = await getAuthenticatedConversationContext("location");
     const normalizedRefs = Array.from(new Set((conversationIds || []).map((id) => String(id || "").trim()).filter(Boolean)));
     if (normalizedRefs.length === 0) throw new Error("Select at least one conversation.");
@@ -7002,6 +7037,7 @@ export async function createDealContext(title: string, conversationIds: string[]
 // ... existing code ...
 
 export async function generateMultiContextDraftAction(dealContextId: string, targetAudience: 'LEAD' | 'OWNER') {
+    await assertCrmActionAllowed("conversations/actions.ts", "generateMultiContextDraftAction");
     const location = await getAuthenticatedLocation();
 
     if (!location.ghlAccessToken) throw new Error("Unauthorized");
@@ -7014,7 +7050,8 @@ export async function generateMultiContextDraftAction(dealContextId: string, tar
 }
 
 export async function getContactContext(contactId: string, options?: { refreshExternal?: boolean }) {
-    const refreshExternal = !!options?.refreshExternal;
+    await assertCrmActionAllowed("conversations/actions.ts", "getContactContext");
+    const refreshExternal = !!options?.refreshExternal && await getRequestAuthRealm() !== "substo";
     const location = refreshExternal
         ? await getAuthenticatedLocationExternal()
         : await getAuthenticatedLocationReadOnly();
@@ -7225,6 +7262,7 @@ async function buildCoordinatorClientIntelligenceContext(args: {
 }
 
 export async function listContactRequirementProposals(contactId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listContactRequirementProposals");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const contact = await db.contact.findFirst({
         where: {
@@ -7244,6 +7282,7 @@ export async function listContactRequirementProposals(contactId: string) {
 }
 
 export async function listContactVerificationProposals(contactId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listContactVerificationProposals");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const contact = await db.contact.findFirst({
         where: {
@@ -7263,6 +7302,7 @@ export async function listContactVerificationProposals(contactId: string) {
 }
 
 export async function updateContactClientContextAction(conversationId: string, contactId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "updateContactClientContextAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -7320,6 +7360,7 @@ export async function updateContactClientContextAction(conversationId: string, c
 }
 
 export async function scanContactVerificationAction(contactId: string, conversationId?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "scanContactVerificationAction");
     const startedAt = Date.now();
     const requestedConversationId = String(conversationId || "").trim();
     const logTiming = (event: string, fields: Record<string, unknown> = {}) => {
@@ -7417,6 +7458,7 @@ export async function scanContactVerificationAction(contactId: string, conversat
 }
 
 export async function approveContactRequirementProposalAction(proposalId: string, editedPatch?: any) {
+    await assertCrmActionAllowed("conversations/actions.ts", "approveContactRequirementProposalAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -7438,6 +7480,7 @@ export async function approveContactRequirementProposalAction(proposalId: string
 }
 
 export async function rejectContactRequirementProposalAction(proposalId: string, reason?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "rejectContactRequirementProposalAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -7452,6 +7495,7 @@ export async function rejectContactRequirementProposalAction(proposalId: string,
 }
 
 export async function applyContactVerificationAction(proposalId: string, editedPatch?: any) {
+    await assertCrmActionAllowed("conversations/actions.ts", "applyContactVerificationAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -7473,6 +7517,7 @@ export async function applyContactVerificationAction(proposalId: string, editedP
 }
 
 export async function rejectContactVerificationAction(proposalId: string, reason?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "rejectContactVerificationAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -7487,6 +7532,7 @@ export async function rejectContactVerificationAction(proposalId: string, reason
 }
 
 export async function markContactVerifiedAction(contactId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "markContactVerifiedAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -7603,6 +7649,7 @@ const DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT = 12;
 const MAX_PROPERTY_MATCH_SEARCH_LIMIT = 25;
 
 export async function getPropertyMatchCampaignModelPreferenceAction() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getPropertyMatchCampaignModelPreferenceAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7632,6 +7679,7 @@ export async function savePropertyMatchCampaignModelPreferenceAction(
     model: string,
     fallbackPolicy: "same_provider" | "allow_paid" = "same_provider",
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "savePropertyMatchCampaignModelPreferenceAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7665,6 +7713,7 @@ export async function savePropertyMatchCampaignModelPreferenceAction(
 }
 
 export async function searchPropertyMatchCampaignPropertiesAction(query?: string, limit = DEFAULT_PROPERTY_MATCH_SEARCH_LIMIT) {
+    await assertCrmActionAllowed("conversations/actions.ts", "searchPropertyMatchCampaignPropertiesAction");
     const trimmed = String(query || "").trim();
     if (trimmed.length === 1) return [];
 
@@ -7732,6 +7781,7 @@ export async function createPropertyMatchCampaignAction(input: {
     scoringModel?: string | null;
     fallbackPolicy?: "same_provider" | "allow_paid" | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createPropertyMatchCampaignAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7760,6 +7810,7 @@ export async function createPropertyMatchCampaignFromSourceAction(input: {
     scoringModel?: string | null;
     fallbackPolicy?: "same_provider" | "allow_paid" | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createPropertyMatchCampaignFromSourceAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7797,6 +7848,7 @@ export async function createPropertyMatchCampaignFromSourceAction(input: {
 }
 
 export async function listPropertyMatchCampaignsAction(query?: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listPropertyMatchCampaignsAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return [];
@@ -7809,6 +7861,7 @@ export async function listPropertyMatchCampaignsAction(query?: string) {
 }
 
 export async function listContactPropertyRecommendationsAction(contactId: string, conversationId?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listContactPropertyRecommendationsAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return [];
@@ -7826,6 +7879,7 @@ export async function getPropertyMatchCampaignDetailAction(
     campaignId: string,
     queue?: "review" | "approved" | "sent" | "skipped" | "rejected" | "needs_profile_verification" | "ai_error" | "not_match" | "already_shared" | "all",
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getPropertyMatchCampaignDetailAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7851,6 +7905,7 @@ export async function updatePropertyMatchCampaignAction(campaignId: string, inpu
     title?: string | null;
     priorityNote?: string | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "updatePropertyMatchCampaignAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7877,6 +7932,7 @@ export async function updatePropertyMatchCampaignProcessingConfigAction(
         fallbackPolicy: "same_provider" | "allow_paid";
     },
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "updatePropertyMatchCampaignProcessingConfigAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7897,6 +7953,7 @@ export async function updatePropertyMatchCampaignProcessingConfigAction(
 }
 
 export async function deletePropertyMatchCampaignAction(campaignId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "deletePropertyMatchCampaignAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7919,6 +7976,7 @@ export async function processPropertyMatchCampaignBatchAction(
     modelOverride?: string | null,
     fallbackPolicy: "same_provider" | "allow_paid" = "same_provider",
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "processPropertyMatchCampaignBatchAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7940,6 +7998,7 @@ export async function processPropertyMatchCampaignBatchAction(
 }
 
 export async function retryPropertyMatchCampaignAiErrorsAction(campaignId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "retryPropertyMatchCampaignAiErrorsAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7957,6 +8016,7 @@ export async function retryPropertyMatchCampaignAiErrorsAction(campaignId: strin
 }
 
 export async function cancelPropertyMatchCampaignBatchAction(campaignId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "cancelPropertyMatchCampaignBatchAction");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const actor = await resolveLocationActorContext(location.id);
@@ -7974,6 +8034,7 @@ export async function cancelPropertyMatchCampaignBatchAction(campaignId: string)
 }
 
 export async function reviewPropertyMatchCandidateAction(candidateId: string, reviewerStatus: "approved" | "rejected" | "skipped" | "pending", reason?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "reviewPropertyMatchCandidateAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
@@ -7988,6 +8049,7 @@ export async function reviewPropertyMatchCandidateAction(candidateId: string, re
 }
 
 export async function generatePropertyMatchCandidateDraftAction(candidateId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "generatePropertyMatchCandidateDraftAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
@@ -8032,6 +8094,7 @@ export async function generatePropertyMatchCandidateDraftAction(candidateId: str
 }
 
 export async function savePropertyMatchCandidateDraftAction(candidateId: string, draftBody: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "savePropertyMatchCandidateDraftAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
@@ -8043,6 +8106,7 @@ export async function savePropertyMatchCandidateDraftAction(candidateId: string,
 }
 
 export async function sendPropertyMatchCandidateAction(candidateId: string, draftBody: string, channel?: "SMS" | "Email" | "WhatsApp" | "SMS_RELAY") {
+    await assertCrmActionAllowed("conversations/actions.ts", "sendPropertyMatchCandidateAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) return { success: false as const, error: "Unauthorized" };
@@ -8125,6 +8189,8 @@ async function getBasicAdminLocationContext() {
 }
 
 export async function getEmailSyncProvidersStatus() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getEmailSyncProvidersStatus");
+    if (await getRequestAuthRealm() === "substo") return { providers: [] as any[] };
     try {
         const { userId: clerkUserId } = await auth();
         if (!clerkUserId) {
@@ -8282,24 +8348,28 @@ export async function getEmailSyncProvidersStatus() {
 }
 
 export async function getAvailableAiModelsAction() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAvailableAiModelsAction");
     const location = await getBasicLocationContext();
     const { getAvailableModels } = await import("@/lib/ai/fetch-models");
     return getAvailableModels(location.id);
 }
 
 export async function getAiDraftModelPickerStateAction() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAiDraftModelPickerStateAction");
     const location = await getBasicLocationContext();
     const { getAiDraftModelPickerState } = await import("@/lib/ai/fetch-models");
     return getAiDraftModelPickerState(location.id);
 }
 
 export async function getAiModelPickerDefaultsAction() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAiModelPickerDefaultsAction");
     const location = await getBasicLocationContext();
     const { getAiModelPickerDefaults } = await import("@/lib/ai/fetch-models");
     return getAiModelPickerDefaults(location.id);
 }
 
 export async function getPropertyImageEnhancementModelCatalogAction(locationId?: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getPropertyImageEnhancementModelCatalogAction");
     const requestedLocationId = String(locationId || "").trim();
     const location = requestedLocationId
         ? await (async () => {
@@ -8484,6 +8554,15 @@ async function resolveConversationChannelCapabilitiesForLocation(
 }
 
 export async function getConversationChannelCapabilities(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationChannelCapabilities");
+    if (await getRequestAuthRealm() === "substo") return {
+      success: true as const, capabilities: {
+        SMS: unavailableChannel("unknown", "Messaging is not configured for this app."),
+        SMS_RELAY: unavailableChannel("unknown", "Messaging is not configured for this app."),
+        Email: unavailableChannel("unknown", "Messaging is not configured for this app."),
+        WhatsApp: unavailableChannel("unknown", "Messaging is not configured for this app."),
+      },
+    };
     try {
         const location = await getBasicLocationContext();
         const result = await resolveConversationChannelCapabilitiesForLocation(location, conversationId);
@@ -8507,6 +8586,7 @@ export async function getConversationChannelCapabilities(conversationId: string)
 }
 
 export async function getSmsChannelEligibility(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getSmsChannelEligibility");
     try {
         const location = await getBasicLocationContext();
 
@@ -8554,6 +8634,7 @@ export async function getSmsChannelEligibility(conversationId: string) {
 }
 
 export async function getWhatsAppChannelEligibility(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getWhatsAppChannelEligibility");
     try {
         const location = await getBasicLocationContext();
         const result = await resolveConversationChannelCapabilitiesForLocation(location, conversationId);
@@ -8578,6 +8659,7 @@ export async function getWhatsAppChannelEligibility(conversationId: string) {
 }
 
 export async function getWhatsAppWebBridgeStatus() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getWhatsAppWebBridgeStatus");
     try {
         const location = await getBasicAdminLocationContext();
         return getWhatsAppWebBridgeStatusForLocation(location);
@@ -8608,6 +8690,7 @@ export async function getWhatsAppWebBridgeStatus() {
 }
 
 export async function triggerWhatsAppWebBridgeConnection() {
+    await assertCrmActionAllowed("conversations/actions.ts", "triggerWhatsAppWebBridgeConnection");
     try {
         const location = await getBasicAdminLocationContext();
         const mode = await resolveLocationWhatsAppProviderMode(location.id);
@@ -8712,6 +8795,7 @@ export async function triggerWhatsAppWebBridgeConnection() {
 
 
 export async function sendWhatsAppFailureSmsFallback(messageId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "sendWhatsAppFailureSmsFallback");
     const normalizedMessageId = String(messageId || "").trim();
     if (!normalizedMessageId) {
         return { success: false as const, error: "Missing message ID." };
@@ -8798,6 +8882,7 @@ export async function sendWhatsAppFailureSmsFallback(messageId: string) {
 }
 
 export async function resendMessage(messageId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "resendMessage");
     const location = await getAuthenticatedLocation();
 
     // 1. Fetch Message
@@ -8940,6 +9025,7 @@ export async function resendMessage(messageId: string) {
 // --- AI Planner Actions ---
 
 export async function generatePlanAction(conversationId: string, contactId: string, goal: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "generatePlanAction");
     const location = await getAuthenticatedLocation();
 
     // 1. Fetch History
@@ -9009,6 +9095,7 @@ export async function generatePlanAction(conversationId: string, contactId: stri
 }
 
 export async function executeNextTaskAction(conversationId: string, contactId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "executeNextTaskAction");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const requestedConversationId = String(conversationId || "").trim();
     if (!requestedConversationId) {
@@ -9195,6 +9282,7 @@ export async function executeNextTaskAction(conversationId: string, contactId: s
 }
 
 export async function getAgentPlan(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAgentPlan");
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
             where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
@@ -9277,6 +9365,7 @@ export async function getAgentExecutionHistoryPage(
     conversationId: string,
     options?: { cursor?: string | null; limit?: number | null }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAgentExecutionHistoryPage");
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
         where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
@@ -9348,11 +9437,13 @@ export async function getAgentExecutionHistoryPage(
 
 // Compatibility wrapper used by mission-control summary hydration.
 export async function getAgentExecutions(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAgentExecutions");
     const page = await getAgentExecutionHistoryPage(conversationId, { limit: DEFAULT_TRACE_HISTORY_LIMIT });
     return page.items;
 }
 
 export async function getAgentExecutionDetail(conversationId: string, executionId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAgentExecutionDetail");
     const location = await getAuthenticatedLocation();
     const conversation = await db.conversation.findFirst({
         where: await buildAuthorizedConversationReferenceWhere(location.id, conversationId),
@@ -9375,12 +9466,14 @@ export async function getAgentExecutionDetail(conversationId: string, executionI
 import { getTrace } from "@/lib/ai/tracing-queries";
 
 export async function getTraceTreeAction(traceId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getTraceTreeAction");
     const location = await getAuthenticatedLocation();
     if (!location) throw new Error("Unauthorized");
     return getTrace(traceId);
 }
 
 export async function getContactInsightsAction(contactId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getContactInsightsAction");
     const location = await getAuthenticatedLocation();
 
     // Resolve contact ID first (could be GHL ID)
@@ -9409,6 +9502,7 @@ export async function getContactInsightsAction(contactId: string) {
  * (from MessageTranscript + MessageTranscriptExtraction).
  */
 export async function getAggregateAIUsage() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getAggregateAIUsage");
     const emptyResult = {
         today: { totalTokens: 0, totalCost: 0 },
         thisMonth: { totalTokens: 0, totalCost: 0 },
@@ -9845,6 +9939,7 @@ export async function getAggregateAIUsage() {
  * Used by the AI Thinking Trace Performance card.
  */
 export async function getConversationTranscriptUsage(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationTranscriptUsage");
     try {
         const { location } = await getAuthenticatedConversationContext("location");
 
@@ -9883,6 +9978,7 @@ export async function getConversationTranscriptUsage(conversationId: string) {
 
 
 export async function refreshConversation(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "refreshConversation");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     // Fetch from DB to get latest fields like suggestedActions
@@ -9927,6 +10023,7 @@ export async function refreshConversation(conversationId: string) {
 }
 
 export async function markConversationAsRead(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "markConversationAsRead");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationId) {
@@ -9985,6 +10082,7 @@ export async function markConversationAsRead(conversationId: string) {
 }
 
 export async function deleteConversations(conversationIds: string[]) {
+    await assertCrmActionAllowed("conversations/actions.ts", "deleteConversations");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
@@ -10047,6 +10145,7 @@ export async function deleteConversations(conversationIds: string[]) {
 }
 
 export async function restoreConversations(conversationIds: string[]) {
+    await assertCrmActionAllowed("conversations/actions.ts", "restoreConversations");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
@@ -10107,6 +10206,7 @@ export async function restoreConversations(conversationIds: string[]) {
 }
 
 export async function permanentlyDeleteConversations(conversationIds: string[]) {
+    await assertCrmActionAllowed("conversations/actions.ts", "permanentlyDeleteConversations");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
@@ -10153,6 +10253,7 @@ export async function permanentlyDeleteConversations(conversationIds: string[]) 
 }
 
 export async function archiveConversations(conversationIds: string[]) {
+    await assertCrmActionAllowed("conversations/actions.ts", "archiveConversations");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
@@ -10211,6 +10312,7 @@ export async function archiveConversations(conversationIds: string[]) {
 }
 
 export async function unarchiveConversations(conversationIds: string[]) {
+    await assertCrmActionAllowed("conversations/actions.ts", "unarchiveConversations");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     if (!conversationIds || conversationIds.length === 0) {
@@ -10268,6 +10370,7 @@ export async function unarchiveConversations(conversationIds: string[]) {
 }
 
 export async function emptyTrash() {
+    await assertCrmActionAllowed("conversations/actions.ts", "emptyTrash");
     const { access, location } = await getAuthenticatedConversationContext("location");
 
     try {
@@ -10306,6 +10409,7 @@ export async function emptyTrash() {
 }
 
 export async function getConversationParticipants(conversationId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getConversationParticipants");
     try {
         const location = await getAuthenticatedLocationReadOnly();
 
@@ -10361,6 +10465,7 @@ export async function getConversationParticipants(conversationId: string) {
 }
 
 export async function prepareGroupParticipantSave(participantId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "prepareGroupParticipantSave");
     try {
         const location = await getAuthenticatedLocationReadOnly();
 
@@ -10405,6 +10510,7 @@ const SaveGroupParticipantSchema = z.object({
 });
 
 export async function saveGroupParticipantContact(input: z.infer<typeof SaveGroupParticipantSchema>) {
+    await assertCrmActionAllowed("conversations/actions.ts", "saveGroupParticipantContact");
     try {
         const location = await getAuthenticatedLocationReadOnly();
 
@@ -10430,6 +10536,7 @@ export async function saveGroupParticipantContact(input: z.infer<typeof SaveGrou
 }
 
 export async function openConversationForGroupParticipant(participantId: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "openConversationForGroupParticipant");
     try {
         const location = await getAuthenticatedLocationReadOnly();
 
@@ -10894,6 +11001,7 @@ async function fetchWebBridgeChatsForPicker(location: { id: string }) {
 
 
 export async function fetchWhatsAppChats() {
+    await assertCrmActionAllowed("conversations/actions.ts", "fetchWhatsAppChats");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     return fetchWebBridgeChatsForPicker(location);
 }
@@ -10902,6 +11010,7 @@ export async function fetchWhatsAppChats() {
  * Create a new conversation for a phone number, with history backfill from WhatsApp Web Bridge.
  */
 export async function startNewConversation(phone: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "startNewConversation");
     const timer = createActionTimer("NewConversation");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const { userId: clerkUserId } = await auth();
@@ -11608,6 +11717,7 @@ async function persistLeadAnalysisTraceRecord(args: {
 }
 
 export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteInputSchema>) {
+    await assertCrmActionAllowed("conversations/actions.ts", "improveInternalNoteText");
     const parsed = ImproveNoteInputSchema.safeParse(input || {});
     if (!parsed.success) {
         return { success: false as const, error: "Invalid note improvement request." };
@@ -11760,6 +11870,7 @@ export async function improveInternalNoteText(input: z.infer<typeof ImproveNoteI
 }
 
 export async function summarizeSelectionToCrmLog(conversationId: string, selectedText: string, modelOverride?: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "summarizeSelectionToCrmLog");
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false, error: "Missing conversation ID" };
@@ -11863,6 +11974,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
 }
 
 export async function suggestTasksFromSelection(conversationId: string, selectedText: string, modelOverride?: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "suggestTasksFromSelection");
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false, error: "Missing conversation ID" };
@@ -12070,6 +12182,7 @@ export async function applySuggestedTasksFromSelection(
     conversationId: string,
     suggestionsInput: Array<z.input<typeof ApplySelectionTaskSuggestionSchema>>
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "applySuggestedTasksFromSelection");
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false as const, error: "Missing conversation ID" };
@@ -12196,6 +12309,7 @@ export async function applySuggestedTasksFromSelection(
 }
 
 export async function getTaskSuggestionFunnelMetrics(input?: z.input<typeof TaskSuggestionFunnelMetricsInputSchema>) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getTaskSuggestionFunnelMetrics");
     const parsedInput = TaskSuggestionFunnelMetricsInputSchema.safeParse(input);
     if (!parsedInput.success) {
         return { success: false as const, error: "Invalid metrics query" };
@@ -12445,6 +12559,7 @@ export async function runCustomSelectionPrompt(
     instruction: string,
     modelOverride?: string
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "runCustomSelectionPrompt");
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false, error: "Missing conversation ID" };
@@ -12525,6 +12640,7 @@ export async function runCustomSelectionPrompt(
 }
 
 export async function saveCustomSelectionToCrmLog(conversationId: string, outputText: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "saveCustomSelectionToCrmLog");
     const sanitizedConversationId = String(conversationId || "").trim();
     if (!sanitizedConversationId) {
         return { success: false, error: "Missing conversation ID" };
@@ -12832,6 +12948,7 @@ export async function parseLeadFromText(
     modelOverride?: string,
     options?: { pasteLeadTraceId?: string }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "parseLeadFromText");
     const pasteLeadTraceId = options?.pasteLeadTraceId || `paste_lead_${randomUUID()}`;
     const statuses: PasteLeadImportStatus[] = [];
     const emitStatus = createPasteLeadStatusRecorder({
@@ -12881,6 +12998,7 @@ export async function parseLeadFromText(
 }
 
 export async function getPasteLeadImportCapability() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getPasteLeadImportCapability");
     try {
         const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
         const { userId: clerkUserId } = await auth();
@@ -12914,6 +13032,7 @@ export async function importLeadFromText(
     modelOverride?: string,
     options?: { pasteLeadTraceId?: string }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "importLeadFromText");
     const pasteLeadTraceId = options?.pasteLeadTraceId || `paste_lead_${randomUUID()}`;
     const statuses: PasteLeadImportStatus[] = [];
     const emitStatus = createPasteLeadStatusRecorder({
@@ -13008,6 +13127,7 @@ export async function createParsedLead(
     originalText: string,
     options?: CreateParsedLeadOptions
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createParsedLead");
     const pasteLeadTraceId = options?.pasteLeadTraceId || `paste_lead_${randomUUID()}`;
     const initialStatuses = options?.initialStatuses || [
         createPasteLeadStatus("paste_lead_import_started", "running", { pasteLeadTraceId }),
@@ -13048,6 +13168,7 @@ export async function processLegacyCrmLeadEmailAction(
     messageId: string,
     options?: { force?: boolean }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "processLegacyCrmLeadEmailAction");
     const location = await getAuthenticatedLocation();
     return processLegacyCrmLeadEmailForLocation({
         locationId: location.id,
@@ -13065,6 +13186,7 @@ export async function processLegacyCrmLeadEmailForLocation(args: {
     runAutoDraftFromSettings?: boolean;
     triggerSource?: string;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "processLegacyCrmLeadEmailForLocation");
     return processLegacyCrmLeadEmailForLocationService(args);
 }
 type ConversationSearchMode = "auto" | "contact" | "broad";
@@ -13132,6 +13254,7 @@ export async function searchConversations(query: string, options?: {
     mode?: ConversationSearchMode;
     scope?: "my" | "location";
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "searchConversations");
     try {
         const { location, assignedUserId } = await getAuthenticatedConversationContext(options?.scope);
         const traceId = createTraceId();
@@ -13787,6 +13910,7 @@ export async function suggestViewingsFromSelection(
     requestedModelId?: string,
     contextInput?: SuggestViewingsContextInput
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "suggestViewingsFromSelection");
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) {
         return { success: false, error: "Unauthorized" as const };
@@ -14103,6 +14227,7 @@ export async function applySuggestedViewingsFromSelection(
     contactId: string,
     suggestionsInput: Array<z.input<typeof ApplySelectionViewingSuggestionSchema>>
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "applySuggestedViewingsFromSelection");
     const { createViewing } = await import("@/app/(main)/admin/contacts/actions");
 
     const sanitizedConversationId = String(conversationId || "").trim();
@@ -14274,6 +14399,7 @@ export async function persistViewingsSuggestionFunnelEvent(args: {
     status?: "processed" | "error";
     error?: string | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "persistViewingsSuggestionFunnelEvent");
     try {
         await db.agentEvent.create({
             data: {
@@ -14297,6 +14423,7 @@ const ViewingsSuggestionFunnelMetricsInputSchema = z.object({
 }).optional();
 
 export async function getViewingsSuggestionFunnelMetrics(input?: z.input<typeof ViewingsSuggestionFunnelMetricsInputSchema>) {
+    await assertCrmActionAllowed("conversations/actions.ts", "getViewingsSuggestionFunnelMetrics");
     const parsedInput = ViewingsSuggestionFunnelMetricsInputSchema.safeParse(input);
     if (!parsedInput.success) {
         return { success: false as const, error: "Invalid metrics query" };
@@ -14528,6 +14655,7 @@ export async function getViewingsSuggestionFunnelMetrics(input?: z.input<typeof 
 }
 
 export async function getDropdownsForViewingsSuggestion() {
+    await assertCrmActionAllowed("conversations/actions.ts", "getDropdownsForViewingsSuggestion");
     try {
         const location = await getAuthenticatedLocationReadOnly();
         if (!location?.id) return { properties: [], users: [] };
@@ -14560,6 +14688,7 @@ export async function fetchConversationActivityLog(
     conversationId: string,
     options?: { limit?: number; beforeCursor?: string | null }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "fetchConversationActivityLog");
     const location = await getAuthenticatedLocationReadOnly();
     if (!location?.id) return [];
 
@@ -14596,6 +14725,7 @@ export async function addConversationActivityEntry(
     dateIso: string,
     clientMutationId?: string
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "addConversationActivityEntry");
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) throw new Error("Unauthorized");
 
@@ -14708,6 +14838,7 @@ export async function updateConversationActivityEntry(
     entryText: string,
     dateIso: string
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "updateConversationActivityEntry");
     const { location, user } = await resolveManualActivityMutationActor();
     const result = await updateManualActivityEntryRow({
         db,
@@ -14755,6 +14886,7 @@ export async function updateConversationActivityEntry(
 }
 
 export async function deleteConversationActivityEntry(historyId: string, reason?: string) {
+    await assertCrmActionAllowed("conversations/actions.ts", "deleteConversationActivityEntry");
     const { location, user } = await resolveManualActivityMutationActor();
     const result = await deleteManualActivityEntryRow({
         db,
@@ -14805,6 +14937,7 @@ function getComposerChannelFromMessageType(lastMessageType?: string | null): 'SM
 }
 
 export async function listSuggestedResponses(input: ListSuggestedResponsesInput) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listSuggestedResponses");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
 
     const requestedConversationId = String(input?.conversationId || "").trim();
@@ -14955,6 +15088,7 @@ export async function acceptSuggestedResponse(
         sendNow?: boolean;
     }
 ) {
+    await assertCrmActionAllowed("conversations/actions.ts", "acceptSuggestedResponse");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -15058,6 +15192,7 @@ export async function acceptSuggestedResponse(
 }
 
 export async function rejectSuggestedResponse(id: string, reason?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "rejectSuggestedResponse");
     const location = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const actor = await resolveLocationActorContext(location.id);
     if (!actor.hasAccess) {
@@ -15114,6 +15249,7 @@ export async function rejectSuggestedResponse(id: string, reason?: string | null
 }
 
 export async function updateAiAutomationConfig(locationId: string, config: unknown) {
+    await assertCrmActionAllowed("conversations/actions.ts", "updateAiAutomationConfig");
     const targetLocationId = String(locationId || "").trim();
     if (!targetLocationId) {
         return { success: false as const, error: "Missing location ID." };
@@ -15252,6 +15388,7 @@ type ListAiRuntimeJobsInput = {
 };
 
 export async function listSkillPolicies(locationId?: string | null) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listSkillPolicies");
     const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const targetLocationId = String(locationId || fallbackLocation.id || "").trim();
     if (!targetLocationId) return [];
@@ -15305,6 +15442,7 @@ export async function listSkillPolicies(locationId?: string | null) {
 }
 
 export async function upsertSkillPolicy(locationId: string, skillId: string, policy: unknown) {
+    await assertCrmActionAllowed("conversations/actions.ts", "upsertSkillPolicy");
     const targetLocationId = String(locationId || "").trim();
     const targetSkillId = String(skillId || "").trim();
     if (!targetLocationId || !targetSkillId) {
@@ -15419,6 +15557,7 @@ export async function upsertSkillPolicy(locationId: string, skillId: string, pol
 }
 
 export async function listAiDecisions(input?: ListAiDecisionsInput) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listAiDecisions");
     const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const targetLocationId = String(input?.locationId || fallbackLocation.id || "").trim();
     if (!targetLocationId) return [];
@@ -15577,6 +15716,7 @@ export async function listAiDecisions(input?: ListAiDecisionsInput) {
 }
 
 export async function listAiRuntimeJobs(input?: ListAiRuntimeJobsInput) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listAiRuntimeJobs");
     const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const targetLocationId = String(input?.locationId || fallbackLocation.id || "").trim();
     if (!targetLocationId) return [];
@@ -15647,6 +15787,7 @@ export async function simulateSkillDecision(input: {
     dealId?: string | null;
     contactId?: string | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "simulateSkillDecision");
     const fallbackLocation = await getAuthenticatedLocationReadOnly({ requireGhlToken: false });
     const targetLocationId = String(input?.locationId || fallbackLocation.id || "").trim();
     if (!targetLocationId) {
@@ -15708,6 +15849,7 @@ export async function simulateSkillDecision(input: {
 }
 
 export async function runAiRuntimeNow(locationId: string, options?: { plannerOnly?: boolean; batchSize?: number; source?: "automation" | "semi_auto" | "manual" | "mission" }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "runAiRuntimeNow");
     const targetLocationId = String(locationId || "").trim();
     if (!targetLocationId) {
         return { success: false as const, error: "Missing location ID." };
@@ -15745,6 +15887,7 @@ export async function runAiSkillDecisionNow(input: {
     extraInstruction?: string;
     executeImmediately?: boolean;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "runAiSkillDecisionNow");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess) {
@@ -15775,6 +15918,7 @@ export async function submitAgentLearningProposalAction(input: {
     category?: string | null;
     key?: string | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "submitAgentLearningProposalAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess) {
@@ -15796,6 +15940,7 @@ export async function listAgentLearningProposalsAction(input: {
     status?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listAgentLearningProposalsAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess || !actor.isAdmin) return [];
@@ -15813,6 +15958,7 @@ export async function listLocationAiPromptVersionsAction(input: {
     targetKind?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "listLocationAiPromptVersionsAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess || !actor.isAdmin) return [];
@@ -15829,6 +15975,7 @@ export async function approveAgentLearningProposalAction(input: {
     locationId: string;
     proposalId: string;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "approveAgentLearningProposalAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess || !actor.isAdmin) {
@@ -15848,6 +15995,7 @@ export async function dismissAgentLearningProposalAction(input: {
     locationId: string;
     proposalId: string;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "dismissAgentLearningProposalAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess || !actor.isAdmin) {
@@ -15868,6 +16016,7 @@ export async function revertLocationAiPromptAction(input: {
     targetKind?: string | null;
     versionId?: string | null;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "revertLocationAiPromptAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess || !actor.isAdmin) {
@@ -15889,6 +16038,7 @@ export async function createAgentLearningSessionAction(input: {
     sourceFeature?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("conversations/actions.ts", "createAgentLearningSessionAction");
     const targetLocationId = String(input.locationId || "").trim();
     const actor = await resolveLocationActorContext(targetLocationId);
     if (!actor.hasAccess || !actor.isAdmin) {

@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from '@/lib/db';
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
@@ -9,6 +11,7 @@ import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from '@/
 import { getLocationContext } from '@/lib/auth/location-context';
 
 export async function completeUserProfile(formData: FormData) {
+    await assertCrmActionAllowed("profile-actions.ts", "completeUserProfile");
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) {
         return { success: false, error: 'Unauthorized' };
@@ -103,6 +106,7 @@ export async function completeUserProfile(formData: FormData) {
 }
 
 export async function getUserProfileStatus() {
+    await assertCrmActionAllowed("profile-actions.ts", "getUserProfileStatus");
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) {
         return { needsOnboarding: false };

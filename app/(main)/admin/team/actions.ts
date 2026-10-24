@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { clerkClient } from '@clerk/nextjs/server';
@@ -153,6 +155,7 @@ export type AssignmentRecoveryPreviewResult =
     | { success: false; error: string };
 
 export async function previewAssignmentRecovery(input: { sourceEmail: string }): Promise<AssignmentRecoveryPreviewResult> {
+    await assertCrmActionAllowed("team/actions.ts", "previewAssignmentRecovery");
     try {
         const { userId: actorClerkId } = await auth();
         if (!actorClerkId) throw new Error('Unauthorized');
@@ -215,6 +218,7 @@ export async function executeAssignmentRecovery(input: {
     confirmationPhrase: string;
     acknowledgeHistoricalPreservation: boolean;
 }): Promise<AssignmentRecoveryExecuteResult> {
+    await assertCrmActionAllowed("team/actions.ts", "executeAssignmentRecovery");
     try {
         if (!input.acknowledgeHistoricalPreservation) throw new Error('Historical-preservation acknowledgement is required');
         const token = verifyAssignmentRecoveryToken(input.confirmationToken);
@@ -331,6 +335,7 @@ export async function previewTransferResponsibilities(input: {
     mode: OffboardingMode;
     suspendClerkGlobally: boolean;
 }): Promise<OffboardingPreviewResult> {
+    await assertCrmActionAllowed("team/actions.ts", "previewTransferResponsibilities");
     try {
         const { userId: actorClerkId } = await auth();
         if (!actorClerkId) throw new Error('Unauthorized');
@@ -506,6 +511,7 @@ export async function executeTransferResponsibilities(input: {
     confirmationPhrase: string;
     acknowledgeNoHistoricalRewrite: boolean;
 }): Promise<ExecuteOffboardingResult> {
+    await assertCrmActionAllowed("team/actions.ts", "executeTransferResponsibilities");
     let localCommit: { auditId: string; counts: Record<string, number>; taskIds: string[]; viewingIds: string[] } | null = null;
     try {
         if (!input.acknowledgeNoHistoricalRewrite) throw new Error('Confirmation acknowledgement is required');
@@ -776,6 +782,7 @@ export async function executeTransferResponsibilities(input: {
 // ============ TEAM MEMBER MANAGEMENT ============
 
 export async function updateMemberContactAccess(formData: FormData): Promise<void> {
+    await assertCrmActionAllowed("team/actions.ts", "updateMemberContactAccess");
     let outcome = 'error';
     try {
         const locationId = await getCurrentLocationId();
@@ -804,6 +811,7 @@ export async function updateMemberContactAccess(formData: FormData): Promise<voi
 }
 
 export async function inviteUserToLocation(formData: FormData) {
+    await assertCrmActionAllowed("team/actions.ts", "inviteUserToLocation");
     const locationId = await getCurrentLocationId();
     const adminUserId = await requireAdminRole(locationId);
 
@@ -1025,6 +1033,7 @@ export async function inviteUserToLocation(formData: FormData) {
 }
 
 export async function revokeInvitation(invitationId: string) {
+    await assertCrmActionAllowed("team/actions.ts", "revokeInvitation");
     const locationId = await getCurrentLocationId();
     await requireAdminRole(locationId);
 
@@ -1043,6 +1052,7 @@ export async function revokeInvitation(invitationId: string) {
 }
 
 export async function resendInvitation(invitationId: string) {
+    await assertCrmActionAllowed("team/actions.ts", "resendInvitation");
     console.log(`[ResendInvitation] Started for invitationId: ${invitationId}`);
     const locationId = await getCurrentLocationId();
     await requireAdminRole(locationId);
@@ -1106,6 +1116,7 @@ export async function resendInvitation(invitationId: string) {
 
 
 export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER') {
+    await assertCrmActionAllowed("team/actions.ts", "updateUserRole");
     const locationId = await getCurrentLocationId();
     const adminUserId = await requireAdminRole(locationId);
 
@@ -1201,6 +1212,7 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
 }
 
 export async function removeUserFromLocation(_userId: string) {
+    await assertCrmActionAllowed("team/actions.ts", "removeUserFromLocation");
     return {
         success: false,
         error: 'Direct removal is disabled. Use Transfer responsibilities and deactivate with a fresh confirmed preview.',
@@ -1210,6 +1222,7 @@ export async function removeUserFromLocation(_userId: string) {
 // ============ GHL CALENDAR MANAGEMENT (from old settings/team) ============
 
 export async function getGHLCalendars() {
+    await assertCrmActionAllowed("team/actions.ts", "getGHLCalendars");
     const locationId = await getCurrentLocationId();
     await requireAdminRole(locationId);
     if (!isGhlIntegrationEnabled()) {
@@ -1230,6 +1243,7 @@ export async function getGHLCalendars() {
 }
 
 export async function updateUserCalendar(userId: string, calendarId: string | null) {
+    await assertCrmActionAllowed("team/actions.ts", "updateUserCalendar");
     try {
         const locationId = await getCurrentLocationId();
         await requireAdminRole(locationId);
@@ -1251,6 +1265,7 @@ export async function createGHLCalendarForUser(
     userId: string,
     data: { name: string; slotDuration: number }
 ) {
+    await assertCrmActionAllowed("team/actions.ts", "createGHLCalendarForUser");
     try {
         const activeLocationId = await getCurrentLocationId();
         await requireAdminRole(activeLocationId);
@@ -1299,6 +1314,7 @@ export async function createGHLCalendarForUser(
 }
 
 export async function updateTeamMemberProfile(formData: FormData) {
+    await assertCrmActionAllowed("team/actions.ts", "updateTeamMemberProfile");
     const locationId = await getCurrentLocationId();
     await requireAdminRole(locationId);
 

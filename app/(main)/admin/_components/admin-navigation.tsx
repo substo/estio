@@ -1,5 +1,7 @@
 "use client"
 
+import { useCrmRealm } from "./crm-realm"
+import { isSubstoCrmPage } from "@/lib/auth/substo-crm-policy"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { LucideIcon } from "lucide-react"
@@ -234,12 +236,16 @@ export function AdminNavigationGroups({
   /** Defaults to the CRM menu; Studio passes its own groups with the same look. */
   groups?: AdminNavGroup[]
 }) {
+  const realm = useCrmRealm()
+  const visibleGroups = realm === "substo" && groups === ADMIN_NAV_GROUPS
+    ? groups.map((group) => ({ ...group, items: group.items.filter((item) => isSubstoCrmPage(item.href)) })).filter((group) => group.items.length > 0)
+    : groups
   const compact = variant === "desktop" && collapsed
 
   return (
     <TooltipProvider delayDuration={150}>
       <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-3.5 text-sm" : "space-y-4 px-3 text-sm")}>
-        {groups.map((group, index) => (
+        {visibleGroups.map((group, index) => (
           <div key={group.label || `primary-${index}`} className={clsx(compact ? "space-y-1.5" : "space-y-1")}>
             {group.label && (
               <h4

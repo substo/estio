@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
@@ -143,6 +145,7 @@ async function resolveAdminContext(locationIdInput?: string | null) {
 }
 
 export async function updateWhatsAppSettings(formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "updateWhatsAppSettings");
     const locationId = String(formData.get("locationId") || "").trim();
     const { location, localUserId } = await resolveAdminContext(locationId || null);
     const resolvedLocationId = location.id;
@@ -283,6 +286,7 @@ export async function updateWhatsAppSettings(formData: FormData) {
 }
 
 export async function getWhatsAppSettings(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "getWhatsAppSettings");
     const { location: contextLocation } = await resolveAdminContext(locationId || null);
     const location = contextLocation;
     const [doc, hasAccessToken, hasTwilioAuthToken] = await Promise.all([
@@ -355,6 +359,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
 }
 
 export async function getWhatsAppWebBridgeDiagnostics(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "getWhatsAppWebBridgeDiagnostics");
     const { location } = await resolveAdminContext(locationId || null);
     const [session, health] = await Promise.all([
         getWhatsAppWebBridgeSession(location.id),
@@ -380,6 +385,7 @@ export async function updateWhatsAppCallingSettings(input: {
     sipEndpoint?: string | null;
     mediaNotes?: string | null;
 }) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "updateWhatsAppCallingSettings");
     const { location } = await resolveAdminContext(input.locationId || null);
     const selectedChannel = input.phoneNumberId
         ? await (db as any).whatsAppChannel.findFirst({
@@ -428,6 +434,7 @@ export async function updateWhatsAppCallingSettings(input: {
 }
 
 export async function checkWhatsAppCallingReadinessAction(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "checkWhatsAppCallingReadinessAction");
     const { location } = await resolveAdminContext(locationId || null);
     const readiness = await checkCallingReadiness(location.id);
     const config = await (db as any).whatsAppCallingConfig.findUnique({
@@ -441,6 +448,7 @@ export async function checkWhatsAppCallingReadinessAction(locationId?: string | 
 }
 
 export async function connectWhatsAppWebBridge(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "connectWhatsAppWebBridge");
     const { location, localUserId } = await resolveAdminContext(locationId || null);
     try {
         const bridgeResult = await startWhatsAppWebBridgeSession(location.id);
@@ -480,6 +488,7 @@ export async function connectWhatsAppWebBridge(locationId?: string | null) {
 }
 
 export async function restartWhatsAppWebBridge(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "restartWhatsAppWebBridge");
     const { location, localUserId } = await resolveAdminContext(locationId || null);
     try {
         const bridgeResult = await restartWhatsAppWebBridgeSession(location.id);
@@ -519,6 +528,7 @@ export async function restartWhatsAppWebBridge(locationId?: string | null) {
 }
 
 export async function disconnectWhatsAppWebBridge(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "disconnectWhatsAppWebBridge");
     const { location } = await resolveAdminContext(locationId || null);
     try {
         await stopWhatsAppWebBridgeSession(location.id);
@@ -535,6 +545,7 @@ export async function disconnectWhatsAppWebBridge(locationId?: string | null) {
 }
 
 export async function clearWhatsAppWebBridge(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "clearWhatsAppWebBridge");
     const { location } = await resolveAdminContext(locationId || null);
     await clearWhatsAppWebBridgeSession(location.id);
     revalidatePath("/admin/settings/integrations/whatsapp");
@@ -542,6 +553,7 @@ export async function clearWhatsAppWebBridge(locationId?: string | null) {
 }
 
 export async function setWhatsAppWebBridgeDefault(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "setWhatsAppWebBridgeDefault");
     const { location, localUserId } = await resolveAdminContext(locationId || null);
     const doc = await settingsService.getDocument<any>({
         scopeType: "LOCATION",
@@ -679,11 +691,13 @@ async function upsertLocalWhatsAppTemplate(locationId: string, template: any, fa
 }
 
 export async function getWhatsAppCloudHealth(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "getWhatsAppCloudHealth");
     const { location } = await resolveAdminContext(locationId || null);
     return getCloudHealth(location.id);
 }
 
 export async function verifyWhatsAppCloudChannel(channelId: string, locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "verifyWhatsAppCloudChannel");
     const { location } = await resolveAdminContext(locationId || null);
     const channel = await (db as any).whatsAppChannel.findFirst({
         where: { id: channelId, locationId: location.id },
@@ -700,6 +714,7 @@ export async function verifyWhatsAppCloudChannel(channelId: string, locationId?:
 }
 
 export async function setDefaultWhatsAppChannelAction(channelId: string, locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "setDefaultWhatsAppChannelAction");
     const { location } = await resolveAdminContext(locationId || null);
     await setDefaultWhatsAppCloudChannel(location.id, channelId);
     revalidatePath("/admin/settings/integrations/whatsapp");
@@ -710,6 +725,7 @@ export async function setDefaultWhatsAppChannelAction(channelId: string, locatio
 }
 
 export async function syncWhatsAppTemplates(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "syncWhatsAppTemplates");
     const { location } = await resolveAdminContext(locationId || null);
     const credentials = await getWhatsAppCloudCredentials(location.id);
     const templates = await fetchWhatsAppCloudTemplates(location.id);
@@ -729,6 +745,7 @@ export async function syncWhatsAppTemplates(locationId?: string | null) {
 }
 
 export async function listWhatsAppTemplates(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "listWhatsAppTemplates");
     const { location } = await resolveAdminContext(locationId || null);
     const rows = await (db as any).whatsAppTemplate.findMany({
         where: { locationId: location.id },
@@ -752,6 +769,7 @@ export async function saveWhatsAppTemplateDraft(input: {
     aiPrompt?: string | null;
     aiRiskNotes?: any;
 }) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "saveWhatsAppTemplateDraft");
     const { location } = await resolveAdminContext(input.locationId || null);
     const credentials = await getWhatsAppCloudCredentials(location.id);
     const name = normalizeTemplateName(input.name);
@@ -832,6 +850,7 @@ export async function generateWhatsAppTemplateDrafts(input: {
     language?: string | null;
     model?: string | null;
 }) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "generateWhatsAppTemplateDrafts");
     const context = await resolveAdminContext(input.locationId || null);
     const intent = String(input.intent || "first contact").trim();
     const language = String(input.language || "en_US").trim();
@@ -902,6 +921,7 @@ export async function createWhatsAppTemplate(input: {
     variableLabels?: any;
     examples?: any;
 }) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "createWhatsAppTemplate");
     const { location } = await resolveAdminContext(input.locationId || null);
     const name = String(input.name || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
     const language = String(input.language || "en_US").trim();
@@ -975,6 +995,7 @@ export async function submitWhatsAppTemplateDraft(input: {
     variableLabels?: Record<string, string>;
     examples?: Record<string, string>;
 }) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "submitWhatsAppTemplateDraft");
     const { location } = await resolveAdminContext(input.locationId || null);
     const existing = input.templateId
         ? await (db as any).whatsAppTemplate.findFirst({ where: { id: input.templateId, locationId: location.id } })
@@ -1005,6 +1026,7 @@ export async function submitWhatsAppTemplateDraft(input: {
 }
 
 export async function repairWhatsAppCloudConnection(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "repairWhatsAppCloudConnection");
     const { location } = await resolveAdminContext(locationId || null);
     const subscribeResult = await subscribeWhatsAppAppToWaba(location.id).catch((error) => ({
         error: error?.message || String(error),
@@ -1033,6 +1055,7 @@ export async function exchangeSystemUserToken(
     locationId?: string | null,
     selectedPhoneNumberId?: string | null
 ) {
+    await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "exchangeSystemUserToken");
     const appSecret = process.env.META_APP_SECRET;
     if (!appSecret) throw new Error("Server Misconfiguration: META_APP_SECRET is missing.");
     const { location, localUserId } = await resolveAdminContext(locationId || null);

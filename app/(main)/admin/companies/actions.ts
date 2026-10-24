@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import db from '@/lib/db';
@@ -84,6 +86,7 @@ export async function createCompany(
     prevState: CompanyFormState,
     formData: FormData
 ): Promise<CompanyFormState> {
+    await assertCrmActionAllowed("companies/actions.ts", "createCompany");
     const validatedFields = createCompanySchema.safeParse({
         name: formData.get('name'),
         email: formData.get('email'),
@@ -144,6 +147,7 @@ export async function updateCompany(
     prevState: CompanyFormState,
     formData: FormData
 ): Promise<CompanyFormState> {
+    await assertCrmActionAllowed("companies/actions.ts", "updateCompany");
     const validatedFields = updateCompanySchema.safeParse({
         companyId: formData.get('companyId'),
         name: formData.get('name'),
@@ -201,6 +205,7 @@ export async function deleteCompany(
     prevState: DeleteCompanyState,
     formData: FormData
 ): Promise<DeleteCompanyState> {
+    await assertCrmActionAllowed("companies/actions.ts", "deleteCompany");
     const validatedFields = deleteCompanySchema.safeParse({
         companyId: formData.get('companyId'),
         confirmationName: formData.get('confirmationName'),
@@ -307,6 +312,7 @@ function matchesCanonicalFeedUrl(existingUrl: string, canonicalUrl: string) {
 }
 
 export async function addFeed(_prevState: FeedActionState, formData: FormData): Promise<FeedActionState> {
+    await assertCrmActionAllowed("companies/actions.ts", "addFeed");
     const validated = feedSchema.safeParse({
         companyId: formData.get('companyId'),
         url: formData.get('url'),
@@ -376,6 +382,7 @@ export async function addFeed(_prevState: FeedActionState, formData: FormData): 
 }
 
 export async function deleteFeed(feedId: string): Promise<FeedActionState> {
+    await assertCrmActionAllowed("companies/actions.ts", "deleteFeed");
     try {
         const { locationId, feed } = await feedAccess.requireFeed(feedId);
         const result = await db.propertyFeed.deleteMany({
@@ -398,6 +405,7 @@ const toggleFeedSchema = z.object({
 });
 
 export async function toggleFeedStatus(feedId: string, isActive: boolean): Promise<FeedActionState> {
+    await assertCrmActionAllowed("companies/actions.ts", "toggleFeedStatus");
     const validated = toggleFeedSchema.safeParse({ feedId, isActive });
     if (!validated.success) return { success: false, message: 'Invalid feed status.' };
     try {

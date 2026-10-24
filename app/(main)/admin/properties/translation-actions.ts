@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { generatePropertyLanguageTranslation, PropertyTranslationInput } from "@/lib/ai/property-translation";
 import { requirePropertyInActiveLocation } from "@/lib/properties/active-location-access";
@@ -10,6 +12,7 @@ export async function translatePropertyFields(
     targetLanguage: string,
     sourceData: PropertyTranslationInput
 ) {
+    await assertCrmActionAllowed("properties/translation-actions.ts", "translatePropertyFields");
     const access = await requirePropertyInActiveLocation(propertyId, { requestedLocationId: locationId });
 
     return await generatePropertyLanguageTranslation({
@@ -33,6 +36,7 @@ export async function savePropertyTranslation(
         isAiGenerated?: boolean;
     }
 ) {
+    await assertCrmActionAllowed("properties/translation-actions.ts", "savePropertyTranslation");
     await requirePropertyInActiveLocation(propertyId, { requestedLocationId: locationId });
 
     return await (db as any).propertyTranslation.upsert({
@@ -62,6 +66,7 @@ export async function savePropertyTranslation(
 }
 
 export async function getPropertyTranslations(locationId: string, propertyId: string) {
+    await assertCrmActionAllowed("properties/translation-actions.ts", "getPropertyTranslations");
     await requirePropertyInActiveLocation(propertyId, { requestedLocationId: locationId });
 
     return await (db as any).propertyTranslation.findMany({

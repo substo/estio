@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { redirect } from 'next/navigation';
 import db from '@/lib/db';
 import { getLocationContext } from '@/lib/auth/location-context';
@@ -19,6 +21,7 @@ async function getLocation() {
  * Create a new import session from uploaded file content
  */
 export async function createImportSession(fileName: string, fileContent: string) {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "createImportSession");
     const location = await getLocation();
 
     // Parse the content
@@ -57,6 +60,7 @@ export async function createImportSession(fileName: string, fileContent: string)
  * Get an import session by ID
  */
 export async function getImportSession(sessionId: string) {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "getImportSession");
     const location = await getLocation();
 
     const session = await db.whatsAppImportSession.findFirst({
@@ -77,6 +81,7 @@ export async function getImportSession(sessionId: string) {
  * Get contacts for mapping dropdown
  */
 export async function getContactsForMapping() {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "getContactsForMapping");
     const location = await getLocation();
 
     const contacts = await db.contact.findMany({
@@ -101,6 +106,7 @@ export async function saveContactMappings(
     mappings: Record<string, string | null>, // { "Display Name": "contactId" or null to skip }
     ownerAuthor: string | null // Which author is "me" (outbound messages)
 ) {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "saveContactMappings");
     const location = await getLocation();
 
     const session = await db.whatsAppImportSession.findFirst({
@@ -129,6 +135,7 @@ export async function saveContactMappings(
  * Execute the import - create conversations and messages
  */
 export async function executeImport(sessionId: string) {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "executeImport");
     const location = await getLocation();
 
     const session = await db.whatsAppImportSession.findFirst({
@@ -299,6 +306,7 @@ export async function executeImport(sessionId: string) {
  * Get all import sessions for the current location
  */
 export async function getImportSessions() {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "getImportSessions");
     const location = await getLocation();
 
     const sessions = await db.whatsAppImportSession.findMany({
@@ -322,6 +330,7 @@ export async function executeDirectImport(
     fileContent: string,
     ownerAuthor: string
 ) {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "executeDirectImport");
     const location = await getLocation();
 
     // 1. Find the conversation and its contact
@@ -432,6 +441,7 @@ export async function executeDirectImport(
  * Parse a WhatsApp export file and return metadata (for modal preview)
  */
 export async function parseWhatsAppFile(fileContent: string) {
+    await assertCrmActionAllowed("conversations/import/actions.ts", "parseWhatsAppFile");
     const parseResult = await parseWhatsAppExport(fileContent);
 
     if (parseResult.errors.length > 0 && parseResult.messageCount === 0) {

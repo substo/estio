@@ -1,5 +1,8 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 
@@ -22,6 +25,7 @@ export async function fetchOutlookEmailsForContactAction(contactEmail: string): 
     data?: OutlookEmail[];
     error?: string;
 }> {
+    await assertCrmActionAllowed("contacts/outlook-actions.ts", "fetchOutlookEmailsForContactAction");
     try {
         const { userId: clerkUserId } = await auth();
         if (!clerkUserId) {
@@ -94,6 +98,7 @@ export async function syncOutlookEmailsAction(senderEmail?: string): Promise<{
     count?: number;
     error?: string;
 }> {
+    await assertCrmActionAllowed("contacts/outlook-actions.ts", "syncOutlookEmailsAction");
     try {
         const { userId: clerkUserId } = await auth();
         if (!clerkUserId) {
@@ -151,6 +156,8 @@ export async function getOutlookStatusAction(): Promise<{
     email?: string;
     lastSyncedAt?: Date;
 }> {
+    if (await getRequestAuthRealm() === "substo") return { connected: false };
+    await assertCrmActionAllowed("contacts/outlook-actions.ts", "getOutlookStatusAction");
     try {
         const { userId: clerkUserId } = await auth();
         if (!clerkUserId) {

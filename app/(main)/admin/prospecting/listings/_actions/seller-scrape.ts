@@ -1,10 +1,13 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from '@/lib/db';
 import { ListingScraperService } from '@/lib/scraping/listing-scraper';
 import { getActiveProspectingAccess } from '@/lib/leads/prospecting-access';
 
 export async function scrapeSellerProfile(locationId: string, sellerName: string, profileUrl: string, prospectId?: string) {
+    await assertCrmActionAllowed("prospecting/listings/_actions/seller-scrape.ts", "scrapeSellerProfile");
     try {
         const access = await getActiveProspectingAccess(locationId);
         if (!access) return { success: false, message: 'Unauthorized or active location mismatch' };

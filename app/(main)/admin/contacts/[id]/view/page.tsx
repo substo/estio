@@ -1,4 +1,5 @@
 
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { EditContactForm } from "../../_components/edit-contact-dialog";
 import ContactView from "../../_components/contact-view";
@@ -102,7 +103,7 @@ export default async function ContactViewPage({ params, searchParams }: { params
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
-            {canManage ? <div className="mb-4 flex justify-end">
+            {canManage && await getRequestAuthRealm() === "estio" ? <div className="mb-4 flex justify-end">
                 <QuickAssistStartButton
                     label="Start Live Assist session"
                     locationId={locationId}

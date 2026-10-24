@@ -1,10 +1,13 @@
 "use client"
 
+import { useCrmRealm } from "./crm-realm"
 import { ProductSwitcher } from "@/components/product-switcher"
 import { openEstioStudioLocation } from "../../studio/actions"
 
 /** CRM is active here; Studio opens the active location's workspace (access re-checked server-side). */
 export function AdminProductSwitcher({ locationId, compact = false, className }: { locationId: string; compact?: boolean; className?: string }) {
+  const realm = useCrmRealm()
+  if (realm === "substo") return null // Product targets are enabled together in slice 4.
   return (
     <ProductSwitcher
       active="crm"

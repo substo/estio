@@ -1,3 +1,4 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import Link from "next/link";
 import { ArrowRight, BarChart3, ShieldCheck } from "lucide-react";
 import { GlobalAiUsageWidget } from "./_components/global-ai-usage-widget";
@@ -8,6 +9,7 @@ import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
 
 export default async function Dashboard() {
+  const realm = await getRequestAuthRealm();
   const [{ userId }, location, platformAdmin] = await Promise.all([
     auth(),
     getLocationContext(),
@@ -28,7 +30,7 @@ export default async function Dashboard() {
 
       {(isLocationAdmin || platformAdmin) && (
         <div className="grid gap-4 md:grid-cols-2">
-          {isLocationAdmin ? <Link href="/admin/analytics" className="group block">
+          {isLocationAdmin && realm === "estio" ? <Link href="/admin/analytics" className="group block">
             <Card className="h-full transition-colors hover:border-gray-400">
               <CardContent className="flex h-full items-start justify-between gap-4 p-5">
                 <div className="min-w-0">

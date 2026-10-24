@@ -29,7 +29,7 @@ test("Substo admits its app routes and exact profile webhook at path boundaries"
   assert.equal(classifySubstoRoute("/account/connections-malicious"), "blocked");
   assert.equal(classifySubstoRoute("/account/billing"), "blocked");
   assert.equal(classifySubstoRoute("/api/studio/workspaces/id/records/export.csv"), "studio-api");
-  for (const pathname of ["/admin", "/studio-admin", "/api/studio-admin", "/sign-in-malicious", "/api/__clerk/v1/client.js", "/api/health"]) {
+  for (const pathname of ["/admin/properties", "/studio-admin", "/api/studio-admin", "/sign-in-malicious", "/api/__clerk/v1/client.js", "/api/health"]) {
     assert.equal(classifySubstoRoute(pathname), "blocked", pathname);
   }
 });
@@ -111,9 +111,9 @@ test("signed-out Estio Studio pages redirect to login while tenant /studio remai
 
 test("ticket redirects stay on origin and use the active brand's landing page", () => {
   assert.equal(safeAuthRedirect(null, "substo"), "/studio");
-  assert.equal(safeAuthRedirect("/admin", "substo"), "/studio");
+  assert.equal(safeAuthRedirect("/admin", "substo"), "/admin");
   assert.equal(safeAuthRedirect("/studio/workspace/id?from=invite", "substo"), "/studio/workspace/id?from=invite");
-  assert.equal(safeAuthRedirect("/studio/../admin", "substo"), "/studio");
+  assert.equal(safeAuthRedirect("/studio/../admin", "substo"), "/admin");
   assert.equal(safeAuthRedirect("/\\evil.example", "estio"), "/admin");
   assert.equal(safeAuthRedirect("//evil.example", "estio"), "/admin");
   assert.equal(safeAuthRedirect("/admin/contacts", "estio"), "/admin/contacts");

@@ -1,9 +1,12 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { uploadToCloudflare, getImageDeliveryUrl } from '@/lib/cloudflareImages';
 import { requireAuthenticatedLocationContext } from '@/lib/properties/active-location-access';
 
 export async function uploadFile(formData: FormData) {
+    await assertCrmActionAllowed("properties/media-actions.ts", "uploadFile");
     const file = formData.get('file') as File;
     const requestedLocationId = formData.get('locationId');
 

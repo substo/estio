@@ -1,5 +1,6 @@
 "use client"
 
+import { useCrmRealm } from "./crm-realm"
 import ModeToggle from '@/components/mode-toggle'
 import { AdminNotificationBell } from '@/components/notifications/admin-notification-bell'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
@@ -26,6 +27,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
   availableLocations: Array<{ id: string; name: string | null }>
   platformLoginLocations: PlatformLocationLoginOption[] | null
 }) {
+  const realm = useCrmRealm()
   return (
     <div
       data-admin-top-nav={appSurface ? "app-surface" : "default"}
@@ -57,7 +59,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
                 <ModeToggle />
               </div>
               <div className="space-y-1">
-                <QuickAssistStartButton
+                {realm === "estio" ? <QuickAssistStartButton
                   label="Start Live Assist session"
                   mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
                   sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
@@ -65,7 +67,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
                   size="sm"
                   className="w-full justify-start gap-2 h-10 mb-2 font-medium"
                   icon="languages"
-                />
+                /> : null}
               </div>
               <AdminProductSwitcher locationId={activeLocation.id} />
               <AdminNavigationGroups variant="mobile" />
@@ -79,14 +81,14 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
         ) : null}
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
           <div className="hidden sm:flex">
-            <QuickAssistStartButton
+            {realm === "estio" ? <QuickAssistStartButton
               label="Live Assist"
               mode={VIEWING_SESSION_MODES.assistantLiveTranslate}
               sessionKind={VIEWING_SESSION_KINDS.twoWayInterpreter}
               variant="outline"
               size="sm"
               icon="languages"
-            />
+            /> : null}
           </div>
           <AdminNotificationBell />
           <div className="hidden sm:block">

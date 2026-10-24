@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 /**
  * app/(main)/admin/settings/integrations/sms-relay/actions.ts
  *
@@ -62,6 +64,7 @@ async function getSmsRelayLocation({ required = false }: { required?: boolean } 
 // ---------------------------------------------------------------------------
 
 export async function getSmsRelayDevices(): Promise<SmsRelayDevice[]> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "getSmsRelayDevices");
     const location = await getSmsRelayLocation();
     if (!location) return [];
 
@@ -103,6 +106,7 @@ export async function getSmsRelayDevices(): Promise<SmsRelayDevice[]> {
 export async function initiatePairing(
     label: string
 ): Promise<{ pairCode: string; qrPayload: string; deviceId: string; expiresInSeconds: number }> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "initiatePairing");
     const location = await getSmsRelayLocation({ required: true });
 
     // Import auth helpers directly (no HTTP round-trip needed in server action)
@@ -150,6 +154,7 @@ export async function updateDevice(
     deviceId: string,
     data: { label?: string; phoneNumber?: string }
 ): Promise<void> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "updateDevice");
     const location = await getSmsRelayLocation({ required: true });
     const normalizedPhoneNumber = typeof data.phoneNumber === "string" && data.phoneNumber.trim()
         ? requireSmsRelayPhoneNumber(data.phoneNumber)
@@ -171,6 +176,7 @@ export async function updateDevice(
 // ---------------------------------------------------------------------------
 
 export async function unlinkDevice(deviceId: string): Promise<{ success: boolean; error?: string }> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "unlinkDevice");
     try {
         const location = await getSmsRelayLocation({ required: true });
         const result = await db.$transaction((tx) => unlinkSmsRelayDevice(tx as any, {
@@ -191,6 +197,7 @@ export async function unlinkDevice(deviceId: string): Promise<{ success: boolean
 // ---------------------------------------------------------------------------
 
 export async function getSmsRelayStats(): Promise<SmsRelayStats> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "getSmsRelayStats");
     const location = await getSmsRelayLocation();
     if (!location) return { sent7d: 0, received7d: 0, failed7d: 0, pending: 0 };
 
@@ -231,6 +238,7 @@ export async function getSmsRelayStats(): Promise<SmsRelayStats> {
 // ---------------------------------------------------------------------------
 
 export async function getSmsRelayToggle(): Promise<boolean> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "getSmsRelayToggle");
     const location = await getSmsRelayLocation();
     if (!location) return false;
 
@@ -243,6 +251,7 @@ export async function getSmsRelayToggle(): Promise<boolean> {
 }
 
 export async function toggleSmsRelay(enabled: boolean): Promise<boolean> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "toggleSmsRelay");
     const location = await getSmsRelayLocation({ required: true });
 
     const updated = await db.location.update({
@@ -259,6 +268,7 @@ export async function toggleSmsRelay(enabled: boolean): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export async function getDeviceActivityStats(deviceId: string): Promise<DeviceActivityStats> {
+    await assertCrmActionAllowed("settings/integrations/sms-relay/actions.ts", "getDeviceActivityStats");
     const location = await getSmsRelayLocation();
     if (!location) return { sentToday: 0, failedToday: 0, queuedNow: 0, lastMessageAt: null };
 

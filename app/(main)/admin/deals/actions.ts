@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import type { Conversation } from "@/lib/ghl/conversations";
 import {
@@ -129,6 +131,7 @@ function buildDealTimelineWindow(events: any[], requestedLimit: number): DealTim
 }
 
 export async function getDealContexts(scope?: "my" | "location") {
+    await assertCrmActionAllowed("deals/actions.ts", "getDealContexts");
     const { access } = await getAuthenticatedDealAccess(scope);
 
     // Fetch all active deals
@@ -145,6 +148,7 @@ export async function getDealContexts(scope?: "my" | "location") {
 }
 
 export async function getDealContext(id: string) {
+    await assertCrmActionAllowed("deals/actions.ts", "getDealContext");
     const [core, sidebar] = await Promise.all([
         getDealWorkspaceCore(id, { take: 1 }),
         getDealWorkspaceSidebar(id),
@@ -161,6 +165,7 @@ export async function getDealContext(id: string) {
 }
 
 export async function findExistingDeal(conversationIds: string[]) {
+    await assertCrmActionAllowed("deals/actions.ts", "findExistingDeal");
     const { access, location } = await getAuthenticatedDealAccess("location");
     const resolved = await resolveDealConversationRefs(db as any, location.id, conversationIds);
     const resolvedConversationIds = resolved.map((item) => item.conversationId);
@@ -192,6 +197,7 @@ export async function findExistingDeal(conversationIds: string[]) {
 }
 
 export async function createPersistentDeal(title: string, conversationIds: string[]) {
+    await assertCrmActionAllowed("deals/actions.ts", "createPersistentDeal");
     const { access, location } = await getAuthenticatedDealAccess("location");
     const normalizedTitle = String(title || "").trim() || "Untitled Deal";
     const normalizedConversationIds = Array.from(new Set(
@@ -273,6 +279,7 @@ export async function getDealWorkspaceCore(
         beforeCursor?: string | null;
     }
 ) {
+    await assertCrmActionAllowed("deals/actions.ts", "getDealWorkspaceCore");
     const { access, location } = await getAuthenticatedDealAccess("location");
     const normalizedDealId = String(dealId || "").trim();
     const requestedTake = Number(options?.take);
@@ -308,6 +315,7 @@ export async function getDealWorkspaceCore(
 }
 
 export async function getDealWorkspaceSidebar(dealId: string) {
+    await assertCrmActionAllowed("deals/actions.ts", "getDealWorkspaceSidebar");
     const { access, location } = await getAuthenticatedDealAccess("location");
     const normalizedDealId = String(dealId || "").trim();
 
@@ -335,6 +343,7 @@ export async function getDealWorkspaceSidebar(dealId: string) {
 }
 
 export async function updateDealStatus(dealId: string, status: string) {
+    await assertCrmActionAllowed("deals/actions.ts", "updateDealStatus");
     const { access } = await getAuthenticatedDealAccess("location");
 
     const result = await db.dealContext.updateMany({
@@ -349,6 +358,7 @@ export async function updateDealStatus(dealId: string, status: string) {
 }
 
 export async function runDealAgentAction(dealId: string, message: string, history: any[]) {
+    await assertCrmActionAllowed("deals/actions.ts", "runDealAgentAction");
     const { access, location } = await getAuthenticatedDealAccess("location");
 
     // Check access
@@ -376,6 +386,7 @@ export async function runDealAgentAction(dealId: string, message: string, histor
 }
 
 export async function removeConversationFromDeal(dealId: string, conversationId: string) {
+    await assertCrmActionAllowed("deals/actions.ts", "removeConversationFromDeal");
     const { access, location } = await getAuthenticatedDealAccess("location");
 
     const deal = await db.dealContext.findFirst({
@@ -417,6 +428,7 @@ export async function fetchDealTimeline(
         beforeCursor?: string | null;
     }
 ) {
+    await assertCrmActionAllowed("deals/actions.ts", "fetchDealTimeline");
     const { access, location } = await getAuthenticatedDealAccess("location");
     const requestedTake = Number(options?.take);
     const take = Number.isFinite(requestedTake) && requestedTake > 0

@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
@@ -122,6 +124,7 @@ export async function updateAiSettings(
     prevState: AiSettingsState,
     formData: FormData
 ): Promise<AiSettingsState> {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "updateAiSettings");
     const authorization = await authorizeAiSettingsLocation(formData.get("locationId"), {
         missingLocationError: "Location ID is missing",
         adminError: "Unauthorized: Admin access is required to update settings.",
@@ -334,6 +337,7 @@ export async function runAiAutomationNowAction(
     locationId: string,
     options?: { plannerOnly?: boolean; batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "runAiAutomationNowAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false, error: authorization.error };
 
@@ -356,6 +360,7 @@ export async function runAiAutomationNowAction(
 }
 
 export async function getOpenAiTextModelPickerStateAction(locationId: string) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "getOpenAiTextModelPickerStateAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) {
         return { models: [], defaultModel: "" };
@@ -369,6 +374,7 @@ export async function runAiRuntimeNowAction(
     locationId: string,
     options?: { plannerOnly?: boolean; batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "runAiRuntimeNowAction");
     return runAiAutomationNowAction(locationId, options);
 }
 
@@ -376,6 +382,7 @@ export async function runRequirementsIntelligenceNowAction(
     locationId: string,
     options?: { batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "runRequirementsIntelligenceNowAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false, error: authorization.error };
 
@@ -398,6 +405,7 @@ export async function runContactProfileVerificationNowAction(
     locationId: string,
     options?: { batchSize?: number }
 ): Promise<RunAiAutomationNowResult> {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "runContactProfileVerificationNowAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false, error: authorization.error };
 
@@ -417,6 +425,7 @@ export async function runContactProfileVerificationNowAction(
 }
 
 export async function triggerGlobalContactProfileRecertificationAction(locationId: string) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "triggerGlobalContactProfileRecertificationAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
 
@@ -436,16 +445,19 @@ export async function updateAiAutomationConfigFromSettingsAction(
     locationId: string,
     config: unknown
 ): Promise<UpdateAiAutomationConfigResult> {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "updateAiAutomationConfigFromSettingsAction");
     return updateAiAutomationConfig(locationId, config);
 }
 
 export async function listSkillPoliciesFromSettingsAction(locationId: string) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "listSkillPoliciesFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return [];
     return listSkillPolicies(authorization.locationId);
 }
 
 export async function upsertSkillPolicyFromSettingsAction(locationId: string, skillId: string, policy: unknown) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "upsertSkillPolicyFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
     return upsertSkillPolicy(authorization.locationId, skillId, policy);
@@ -460,6 +472,7 @@ export async function submitAgentLearningProposalFromSettingsAction(locationId: 
     category?: string | null;
     key?: string | null;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "submitAgentLearningProposalFromSettingsAction");
     return submitAgentLearningProposalAction({
         ...input,
         locationId,
@@ -470,6 +483,7 @@ export async function listAgentLearningProposalsFromSettingsAction(locationId: s
     status?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "listAgentLearningProposalsFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return [];
     return listAgentLearningProposalsAction({
@@ -480,6 +494,7 @@ export async function listAgentLearningProposalsFromSettingsAction(locationId: s
 }
 
 export async function approveAgentLearningProposalFromSettingsAction(locationId: string, proposalId: string) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "approveAgentLearningProposalFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
     return approveAgentLearningProposalAction({
@@ -489,6 +504,7 @@ export async function approveAgentLearningProposalFromSettingsAction(locationId:
 }
 
 export async function dismissAgentLearningProposalFromSettingsAction(locationId: string, proposalId: string) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "dismissAgentLearningProposalFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
     return dismissAgentLearningProposalAction({
@@ -501,6 +517,7 @@ export async function revertLocationAiPromptFromSettingsAction(locationId: strin
     skillId: string;
     versionId?: string | null;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "revertLocationAiPromptFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
     return revertLocationAiPromptAction({
@@ -515,6 +532,7 @@ export async function listLocationAiPromptVersionsFromSettingsAction(locationId:
     skillId?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "listLocationAiPromptVersionsFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return [];
     return listLocationAiPromptVersionsAction({
@@ -531,6 +549,7 @@ export async function listAiRuntimeDecisionsFromSettingsAction(locationId: strin
     since?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "listAiRuntimeDecisionsFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return [];
     return listAiDecisions({
@@ -545,6 +564,7 @@ export async function listAiRuntimeJobsFromSettingsAction(locationId: string, in
     since?: string | null;
     limit?: number;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "listAiRuntimeJobsFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(locationId);
     if (!authorization.ok) return [];
     return listAiRuntimeJobs({
@@ -560,6 +580,7 @@ export async function simulateSkillDecisionFromSettingsAction(input: {
     dealId?: string | null;
     contactId?: string | null;
 }) {
+    await assertCrmActionAllowed("settings/ai/actions.ts", "simulateSkillDecisionFromSettingsAction");
     const authorization = await authorizeAiSettingsLocation(input.locationId);
     if (!authorization.ok) return { success: false as const, error: authorization.error };
     return simulateSkillDecision(input);

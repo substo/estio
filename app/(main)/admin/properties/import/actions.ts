@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { puppeteerService } from "@/lib/crm/puppeteer-service";
 import {
@@ -30,6 +32,7 @@ async function getCrmCredentials(context?: ActiveLocationContext) {
 
 
 export async function analyzeCrmSchema() {
+    await assertCrmActionAllowed("properties/import/actions.ts", "analyzeCrmSchema");
     try {
         const creds = await getCrmCredentials();
         if (!creds) {
@@ -92,6 +95,7 @@ import { downloadAndResetImage, cleanupTempImage } from "@/lib/crm/image-process
 
 // Step 2: Confirm & Upload
 export async function uploadToCrm(propertyId: string, notionImages: string[]) {
+    await assertCrmActionAllowed("properties/import/actions.ts", "uploadToCrm");
     try {
         const access = await requirePropertyInActiveLocation(propertyId);
         const property = await db.property.findFirst({
@@ -197,6 +201,7 @@ export async function uploadToCrm(propertyId: string, notionImages: string[]) {
 
 
 export async function saveCrmSchema(schema: any) {
+    await assertCrmActionAllowed("properties/import/actions.ts", "saveCrmSchema");
     try {
         const { location } = await requireAuthenticatedLocationContext();
 
@@ -214,5 +219,6 @@ export async function saveCrmSchema(schema: any) {
 
 
 export async function getUserLocation() {
+    await assertCrmActionAllowed("properties/import/actions.ts", "getUserLocation");
     return (await requireAuthenticatedLocationContext()).locationId;
 }

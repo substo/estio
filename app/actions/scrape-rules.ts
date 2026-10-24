@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
@@ -10,6 +12,7 @@ export async function saveScrapeRule(
     instructions: string,
     interactionSelector?: string
 ) {
+    await assertCrmActionAllowed("app/actions/scrape-rules.ts", "saveScrapeRule");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 

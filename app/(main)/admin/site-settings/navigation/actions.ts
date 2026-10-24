@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
@@ -138,6 +140,7 @@ async function saveNavigationPayload(
 }
 
 export async function saveNavigation(locationId: string, type: "nav" | "footer" | "social" | "legal", links: any[]) {
+    await assertCrmActionAllowed("site-settings/navigation/actions.ts", "saveNavigation");
     const actorUserId = await assertAdmin(locationId);
     const { payload } = await getNavigationPayload(locationId);
 
@@ -155,6 +158,7 @@ export async function saveNavigation(locationId: string, type: "nav" | "footer" 
 }
 
 export async function getLivePages(locationId: string) {
+    await assertCrmActionAllowed("site-settings/navigation/actions.ts", "getLivePages");
     await assertAdmin(locationId);
     const pages = await db.contentPage.findMany({
         where: {
@@ -181,6 +185,7 @@ export async function getLivePages(locationId: string) {
 }
 
 export async function saveFooterDisclaimer(locationId: string, text: string) {
+    await assertCrmActionAllowed("site-settings/navigation/actions.ts", "saveFooterDisclaimer");
     const actorUserId = await assertAdmin(locationId);
     const { payload } = await getNavigationPayload(locationId);
     await saveNavigationPayload(locationId, actorUserId, {
@@ -191,6 +196,7 @@ export async function saveFooterDisclaimer(locationId: string, text: string) {
 }
 
 export async function saveFooterBio(locationId: string, text: string) {
+    await assertCrmActionAllowed("site-settings/navigation/actions.ts", "saveFooterBio");
     const actorUserId = await assertAdmin(locationId);
     const { payload } = await getNavigationPayload(locationId);
     await saveNavigationPayload(locationId, actorUserId, {
@@ -201,6 +207,7 @@ export async function saveFooterBio(locationId: string, text: string) {
 }
 
 export async function saveNavigationStyle(locationId: string, style: "side" | "top") {
+    await assertCrmActionAllowed("site-settings/navigation/actions.ts", "saveNavigationStyle");
     const actorUserId = await assertAdmin(locationId);
     const { payload } = await getNavigationPayload(locationId);
     await saveNavigationPayload(locationId, actorUserId, {
@@ -212,6 +219,7 @@ export async function saveNavigationStyle(locationId: string, style: "side" | "t
 }
 
 export async function savePublicListingEnabled(locationId: string, enabled: boolean) {
+    await assertCrmActionAllowed("site-settings/navigation/actions.ts", "savePublicListingEnabled");
     const actorUserId = await assertAdmin(locationId);
     const { payload } = await getNavigationPayload(locationId);
     await saveNavigationPayload(locationId, actorUserId, {

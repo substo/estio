@@ -1,3 +1,4 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import { Plus, Pencil, Trash, ExternalLink } from "lucide-react";
 import { deletePage } from "@/app/(main)/admin/content/actions";
 
 export default async function PagesListPage() {
+    const realm = await getRequestAuthRealm();
     const orgId = (await getLocationContext())?.id;
 
     if (!orgId) return null;
@@ -45,6 +47,7 @@ export default async function PagesListPage() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
+                        {realm === "estio" ? <>
                         {/* Virtual Home Page Row */}
                         <TableRow className="bg-slate-50">
                             <TableCell className="font-medium">
@@ -149,6 +152,7 @@ export default async function PagesListPage() {
                             </TableCell>
                         </TableRow>
 
+                        </> : null}
                         {pages.length === 0 && (
                             <TableRow>
                                 <TableCell colSpan={4} className="text-center h-24 text-muted-foreground">
@@ -169,7 +173,7 @@ export default async function PagesListPage() {
                                     <Link href={`/admin/content/pages/${page.id}`}>
                                         <Button variant="ghost" size="icon"><Pencil className="w-4 h-4" /></Button>
                                     </Link>
-                                    {page.published && (
+                                    {realm === "estio" && page.published && (
                                         <a href={`${protocol}://${domain}${port}/${page.slug}`} target="_blank" rel="noopener noreferrer">
                                             <Button variant="ghost" size="icon" title="View Live"><ExternalLink className="w-4 h-4" /></Button>
                                         </a>

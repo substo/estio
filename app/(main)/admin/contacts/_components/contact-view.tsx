@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Pencil, ExternalLink, Mail } from "lucide-react";
 import Link from "next/link";
+import { useCrmRealm } from "../../_components/crm-realm";
 import { useRouter } from "next/navigation";
 import { DialogFooter } from "@/components/ui/dialog";
 import { format } from "date-fns";
@@ -94,7 +95,9 @@ export default function ContactView({
     const contactType = isKnownContactType(contact.contactType)
         ? (contact.contactType as ContactType)
         : DEFAULT_CONTACT_TYPE;
-    const config = CONTACT_TYPE_CONFIG[contactType];
+    const realm = useCrmRealm();
+    const originalConfig = CONTACT_TYPE_CONFIG[contactType];
+    const config = realm === "substo" ? { ...originalConfig, visibleTabs: originalConfig.visibleTabs.filter((tab) => !["properties", "matching", "requirements"].includes(tab)) } : originalConfig;
 
     return (
         <div className={variant === 'modal' ? "flex flex-col h-full overflow-hidden" : "space-y-8 pb-12"}>

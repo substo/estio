@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { revalidatePath } from "next/cache";
 import db from "@/lib/db";
 import { resolveIntegrationAdminContext } from "./admin-context";
@@ -107,9 +109,11 @@ async function mutateProvider(provider: "gemini" | "openai", formData: FormData)
 }
 
 export async function saveGeminiIntegration(_state: AiProviderActionState, formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/ai-provider-actions.ts", "saveGeminiIntegration");
     return mutateProvider("gemini", formData);
 }
 
 export async function saveOpenAiApiIntegration(_state: AiProviderActionState, formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/ai-provider-actions.ts", "saveOpenAiApiIntegration");
     return mutateProvider("openai", formData);
 }

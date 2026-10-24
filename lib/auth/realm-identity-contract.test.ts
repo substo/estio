@@ -94,8 +94,8 @@ test("Business Clerk webhooks verify and act per realm", () => {
   assert.match(mail, /where: realmEmailWhere\('estio', toEmail\)/);
 });
 
-test("Business routes and Business webhooks stay closed on the Substo host (slice 3 opens /admin)", () => {
-  for (const pathname of ["/admin", "/admin/contacts", "/api/webhooks/clerk", "/api/webhooks/clerk-mail", "/sso/validate", "/api/oauth/callback", "/select-location"]) {
+test("Property routes and Business webhooks stay closed on the Substo host", () => {
+  for (const pathname of ["/admin/properties", "/admin/prospecting", "/api/webhooks/clerk", "/api/webhooks/clerk-mail", "/sso/validate", "/api/oauth/callback"]) {
     assert.equal(classifySubstoRoute(pathname), "blocked", pathname);
   }
 });
@@ -104,9 +104,9 @@ test("Substo brand pages are allowed and protected; lookalike paths stay blocked
   assert.equal(classifySubstoRoute("/brand/team"), "brand");
   assert.equal(classifySubstoRoute("/brand/settings"), "brand");
   assert.equal(classifySubstoRoute("/brand-x"), "blocked");
-  assert.match(read("middleware.ts"), /routeKind === "studio" \|\| routeKind === "brand" \|\| routeKind === "profile"\) await auth\.protect\(\)/);
+  assert.match(read("middleware.ts"), /routeKind === "studio" \|\| routeKind === "brand" \|\| routeKind === "profile" \|\| routeKind === "crm"\) await auth\.protect\(\)/);
   assert.match(read("app/(main)/brand/layout.tsx"), /!== "substo"\) notFound\(\)/);
-  assert.match(read("app/(main)/admin/layout.tsx"), /if \(await getRequestAuthRealm\(\) !== "estio"\) notFound\(\);/);
+  assert.match(read("app/(main)/admin/layout.tsx"), /prepareCurrentSubstoUser\(\)/);
 });
 
 test("Substo Studio access comes from the brand team, never from Studio membership alone", () => {

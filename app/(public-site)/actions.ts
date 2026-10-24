@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { getSiteConfig } from "@/lib/public-data";
 import { recordPropertyAnalyticsEvent } from "@/lib/analytics/server";
@@ -16,6 +18,7 @@ export async function submitLeadInquiry(
     prevState: any,
     formData: FormData
 ): Promise<ActionResponse> {
+    await assertCrmActionAllowed("app/(public-site)/actions.ts", "submitLeadInquiry");
     // 1. Resolve Tenant Context
     const config = await getSiteConfig(domain);
     if (!config) {

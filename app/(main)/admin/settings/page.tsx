@@ -1,3 +1,5 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
+import { isSubstoCrmPage } from "@/lib/auth/substo-crm-policy";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,9 +89,10 @@ function SettingsCard({ section }: { section: SettingsSection }) {
 }
 
 export default async function SettingsPage() {
+  const realm = await getRequestAuthRealm();
   const access = await getActiveContactsAccess();
   const isAdmin = access?.role === "ADMIN";
-  const visibleSections = SETTINGS_SECTIONS.filter((section) => !section.requiresAdmin || isAdmin);
+  const visibleSections = SETTINGS_SECTIONS.filter((section) => (!section.requiresAdmin || isAdmin) && (realm === "estio" || isSubstoCrmPage(section.href))).map((section) => realm === "substo" && section.href === "/admin/team" ? { ...section, description: "Manage your brand team.", href: "/brand/team" } : section);
 
   return (
     <div className="p-6">

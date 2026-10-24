@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { google } from 'googleapis';
@@ -7,6 +9,7 @@ import { getValidAccessToken } from "./auth";
 import { processMessage } from "./gmail-sync"; // We will need to export processMessage or move it
 
 export async function fetchContactHistory(contactId: string) {
+    await assertCrmActionAllowed("lib/google/actions.ts", "fetchContactHistory");
     const { userId: clerkUserId } = await auth();
     if (!clerkUserId) throw new Error("Unauthorized");
 

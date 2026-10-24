@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { eventBus } from '@/lib/ai/events/event-bus';
@@ -157,14 +159,17 @@ async function createOrReactivateContactForProspect(prospect: any) {
 // --- Prospect (People) Actions ---
 
 export async function acceptProspect(id: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "acceptProspect");
     return acceptProspectWithListings(id);
 }
 
 export async function rejectProspect(id: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "rejectProspect");
     return rejectProspectWithListings(id);
 }
 
 export async function deleteProspect(id: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "deleteProspect");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -189,6 +194,7 @@ export async function deleteProspect(id: string) {
 }
 
 export async function bulkReject(ids: string[]) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "bulkReject");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -216,6 +222,7 @@ export async function bulkReject(ids: string[]) {
  * This ensures all acceptance goes through the contact-centric flow.
  */
 export async function acceptScrapedListing(id: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "acceptScrapedListing");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -243,6 +250,7 @@ export async function acceptScrapedListing(id: string) {
  * Reject a single listing by cascading to its parent contact.
  */
 export async function rejectScrapedListing(id: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "rejectScrapedListing");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -271,6 +279,7 @@ export async function rejectScrapedListing(id: string) {
 }
 
 export async function bulkAcceptListings(ids: string[]) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "bulkAcceptListings");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -293,6 +302,7 @@ export async function bulkAcceptListings(ids: string[]) {
 }
 
 export async function bulkRejectListings(ids: string[]) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "bulkRejectListings");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -317,6 +327,7 @@ export async function bulkRejectListings(ids: string[]) {
 // --- Contact-level Cascading Actions ---
 
 export async function rejectProspectWithListings(prospectId: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "rejectProspectWithListings");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -400,6 +411,7 @@ export async function acceptProspectWithListings(
     prospectId: string,
     options: AcceptProspectWithListingsOptions = {}
 ): Promise<AcceptProspectResponse> {
+    await assertCrmActionAllowed("prospecting/actions.ts", "acceptProspectWithListings");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -627,6 +639,7 @@ export async function acceptProspectWithListings(
  * create/update a CRM Company from a staged agency prospect without accepting the prospect as Contact.
  */
 export async function getProspectCompanyLinkOptions(prospectId: string): Promise<ProspectCompanyLinkOptionsResponse> {
+    await assertCrmActionAllowed("prospecting/actions.ts", "getProspectCompanyLinkOptions");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) {
@@ -710,6 +723,7 @@ export async function getProspectCompanyLinkOptions(prospectId: string): Promise
 }
 
 export async function applyProspectCompanyLink(prospectId: string, selection: ProspectCompanyLinkApplyInput) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "applyProspectCompanyLink");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };
@@ -765,6 +779,7 @@ export async function applyProspectCompanyLink(prospectId: string, selection: Pr
 }
 
 export async function linkProspectAgencyCompany(prospectId: string) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "linkProspectAgencyCompany");
     try {
         const options = await getProspectCompanyLinkOptions(prospectId);
         if (!options.success || !options.linkable) {
@@ -802,6 +817,7 @@ export async function linkProspectAgencyCompany(prospectId: string) {
 // --- Classification Toggle ---
 
 export async function toggleProspectAgencyStatus(id: string, isAgencyManual: boolean | null) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "toggleProspectAgencyStatus");
     const sellerTypeManual: ProspectSellerType | null = isAgencyManual === null
         ? null
         : (isAgencyManual ? 'agency' : 'private');
@@ -809,6 +825,7 @@ export async function toggleProspectAgencyStatus(id: string, isAgencyManual: boo
 }
 
 export async function setProspectSellerTypeManual(id: string, sellerTypeManual: ProspectSellerType | null) {
+    await assertCrmActionAllowed("prospecting/actions.ts", "setProspectSellerTypeManual");
     try {
         const access = await getActiveProspectingAccess();
         if (!access) return { success: false, message: 'Unauthorized' };

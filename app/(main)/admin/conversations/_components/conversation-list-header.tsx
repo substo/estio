@@ -475,6 +475,7 @@ export function ConversationListHeader({
                                                 size="icon"
                                                 className="h-8 w-8 shrink-0 bg-green-600 text-white hover:bg-green-700"
                                                 onClick={onNewConversationClick}
+                                                disabled={!onNewConversationClick}
                                             >
                                                 <Plus className="w-4 h-4" />
                                             </Button>
@@ -489,14 +490,14 @@ export function ConversationListHeader({
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-44">
-                                            <DropdownMenuItem onClick={onCampaignsClick} className="gap-2">
+                                            {onCampaignsClick ? <DropdownMenuItem onClick={onCampaignsClick} className="gap-2">
                                                 <Megaphone className="w-4 h-4" />
                                                 Campaigns
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={onSyncAllClick} className="gap-2">
+                                            </DropdownMenuItem> : null}
+                                            {onSyncAllClick ? <DropdownMenuItem onClick={onSyncAllClick} className="gap-2">
                                                 <CloudDownload className="w-4 h-4" />
                                                 Sync WhatsApp
-                                            </DropdownMenuItem>
+                                            </DropdownMenuItem> : null}
                                             <DropdownMenuItem onClick={() => onToggleSelectionMode(true)} className="gap-2">
                                                 <Layers className="w-4 h-4" />
                                                 Bind to Deal

@@ -1,5 +1,6 @@
 'use client';
 
+import { useCrmRealm } from '../../_components/crm-realm';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
@@ -147,7 +148,8 @@ export function EditContactForm({ contact, onSuccess, onDelete, onContactSaved, 
         : DEFAULT_CONTACT_TYPE;
     const contactConfig = CONTACT_TYPE_CONFIG[contactType];
     // Show Viewings only if 'properties' tab is enabled (implies property interest/seeker)
-    const showViewings = contactConfig.visibleTabs.includes('properties');
+    const realm = useCrmRealm();
+    const showViewings = realm === "estio" && contactConfig.visibleTabs.includes('properties');
 
     return (
         <>

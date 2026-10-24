@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import fs from "fs";
 import path from "path";
@@ -102,6 +104,7 @@ export async function extractPropertyDataWithAI(
     scrapedLat?: number,
     scrapedLng?: number
 ): Promise<{ success: boolean; data?: AIPropertyData; error?: string }> {
+    await assertCrmActionAllowed("properties/import/ai-property-extraction.ts", "extractPropertyDataWithAI");
     // The optional location ID is only a mismatch assertion. The active location
     // is always resolved from the authenticated server context.
     const { locationId: targetLocationId } = await requireAuthenticatedLocationContext(locationId);

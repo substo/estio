@@ -1,3 +1,4 @@
+import { isSubstoCrmPage, isSubstoCrmApi } from "./substo-crm-policy";
 import type { HostBrand } from "./host-brand";
 
 function isPathOrNested(pathname: string, root: string): boolean {
@@ -6,16 +7,18 @@ function isPathOrNested(pathname: string, root: string): boolean {
 
 export const CLERK_PROFILE_WEBHOOK_PATH = "/api/webhooks/clerk-profile";
 
-export type SubstoRouteKind = "root" | "auth" | "studio" | "studio-api" | "brand" | "profile" | "webhook" | "blocked";
+export type SubstoRouteKind = "root" | "auth" | "studio" | "studio-api" | "brand" | "crm" | "crm-api" | "profile" | "webhook" | "blocked";
 
-/** Application routes on Substo never reach Estio's APIs or tenant resolver. */
+/** Substo reaches reviewed application routes and never the tenant-site resolver. */
 export function classifySubstoRoute(pathname: string): SubstoRouteKind {
   if (pathname === CLERK_PROFILE_WEBHOOK_PATH) return "webhook";
   if (pathname === "/") return "root";
   if (isPathOrNested(pathname, "/sign-in") || isPathOrNested(pathname, "/sign-up")) return "auth";
   if (isPathOrNested(pathname, "/account/connections")) return "profile";
   if (isPathOrNested(pathname, "/studio")) return "studio";
-  // Brand pages (team, settings). The CRM (/admin) stays blocked until slice 3.
+  if (isSubstoCrmPage(pathname) || pathname === "/select-location") return "crm";
+  if (isSubstoCrmApi(pathname)) return "crm-api";
+  // Brand team management is shared with Studio.
   if (isPathOrNested(pathname, "/brand")) return "brand";
   if (isPathOrNested(pathname, "/api/studio")) return "studio-api";
   return "blocked";
@@ -35,7 +38,7 @@ export function safeAuthRedirect(value: string | null, brand: HostBrand): string
   try {
     const target = new URL(value, "https://auth.invalid");
     if (target.origin !== "https://auth.invalid") return fallback;
-    if (brand === "substo" && !isPathOrNested(target.pathname, "/studio") && !isPathOrNested(target.pathname, "/brand") && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
+    if (brand === "substo" && !isSubstoCrmPage(target.pathname) && !isPathOrNested(target.pathname, "/studio") && !isPathOrNested(target.pathname, "/brand") && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
     return `${target.pathname}${target.search}${target.hash}`;
   } catch {
     return fallback;

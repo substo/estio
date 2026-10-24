@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useCrmRealm } from "../../_components/crm-realm";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -175,6 +176,7 @@ export function MessageSelectionActions({
     triggerAction,
     onTriggerActionHandled,
 }: MessageSelectionActionsProps) {
+    const realm = useCrmRealm();
     const router = useRouter();
     const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
     const toolbarRef = useRef<HTMLDivElement>(null);
@@ -480,6 +482,7 @@ export function MessageSelectionActions({
     };
 
     const openSuggestViewingsDialog = () => {
+        if (realm !== "estio") return;
         const text = hasBatchSelections
             ? batchContextText
             : String(selection?.text || "").trim();
@@ -1076,7 +1079,7 @@ export function MessageSelectionActions({
                         <Sparkles className="h-3.5 w-3.5" />
                         Tasks
                     </Button>
-                    <Button
+                    {realm === "estio" ? <Button
                         type="button"
                         size="sm"
                         variant="ghost"
@@ -1088,7 +1091,7 @@ export function MessageSelectionActions({
                     >
                         <Home className="h-3.5 w-3.5" />
                         Viewings
-                    </Button>
+                    </Button> : null}
                     <Button
                         type="button"
                         size="sm"
@@ -2039,7 +2042,7 @@ export function MessageSelectionActions({
                 </DialogContent>
             </Dialog>
 
-            <ViewingsSuggestionDialog
+            {realm === "estio" ? <ViewingsSuggestionDialog
                 open={suggestViewingsOpen}
                 onOpenChange={(open) => {
                     setSuggestViewingsOpen(open);
@@ -2051,7 +2054,7 @@ export function MessageSelectionActions({
                 conversationId={conversationId || undefined}
                 activeAiModel={activeAiModel || undefined}
                 anchorMessageId={messageId || undefined}
-            />
+            /> : null}
         </>
     );
 }

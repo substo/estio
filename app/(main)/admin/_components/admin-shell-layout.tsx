@@ -1,5 +1,7 @@
 "use client"
 
+import { CrmRealmProvider } from "./crm-realm"
+import type { AuthRealm } from "@/lib/auth/auth-realm"
 import { ReactNode, useEffect, useState } from "react"
 import DashboardSideBar from "./dashboard-side-bar"
 import DashboardTopNav from "./dashbord-top-nav"
@@ -59,6 +61,7 @@ export function useSidebarCollapsed(): [boolean, (collapsed: boolean) => void] {
 
 export function AdminShellLayout({
   children,
+  realm = "estio",
   logoUrl,
   lightUrl,
   activeLocation,
@@ -67,6 +70,7 @@ export function AdminShellLayout({
   impersonation,
 }: {
   children: ReactNode
+  realm?: AuthRealm
   logoUrl?: string
   lightUrl?: string
   activeLocation: { id: string; name: string | null }
@@ -79,7 +83,7 @@ export function AdminShellLayout({
   const { appSurface } = layoutPolicy
 
   return (
-    <>
+    <CrmRealmProvider value={realm}>
       {impersonation ? <ImpersonationBanner context={impersonation} /> : null}
       <div
       data-admin-shell-layout={appSurface ? "app-surface" : "default"}
@@ -100,6 +104,6 @@ export function AdminShellLayout({
         <DashboardTopNav appSurface={appSurface} activeLocation={activeLocation} availableLocations={availableLocations} platformLoginLocations={platformLoginLocations}>{children}</DashboardTopNav>
       </AdminLayoutPolicyProvider>
       </div>
-    </>
+    </CrmRealmProvider>
   )
 }

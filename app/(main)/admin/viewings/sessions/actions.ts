@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -150,6 +152,7 @@ export async function createViewingSession(
     viewingId: string,
     input?: z.input<typeof createViewingSessionSchema>
 ) {
+    await assertCrmActionAllowed("viewings/sessions/actions.ts", "createViewingSession");
     const normalizedViewingId = asString(viewingId);
     if (!normalizedViewingId) {
         return { success: false, message: "Missing viewingId." };
@@ -311,6 +314,7 @@ export async function createViewingSession(
 }
 
 export async function startViewingSession(sessionId: string) {
+    await assertCrmActionAllowed("viewings/sessions/actions.ts", "startViewingSession");
     const normalizedSessionId = asString(sessionId);
     if (!normalizedSessionId) return { success: false, message: "Missing sessionId." };
 
@@ -359,6 +363,7 @@ export async function startViewingSession(sessionId: string) {
 }
 
 export async function pauseViewingSession(sessionId: string) {
+    await assertCrmActionAllowed("viewings/sessions/actions.ts", "pauseViewingSession");
     const normalizedSessionId = asString(sessionId);
     if (!normalizedSessionId) return { success: false, message: "Missing sessionId." };
 
@@ -398,6 +403,7 @@ export async function pauseViewingSession(sessionId: string) {
 }
 
 export async function completeViewingSession(sessionId: string) {
+    await assertCrmActionAllowed("viewings/sessions/actions.ts", "completeViewingSession");
     const normalizedSessionId = asString(sessionId);
     if (!normalizedSessionId) return { success: false, message: "Missing sessionId." };
 

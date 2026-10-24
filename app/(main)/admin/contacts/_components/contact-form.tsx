@@ -1,5 +1,7 @@
 'use client';
 
+import { useCrmRealm } from '../../_components/crm-realm';
+
 
 import { useRouter } from 'next/navigation';
 import type { FormEvent } from 'react';
@@ -408,7 +410,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
     // ...
 
     const effectiveContactType = isEditing ? contactType : initialContactType;
-    const currentConfig = CONTACT_TYPE_CONFIG[effectiveContactType];
+    const realm = useCrmRealm();
+    const originalConfig = CONTACT_TYPE_CONFIG[effectiveContactType];
+    const currentConfig = realm === "substo" ? { ...originalConfig, entityType: originalConfig.entityType === "company" ? "company" as const : "none" as const, impliedRole: originalConfig.entityType === "company" ? originalConfig.impliedRole : undefined, visibleTabs: originalConfig.visibleTabs.filter((tab) => !["properties", "matching", "requirements"].includes(tab)) } : originalConfig;
     const entityError = state.errors?.entityIds?.[0] || state.errors?.entityId?.[0];
 
     // Entity Assignment State

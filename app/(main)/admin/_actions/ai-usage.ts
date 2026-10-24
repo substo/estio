@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
@@ -37,6 +39,7 @@ export interface AiUsageSummary {
 
 /** Property-level token and cost data is restricted to location admins. */
 export async function getPropertyAiUsageSummary(propertyId: string): Promise<AiUsageSummary | null> {
+    await assertCrmActionAllowed("_actions/ai-usage.ts", "getPropertyAiUsageSummary");
     let locationId: string;
     try {
         ({ locationId } = await requirePropertyInActiveLocation(propertyId, { adminOnly: true }));
@@ -249,6 +252,7 @@ async function getAiUsageSummary(
 }
 
 export async function getLocationAiUsageSummary(): Promise<LocationAiUsageSummary | null> {
+    await assertCrmActionAllowed("_actions/ai-usage.ts", "getLocationAiUsageSummary");
     const [{ userId }, location] = await Promise.all([
         auth(),
         getLocationContext(),
@@ -268,6 +272,7 @@ export async function getLocationAiUsageSummary(): Promise<LocationAiUsageSummar
  * another team member's usage.
  */
 export async function getCurrentUserAiUsageSummary(): Promise<LocationAiUsageSummary | null> {
+    await assertCrmActionAllowed("_actions/ai-usage.ts", "getCurrentUserAiUsageSummary");
     const [location, userId] = await Promise.all([
         getLocationContext(),
         resolveAuthenticatedDbUserId(),

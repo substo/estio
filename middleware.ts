@@ -17,7 +17,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   hostname = hostname ? hostname.replace(/:\d+$/, "") : "";
   const url = req.nextUrl;
 
-  // Substo is a separate Clerk realm and has no Estio tenant-site or Business routes.
+  // Substo is a separate Clerk realm with an explicit CRM allowlist.
   // Enforce this before the Estio tenant rewrite loop-protection bypass.
   if (getRequestBrand(req) === "substo") {
     const routeKind = classifySubstoRoute(url.pathname);
@@ -27,7 +27,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     if (routeKind === "blocked") {
       return new NextResponse("Not Found", { status: 404 });
     }
-    if (routeKind === "studio" || routeKind === "brand" || routeKind === "profile") await auth.protect();
+    if (routeKind === "studio" || routeKind === "brand" || routeKind === "profile" || routeKind === "crm") await auth.protect();
     // Studio API handlers validate their Clerk user and workspace access, returning
     // JSON errors to clients instead of Clerk's page-oriented protect redirect.
 

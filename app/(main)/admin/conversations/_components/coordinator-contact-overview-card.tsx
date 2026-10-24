@@ -1,5 +1,6 @@
 "use client";
 
+import { useCrmRealm } from "../../_components/crm-realm";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -401,6 +402,7 @@ export function CoordinatorContactOverviewCard({
     onContactContextUpdated,
     onOpenPropertyCampaign,
 }: CoordinatorContactOverviewCardProps) {
+    const realm = useCrmRealm();
     const canEditContact = hasFullContactContext(contactContext);
     const isShellContact = isShellContactContext(contactContext);
 
@@ -561,7 +563,7 @@ export function CoordinatorContactOverviewCard({
                                                 </div>
                                             )}
 
-                                            {showPropertyAssociations && (
+                                            {realm === "estio" && showPropertyAssociations && (
                                                 <div className="pt-1.5 border-t">
                                                     <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Property Associations</span>
                                                     <div className="space-y-1">
@@ -584,7 +586,7 @@ export function CoordinatorContactOverviewCard({
                                                 </div>
                                             )}
 
-                                            {showInterested && (
+                                            {realm === "estio" && showInterested && (
                                                 <div className="pt-1.5 border-t">
                                                     <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Interested</span>
                                                     <div className="space-y-1">
@@ -604,7 +606,7 @@ export function CoordinatorContactOverviewCard({
                                                 </div>
                                             )}
 
-                                            {showInspected && (
+                                            {realm === "estio" && showInspected && (
                                                 <div className="pt-1.5 border-t">
                                                     <span className="text-[10px] text-muted-foreground font-medium mb-1 block">Inspected</span>
                                                     <div className="space-y-1">
@@ -627,7 +629,7 @@ export function CoordinatorContactOverviewCard({
                                                 </div>
                                             )}
 
-                                            {showSearchCriteria && (
+                                            {realm === "estio" && showSearchCriteria && (
                                                 <div className="pt-1.5 border-t">
                                                     <ContactVerificationProposals
                                                         conversationId={conversationId}

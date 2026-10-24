@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed, assertGenericContactInput } from "@/lib/auth/crm-action-guard";
+
 import { z } from 'zod';
 import db from '@/lib/db';
 import { revalidatePath, revalidateTag } from 'next/cache';
@@ -466,6 +468,7 @@ function buildContactIdentityPatch(contact: {
 }
 
 export async function openOrStartConversationForContact(contactId: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "openOrStartConversationForContact");
   try {
     const access = await getActiveContactsAccess();
     if (!access) return { success: false, error: 'Unauthorized' };
@@ -785,6 +788,8 @@ export async function createContact(
   prevState: CreateContactState,
   formData: FormData
 ): Promise<CreateContactState> {
+    await assertCrmActionAllowed("contacts/actions.ts", "createContact");
+    await assertGenericContactInput(Object.fromEntries(formData.entries()));
   const rawData: Record<string, any> = {};
   formData.forEach((value, key) => { rawData[key] = value; });
   console.log('[createContact] RAW FormData:', rawData);
@@ -1182,6 +1187,8 @@ async function updateContactCore(
 }
 
 export async function updateContactAction(contactId: string, data: Partial<ValidatedContactData>) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateContactAction");
+    await assertGenericContactInput(data as Record<string, unknown>);
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, error: "Unauthorized" };
   const { userId, locationId } = access;
@@ -1216,6 +1223,7 @@ export async function updateContactAction(contactId: string, data: Partial<Valid
 }
 
 export async function updateContactIdentityAction(contactId: string, data: ContactIdentityUpdateData) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateContactIdentityAction");
   const t0 = performance.now();
   const normalizedContactId = String(contactId || '').trim();
   if (!normalizedContactId) return { success: false as const, error: 'Missing contact ID' };
@@ -1363,6 +1371,7 @@ export async function updateContactIdentityAction(contactId: string, data: Conta
 }
 
 export async function updateContactTypeAction(contactId: string, contactType: ContactType) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateContactTypeAction");
   const normalizedContactId = String(contactId || '').trim();
   if (!normalizedContactId) return { success: false as const, error: 'Missing contact ID' };
   if (!CONTACT_TYPES.includes(contactType)) return { success: false as const, error: 'Invalid contact type' };
@@ -1475,6 +1484,8 @@ export async function updateContact(
   prevState: CreateContactState,
   formData: FormData
 ): Promise<CreateContactState> {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateContact");
+    await assertGenericContactInput(Object.fromEntries(formData.entries()));
   const t0 = performance.now();
   const timings: Record<string, number> = {};
   const mark = (label: string) => {
@@ -1588,6 +1599,8 @@ export async function updateContact(
 
 
 export async function deleteContactRole(roleId: string, type: 'property' | 'company') {
+    await assertCrmActionAllowed("contacts/actions.ts", "deleteContactRole");
+    await assertGenericContactInput({ roleType: type });
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, message: 'Unauthorized' };
   const { locationId } = access;
@@ -1645,6 +1658,7 @@ const createCompanySchema = z.object({
 
 
 export async function getGoogleContactAction(resourceName: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "getGoogleContactAction");
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
@@ -1674,6 +1688,7 @@ export async function getGoogleContactAction(resourceName: string) {
 }
 
 export async function warmupGoogleContactsSearchAction() {
+    await assertCrmActionAllowed("contacts/actions.ts", "warmupGoogleContactsSearchAction");
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
@@ -1703,6 +1718,7 @@ export async function searchGoogleContactsAction(
   query: string,
   options?: { phoneFallback?: boolean; includeMetadata?: boolean; pageSize?: number }
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "searchGoogleContactsAction");
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
@@ -1730,6 +1746,7 @@ export async function searchGoogleContactsAction(
 }
 
 export async function importNewGoogleContactAction(resourceName: string, expectedLocationId: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "importNewGoogleContactAction");
   const access = await getActiveContactsAccess(expectedLocationId);
   if (!access) return { success: false, message: 'Unauthorized: Invalid active location.' };
   const { userId, locationId } = access;
@@ -1884,6 +1901,7 @@ export async function resolveSyncConflict(
     skipRevalidate?: boolean;
   }
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "resolveSyncConflict");
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, message: 'Unauthorized' };
   const { userId, locationId } = access;
@@ -2020,6 +2038,7 @@ export async function createCompany(
   prevState: CreateCompanyState,
   formData: FormData
 ): Promise<CreateCompanyState> {
+    await assertCrmActionAllowed("contacts/actions.ts", "createCompany");
   const validatedFields = createCompanySchema.safeParse({
     name: formData.get('name'),
     email: formData.get('email'),
@@ -2334,6 +2353,7 @@ export async function createViewing(
   prevState: any,
   formData: FormData
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "createViewing");
   const validatedFields = viewingSchema.safeParse({
     locationId: formData.get('locationId'),
     contactId: formData.get('contactId') || undefined,
@@ -2507,6 +2527,7 @@ export async function updateViewing(
   prevState: any,
   formData: FormData
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateViewing");
   const viewingId = formData.get('viewingId') as string;
   const validatedFields = viewingSchema.safeParse({
     locationId: formData.get('locationId'),
@@ -2679,6 +2700,7 @@ export async function updateViewing(
 }
 
 export async function deleteViewing(viewingId: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "deleteViewing");
   const { userId } = await auth();
   if (!userId) return { success: false, message: 'Unauthorized' };
 
@@ -2745,6 +2767,7 @@ export async function updateViewingStatus(
   status: z.infer<typeof viewingStatusSchema>,
   reason?: string | null
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateViewingStatus");
   const parsed = z.object({
     viewingId: z.string().min(1),
     status: viewingStatusSchema,
@@ -2808,6 +2831,7 @@ const viewingFeedbackSchema = z.object({
 });
 
 export async function updateViewingFeedback(input: z.input<typeof viewingFeedbackSchema>) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateViewingFeedback");
   const parsed = viewingFeedbackSchema.safeParse(input || {});
 
   if (!parsed.success) {
@@ -2893,6 +2917,7 @@ export async function generateViewingReminderDraftAction(
   viewingId: string,
   audience: ViewingReminderAudience
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "generateViewingReminderDraftAction");
   const access = await verifyViewingReminderAccess(viewingId);
   if (!access.ok) {
     return { success: false as const, error: access.error };
@@ -2920,6 +2945,7 @@ export async function generateViewingReminderDraftAction(
 }
 
 export async function queueViewingLeadRemindersAction(viewingId: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "queueViewingLeadRemindersAction");
   const access = await verifyViewingReminderAccess(viewingId);
   if (!access.ok) {
     return { success: false as const, error: access.error };
@@ -2938,6 +2964,7 @@ export async function queueViewingLeadRemindersAction(viewingId: string) {
 }
 
 export async function checkPropertyOwnerEmail(propertyId: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "checkPropertyOwnerEmail");
   try {
     const access = await getActiveContactsAccess();
     if (!access) return { hasEmail: false };
@@ -2982,6 +3009,7 @@ export async function deleteContact(
     deleteFromGoogle?: boolean;
   }
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "deleteContact");
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, message: 'Unauthorized' };
   const { userId, locationId } = access;
@@ -3053,6 +3081,7 @@ export async function deleteContact(
 }
 
 export async function addContactHistoryEntry(contactId: string, entry: string, date: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "addContactHistoryEntry");
   try {
     const access = await getActiveContactsAccess();
     if (!access) return { success: false, message: 'Unauthorized' };
@@ -3138,6 +3167,7 @@ function queueRequirementRefreshForEditedManualActivity(args: {
 }
 
 export async function updateManualActivityEntry(historyId: string, entry: string, dateIso: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateManualActivityEntry");
   const actor = await resolveManualActivityActor();
   if ('error' in actor) return { success: false, message: actor.error };
 
@@ -3179,6 +3209,7 @@ export async function updateManualActivityEntry(historyId: string, entry: string
 }
 
 export async function deleteManualActivityEntry(historyId: string, reason?: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "deleteManualActivityEntry");
   const actor = await resolveManualActivityActor();
   if ('error' in actor) return { success: false, message: actor.error };
 
@@ -3212,6 +3243,7 @@ export async function deleteManualActivityEntry(historyId: string, reason?: stri
 }
 
 export async function getContactDetails(contactId: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "getContactDetails");
   const access = await getActiveContactsAccess();
   if (!access) return null;
   const { userId, locationId } = access;
@@ -3336,6 +3368,7 @@ export async function getContactDetails(contactId: string) {
 
 
 export async function unlinkGoogleContact(contactId: string, options?: { skipRevalidate?: boolean }) {
+    await assertCrmActionAllowed("contacts/actions.ts", "unlinkGoogleContact");
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, message: 'Unauthorized' };
 
@@ -3362,6 +3395,7 @@ export async function unlinkGoogleContact(contactId: string, options?: { skipRev
 }
 
 export async function verifyAndHealContact(contactId: string, error: string | null) {
+    await assertCrmActionAllowed("contacts/actions.ts", "verifyAndHealContact");
   if (!error?.includes('Link broken') && !error?.includes('not found')) return;
 
   const access = await getActiveContactsAccess();
@@ -3385,6 +3419,7 @@ export async function verifyAndHealContact(contactId: string, error: string | nu
 }
 
 export async function searchContactsAction(query: string, requestedScope?: 'my' | 'location') {
+    await assertCrmActionAllowed("contacts/actions.ts", "searchContactsAction");
   const rawQuery = String(query || '').trim();
   if (rawQuery.length < 2) return [];
 
@@ -3573,6 +3608,7 @@ export async function previewMergeContacts(sourceContactId: string, targetContac
   message?: string;
   preview?: MergeContactPreview;
 }> {
+    await assertCrmActionAllowed("contacts/actions.ts", "previewMergeContacts");
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, message: "Unauthorized" };
   if (!sourceContactId || !targetContactId || sourceContactId === targetContactId) {
@@ -3623,6 +3659,7 @@ export async function mergeContacts(
   targetContactId: string,
   fieldChoices: MergeContactFieldChoices = {}
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "mergeContacts");
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, message: "Unauthorized" };
   const userId = access.userId;
@@ -3876,6 +3913,7 @@ export async function mergeContacts(
 }
 
 export async function updateContactStage(contactId: string, newStage: string) {
+    await assertCrmActionAllowed("contacts/actions.ts", "updateContactStage");
   if (!LEAD_STAGES.includes(newStage as any)) return { success: false, error: 'Invalid contact stage' };
   const access = await getActiveContactsAccess();
   if (!access) return { success: false, error: 'Unauthorized' };
@@ -3921,6 +3959,7 @@ export async function saveSharedContact(params: {
   name?: string;
   error?: string;
 }> {
+    await assertCrmActionAllowed("contacts/actions.ts", "saveSharedContact");
   try {
     const { userId } = await auth();
     if (!userId) {
@@ -4080,6 +4119,7 @@ export async function checkSharedContactsSavedState(
   locationId: string,
   phoneNumbers: string[]
 ) {
+    await assertCrmActionAllowed("contacts/actions.ts", "checkSharedContactsSavedState");
   try {
     const { userId } = await auth();
     if (!userId) return { success: false, error: 'Unauthorized' };

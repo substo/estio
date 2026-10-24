@@ -235,3 +235,18 @@ test("Estio brands are never resolved as Substo Studio workspaces", async () => 
   assert.equal(await resolveBrandWorkspaceAccess(context, workspaceId, estioUser.clerkId!), null);
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.size, 0);
 });
+
+test("a foreign push endpoint cannot be reassigned by the scoped upsert, including concurrent attempts", async () => {
+  const email = `${unique("push")}@example.com`;
+  const estio = await db.user.create({ data: { email, clerkId: unique("push-estio"), authRealm: "estio" } });
+  const substo = await db.user.create({ data: { email, clerkId: unique("push-substo"), authRealm: "substo" } });
+  const endpoint = `https://push.example.com/${unique("endpoint")}`;
+  const original = await db.webPushSubscription.create({ data: { userId: estio.id, endpoint, p256dh: "estio-key", auth: "estio-auth" } });
+  const attempts = await Promise.allSettled([1, 2].map(() => db.webPushSubscription.upsert({
+    where: { endpoint, userId: substo.id },
+    update: { userId: substo.id, p256dh: "substo-key" },
+    create: { userId: substo.id, endpoint, p256dh: "substo-key", auth: "substo-auth" },
+  })));
+  assert.ok(attempts.every((result) => result.status === "rejected" && ["P2002", "P2025"].includes(result.reason.code)), JSON.stringify(attempts.map((result) => result.status === "fulfilled" ? { status: result.status, userId: result.value.userId } : { status: result.status, code: result.reason.code, message: result.reason.message })));
+  assert.deepEqual(await db.webPushSubscription.findUniqueOrThrow({ where: { endpoint } }), original);
+});

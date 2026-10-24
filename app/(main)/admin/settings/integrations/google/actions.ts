@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
@@ -54,6 +56,7 @@ async function saveGoogleSettings({
 }
 
 export async function updateGoogleSyncDirection(direction: string) {
+    await assertCrmActionAllowed("settings/integrations/google/actions.ts", "updateGoogleSyncDirection");
     const { user } = await resolveGoogleContext();
 
     // Validate direction value
@@ -78,6 +81,7 @@ type GoogleAutomationSettingsInput = {
 };
 
 export async function updateGoogleAutomationSettings(input: GoogleAutomationSettingsInput) {
+    await assertCrmActionAllowed("settings/integrations/google/actions.ts", "updateGoogleAutomationSettings");
     const { user } = await resolveGoogleContext();
 
     if (input.mode && !["LINK_ONLY", "LINK_OR_CREATE"].includes(input.mode)) {
@@ -107,6 +111,7 @@ const updateGoogleTasklistSettingsSchema = z.object({
 });
 
 export async function updateGoogleTasklistSettings(input: z.input<typeof updateGoogleTasklistSettingsSchema>) {
+    await assertCrmActionAllowed("settings/integrations/google/actions.ts", "updateGoogleTasklistSettings");
     const { user } = await resolveGoogleContext();
 
     const parsed = updateGoogleTasklistSettingsSchema.parse(input);
@@ -127,6 +132,7 @@ const updateGoogleCalendarSettingsSchema = z.object({
 });
 
 export async function updateGoogleCalendarSettings(input: z.input<typeof updateGoogleCalendarSettingsSchema>) {
+    await assertCrmActionAllowed("settings/integrations/google/actions.ts", "updateGoogleCalendarSettings");
     const { user } = await resolveGoogleContext();
 
     const parsed = updateGoogleCalendarSettingsSchema.parse(input);

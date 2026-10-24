@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
@@ -37,6 +39,7 @@ export async function updateSiteSettings(
     prevState: SiteSettingsState,
     formData: FormData
 ): Promise<SiteSettingsState> {
+    await assertCrmActionAllowed("site-settings/actions.ts", "updateSiteSettings");
     const { userId } = await auth();
     if (!userId) return { message: "Unauthorized" };
 

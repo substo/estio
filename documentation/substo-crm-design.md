@@ -1,6 +1,6 @@
 # Substo CRM: design direction
 
-Status: direction approved by the user on 2026-10-24. Slices 0–2 are implemented locally on `feature/crm-realm-identity`; nothing is deployed. See [the rollout runbook](crm-realm-identity-rollout.md). This changes one boundary of the approved brief in [the Studio audit handoff](studio-audit-continuation-handoff.md): there, Substo was "Studio only" with standalone workspace memberships.
+Status: direction approved by the user on 2026-10-24. Slices 0–3 are implemented locally on `feature/crm-realm-identity`; nothing is deployed. See [the rollout runbook](crm-realm-identity-rollout.md). This changes one boundary of the approved brief in [the Studio audit handoff](studio-audit-continuation-handoff.md): there, Substo was "Studio only" with standalone workspace memberships.
 
 ## Decisions (user, 2026-10-24)
 
@@ -62,7 +62,7 @@ Consequences:
 | 0 | **Separate identities** (done locally, commit `9e2d34ad`) | Equal emails in Estio and Substo are always different users. Ship the additive release first, then the contract step. |
 | 1 | **Brands on Substo** | `Location` records its app; automatic brand at first Substo sign-in; CRM team page and invitations per app; the Clerk webhook opened for Substo with its own secret. |
 | 2 | **Studio on top of the brand** | A Substo Studio workspace attaches 1:1 to its brand with inherited roles. Existing Substo workspaces are migrated, and Studio memberships and invite links are retired. The Substo Studio chooser lists brands, not workspaces. |
-| 3 | **Open the CRM on Substo** | `/admin` opens on substo.com for the shown modules only, with server-side blocking of hidden ones. An isolation test proves, for every opened route, that a Substo user cannot reach Estio data. |
+| 3 | **Open the CRM on Substo** (implemented locally) | `/admin` opens on substo.com for the shown modules only, with server-side blocking of hidden ones. An isolation test proves, for every opened route, that a Substo user cannot reach Estio data. |
 | 4 | **Look generic** | CRM option in the product switch, Substo branding (logo, emails, titles) and the vocabulary layer with the generic terms. |
 | 5 | **Website on Substo** | Pages, blog and posting for a brand on a substo.com address. |
 | 6+ | **Feature by feature** | Integrations one at a time; custom domains for brand websites (needs Substo sign-in on those domains); custom fields/objects per niche; billing. |

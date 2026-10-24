@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { AdminShellLayout, AdminSidebarPreferenceScript } from "./_components/admin-shell-layout";
 import { AdminContentFrame } from "./_components/admin-content-frame";
 import { OnboardingWrapper } from "@/components/onboarding-wrapper";
@@ -15,9 +15,12 @@ import { listPlatformLocationLoginOptions } from "@/lib/auth/platform-location-o
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  // The CRM is Estio-only until its Substo route firewall exists (slice 3);
-  // middleware already blocks /admin on Substo, this is a second guard.
-  if (await getRequestAuthRealm() !== "estio") notFound();
+  const realm = await getRequestAuthRealm();
+  if (realm === "substo") {
+    // Direct CRM entry also performs first-sign-in/invitation setup.
+    const { prepareCurrentSubstoUser } = await import("@/lib/brands/substo-brands");
+    await prepareCurrentSubstoUser();
+  }
   const platformAdmin = await getPlatformAdminContext();
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect("/sign-in");
@@ -25,6 +28,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   if (resolution.status !== "authorized" || !resolution.location || !resolution.user) {
     if ((await auth()).actor) redirect("/support-access-invalid");
+    if (realm === "substo") redirect("/studio?choose=1");
     const hostname = (await headers()).get("host") || "";
     const isSystemDomain = ["localhost", "estio.co"].includes(hostname.replace(":3000", ""));
     redirect(isSystemDomain ? "/" : "/favorites");
@@ -44,6 +48,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <AdminSidebarPreferenceScript />
       <LocationPresenceTracker />
       <AdminShellLayout
+        realm={realm}
         logoUrl={theme?.logo?.url}
         lightUrl={theme?.logo?.lightUrl}
         activeLocation={{ id: location.id, name: location.name }}
@@ -57,7 +62,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         } : null}
       >
         <AdminContentFrame>
-          <Suspense fallback={null}><AnalyticsTracker eventName="admin_page_view" /></Suspense>
+          {realm === "estio" ? <Suspense fallback={null}><AnalyticsTracker eventName="admin_page_view" /></Suspense> : null}
           {needsOnboarding ? (
             <div className="flex min-h-[50vh] flex-col items-center justify-center space-y-4">
               <div className="text-center">

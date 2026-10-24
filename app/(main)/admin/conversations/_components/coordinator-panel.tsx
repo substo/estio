@@ -1,3 +1,4 @@
+import { useCrmRealm } from "../../_components/crm-realm";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { Conversation } from "@/lib/ghl/conversations";
@@ -88,6 +89,7 @@ export function CoordinatorPanel({
     onContactMerged,
     onOpenPropertyCampaign,
 }: CoordinatorPanelProps) {
+    const realm = useCrmRealm();
     const [reasoning, setReasoning] = useState("");
     const [error, setError] = useState<string | null>(null);
 
@@ -248,7 +250,7 @@ export function CoordinatorPanel({
                     >
                         Tasks{taskOpenCount > 0 ? ` (${taskOpenCount})` : ''}
                     </Button>
-                    <Button
+                    {realm === "estio" ? <Button
                         type="button"
                         variant={sidebarTab === "viewings" ? "default" : "outline"}
                         size="sm"
@@ -256,7 +258,7 @@ export function CoordinatorPanel({
                         onClick={() => setSidebarTab("viewings")}
                     >
                         Viewings{upcomingViewingCount > 0 ? ` (${upcomingViewingCount})` : ''}
-                    </Button>
+                    </Button> : null}
                 </div>
             )}
 
@@ -332,7 +334,7 @@ export function CoordinatorPanel({
                 </div>
             )}
 
-            {(!lazySidebarDataEnabled || loadedSidebarTabs.viewings) && (
+            {realm === "estio" && (!lazySidebarDataEnabled || loadedSidebarTabs.viewings) && (
                 <div className={cn(lazySidebarDataEnabled && sidebarTab !== 'viewings' ? 'hidden' : 'block')}>
                     <Card className="shadow-none border-border/50">
                         <CardContent className="p-3">
@@ -349,7 +351,7 @@ export function CoordinatorPanel({
             )}
 
             <div className={cn("flex-1 min-h-0 flex flex-col space-y-3", lazySidebarDataEnabled && sidebarTab !== 'overview' ? 'hidden' : '')}>
-                <CoordinatorMissionControl
+                {realm === "estio" ? <CoordinatorMissionControl
                     goal={goal}
                     setGoal={setGoal}
                     plan={plan}
@@ -371,7 +373,7 @@ export function CoordinatorPanel({
                     handleExecuteNext={handleExecuteNext}
                     handleOrchestrate={handleOrchestrate}
                     handleGenerateDraftOnly={handleGenerateDraftOnly}
-                />
+                /> : null}
 
                 <CoordinatorTraceModal
                     open={traceModalOpen}

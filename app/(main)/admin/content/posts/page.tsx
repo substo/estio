@@ -1,3 +1,4 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import Image from "next/image";
 import { getImageDeliveryUrl } from "@/lib/cloudflareImages";
 
 export default async function PostsListPage() {
+    const realm = await getRequestAuthRealm();
     const orgId = (await getLocationContext())?.id;
 
     if (!orgId) return null;
@@ -86,7 +88,7 @@ export default async function PostsListPage() {
                                     <Link href={`/admin/content/posts/${post.id}`}>
                                         <Button variant="ghost" size="icon"><Pencil className="w-4 h-4" /></Button>
                                     </Link>
-                                    {post.published && (
+                                    {realm === "estio" && post.published && (
                                         <a href={`${protocol}://${domain}${port}/blog/${post.slug}`} target="_blank" rel="noopener noreferrer">
                                             <Button variant="ghost" size="icon" title="View Live"><ExternalLink className="w-4 h-4" /></Button>
                                         </a>

@@ -12,6 +12,7 @@ export async function getPlatformAdminContext(): Promise<PlatformAdminContext | 
   if (!userId || actor) return null;
   const realm = await getRequestAuthRealm();
   if (!isBusinessRealm(realm)) return null;
+  if (realm !== "estio") return null;
   const user = await db.user.findUnique({ where: realmClerkIdWhere(realm, userId), select: { id: true, authRealm: true, clerkId: true, platformRole: true } });
   if (!user || user.clerkId !== userId || user.authRealm !== realm || user.platformRole !== "PLATFORM_ADMIN") return null;
   return { clerkUserId: userId, internalUserId: user.id };

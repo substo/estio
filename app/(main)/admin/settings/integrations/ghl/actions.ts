@@ -1,11 +1,14 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { revalidatePath } from "next/cache";
 import db from "@/lib/db";
 import { buildGhlDisconnectData } from "@/lib/ghl/disconnect";
 import { resolveIntegrationAdminContext } from "../admin-context";
 
 export async function disconnectGhlIntegration(formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/ghl/actions.ts", "disconnectGhlIntegration");
     const { locationId } = await resolveIntegrationAdminContext();
     const mode = String(formData.get("mode") || "").trim();
 

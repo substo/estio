@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { revalidatePath } from 'next/cache';
 import db from '@/lib/db';
 import { verifyUserIsLocationAdmin } from '@/lib/auth/permissions';
@@ -193,6 +195,7 @@ async function requireProspectingLocationAdmin(locationId: string, errorMessage 
 // --- CONNECTIONS ---
 
 export async function getScrapingConnections(locationId: string) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getScrapingConnections");
     if (!locationId) return [];
     return await db.scrapingConnection.findMany({
         where: { locationId },
@@ -201,6 +204,7 @@ export async function getScrapingConnections(locationId: string) {
 }
 
 export async function createScrapingConnection(locationId: string, data: any) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "createScrapingConnection");
     await requireProspectingLocationAdmin(locationId, "Unauthorized to create scraping connections");
 
     const connection = await db.scrapingConnection.create({
@@ -218,6 +222,7 @@ export async function createScrapingConnection(locationId: string, data: any) {
 }
 
 export async function updateScrapingConnection(id: string, locationId: string, data: any) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "updateScrapingConnection");
     await requireProspectingLocationAdmin(locationId);
 
     const updateData: any = {
@@ -236,6 +241,7 @@ export async function updateScrapingConnection(id: string, locationId: string, d
 }
 
 export async function deleteScrapingConnection(id: string, locationId: string) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "deleteScrapingConnection");
     await requireProspectingLocationAdmin(locationId);
 
     await db.scrapingConnection.delete({
@@ -249,6 +255,7 @@ export async function deleteScrapingConnection(id: string, locationId: string) {
 // --- CREDENTIALS ---
 
 export async function getScrapingCredentials(connectionId: string) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getScrapingCredentials");
     if (!connectionId) return [];
     return await db.scrapingCredential.findMany({
         where: { connectionId },
@@ -257,6 +264,7 @@ export async function getScrapingCredentials(connectionId: string) {
 }
 
 export async function createScrapingCredential(connectionId: string, locationId: string, data: any) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "createScrapingCredential");
     await requireProspectingLocationAdmin(locationId);
 
     let encryptedPassword = null;
@@ -278,6 +286,7 @@ export async function createScrapingCredential(connectionId: string, locationId:
 }
 
 export async function updateScrapingCredential(id: string, locationId: string, data: any) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "updateScrapingCredential");
     await requireProspectingLocationAdmin(locationId);
 
     const updateData: any = {
@@ -299,6 +308,7 @@ export async function updateScrapingCredential(id: string, locationId: string, d
 }
 
 export async function deleteScrapingCredential(id: string, locationId: string) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "deleteScrapingCredential");
     await requireProspectingLocationAdmin(locationId);
 
     await db.scrapingCredential.delete({
@@ -312,6 +322,7 @@ export async function deleteScrapingCredential(id: string, locationId: string) {
 // --- TASKS ---
 
 export async function getScrapingTasks(locationId: string) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getScrapingTasks");
     if (!locationId) return [];
     return await db.scrapingTask.findMany({
         where: { locationId },
@@ -321,6 +332,7 @@ export async function getScrapingTasks(locationId: string) {
 }
 
 export async function createScrapingTask(locationId: string, data: any) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "createScrapingTask");
     await requireProspectingLocationAdmin(locationId, "Unauthorized to create scraping tasks");
 
     const connection = await db.scrapingConnection.findFirst({
@@ -358,6 +370,7 @@ export async function createScrapingTask(locationId: string, data: any) {
 }
 
 export async function updateScrapingTask(id: string, locationId: string, data: any) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "updateScrapingTask");
     await requireProspectingLocationAdmin(locationId);
 
     const existingTask = await db.scrapingTask.findFirst({
@@ -410,6 +423,7 @@ export async function updateScrapingTask(id: string, locationId: string, data: a
 }
 
 export async function deleteScrapingTask(id: string, locationId: string) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "deleteScrapingTask");
     await requireProspectingLocationAdmin(locationId);
 
     await db.scrapingTask.delete({
@@ -421,6 +435,7 @@ export async function deleteScrapingTask(id: string, locationId: string) {
 }
 
 export async function manualTriggerScrape(id: string, locationId: string, pageLimit?: number) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "manualTriggerScrape");
     const userId = await requireProspectingLocationAdmin(locationId);
 
     const task = await db.scrapingTask.findUnique({
@@ -445,6 +460,7 @@ export async function manualTriggerDeepScrape(
     locationId: string,
     limit?: number,
 ): Promise<ManualDeepScrapeTriggerResult> {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "manualTriggerDeepScrape");
     const userId = await requireProspectingLocationAdmin(locationId);
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit as number))) : 50;
@@ -642,6 +658,7 @@ export async function manualTriggerDeepScrape(
 }
 
 export async function getDeepScrapeRuns(locationId: string, limit = 15) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getDeepScrapeRuns");
     await requireProspectingLocationAdmin(locationId);
 
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 15;
@@ -659,6 +676,7 @@ export async function getDeepScrapeRuns(locationId: string, limit = 15) {
 }
 
 export async function getDeepScrapeRunDetails(locationId: string, runId: string, stageLimit = 200) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getDeepScrapeRunDetails");
     await requireProspectingLocationAdmin(locationId);
 
     const safeStageLimit = Number.isFinite(stageLimit)
@@ -683,6 +701,7 @@ export async function getDeepScrapeRunDetails(locationId: string, runId: string,
 }
 
 export async function cancelDeepScrapeRun(locationId: string, runId: string): Promise<CancelDeepScrapeRunResult> {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "cancelDeepScrapeRun");
     const userId = await requireProspectingLocationAdmin(locationId);
 
     const safeRunId = String(runId || '').trim();
@@ -799,12 +818,14 @@ export async function cancelDeepScrapeRun(locationId: string, runId: string): Pr
 }
 
 export async function getDeepScrapeQueueDiagnostics(locationId: string): Promise<DeepScrapeQueueDiagnostics> {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getDeepScrapeQueueDiagnostics");
     await requireProspectingLocationAdmin(locationId);
 
     return getScrapingQueueDiagnostics();
 }
 
 export async function getDeepScrapeRunOverview(locationId: string, windowHours = 24): Promise<DeepScrapeRunOverview> {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getDeepScrapeRunOverview");
     await requireProspectingLocationAdmin(locationId);
 
     const safeWindowHours = Number.isFinite(windowHours) ? Math.max(1, Math.min(24 * 30, Math.floor(windowHours))) : 24;
@@ -909,6 +930,7 @@ export async function getDeepScrapeRunOverview(locationId: string, windowHours =
 }
 
 export async function getScrapingRuns(taskId: string, locationId: string, limit = 15) {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getScrapingRuns");
     await requireProspectingLocationAdmin(locationId);
 
     if (!taskId) return [];
@@ -923,6 +945,7 @@ export async function getScrapingRuns(taskId: string, locationId: string, limit 
 }
 
 export async function getScrapingRunOverview(locationId: string, windowHours = 24): Promise<ScrapingRunOverview> {
+    await assertCrmActionAllowed("settings/prospecting/actions.ts", "getScrapingRunOverview");
     await requireProspectingLocationAdmin(locationId);
 
     const safeWindowHours = Number.isFinite(windowHours) ? Math.max(1, Math.min(24 * 30, Math.floor(windowHours))) : 24;

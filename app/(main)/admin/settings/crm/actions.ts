@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { puppeteerService } from '@/lib/crm/puppeteer-service';
 
 import db from '@/lib/db';
@@ -121,6 +123,7 @@ function getUserCrmDocument(localUserId: string) {
 }
 
 export async function pullLead(crmLeadId: string) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "pullLead");
     console.log("[Action] pullLead called for ID:", crmLeadId);
     try {
         const { userId } = await auth();
@@ -139,6 +142,7 @@ export async function pullLead(crmLeadId: string) {
 }
 
 export async function previewLeadAction(crmLeadId: string) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "previewLeadAction");
     try {
         const { userId } = await auth();
         if (!userId) return { success: false, error: "Unauthorized" };
@@ -152,6 +156,7 @@ export async function previewLeadAction(crmLeadId: string) {
 }
 
 export async function addLeadSource(name: string, locationId?: string | null) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "addLeadSource");
     try {
         const context = await resolveAdminContext(locationId);
 
@@ -172,6 +177,7 @@ export async function addLeadSource(name: string, locationId?: string | null) {
 }
 
 export async function toggleLeadSource(id: string, isActive: boolean) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "toggleLeadSource");
     try {
         const access = await resolveLeadSourceAdminAccess(id);
         if (!access.success) return access;
@@ -190,6 +196,7 @@ export async function toggleLeadSource(id: string, isActive: boolean) {
 }
 
 export async function getLeadSources(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "getLeadSources");
     try {
         const context = await resolveAdminContext(locationId);
 
@@ -207,6 +214,7 @@ export async function getLeadSources(locationId?: string | null) {
 }
 
 export async function saveLegacyCrmLeadEmailSettings(data: any) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "saveLegacyCrmLeadEmailSettings");
     try {
         const context = await resolveAdminContext(data.locationId || null);
         const expectedVersion = parseOptionalVersion(data.settingsVersion);
@@ -282,6 +290,7 @@ export async function saveLegacyCrmLeadEmailSettings(data: any) {
 }
 
 export async function saveCrmCredentials(data: any) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "saveCrmCredentials");
     try {
         const context = await resolveAdminContext(data.locationId || null);
         const expectedVersion = parseOptionalVersion(data.settingsVersion);
@@ -399,6 +408,7 @@ export async function saveCrmCredentials(data: any) {
 }
 
 export async function clearOldCrmSettingsSection(section: OldCrmSettingsSection) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "clearOldCrmSettingsSection");
     try {
         if (!isOldCrmSettingsSection(section)) {
             return { success: false, error: "Unknown Old CRM settings section" };
@@ -468,6 +478,7 @@ export async function clearOldCrmSettingsSection(section: OldCrmSettingsSection)
 }
 
 export async function getCrmSettings(locationId?: string | null) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "getCrmSettings");
     try {
         const context = await resolveAdminContext(locationId || null);
         const [location, locationDoc, userDoc, hasCrmPassword] = await Promise.all([
@@ -534,6 +545,7 @@ export async function getCrmSettings(locationId?: string | null) {
 }
 
 export async function saveLeadSchema(schema: any, locationId?: string | null) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "saveLeadSchema");
     try {
         const context = await resolveAdminContext(locationId || null);
         const existing = await getLocationCrmDocument(context.locationId);
@@ -569,6 +581,7 @@ export async function saveLeadSchema(schema: any, locationId?: string | null) {
 }
 
 export async function analyzeLeadSchema(testUrl: string, locationId?: string | null) {
+    await assertCrmActionAllowed("settings/crm/actions.ts", "analyzeLeadSchema");
     try {
         const { userId } = await auth();
         if (!userId) return { success: false, error: "Unauthorized" };

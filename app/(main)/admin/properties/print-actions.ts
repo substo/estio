@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import db from "@/lib/db";
@@ -44,6 +46,7 @@ export async function createPropertyPrintDraft(input: {
     propertyId: string;
     locationId: string;
 }) {
+    await assertCrmActionAllowed("properties/print-actions.ts", "createPropertyPrintDraft");
     const normalizedPropertyId = String(input.propertyId || "").trim();
     const requestedLocationId = String(input.locationId || "").trim();
     const { locationId } = await requirePropertyInActiveLocation(normalizedPropertyId, { requestedLocationId });
@@ -102,6 +105,7 @@ export async function createPropertyPrintDraft(input: {
 }
 
 export async function savePropertyPrintDraft(input: z.infer<typeof saveDraftSchema>) {
+    await assertCrmActionAllowed("properties/print-actions.ts", "savePropertyPrintDraft");
     const parsed = saveDraftSchema.parse(input);
     const { locationId } = await requirePropertyInActiveLocation(parsed.propertyId, {
         requestedLocationId: parsed.locationId,
@@ -188,6 +192,7 @@ export async function duplicatePropertyPrintDraft(input: {
     propertyId: string;
     locationId: string;
 }) {
+    await assertCrmActionAllowed("properties/print-actions.ts", "duplicatePropertyPrintDraft");
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
     const requestedLocationId = String(input.locationId || "").trim();
@@ -224,6 +229,7 @@ export async function deletePropertyPrintDraft(input: {
     propertyId: string;
     locationId: string;
 }) {
+    await assertCrmActionAllowed("properties/print-actions.ts", "deletePropertyPrintDraft");
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
     const requestedLocationId = String(input.locationId || "").trim();
@@ -268,6 +274,7 @@ export async function setDefaultPropertyPrintDraft(input: {
     propertyId: string;
     locationId: string;
 }) {
+    await assertCrmActionAllowed("properties/print-actions.ts", "setDefaultPropertyPrintDraft");
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
     const requestedLocationId = String(input.locationId || "").trim();
@@ -305,6 +312,7 @@ export async function generatePropertyPrintDraftCopy(input: {
     locationId: string;
     modelOverride?: string | null;
 }) {
+    await assertCrmActionAllowed("properties/print-actions.ts", "generatePropertyPrintDraftCopy");
     const draftId = String(input.draftId || "").trim();
     const propertyId = String(input.propertyId || "").trim();
     const requestedLocationId = String(input.locationId || "").trim();

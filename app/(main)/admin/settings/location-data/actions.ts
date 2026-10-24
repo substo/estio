@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { revalidatePath } from 'next/cache';
 import db from '@/lib/db';
 import { getActiveContactsAccess } from '@/lib/contacts/active-location-access';
@@ -9,6 +11,7 @@ export async function resetAnalytics(
   _previousState: ResetAnalyticsResult,
   formData: FormData,
 ): Promise<ResetAnalyticsResult> {
+    await assertCrmActionAllowed("settings/location-data/actions.ts", "resetAnalytics");
   try {
     const result = await performResetAnalytics({
       confirmation: String(formData.get('confirmation') || ''),

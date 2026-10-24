@@ -1,3 +1,4 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import Link from "next/link";
 import { ArrowLeft, Building2, Globe, Mail, Phone } from "lucide-react";
 import { notFound } from "next/navigation";
@@ -16,6 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function CompanyViewPage(props: {
     params: Promise<{ id: string }>;
 }) {
+    const realm = await getRequestAuthRealm();
     const { id } = await props.params;
 
     const access = await getActiveContactsAccess();
@@ -141,16 +143,16 @@ export default async function CompanyViewPage(props: {
                 </CardContent>
             </Card>
 
-            <Card>
+            {realm === "estio" ? <Card>
                 <CardHeader className="pb-2">
                     <h2 className="text-base font-semibold leading-none tracking-tight">XML Feeds</h2>
                 </CardHeader>
                 <CardContent>
                     <FeedManager companyId={company.id} initialFeeds={company.feeds} />
                 </CardContent>
-            </Card>
+            </Card> : null}
 
-            <Card>
+            {realm === "estio" ? <Card>
                 <CardHeader className="pb-2">
                     <h2 className="text-base font-semibold leading-none tracking-tight">Property Relations</h2>
                 </CardHeader>
@@ -176,7 +178,7 @@ export default async function CompanyViewPage(props: {
                         </ul>
                     )}
                 </CardContent>
-            </Card>
+            </Card> : null}
 
             <Card>
                 <CardHeader className="pb-2">

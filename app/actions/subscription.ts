@@ -1,10 +1,13 @@
 "use server"
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { syncContactToGHL } from '@/lib/ghl/stakeholders';
 import { getAccessToken } from '@/lib/ghl/token';
 import db from '@/lib/db';
 
 export async function subscribe(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("app/actions/subscription.ts", "subscribe");
     const email = formData.get('email') as string;
 
     if (!email) {

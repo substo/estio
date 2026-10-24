@@ -1,3 +1,5 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
+import { redirect } from "next/navigation";
 import db from "@/lib/db";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { TeamMemberCard } from "./_components/team-member-card";
@@ -10,6 +12,7 @@ import { AccessSessionsSection } from "./_components/access-sessions-section";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
 
 export default async function TeamPage({ searchParams }: { searchParams?: Promise<{ contactAccess?: string; removalAudit?: string; cleanupWarning?: string }> }) {
+    if (await getRequestAuthRealm() === "substo") redirect("/brand/team");
     const resolvedSearchParams = await searchParams;
     const contactAccessResult = resolvedSearchParams?.contactAccess;
     const removalAudit = resolvedSearchParams?.removalAudit;

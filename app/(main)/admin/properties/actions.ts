@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { MediaKind, PropertyStatus, PublicationStatus } from "@prisma/client";
 import { updatePropertyEmbedding } from "@/lib/ai/search/property-embeddings";
@@ -152,6 +154,7 @@ const emptyToNull = (val: FormDataEntryValue | null) => {
 };
 
 export async function upsertProperty(formData: FormData, options?: { redirectOnCreate?: boolean }) {
+    await assertCrmActionAllowed("properties/actions.ts", "upsertProperty");
     try {
         const requestedLocationId = formData.get("locationId");
         const id = formData.get("id") as string;
@@ -403,6 +406,7 @@ export async function upsertProperty(formData: FormData, options?: { redirectOnC
 }
 
 export async function deletePropertyAction(propertyId: string, requestedLocationId?: string) {
+    await assertCrmActionAllowed("properties/actions.ts", "deletePropertyAction");
     try {
         const { locationId } = await requirePropertyInActiveLocation(propertyId, { requestedLocationId });
         console.log(`Attempting to delete property ${propertyId} for location ${locationId}`);
@@ -472,6 +476,7 @@ export async function bulkUpdateFeedInboxPropertiesAction(
         action: FeedInboxBulkAction;
     }
 ) {
+    await assertCrmActionAllowed("properties/actions.ts", "bulkUpdateFeedInboxPropertiesAction");
     const { propertyIds, locationId: requestedLocationId, action } = params;
     const { locationId } = await requireAuthenticatedLocationContext(requestedLocationId);
 
@@ -537,6 +542,7 @@ import { buildOldCrmManualPullFailure } from "@/lib/crm/old-crm-property-pull-se
 import { pullOldCrmPropertyForManualClient } from "@/lib/crm/manual-old-crm-property-pull";
 
 export async function pushToOldCrm(propertyId: string) {
+    await assertCrmActionAllowed("properties/actions.ts", "pushToOldCrm");
     const { clerkUserId, location, locationId } = await requirePropertyInActiveLocation(propertyId);
     return await pushPropertyToCrm({
         propertyId,
@@ -546,6 +552,7 @@ export async function pushToOldCrm(propertyId: string) {
 }
 
 export async function pullFromOldCrm(oldPropertyId: string) {
+    await assertCrmActionAllowed("properties/actions.ts", "pullFromOldCrm");
     try {
         const user = await currentUser();
         return await pullOldCrmPropertyForManualClient({
@@ -566,6 +573,7 @@ export async function pullFromOldCrm(oldPropertyId: string) {
 }
 
 export async function linkPropertyCreator(propertyId: string, email: string) {
+    await assertCrmActionAllowed("properties/actions.ts", "linkPropertyCreator");
     if (!propertyId || !email) {
         throw new Error("Property ID and Email are required");
     }

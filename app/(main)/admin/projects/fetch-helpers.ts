@@ -1,11 +1,14 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from '@/lib/db';
 import { auth } from '@clerk/nextjs/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import { getLocationContext } from '@/lib/auth/location-context';
 
 export async function getProjectsForSelect(locationId: string) {
+    await assertCrmActionAllowed("projects/fetch-helpers.ts", "getProjectsForSelect");
     try {
         const { userId } = await auth();
         if (!userId || (await getLocationContext())?.id !== locationId || !(await verifyUserHasAccessToLocation(userId, locationId))) {

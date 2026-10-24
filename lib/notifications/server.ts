@@ -316,6 +316,9 @@ export async function upsertWebPushSubscriptionForUser(args: {
   return db.webPushSubscription.upsert({
     where: {
       endpoint: args.endpoint,
+      // Extended unique filter: a foreign user's endpoint cannot be taken over.
+      // Foreign rows fail instead of transferring ownership, including racing requests.
+      userId: args.userId,
     },
     update: {
       userId: args.userId,

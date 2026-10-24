@@ -1,5 +1,7 @@
 'use client';
 
+import { useCrmRealm } from '../../_components/crm-realm';
+
 import dynamic from 'next/dynamic';
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -322,6 +324,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const searchParamsString = searchParams?.toString() || "";
+    const realm = useCrmRealm();
     const getSearchParam = (key: string) => searchParams?.get(key) || null;
 
     const updateUrl = useCallback((updates: Record<string, string | null>, mode: 'replace' | 'push' = 'replace') => {
@@ -3177,15 +3180,15 @@ export function ConversationInterface({ locationId, scope, initialConversations,
             deals={deals}
             onSelectDeal={handleSelectDeal}
             onHoverDeal={viewMode === 'deals' ? prefetchDealWorkspaceCore : undefined}
-            onImportClick={() => setImportModalOpen(true)}
+            onImportClick={realm === "estio" ? () => setImportModalOpen(true) : undefined}
             onBind={handleBindClick}
             onArchive={viewFilter === 'active' ? handleArchive : undefined}
             onUnarchive={viewFilter === 'archived' ? handleUnarchive : undefined}
             onRestore={viewFilter === 'trash' ? handleRestore : undefined}
             onEmptyTrash={viewFilter === 'trash' ? handleEmptyTrash : undefined}
-            onNewConversationClick={() => setNewConversationOpen(true)}
-            onSyncAllClick={() => setSyncAllOpen(true)}
-            onCampaignsClick={() => setPropertyCampaignsOpen(true)}
+            onNewConversationClick={realm === "estio" ? () => setNewConversationOpen(true) : undefined}
+            onSyncAllClick={realm === "estio" ? () => setSyncAllOpen(true) : undefined}
+            onCampaignsClick={realm === "estio" ? () => setPropertyCampaignsOpen(true) : undefined}
             onOpenPropertyCampaign={openPropertyCampaignMatch}
             disablePreviewCard={isMobileViewport}
         />
@@ -3216,7 +3219,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
             onSendMedia={handleSendMedia}
             onRefetchMedia={handleRefetchMedia}
             onRequestTranscript={handleRequestTranscript}
-            onExtractViewingNotes={handleExtractViewingNotes}
+            onExtractViewingNotes={realm === "estio" ? handleExtractViewingNotes : undefined}
             onRetryTranscript={handleRetryTranscript}
             onBulkTranscribeUnprocessedAudio={handleBulkTranscribeUnprocessedAudio}
             transcriptOnDemandEnabled={transcriptOnDemandEnabled}
@@ -3549,7 +3552,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
             )}
 
             {/* WhatsApp Import Modal */}
-            {activeConversation && (
+            {realm === "estio" && activeConversation && (
                 <WhatsAppImportModal
                     open={importModalOpen}
                     onOpenChange={setImportModalOpen}
@@ -3572,7 +3575,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
             />
 
             {/* Sync All WhatsApp Chats Dialog */}
-            <SyncAllChatsDialog
+            {realm === "estio" ? <SyncAllChatsDialog
                 open={syncAllOpen}
                 onOpenChange={setSyncAllOpen}
                 onComplete={async () => {
@@ -3580,9 +3583,9 @@ export function ConversationInterface({ locationId, scope, initialConversations,
                     const data = await fetchConversations(viewFilter, activeId || undefined, { scope });
                     replaceConversationListFromResponse(data);
                 }}
-            />
+            /> : null}
 
-            <PropertyMatchCampaignsDialog
+            {realm === "estio" ? <PropertyMatchCampaignsDialog
                 open={propertyCampaignsOpen}
                 onOpenChange={(nextOpen) => {
                     setPropertyCampaignsOpen(nextOpen);
@@ -3595,10 +3598,10 @@ export function ConversationInterface({ locationId, scope, initialConversations,
                     updateUrl({ id: conversationId, view: 'active', mode: null }, 'push');
                     handleSelect(conversationId);
                 }}
-            />
+            /> : null}
 
             {/* New Conversation Dialog */}
-            <NewConversationDialog
+            {realm === "estio" ? <NewConversationDialog
                 open={newConversationOpen}
                 onOpenChange={setNewConversationOpen}
                 locationId={locationId}
@@ -3625,7 +3628,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
                             toast({ title: "Error", description: "Failed to refresh conversations.", variant: "destructive" });
                         });
                 }}
-            />
+            /> : null}
         </>
     );
 }

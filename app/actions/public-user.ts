@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
@@ -31,18 +33,22 @@ export async function toggleFavorite(
     locationId: string,
     propertyId: string,
 ): Promise<{ success: boolean; isFavorited: boolean; error?: string }> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "toggleFavorite");
     return toggleFavoriteAtLocation(locationId, propertyId, publicUserLocationDependencies);
 }
 
 export async function isFavorited(locationId: string, propertyId: string): Promise<boolean> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "isFavorited");
     return isFavoritedAtLocation(locationId, propertyId, publicUserLocationDependencies);
 }
 
 export async function getFavorites(locationId: string) {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "getFavorites");
     return getFavoritesAtLocation(locationId, publicUserLocationDependencies);
 }
 
 export async function getFavoriteIds(locationId: string): Promise<string[]> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "getFavoriteIds");
     return getFavoriteIdsAtLocation(locationId, publicUserLocationDependencies);
 }
 
@@ -64,6 +70,7 @@ export interface SavedSearchFilters {
 }
 
 export async function saveSearch(filters: SavedSearchFilters): Promise<{ success: boolean; error?: string }> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "saveSearch");
     try {
         const { userId } = await auth();
         if (!userId) return { success: false, error: "Must be signed in to save searches" };
@@ -102,6 +109,7 @@ export async function saveSearch(filters: SavedSearchFilters): Promise<{ success
 }
 
 export async function getSavedSearch(): Promise<{ hasSearch: boolean; queryString: string }> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "getSavedSearch");
     try {
         const { userId } = await auth();
         if (!userId) return { hasSearch: false, queryString: "" };
@@ -170,10 +178,12 @@ export async function submitPublicProperty(
     previousState: unknown,
     formData: FormData,
 ): Promise<PublicPropertyState> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "submitPublicProperty");
     return submitPublicPropertyAtLocation(locationId, previousState, formData, publicUserLocationDependencies);
 }
 
 export async function getUserSubmissions(locationId: string) {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "getUserSubmissions");
     return getUserSubmissionsAtLocation(locationId, publicUserLocationDependencies);
 }
 
@@ -182,5 +192,6 @@ export async function updatePublicProperty(
     previousState: unknown,
     formData: FormData,
 ): Promise<PublicPropertyState> {
+    await assertCrmActionAllowed("app/actions/public-user.ts", "updatePublicProperty");
     return updatePublicPropertyAtLocation(locationId, previousState, formData, publicUserLocationDependencies);
 }

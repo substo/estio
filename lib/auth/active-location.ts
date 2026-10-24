@@ -50,8 +50,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
     return { status: "unauthenticated", clerkUserId: null, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
 
-  // Resolve only within the host's identity realm; Business is closed to
-  // realms without a Business tenancy (Substo until slice 3).
+  // Both the identity and every eligible tenant must belong to the verified host realm.
   const realm = await getRequestAuthRealm();
   if (!isBusinessRealm(realm)) {
     return { status: "no_access", clerkUserId, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
@@ -60,7 +59,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
     where: realmClerkIdWhere(realm, clerkUserId),
     select: {
       id: true, authRealm: true, clerkId: true, firstName: true, lastName: true, phone: true, timeZone: true, platformRole: true,
-      locations: { select: { id: true, name: true, isPlatformMaster: true } },
+      locations: { where: { authRealm: realm }, select: { id: true, name: true, isPlatformMaster: true } },
       locationRoles: { select: { locationId: true, role: true, contactAccessScope: true } },
     },
   });
@@ -91,7 +90,7 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
   }
 
   const fullLocation = await db.location.findUnique({ where: { id: selection.location.id } });
-  if (!fullLocation) {
+  if (!fullLocation || fullLocation.authRealm !== realm) {
     return { status: "no_access", clerkUserId, user: localIdentity, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
   return {
@@ -108,7 +107,7 @@ export async function validateActiveLocationSelection(locationId: string): Promi
     return { ...resolution, status: resolution.clerkUserId ? "no_access" : "unauthenticated", location: null, role: null };
   }
   const fullLocation = await db.location.findUnique({ where: { id: selected.id } });
-  if (!fullLocation) return { ...resolution, status: "no_access", location: null, role: null };
+  if (!fullLocation || fullLocation.authRealm !== await getRequestAuthRealm()) return { ...resolution, status: "no_access", location: null, role: null };
   return {
     ...resolution, status: "authorized",
     location: { ...fullLocation, membershipRole: selected.role, contactAccessScope: selected.contactAccessScope },

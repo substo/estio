@@ -1,13 +1,13 @@
 # Realm-scoped identity and Substo brands: rollout runbook
 
-Slices 0–2 of "CRM on Substo" ([design](substo-crm-design.md)). `User` gains an `authRealm` (`estio` | `substo`), so equal email addresses in the Estio and Substo Clerk applications never resolve to, link to or merge with the same Business user. Substo then gets brands (Prisma `Location`) with their own team and invitations, and Substo Studio sits on top of the brand. Nothing in this runbook has been run against production. Each release below needs its own authorization.
+Slices 0–3 of "CRM on Substo" ([design](substo-crm-design.md)). `User` gains an `authRealm` (`estio` | `substo`), so equal email addresses in the Estio and Substo Clerk applications never resolve to, link to or merge with the same Business user. Substo then gets brands (Prisma `Location`) with their own team and invitations, and Substo Studio sits on top of the brand. Nothing in this runbook has been run against production. Each release below needs its own authorization.
 
 There are **two releases, in this order, never combined**:
 
 | Release | Commit | Migrations | Code |
 | --- | --- | --- | --- |
 | A | `9e2d34ad` | `20261024160000_user_auth_realm_expand` | realm-aware user resolution, linking and webhooks (slice 0) |
-| B | branch head | `20261024170000_substo_brands`, `20261024180000_user_auth_realm_contract` | brands, brand team and invitations on Substo, Studio on top of the brand, shared sidebar layout, CRM/Studio switch (slices 1–2) |
+| B | branch head | `20261024170000_substo_brands`, `20261024180000_user_auth_realm_contract` | brands, brand team and invitations on Substo, Studio on top of the brand, shared sidebar layout, CRM/Studio switch on Estio and generic CRM opening on Substo (slices 1–3) |
 
 The contract migration refuses to run unless the expand migration finished at least 10 minutes earlier. A deploy of B straight from a pre-A release therefore aborts before the traffic switch, rather than leaving a rollback target that links users by email alone.
 
@@ -17,9 +17,9 @@ The contract migration refuses to run unless the expand migration finished at le
 | --- | --- |
 | Schema | `enum AuthRealm`, `User.authRealm NOT NULL DEFAULT 'estio'`, unique `(authRealm, email)` and `(authRealm, clerkId)`. `User.clerkId` stays globally unique on purpose: one Clerk user ID can only ever map to one row. |
 | Realm source | `lib/auth/request-realm.ts`: the exact host allowlist (`resolveHostBrand`) that also selects the Clerk keys. estio.co, local hosts and tenant satellites → `estio`; Substo hosts → `substo`. Never derived from an email or payload. |
-| Resolution | `resolveActiveLocation`, `getPlatformAdminContext` and impersonation resolve by (request realm, clerkId) and refuse realms without Business access (`isBusinessRealm`: `estio` only until slice 3). Header-free helpers (`permissions.ts`, `current-user.ts`) use `businessClerkIdWhere`. The Studio schedule worker uses (`estio`, clerkId). |
+| Resolution | Release A resolves Business users only on Estio. Release B resolves active tenants by (request realm, clerkId), filters connected brands by that realm and rechecks the selected brand. Platform admin and impersonation remain Estio-only. Header-free helpers (`permissions.ts`, `current-user.ts`) use `businessClerkIdWhere`. The Studio schedule worker uses (`estio`, clerkId). |
 | Linking | `ensureUserExists` → `ensureRealmUser`: (realm, clerkId), then a same-realm email claim (invited/placeholder users), as before. No fallback across realms. A conflicting row in the other realm makes the write fail closed. |
-| Webhooks | `/api/webhooks/clerk` verifies the raw body with the host realm's secret (`CLERK_WEBHOOK_SECRET` for Estio, `SUBSTO_CLERK_WEBHOOK_SECRET` for Substo). It rejects identical secrets, and checks `instance_id` when `ESTIO_CLERK_INSTANCE_ID` / `SUBSTO_CLERK_INSTANCE_ID` is set (the Substo ID is required). Substo events cannot create team members (no Business access) or tenant contacts. `/api/webhooks/clerk-mail` is Estio-only (404 elsewhere). `/api/webhooks/clerk-profile` was already per realm and touches only Studio. All three stay blocked on the Substo host by `classifySubstoRoute`. |
+| Webhooks | `/api/webhooks/clerk` verifies the raw body with the host realm's secret (`CLERK_WEBHOOK_SECRET` for Estio, `SUBSTO_CLERK_WEBHOOK_SECRET` for Substo). It rejects identical secrets, and checks `instance_id` when `ESTIO_CLERK_INSTANCE_ID` / `SUBSTO_CLERK_INSTANCE_ID` is set (the Substo ID is required). Substo events cannot create team members (no Business access) or tenant contacts. `/api/webhooks/clerk-mail` is Estio-only (404 elsewhere). `/api/webhooks/clerk-profile` was already per realm and touches only Studio. The profile webhook is the sole admitted webhook on Substo; the Business and mail webhook paths stay blocked by `classifySubstoRoute`. Substo brand invitations and memberships are managed by its brand service. |
 | Estio-only links by email | GHL OAuth callback, GHL SSO, property-creator placeholders, team invite and offboarding preview, platform-admin scripts and repair scripts: scoped to (`estio` or request realm, email). |
 
 ### Lookups deliberately left unchanged
@@ -29,7 +29,7 @@ About 50 Business call sites still use `findUnique({ where: { clerkId } })` afte
 1. `clerkId` is globally unique, so the lookup returns only the row created for that exact Clerk user.
 2. Every write path that sets `clerkId` now sets it within the Clerk user's own realm.
 3. They sit behind the realm-gated chokepoints above.
-4. Middleware keeps `/admin` and the Business APIs off the Substo host.
+4. Release A keeps all Business routes off Substo. Release B opens only the reviewed CRM pages/APIs behind same-realm tenant authority; Server Actions have a separate default-deny app guard.
 
 `realm-identity-contract.test.ts` pins the global `clerkId` uniqueness this relies on, and fails if any `db.user.findUnique/upsert/update/delete({ where: { email ... } })` without a realm reappears in `app/`, `lib/` or `scripts/`. Location-scoped user lists need no realm, because the database rejects cross-app memberships (release B). `platform-location-options` (Estio platform-admin login) is filtered to Estio brands and users.
 
@@ -122,7 +122,7 @@ Behaviour on Substo after release B:
 
 - At each `/studio` entry, the app links the Substo Business user and claims pending brand invitations addressed to the user's verified emails. It then adopts pre-brand Studio workspaces: the first member to sign in turns each one into a brand, and all of its current Studio members are imported once. If the user is still in no brand and has no invitation, the app creates their brand ("<first name>'s brand"), at most once per user.
 - Team management lives at `/brand/team` (invite by email, change role, remove, leave), and the name at `/brand/settings`. Invitations are sent by Substo's own Clerk application. Old `/studio/invite/<token>` links only explain that invitations now come by email.
-- Studio and brand pages use the CRM's sidebar shell in both apps. On Estio, the CRM/Studio switch sits under the logo. `/admin` stays blocked on Substo (middleware, plus a second check in the admin layout) until slice 3.
+- Studio and brand pages use the CRM's sidebar shell in both apps. On Estio, the CRM/Studio switch sits under the logo. Slice 3 now opens only the reviewed generic CRM pages/APIs on Substo, with a separate Server Action firewall. The Substo product-switch target remains slice 4.
 
 ### Before deploying B (read-only)
 
@@ -162,7 +162,7 @@ Smoke tests:
   - Sign in. You land in your brand's Studio with the same sidebar; a pre-brand workspace appears as a brand with its name.
   - `/brand/team` invites a second test address. That person signs up from the email and lands in the same brand as a member, without getting a brand of their own.
   - Removing them takes their Studio access away.
-  - `/admin` returns 404.
+  - `/admin` opens the generic CRM in the same Substo brand. Follow every opened route and foreign-ID check in [the slice 3 audit](substo-crm-route-firewall.md). `/admin/properties`, `/admin/prospecting`, `/admin/viewings`, platform/provider routes and forbidden Server Actions remain closed.
 
 ### Roll back release B
 
@@ -183,3 +183,8 @@ Smoke tests:
   - The contract guard rejects a same-deploy run.
   - The brand service integration tests (`lib/brands/brand-service.db.test.ts`) pass against the migrated database.
 - Unit and contract tests: `npx tsx --test lib/auth/realm-user-link.test.ts lib/auth/clerk-business-webhook.test.ts lib/auth/realm-identity-contract.test.ts lib/brands/brand-policy.test.ts`.
+
+
+## Slice 3: CRM host and action firewall
+
+This adds no migration. Release B now includes the generic CRM opening described in [the route audit](substo-crm-route-firewall.md). Keep the release A → release B order above. Rollback from slice 3 to `cad79180` closes Substo CRM access again, keeps brands and Studio, and retains CRM records; it needs no database reversal. A rollback across release B's contract step must follow the older limits above.

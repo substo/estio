@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { cookies } from "next/headers";
 import { z } from "zod";
@@ -12,6 +14,7 @@ const swipeSchema = z.object({
 });
 
 export async function submitSwipe(data: z.infer<typeof swipeSchema>) {
+    await assertCrmActionAllowed("app/(main)/widget/actions.ts", "submitSwipe");
     const validated = swipeSchema.parse(data);
     const cookieStore = await cookies();
     let anonymousKey = cookieStore.get("swipe_session_key")?.value;

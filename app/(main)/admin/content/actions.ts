@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
@@ -78,6 +80,7 @@ function extractImageIds(blocks: any): Set<string> {
 }
 
 export async function upsertPage(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("content/actions.ts", "upsertPage");
     const context = await resolveUserContext();
     if (!context) return { message: "Unauthorized: No user" };
 
@@ -187,6 +190,7 @@ export async function upsertPage(prevState: any, formData: FormData) {
 }
 
 export async function deletePage(id: string) {
+    await assertCrmActionAllowed("content/actions.ts", "deletePage");
     const context = await resolveUserContext();
     if (!context) return { message: "Unauthorized" };
 
@@ -211,6 +215,7 @@ export async function deletePage(id: string) {
 }
 
 export async function upsertPost(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("content/actions.ts", "upsertPost");
     const context = await resolveUserContext();
     if (!context) return { message: "Unauthorized" };
 
@@ -278,6 +283,7 @@ export async function upsertPost(prevState: any, formData: FormData) {
 }
 
 export async function deletePost(id: string) {
+    await assertCrmActionAllowed("content/actions.ts", "deletePost");
     const context = await resolveUserContext();
     if (!context) return { message: "Unauthorized" };
 
@@ -302,6 +308,7 @@ export async function deletePost(id: string) {
 }
 
 export async function updateHomeConfig(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("content/actions.ts", "updateHomeConfig");
     const context = await resolveUserContext();
     if (!context) return { message: "Unauthorized", success: false };
 
@@ -435,6 +442,7 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
 }
 
 export async function updateFavoritesConfig(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("content/actions.ts", "updateFavoritesConfig");
     const context = await resolveUserContext();
     if (!context) return { success: false, message: "Unauthorized" };
 
@@ -517,6 +525,7 @@ export async function updateFavoritesConfig(prevState: any, formData: FormData) 
 }
 
 export async function updateSearchConfig(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("content/actions.ts", "updateSearchConfig");
     const context = await resolveUserContext();
     if (!context) return { success: false, message: "Unauthorized" };
 
@@ -598,6 +607,7 @@ export async function updateSearchConfig(prevState: any, formData: FormData) {
 }
 
 export async function updateSubmissionsConfig(prevState: any, formData: FormData) {
+    await assertCrmActionAllowed("content/actions.ts", "updateSubmissionsConfig");
     const context = await resolveUserContext();
     if (!context) return { success: false, message: "Unauthorized" };
 

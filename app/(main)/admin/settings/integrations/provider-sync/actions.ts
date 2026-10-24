@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import {
@@ -88,6 +90,7 @@ async function updateGmailSyncOutboxJob(formData: FormData, buildData: () => any
 }
 
 export async function getProviderSyncDashboard() {
+    await assertCrmActionAllowed("settings/integrations/provider-sync/actions.ts", "getProviderSyncDashboard");
     const { locationId } = await resolveIntegrationAdminContext();
     const staleLockBefore = new Date(Date.now() - STALE_LOCK_MS);
 
@@ -265,17 +268,21 @@ export async function getProviderSyncDashboard() {
 }
 
 export async function retryProviderOutboxJob(formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/provider-sync/actions.ts", "retryProviderOutboxJob");
     await updateProviderOutboxJob(formData, buildRetryOutboxJobData);
 }
 
 export async function disableProviderOutboxJob(formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/provider-sync/actions.ts", "disableProviderOutboxJob");
     await updateProviderOutboxJob(formData, buildDisableOutboxJobData);
 }
 
 export async function retryGmailSyncOutboxJob(formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/provider-sync/actions.ts", "retryGmailSyncOutboxJob");
     await updateGmailSyncOutboxJob(formData, buildRetryOutboxJobData);
 }
 
 export async function disableGmailSyncOutboxJob(formData: FormData) {
+    await assertCrmActionAllowed("settings/integrations/provider-sync/actions.ts", "disableGmailSyncOutboxJob");
     await updateGmailSyncOutboxJob(formData, buildDisableOutboxJobData);
 }

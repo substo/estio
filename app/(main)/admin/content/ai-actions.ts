@@ -1,5 +1,7 @@
 "use server";
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { getLocationContext } from "@/lib/auth/location-context";
@@ -51,6 +53,7 @@ async function callContentAiModel(args: {
 }
 
 export async function generateContentFromUrl(url: string, locationId?: string, brandVoiceOverride?: string, extractionModelOverride?: string): Promise<GenerateContentResult> {
+    await assertCrmActionAllowed("content/ai-actions.ts", "generateContentFromUrl");
     console.log("--- START AI IMPORT ---");
     console.log(`URL: ${url}`);
 
@@ -309,6 +312,7 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
 
 // STAGE 2: Rebuild / Visual Engine
 export async function regeneratePageDesign(currentBlocks: any[], locationId: string, brandVoiceOverride?: string, designModelOverride?: string, promptOverride?: string): Promise<{ success: boolean; blocks?: any[]; error?: string }> {
+    await assertCrmActionAllowed("content/ai-actions.ts", "regeneratePageDesign");
     console.log("--- START STAGE 2: DESIGN REGEN ---");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
@@ -500,6 +504,7 @@ async function handleImageUpload(
 }
 
 export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?: string): Promise<{ success: boolean; voice?: string; error?: string }> {
+    await assertCrmActionAllowed("content/ai-actions.ts", "generateBrandVoiceFromSite");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
@@ -581,6 +586,7 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
 }
 
 export async function refineBlockContent(currentBlock: any, instruction: string, locationId: string): Promise<{ success: boolean; block?: any; error?: string }> {
+    await assertCrmActionAllowed("content/ai-actions.ts", "refineBlockContent");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
@@ -669,6 +675,7 @@ export async function generateSiteTheme(
     currentConfig: any,
     researchUrl?: string
 ): Promise<{ success: boolean; theme?: any; error?: string }> {
+    await assertCrmActionAllowed("content/ai-actions.ts", "generateSiteTheme");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
@@ -799,6 +806,7 @@ export async function generateSectionFromPrompt(
     brandVoiceOverride?: string,
     modelOverride?: string
 ): Promise<{ success: boolean; blocks?: any[]; error?: string }> {
+    await assertCrmActionAllowed("content/ai-actions.ts", "generateSectionFromPrompt");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 

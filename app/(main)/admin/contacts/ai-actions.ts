@@ -1,5 +1,7 @@
 'use server';
 
+import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
+
 import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { currentUser } from '@clerk/nextjs/server';
@@ -12,6 +14,7 @@ import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
  * Analyze a contact's conversation history and extract outreach details.
  */
 export async function analyzeContactAction(contactId: string, locationId: string) {
+    await assertCrmActionAllowed("contacts/ai-actions.ts", "analyzeContactAction");
     try {
         const user = await currentUser();
         if (!user) return { success: false, message: "Unauthorized" };
