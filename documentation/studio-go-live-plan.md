@@ -47,6 +47,24 @@ not approval. Recheck the observations in
    file, transcribe with a low-budget workspace OpenAI key, run one text job,
    confirm Estio Business pages/tenant sites still work.
 
+## First activation record (2026-10-24)
+
+- Deployed `release/studio-go-live` (based on live commit `2a5c79e7`) with
+  `PRISMA_SCHEMA_SYNC_MODE=migrate-only`; build `PXi9bEy9Z06HzLE6spi_F` on green
+  (:3002). No Business migrations were pending. `studio.env` is merged as a second
+  owner-only overlay only when `.env.prod` sets `SUBSTO_APP_HOSTS`.
+- Studio dependency and worker readiness passed before the switch; the post-switch
+  soak passed. Blue was drained afterwards and PM2 state saved.
+- The script then exited non-zero at `estio-device-tunnel-gateway`: its
+  `DEVICE_TUNNEL_CANARY_SCOPES` entry in the WhatsApp overlay expired on
+  2026-09-18, and the gateway had already been crash-looping before this deploy.
+  Renew or retire that canary before the next full-scope deploy, or the deploy
+  will stop at the same step after cutover (skipping the bridge, drain and
+  `pm2 save` steps).
+- `https://substo.com` loops (Cloudflare 308 to the same URL): the apex is already
+  proxied and the zone SSL mode must be **Full (strict)**. The origin serves
+  correctly with its Let's Encrypt certificate.
+
 ## Can be postponed until after first live use
 
 - Real legacy data/media import (start with empty workspaces; import later via
