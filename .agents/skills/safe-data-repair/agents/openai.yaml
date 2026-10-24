@@ -1,0 +1,4 @@
+interface:
+  display_name: "Safe Data Repair"
+  short_description: "Diagnose and gate narrow Estio data repairs"
+  default_prompt: "Use $safe-data-repair to diagnose and safely prepare this Estio repair."

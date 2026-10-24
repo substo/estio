@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy Estio"
+  short_description: "Safely deploy and verify Estio production"
+  default_prompt: "Use $deploy-estio to prepare and verify an Estio production deployment."
