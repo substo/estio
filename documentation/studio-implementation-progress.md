@@ -1,5 +1,15 @@
 # Shared Studio implementation progress
 
+## Latest local slice: Substo branding and generic CRM vocabulary (slice 4)
+
+Implemented locally on `feature/crm-realm-identity`. No production data, Clerk configuration, migration, real email delivery or deployment was changed.
+
+- Substo's desktop, collapsed and mobile shells now show CRM | Studio in both directions. Studio → CRM resolves and revalidates the displayed workspace's brand before changing selection. Foreign/revoked access cannot change the cookie. The slice 3 route/action firewall remains intact.
+- Shared app identity provides the Substo wordmark/icon, dashboard and app/product titles. A shared vocabulary layer supplies brand/team/company wording, generic contact types, Meeting pipeline labels and generic enquiry labels while preserving stored IDs/enums. Project property controls are hidden; company selection stays scoped to the current brand.
+- Estio keeps its current wording and switch behavior. No schema change or data rewrite is introduced.
+- Substo's Clerk application still owns email delivery. [The edition runbook](substo-edition-branding.md) contains concrete sender/name/template copy and preview checks; live Clerk branding and real delivery are pending acceptance steps.
+- Validation: 148 focused tests pass, including 10 new switch/render/vocabulary tests. Studio/team: 103/104, with the documented pre-existing assignment-recovery failure. No new compiler diagnostics in 39 changed files (six existing remain). Build exits 0, 129/129 pages; whitespace checks pass. Logs and rollout/rollback details are in the edition runbook. Signed-in browser acceptance is pending. Next: slice 5, public brand websites, then separately scoped integration work.
+
 ## Latest local slice: open the generic CRM on Substo (slice 3)
 
 Implemented locally on `feature/crm-realm-identity`; no production data change, migration or deployment occurred.

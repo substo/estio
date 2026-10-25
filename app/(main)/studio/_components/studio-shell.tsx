@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 import DashboardSideBar from "../../admin/_components/dashboard-side-bar";
 import { AdminNavigationGroups, type AdminNavGroup } from "../../admin/_components/admin-navigation";
 import { AdminSidebarPreferenceScript, useSidebarCollapsed } from "../../admin/_components/admin-shell-layout";
-import { openEstioStudioBusinessAction, openSubstoBrandStudioAction } from "../actions";
+import { openEstioStudioBusinessAction, openSubstoBrandStudioAction, openSubstoStudioCrmAction } from "../actions";
 
 type App = "estio" | "substo";
 
@@ -72,15 +72,6 @@ export function studioNavGroups(app: App, workspaceId: string | null): AdminNavG
     groups.push({ label: "Workspace", items: [{ href: "/studio", label: "Locations", icon: Layers, activePath: (pathname) => pathname === "/studio" }] });
   }
   return groups;
-}
-
-function SubstoWordmark({ compact }: { compact: boolean }) {
-  return (
-    <Link href="/studio" className={cn("flex items-center gap-2 font-semibold tracking-tight", compact ? "justify-center" : "min-w-0")}>
-      <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">S</span>
-      <span className={compact ? "sr-only" : "truncate text-base"}>Substo</span>
-    </Link>
-  );
 }
 
 /** Substo: switch the active brand. Each option re-checks membership on the server. */
@@ -137,21 +128,14 @@ export function StudioShell({
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const workspaceId = pathname.match(WORKSPACE_PATH)?.[1] ?? fallbackWorkspaceId;
   const groups = studioNavGroups(app, workspaceId);
-  // Substo has no CRM yet, so it gets no CRM target and the switch stays hidden there.
-  const switcher = app === "estio" ? (
-    <ProductSwitcher
-      active="studio"
-      compact={collapsed}
-      className={collapsed ? "mx-3.5" : "mx-3"}
-      targets={{
-        crm: workspaceId ? { action: openEstioStudioBusinessAction.bind(null, workspaceId) } : { href: "/admin" },
-        studio: { href: "/studio" },
-      }}
-    />
-  ) : null;
-  const logo = app === "substo"
-    ? <SubstoWordmark compact={collapsed} />
-    : <AppLogo size="sm" showName iconOnly={collapsed} className={collapsed ? "justify-center" : "min-w-0"} />;
+  const targets = {
+    crm: workspaceId
+      ? { action: (app === "substo" ? openSubstoStudioCrmAction : openEstioStudioBusinessAction).bind(null, workspaceId) }
+      : { href: "/admin" },
+    studio: { href: "/studio" },
+  };
+  const switcher = <ProductSwitcher active="studio" compact={collapsed} className={collapsed ? "mx-3.5" : "mx-3"} targets={targets} />;
+  const logo = <AppLogo app={app} href={app === "substo" ? "/studio" : "/"} size="sm" showName iconOnly={collapsed} className={collapsed ? "justify-center" : "min-w-0"} />;
 
   return (
     <>
@@ -175,15 +159,7 @@ export function StudioShell({
                   <SheetTitle className="font-bold">{app === "substo" ? "Substo" : "Estio"} Studio</SheetTitle>
                 </SheetHeader>
                 <div className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-4">
-                  {app === "estio" ? (
-                    <ProductSwitcher
-                      active="studio"
-                      targets={{
-                        crm: workspaceId ? { action: openEstioStudioBusinessAction.bind(null, workspaceId) } : { href: "/admin" },
-                        studio: { href: "/studio" },
-                      }}
-                    />
-                  ) : null}
+                  <ProductSwitcher active="studio" targets={targets} />
                   <AdminNavigationGroups variant="mobile" groups={groups} />
                 </div>
               </SheetContent>

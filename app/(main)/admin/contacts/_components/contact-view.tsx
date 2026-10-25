@@ -1,9 +1,11 @@
 "use client";
 
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Pencil, ExternalLink, Mail } from "lucide-react";
 import Link from "next/link";
+import { crmVocabulary, crmGoalLabel, crmStageLabel } from "@/lib/branding/crm-vocabulary";
 import { useCrmRealm } from "../../_components/crm-realm";
 import { useRouter } from "next/navigation";
 import { DialogFooter } from "@/components/ui/dialog";
@@ -12,7 +14,7 @@ import { useState } from "react";
 import { EditContactDialog } from "./edit-contact-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContactData } from "./contact-form";
-import { CONTACT_TYPE_CONFIG, ContactType, DEFAULT_CONTACT_TYPE, isKnownContactType } from "./contact-types";
+import { CONTACT_TYPE_CONFIG, contactTypeConfigForApp, ContactType, DEFAULT_CONTACT_TYPE, isKnownContactType } from "./contact-types";
 import { OutlookSyncManager } from "./outlook-sync-manager";
 
 
@@ -96,8 +98,8 @@ export default function ContactView({
         ? (contact.contactType as ContactType)
         : DEFAULT_CONTACT_TYPE;
     const realm = useCrmRealm();
-    const originalConfig = CONTACT_TYPE_CONFIG[contactType];
-    const config = realm === "substo" ? { ...originalConfig, visibleTabs: originalConfig.visibleTabs.filter((tab) => !["properties", "matching", "requirements"].includes(tab)) } : originalConfig;
+    const vocabulary = crmVocabulary(realm);
+    const config = contactTypeConfigForApp(realm, contactType);
 
     return (
         <div className={variant === 'modal' ? "flex flex-col h-full overflow-hidden" : "space-y-8 pb-12"}>
@@ -142,7 +144,7 @@ export default function ContactView({
                         <DisplayField label="Name" value={contact.name} />
                         <DisplayField label="Email" value={contact.email} />
                         <DisplayField label="Phone" value={contact.phone} />
-                        {contact.contactType && <DisplayField label="Type" value={contact.contactType} />}
+                        {contact.contactType && <DisplayField label="Type" value={config.label} />}
                         <DisplayField label="Status" value={contact.status} />
                         <DisplayField label="Status" value={contact.status} />
                         {config.showLeadFields && <DisplayField label="Heat Score" value={contact.heatScore} />}
@@ -153,11 +155,11 @@ export default function ContactView({
                     {/* 2. LEAD DETAILS */}
                     {config.showLeadFields && (
                         <DisplaySection title="Lead Details">
-                            <DisplayField label="Goal" value={contact.leadGoal} />
+                            <DisplayField label="Goal" value={crmGoalLabel(realm, contact.leadGoal)} />
                             <DisplayField label="Priority" value={contact.leadPriority} />
-                            <DisplayField label="Stage" value={contact.leadStage} />
+                            <DisplayField label="Stage" value={crmStageLabel(realm, contact.leadStage || "Unassigned")} />
                             <DisplayField label="Source" value={contact.leadSource} />
-                            <DisplayField label="Assigned Agent" value={contact.assignedUserId ? (userMap[contact.assignedUserId] || contact.assignedUserId) : null} />
+                            <DisplayField label={vocabulary.assignedPerson} value={contact.assignedUserId ? (userMap[contact.assignedUserId] || contact.assignedUserId) : null} />
                             <DisplayField label="Next Action" value={contact.leadNextAction} />
                             <DisplayField label="Follow Up Date" value={contact.leadFollowUpDate ? format(new Date(contact.leadFollowUpDate), 'dd/MM/yyyy') : null} />
                         </DisplaySection>

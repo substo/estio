@@ -1,3 +1,5 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
+import { crmVocabulary } from "@/lib/branding/crm-vocabulary";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { ProjectDialog } from "./_components/project-dialog";
@@ -14,6 +16,8 @@ export default async function ProjectsPage(props: {
         hasProperties?: string;
     }>
 }) {
+    const realm = await getRequestAuthRealm();
+    const vocabulary = crmVocabulary(realm);
     const searchParams = await props.searchParams;
     const location = await getLocationContext();
     if (!location) {
@@ -24,7 +28,7 @@ export default async function ProjectsPage(props: {
     // Parse search params
     const q = searchParams.q || undefined;
     const developer = searchParams.developer || undefined;
-    const hasProperties = searchParams.hasProperties === 'true';
+    const hasProperties = realm === 'estio' && searchParams.hasProperties === 'true';
 
     const projects = await listProjects({
         locationId,
@@ -43,7 +47,7 @@ export default async function ProjectsPage(props: {
 
     // 2. Developers from Company table
     const companyDevelopers = await db.company.findMany({
-        where: { locationId, type: { contains: 'Developer', mode: 'insensitive' } },
+        where: { locationId, ...(realm === 'estio' ? { type: { contains: 'Developer', mode: 'insensitive' as const } } : {}) },
         select: { name: true }
     }).then(res => res.map(c => c.name));
 
@@ -55,7 +59,7 @@ export default async function ProjectsPage(props: {
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold">Projects</h1>
-                    <p className="text-sm text-gray-500">Manage your development projects.</p>
+                    <p className="text-sm text-gray-500">{vocabulary.projectSummary}</p>
                 </div>
                 <ProjectDialog locationId={locationId} />
             </div>
@@ -67,18 +71,18 @@ export default async function ProjectsPage(props: {
                     <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
                             <th className="p-4">Name</th>
-                            <th className="p-4">Developer</th>
-                            <th className="p-4">Location</th>
-                            <th className="p-4">Completion</th>
-                            <th className="p-4">Units</th>
-                            <th className="p-4">Properties</th>
+                            <th className="p-4">{vocabulary.projectCompany}</th>
+                            <th className="p-4">{realm === "estio" ? "Location" : vocabulary.projectArea}</th>
+                            <th className="p-4">{realm === "estio" ? "Completion" : vocabulary.projectTarget}</th>
+                            {realm === "estio" ? <th className="p-4">Units</th> : null}
+                            {realm === "estio" ? <th className="p-4">Properties</th> : null}
                             <th className="p-4">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {projects.length === 0 ? (
                             <tr>
-                                <td colSpan={7} className="p-8 text-center text-gray-500">
+                                <td colSpan={realm === "estio" ? 7 : 5} className="p-8 text-center text-gray-500">
                                     No projects found. {q || developer || hasProperties ? 'Try adjusting your filters.' : 'Create one to get started.'}
                                 </td>
                             </tr>
@@ -105,12 +109,12 @@ export default async function ProjectsPage(props: {
                                     <td className="p-4">
                                         {project.completionDate ? project.completionDate.toLocaleDateString() : "-"}
                                     </td>
-                                    <td className="p-4">{project.totalUnits?.toString() || "-"}</td>
-                                    <td className="p-4">
+                                    {realm === "estio" ? <td className="p-4">{project.totalUnits?.toString() || "-"}</td> : null}
+                                    {realm === "estio" ? <td className="p-4">
                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                             {project._count.properties} Linked
                                         </span>
-                                    </td>
+                                    </td> : null}
                                     <td className="p-4">
                                         <ProjectDialog
                                             locationId={locationId}

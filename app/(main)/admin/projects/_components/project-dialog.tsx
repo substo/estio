@@ -1,5 +1,6 @@
 'use client';
 
+import { useCrmRealm } from '../../_components/crm-realm';
 import { useState, useActionState, useEffect } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ import { Project } from '@prisma/client';
 
 
 export function ProjectDialog({ locationId, onSuccess, triggerButton, project }: { locationId: string, onSuccess?: (project: Project) => void, triggerButton?: React.ReactNode, project?: Project }) {
+    const realm = useCrmRealm();
     const [open, setOpen] = useState(false);
     // Use the same upsert action. If 'project' exists, the form will include hidden ID which the action uses (or should use).
     // Note: upsertProjectAction uses 'ghlProjectId' to identify for update? 
@@ -75,7 +77,7 @@ export function ProjectDialog({ locationId, onSuccess, triggerButton, project }:
                 <DialogHeader>
                     <DialogTitle>{project ? 'Edit Project' : 'Add New Project'}</DialogTitle>
                     <DialogDescription>
-                        {project ? 'Update project details.' : 'Create a new development project.'}
+                        {project ? 'Update project details.' : realm === 'estio' ? 'Create a new development project.' : 'Create a new project.'}
                     </DialogDescription>
                 </DialogHeader>
 

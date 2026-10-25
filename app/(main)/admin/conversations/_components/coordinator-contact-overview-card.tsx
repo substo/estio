@@ -1,5 +1,6 @@
 "use client";
 
+import { crmStageLabel, crmContactTypeLabel } from "@/lib/branding/crm-vocabulary";
 import { useCrmRealm } from "../../_components/crm-realm";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -463,11 +464,11 @@ export function CoordinatorContactOverviewCard({
                                 <div className="grid grid-cols-2 gap-1.5 text-xs">
                                     <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
                                         <span className="text-muted-foreground block text-[10px] mb-0.5">Status</span>
-                                        <span className="font-medium">{contactContext.contact.leadStage || "Unassigned"}</span>
+                                        <span className="font-medium">{crmStageLabel(realm, contactContext.contact.leadStage || "Unassigned")}</span>
                                     </div>
                                     <div className="bg-secondary/50 p-1.5 rounded border border-secondary">
                                         <span className="text-muted-foreground block text-[10px] mb-0.5">Type</span>
-                                        <span className="font-medium">{contactContext.contact.contactType || (isShellContact ? "Loading..." : "Lead")}</span>
+                                        <span className="font-medium">{contactContext.contact.contactType ? crmContactTypeLabel(realm, contactContext.contact.contactType) : (isShellContact ? "Loading..." : "Lead")}</span>
                                     </div>
                                 </div>
                                 {isShellContact && loadingContext && (

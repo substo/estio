@@ -1,13 +1,13 @@
 # Realm-scoped identity and Substo brands: rollout runbook
 
-Slices 0–3 of "CRM on Substo" ([design](substo-crm-design.md)). `User` gains an `authRealm` (`estio` | `substo`), so equal email addresses in the Estio and Substo Clerk applications never resolve to, link to or merge with the same Business user. Substo then gets brands (Prisma `Location`) with their own team and invitations, and Substo Studio sits on top of the brand. Nothing in this runbook has been run against production. Each release below needs its own authorization.
+Slices 0–4 of "CRM on Substo" ([design](substo-crm-design.md)). `User` gains an `authRealm` (`estio` | `substo`), so equal email addresses in the Estio and Substo Clerk applications never resolve to, link to or merge with the same Business user. Substo then gets brands (Prisma `Location`) with their own team and invitations, and Substo Studio sits on top of the brand. Nothing in this runbook has been run against production. Each release below needs its own authorization.
 
 There are **two releases, in this order, never combined**:
 
 | Release | Commit | Migrations | Code |
 | --- | --- | --- | --- |
 | A | `9e2d34ad` | `20261024160000_user_auth_realm_expand` | realm-aware user resolution, linking and webhooks (slice 0) |
-| B | branch head | `20261024170000_substo_brands`, `20261024180000_user_auth_realm_contract` | brands, brand team and invitations on Substo, Studio on top of the brand, shared sidebar layout, CRM/Studio switch on Estio and generic CRM opening on Substo (slices 1–3) |
+| B | branch head | `20261024170000_substo_brands`, `20261024180000_user_auth_realm_contract` | brands, brand team and invitations on Substo, Studio on top of the brand, shared sidebar layout, CRM/Studio switch on Estio and generic CRM opening, Substo product switch and vocabulary (slices 1–4) |
 
 The contract migration refuses to run unless the expand migration finished at least 10 minutes earlier. A deploy of B straight from a pre-A release therefore aborts before the traffic switch, rather than leaving a rollback target that links users by email alone.
 
@@ -122,7 +122,7 @@ Behaviour on Substo after release B:
 
 - At each `/studio` entry, the app links the Substo Business user and claims pending brand invitations addressed to the user's verified emails. It then adopts pre-brand Studio workspaces: the first member to sign in turns each one into a brand, and all of its current Studio members are imported once. If the user is still in no brand and has no invitation, the app creates their brand ("<first name>'s brand"), at most once per user.
 - Team management lives at `/brand/team` (invite by email, change role, remove, leave), and the name at `/brand/settings`. Invitations are sent by Substo's own Clerk application. Old `/studio/invite/<token>` links only explain that invitations now come by email.
-- Studio and brand pages use the CRM's sidebar shell in both apps. On Estio, the CRM/Studio switch sits under the logo. Slice 3 now opens only the reviewed generic CRM pages/APIs on Substo, with a separate Server Action firewall. The Substo product-switch target remains slice 4.
+- Studio and brand pages use the CRM's sidebar shell in both apps. On Estio, the CRM/Studio switch sits under the logo. Slice 3 now opens only the reviewed generic CRM pages/APIs on Substo, with a separate Server Action firewall. Slice 4 enables both directions of the Substo product switch with membership revalidation.
 
 ### Before deploying B (read-only)
 
@@ -188,3 +188,8 @@ Smoke tests:
 ## Slice 3: CRM host and action firewall
 
 This adds no migration. Release B now includes the generic CRM opening described in [the route audit](substo-crm-route-firewall.md). Keep the release A → release B order above. Rollback from slice 3 to `cad79180` closes Substo CRM access again, keeps brands and Studio, and retains CRM records; it needs no database reversal. A rollback across release B's contract step must follow the older limits above.
+
+
+## Slice 4: Substo edition branding and navigation
+
+[The edition runbook](substo-edition-branding.md) records the shared identity/vocabulary, switch authority, exact local checks, Clerk email-branding copy and acceptance steps. It adds no migration. The release A → B order is unchanged; a later code-only slice 4 release can follow deployed slice 3. Code rollback to `4408b7b7` preserves CRM access/isolation and data while hiding the Substo product-switch option. Do not change the Estio Clerk application when reviewing Substo email branding.

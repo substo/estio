@@ -71,7 +71,7 @@ export function AddCompanyDialog({ locationId, type = 'Management', onSuccess }:
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
-                    <DialogTitle>Add {type} Company</DialogTitle>
+                    <DialogTitle>{type === "Company" ? "Add Company" : `Add ${type} Company`}</DialogTitle>
                     <DialogDescription>
                         Create a new company record.
                     </DialogDescription>

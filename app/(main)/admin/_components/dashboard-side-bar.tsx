@@ -1,5 +1,6 @@
 "use client"
 
+import { useCrmRealm } from "./crm-realm"
 import { AppLogo } from "@/components/app-logo"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -31,6 +32,7 @@ export default function DashboardSideBar({
   switcher?: ReactNode
   navigation?: ReactNode
 }) {
+  const realm = useCrmRealm()
   const ToggleIcon = collapsed ? ChevronRight : ChevronLeft
   const toggleLabel = collapsed ? "Expand sidebar" : "Collapse sidebar"
 
@@ -45,6 +47,8 @@ export default function DashboardSideBar({
         <div className="flex h-[55px] w-full items-center justify-center border-b px-2">
           {logo ?? (
             <AppLogo
+              app={realm}
+              href={realm === "substo" ? "/admin" : "/"}
               size="sm"
               showName={true}
               url={logoUrl}

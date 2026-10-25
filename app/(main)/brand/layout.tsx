@@ -1,3 +1,4 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
@@ -13,4 +14,8 @@ export default async function BrandLayout({ children }: { children: ReactNode })
   const shell = await getStudioShellData();
   if (!shell) notFound();
   return <StudioShell {...shell}>{children}</StudioShell>;
+}
+
+export async function generateMetadata() {
+  return await getRequestAuthRealm() === "substo" ? { title: "Brand" } : {};
 }

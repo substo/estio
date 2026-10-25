@@ -41,7 +41,7 @@ test("admin layout blocks multi-location tenant rendering until selection", () =
 test("one-location header renders no label or disabled selector and multi-location switcher is accessible", () => {
   assert.doesNotMatch(topNav, /Current location/);
   assert.match(topNav, /availableLocations\.length > 1/);
-  assert.match(switcher, /aria-label="Switch location"/);
+  assert.match(switcher, /aria-label=\{vocabulary\.switchTenant\}/);
   assert.match(switcher, /DropdownMenuRadioGroup/);
   assert.match(switcher, /role="alert" aria-live="assertive"/);
   assert.match(switcher, /window\.location\.reload\(\)/);

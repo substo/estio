@@ -80,3 +80,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     </>
   );
 }
+
+export async function generateMetadata() {
+  return await getRequestAuthRealm() === "substo" ? { title: "CRM" } : {};
+}

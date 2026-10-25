@@ -47,14 +47,14 @@ Logs: `/tmp/crm-slice3-auth-final.log`, `/tmp/crm-slice3-isolation.log`, `/tmp/c
 3. Verify the runbook's cross-realm membership/role/invitation queries return zero, and that sample same-email users resolve to different user IDs and same-realm brands.
 4. With two real signed-in sessions, test every opened surface in the table: ordinary Substo access works, and Estio location cookies, location IDs, contact/company/project/page/post/conversation/task/deal/message/attachment IDs cannot disclose or mutate Estio data. Check direct paths, intercepted contact views, query strings and Server Action submissions. Repeat representative Estio workflows.
 5. Confirm hidden pages/APIs return 404, forbidden actions reject when posted to `/admin/contacts`, team invitations use Substo Clerk, and no GHL/provider setup/send is exposed. Confirm Studio team access still follows the brand.
-6. Slice 4 enables the CRM product-switch target; until then Substo users can enter `/admin` directly. Public website routing and integrations are separately scoped later slices.
+6. Slice 4 enables the product switch in both directions. Verify that it preserves the selected brand as described in [the edition runbook](substo-edition-branding.md). Public website routing and integrations are separately scoped later slices.
 
 Rollback this code to `cad79180` to close Substo `/admin` again while preserving brand/Studio access. Keep all database records; no reverse migration or deletion is needed. CRM records created on Substo remain for a subsequent release. Rolling back before release B has the contract restrictions documented in the realm rollout runbook.
 
 ## Remaining work
 
 - Signed-in two-app acceptance and real Clerk invitation delivery; separately authorized release A/release B rollout, backup and operational verification.
-- Slice 4: CRM switch targets in both directions, Substo logo/emails/titles and generic vocabulary/contact types/settings.
+- Slice 4 is implemented locally; Substo Clerk email branding preview/delivery remains an external acceptance step.
 - Slice 5: public brand websites, pages/blog/posting addresses on Substo.
 - Slice 6+: review and enable messaging, WhatsApp/SIM relay, Google/Microsoft and other integrations individually; adapt automated AI/property-specific tools before opening them.
 - Custom domains and their Clerk login, custom fields/objects per niche, and billing.

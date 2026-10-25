@@ -1,5 +1,7 @@
 'use client';
 
+import { useCrmRealm } from '../../_components/crm-realm';
+import { crmStageLabel } from '@/lib/branding/crm-vocabulary';
 import { useState, useOptimistic, useTransition, useEffect } from 'react';
 import { LEAD_STAGES } from './contact-types';
 import { PipelineCard } from './pipeline-card';
@@ -25,6 +27,7 @@ interface PipelineBoardProps {
 }
 
 export function PipelineBoard({ contacts, stageCounts, leadSources, isGoogleConnected, isGhlConnected }: PipelineBoardProps) {
+    const realm = useCrmRealm();
     const [isPending, startTransition] = useTransition();
 
     // Use optimistic state for instant UI feedback on drop 
@@ -88,7 +91,7 @@ export function PipelineBoard({ contacts, stageCounts, leadSources, isGoogleConn
                     onDrop={(e) => handleDrop(e, stage)}
                 >
                     <div className="p-3 font-semibold text-sm border-b flex justify-between items-center bg-white/50 dark:bg-black/20 rounded-t-lg">
-                        <span className="uppercase tracking-wider text-xs">{stage}</span>
+                        <span className="uppercase tracking-wider text-xs">{crmStageLabel(realm, stage)}</span>
                         <div className="bg-white dark:bg-gray-900 border px-2 py-0.5 rounded-full text-xs text-muted-foreground font-medium">
                             {grouped[stage].length}
                         </div>

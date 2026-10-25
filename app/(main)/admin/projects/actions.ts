@@ -1,5 +1,6 @@
 'use server';
 
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from "@/lib/db";
@@ -20,6 +21,7 @@ export type ActionState = {
 
 export async function upsertProjectAction(prevState: ActionState, formData: FormData): Promise<ActionState> {
     await assertCrmActionAllowed("projects/actions.ts", "upsertProjectAction");
+    const realm = await getRequestAuthRealm();
     const locationId = formData.get("locationId") as string;
     const name = formData.get("name") as string;
     const ghlProjectId = formData.get("ghlProjectId") as string;
@@ -69,6 +71,7 @@ export async function upsertProjectAction(prevState: ActionState, formData: Form
     try {
         const data = {
             name,
+            source: realm === "substo" ? "Substo" : undefined,
             description: formData.get("description") as string,
             developer: formData.get("developer") as string, // This will be the Company Name selected from the dropdown
             projectLocation: formData.get("projectLocation") as string,

@@ -1,3 +1,4 @@
+import { appIdentity } from "@/lib/branding/app-identity";
 import Provider from '@/app/(main)/provider'
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
@@ -41,9 +42,13 @@ const estioMetadata: Metadata = {
 export async function generateMetadata(): Promise<Metadata> {
   const host = (await headers()).get("host") || "";
   if (resolveHostBrand(host, getHostBrandConfig()) === "substo") {
+    const identity = appIdentity("substo");
     return {
-      title: { default: "Substo Studio", template: "%s | Substo Studio" },
-      description: "Research, develop, and manage your content in Substo Studio.",
+      title: { default: identity.name, template: `%s | ${identity.name}` },
+      description: identity.description,
+      icons: { icon: identity.icon, shortcut: identity.icon, apple: identity.icon },
+      openGraph: { title: identity.name, description: identity.description },
+      twitter: { card: "summary", title: identity.name, description: identity.description },
     };
   }
   return estioMetadata;

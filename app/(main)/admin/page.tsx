@@ -1,4 +1,5 @@
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
+import { appIdentity } from "@/lib/branding/app-identity";
 import Link from "next/link";
 import { ArrowRight, BarChart3, ShieldCheck } from "lucide-react";
 import { GlobalAiUsageWidget } from "./_components/global-ai-usage-widget";
@@ -25,7 +26,7 @@ export default async function Dashboard() {
     <div className="p-6 space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome to the Estio Dashboard.</p>
+        <p className="text-muted-foreground">Welcome to the {appIdentity(realm).name} Dashboard.</p>
       </div>
 
       {(isLocationAdmin || platformAdmin) && (

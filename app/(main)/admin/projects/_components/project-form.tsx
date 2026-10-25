@@ -1,5 +1,6 @@
 'use client';
 
+import { useCrmRealm, useCrmVocabulary } from "../../_components/crm-realm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,8 @@ const PROJECT_FEATURES = [
 
 
 export default function ProjectForm({ project, locationId }: { project?: Project, locationId: string }) {
+    const realm = useCrmRealm();
+    const vocabulary = useCrmVocabulary();
     const [developers, setDevelopers] = useState<{ id: string; name: string }[]>([]);
     const [selectedDeveloperId, setSelectedDeveloperId] = useState<string>("");
 
@@ -35,7 +38,7 @@ export default function ProjectForm({ project, locationId }: { project?: Project
     // We will fetch companies and see if any match the name.
 
     useEffect(() => {
-        getCompaniesForSelect(locationId, 'Developer').then((devs) => {
+        getCompaniesForSelect(locationId, realm === 'estio' ? 'Developer' : undefined).then((devs) => {
             const mappedDevs = devs.map(c => ({ id: c.id, name: c.name }));
             setDevelopers(mappedDevs);
 
@@ -46,11 +49,12 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                 }
             }
         });
-    }, [locationId, project]);
+    }, [locationId, project, realm]);
 
     return (
         <div className="h-full flex flex-col overflow-hidden">
             <input type="hidden" name="locationId" value={locationId} />
+            {realm === "substo" ? project?.features?.map((feature) => <input key={feature} type="hidden" name="features" value={feature} />) : null}
             <input type="hidden" name="ghlProjectId" value={project?.ghlProjectId || ""} />
 
             {/* The developer string field is populated by the selected company name */}
@@ -64,7 +68,7 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                 <div className="px-1 pt-1">
                     <TabsList className="grid w-full grid-cols-3">
                         <TabsTrigger value="details">Details</TabsTrigger>
-                        <TabsTrigger value="specs">Specs</TabsTrigger>
+                        <TabsTrigger value="specs">{realm === "estio" ? "Specs" : "Schedule"}</TabsTrigger>
                         <TabsTrigger value="stakeholders">Stakeholders</TabsTrigger>
                     </TabsList>
                 </div>
@@ -74,12 +78,12 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2 col-span-2">
                                 <Label htmlFor="name">Project Name</Label>
-                                <Input id="name" name="name" defaultValue={project?.name} required placeholder="e.g. Sunrise Apartments" />
+                                <Input id="name" name="name" defaultValue={project?.name} required placeholder={realm === "estio" ? "e.g. Sunrise Apartments" : "e.g. Product launch"} />
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="projectLocation">Location / Area</Label>
-                                <Input id="projectLocation" name="projectLocation" defaultValue={project?.projectLocation || ""} placeholder="e.g. Limassol Marina" />
+                                <Label htmlFor="projectLocation">{vocabulary.projectArea}</Label>
+                                <Input id="projectLocation" name="projectLocation" defaultValue={project?.projectLocation || ""} placeholder={realm === "estio" ? "e.g. Limassol Marina" : "Project area or region"} />
                             </div>
 
                             <div className="space-y-2">
@@ -97,7 +101,7 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                     <TabsContent value="specs" className="space-y-4 py-4 data-[state=inactive]:hidden" forceMount={true}>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label htmlFor="completionDate">Completion Date</Label>
+                                <Label htmlFor="completionDate">{vocabulary.projectTarget}</Label>
                                 <Input
                                     type="date"
                                     id="completionDate"
@@ -106,13 +110,13 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                                 />
                             </div>
 
-                            <div className="space-y-2">
+                            {realm === "estio" ? <div className="space-y-2">
                                 <Label htmlFor="totalUnits">Total Units</Label>
                                 <Input type="number" id="totalUnits" name="totalUnits" defaultValue={project?.totalUnits?.toString()} />
-                            </div>
+                            </div> : null}
                         </div>
 
-                        <div className="space-y-4 pt-4 border-t">
+                        {realm === "estio" ? <div className="space-y-4 pt-4 border-t">
                             <Label className="text-lg font-semibold">Features & Amenities</Label>
                             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                                 {PROJECT_FEATURES.map((feature) => (
@@ -129,28 +133,28 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                                     </div>
                                 ))}
                             </div>
-                        </div>
+                        </div> : null}
                     </TabsContent>
 
                     <TabsContent value="stakeholders" className="space-y-6 py-4 data-[state=inactive]:hidden" forceMount={true}>
                         {/* Developer Section */}
                         <div className="space-y-2 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border">
-                            <Label className="text-lg font-semibold text-gray-700 dark:text-gray-300">Developer Details</Label>
+                            <Label className="text-lg font-semibold text-gray-700 dark:text-gray-300">{vocabulary.projectCompany} Details</Label>
                             <div className="space-y-2">
-                                <Label>Select Developer</Label>
+                                <Label>Select {vocabulary.projectCompany}</Label>
                                 <div className="flex gap-2">
                                     <SearchableSelect
                                         name="developerIdSelect" // Not directly used in action, we use the hidden 'developer' input
                                         value={selectedDeveloperId}
                                         onChange={setSelectedDeveloperId}
                                         options={developers.map(c => ({ value: c.id, label: c.name }))}
-                                        placeholder="Select Developer..."
+                                        placeholder={`Select ${vocabulary.projectCompanyLower}...`}
                                         searchPlaceholder="Search companies..."
                                         className="flex-1"
                                     />
                                     <AddCompanyDialog
                                         locationId={locationId}
-                                        type="Developer"
+                                        type={realm === "estio" ? "Developer" : "Company"}
                                         onSuccess={(newCompany) => {
                                             setDevelopers(prev => [...prev, newCompany].sort((a, b) => a.name.localeCompare(b.name)));
                                             setSelectedDeveloperId(newCompany.id);
@@ -158,7 +162,7 @@ export default function ProjectForm({ project, locationId }: { project?: Project
                                     />
                                 </div>
                                 <p className="text-xs text-gray-500">
-                                    Selecting a developer will link the company name to this project.
+                                    Selecting a {vocabulary.projectCompanyLower} will link its name to this project.
                                 </p>
                             </div>
                         </div>

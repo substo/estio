@@ -1,5 +1,6 @@
 "use client";
 
+import { useCrmRealm, useCrmVocabulary } from "../../_components/crm-realm";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,6 +19,8 @@ interface ProjectFiltersProps {
 
 export function ProjectFilters({ developers = [] }: ProjectFiltersProps) {
     const searchParams = useSearchParams();
+    const realm = useCrmRealm();
+    const vocabulary = useCrmVocabulary();
     const router = useRouter();
     const pathname = usePathname();
 
@@ -95,7 +98,7 @@ export function ProjectFilters({ developers = [] }: ProjectFiltersProps) {
                 </div>
 
                 <div className="space-y-2">
-                    <Label>Developer</Label>
+                    <Label>{vocabulary.projectCompany}</Label>
                     <Popover open={developerOpen} onOpenChange={setDeveloperOpen}>
                         <PopoverTrigger asChild>
                             <Button
@@ -106,15 +109,15 @@ export function ProjectFilters({ developers = [] }: ProjectFiltersProps) {
                             >
                                 {developer
                                     ? developers.find((d) => d === developer) || developer
-                                    : "Select developer..."}
+                                    : `Select ${vocabulary.projectCompanyLower}...`}
                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                             </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-full p-0">
                             <Command>
-                                <CommandInput placeholder="Search developer..." />
+                                <CommandInput placeholder={`Search ${vocabulary.projectCompanyLower}...`} />
                                 <CommandList>
-                                    <CommandEmpty>No developer found.</CommandEmpty>
+                                    <CommandEmpty>No {vocabulary.projectCompanyLower} found.</CommandEmpty>
                                     <CommandGroup>
                                         <CommandItem
                                             value="all_developers_reset_option"
@@ -127,7 +130,7 @@ export function ProjectFilters({ developers = [] }: ProjectFiltersProps) {
                                                     !developer ? "opacity-100" : "opacity-0"
                                                 )}
                                             />
-                                            Any Developer
+                                            Any {vocabulary.projectCompany}
                                         </CommandItem>
                                         {developers.map((d) => (
                                             <CommandItem
@@ -152,7 +155,7 @@ export function ProjectFilters({ developers = [] }: ProjectFiltersProps) {
                     </Popover>
                 </div>
 
-                <div className="space-y-2 pb-2">
+                {realm === "estio" ? <div className="space-y-2 pb-2">
                     <div className="flex items-center space-x-2">
                         <Checkbox
                             id="has-properties"
@@ -162,6 +165,7 @@ export function ProjectFilters({ developers = [] }: ProjectFiltersProps) {
                         <Label htmlFor="has-properties">Has Linked Properties</Label>
                     </div>
                 </div>
+ : null}
 
                 <div className="md:text-right">
                     {hasActiveFilters && (

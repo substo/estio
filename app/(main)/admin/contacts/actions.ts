@@ -1,5 +1,6 @@
 'use server';
 
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { assertCrmActionAllowed, assertGenericContactInput } from "@/lib/auth/crm-action-guard";
 
 import { z } from 'zod';
@@ -10,7 +11,7 @@ import { after } from 'next/server';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 import {
   LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, LEAD_SOURCES,
-  REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES, CONTACT_TYPE_CONFIG, type ContactType
+  REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS, CONTACT_TYPES, CONTACT_TYPE_CONFIG, contactTypeConfigForApp, type ContactType
 } from '@/app/(main)/admin/contacts/_components/contact-types';
 import { enqueueContactSync } from '@/lib/contacts/sync-engine';
 import { Prisma } from '@prisma/client';
@@ -189,10 +190,11 @@ function areValuesEqual(a: any, b: any) {
 
 function getEntityRequirementError(
   data: ValidatedContactData,
-  existingContactType?: string | null
+  existingContactType?: string | null,
+  realm: import("@/lib/auth/auth-realm").AuthRealm = "estio"
 ): { field: 'entityId' | 'entityIds'; message: string } | null {
   const resolvedType = (data.contactType || existingContactType || 'Lead') as ContactType;
-  const config = CONTACT_TYPE_CONFIG[resolvedType];
+  const config = CONTACT_TYPES.includes(resolvedType) ? contactTypeConfigForApp(realm, resolvedType) : null;
   if (!config || !config.entityRequired) return null;
 
   const hasEntityId = !!data.entityId;
@@ -872,7 +874,7 @@ export async function createContact(
   }
   data.leadAssignedToAgent = assignedUserId || undefined;
 
-  const entityError = getEntityRequirementError(data);
+  const entityError = getEntityRequirementError(data, undefined, await getRequestAuthRealm());
   if (entityError) {
     return {
       errors: { [entityError.field]: [entityError.message] },
@@ -1032,7 +1034,7 @@ async function updateContactCore(
     return { errors: { leadAssignedToAgent: ['Members may assign contacts only to themselves.'] }, message: 'Invalid contact assignment.', success: false };
   }
 
-  const entityError = getEntityRequirementError(data, existingContactCheck.contactType);
+  const entityError = getEntityRequirementError(data, existingContactCheck.contactType, await getRequestAuthRealm());
   if (entityError) {
     return {
       errors: { [entityError.field]: [entityError.message] },

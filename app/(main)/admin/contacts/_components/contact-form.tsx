@@ -1,5 +1,7 @@
 'use client';
 
+import { crmGoalLabel, crmGoalValues, crmStageLabel, crmContactTypeLabel, SUBSTO_CONTACT_TYPES } from '@/lib/branding/crm-vocabulary';
+import { useCrmVocabulary } from '../../_components/crm-realm';
 import { useCrmRealm } from '../../_components/crm-realm';
 
 
@@ -43,7 +45,7 @@ import { MultiPropertySelect } from './multi-property-select';
 import { ContactPropertyTypeSelector } from './contact-property-type-selector';
 // AI Analyzer moved to Coordinator Panel
 import {
-    CONTACT_TYPES, CONTACT_TYPE_CONFIG, DEFAULT_CONTACT_TYPE, isKnownContactType, type ContactType,
+    CONTACT_TYPES, CONTACT_TYPE_CONFIG, contactTypeConfigForApp, DEFAULT_CONTACT_TYPE, isKnownContactType, type ContactType,
     LEAD_GOALS, LEAD_PRIORITIES, LEAD_STAGES, REQUIREMENT_STATUSES, REQUIREMENT_CONDITIONS
 } from './contact-types';
 import {
@@ -411,8 +413,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
 
     const effectiveContactType = isEditing ? contactType : initialContactType;
     const realm = useCrmRealm();
-    const originalConfig = CONTACT_TYPE_CONFIG[effectiveContactType];
-    const currentConfig = realm === "substo" ? { ...originalConfig, entityType: originalConfig.entityType === "company" ? "company" as const : "none" as const, impliedRole: originalConfig.entityType === "company" ? originalConfig.impliedRole : undefined, visibleTabs: originalConfig.visibleTabs.filter((tab) => !["properties", "matching", "requirements"].includes(tab)) } : originalConfig;
+    const vocabulary = useCrmVocabulary();
+    const currentConfig = contactTypeConfigForApp(realm, effectiveContactType);
+    const contactTypes = realm === "substo" ? [...new Set<ContactType>([...SUBSTO_CONTACT_TYPES, effectiveContactType])] : CONTACT_TYPES;
     const entityError = state.errors?.entityIds?.[0] || state.errors?.entityId?.[0];
 
     // Entity Assignment State
@@ -1011,17 +1014,17 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                 {/* AI Analyzer moved to Conversations > AI Coordinator Panel */}
 
                 {/* Contact Type Selector */}
-                <RenderField label="Contact Type" value={CONTACT_TYPE_CONFIG[effectiveContactType]?.label} isEditing={isEditing} className="mb-4">
+                <RenderField label="Contact Type" value={currentConfig.label} isEditing={isEditing} className="mb-4">
                     <div className="mb-4 p-3 bg-muted/50 rounded-lg border">
                         <Select value={contactType} onValueChange={(v) => setContactType(v as ContactType)}>
                             <SelectTrigger className="w-full" aria-label="Contact type">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                                {CONTACT_TYPES.map((type) => (
+                                {contactTypes.map((type) => (
                                     <SelectItem key={type} value={type}>
                                         <div className="flex flex-col">
-                                            <span>{CONTACT_TYPE_CONFIG[type].label}</span>
+                                            <span>{crmContactTypeLabel(realm, type)}</span>
                                         </div>
                                     </SelectItem>
                                 ))}
@@ -1174,14 +1177,14 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                     </div>
                                     <input type="hidden" name="leadScore" value={contact?.leadScore || 0} />
                                 </RenderField>
-                                <RenderField label="Goal" value={contact?.leadGoal} isEditing={isEditing}>
+                                <RenderField label="Goal" value={crmGoalLabel(realm, contact?.leadGoal)} isEditing={isEditing}>
                                     <Select name="leadGoal" defaultValue={contact?.leadGoal || undefined}>
                                         <SelectTrigger aria-label="Goal">
                                             <SelectValue placeholder="Select Goal" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {LEAD_GOALS.map(o => (
-                                                <SelectItem key={o} value={o}>{o}</SelectItem>
+                                            {crmGoalValues(realm, contact?.leadGoal).map(o => (
+                                                <SelectItem key={o} value={o}>{crmGoalLabel(realm, o)}</SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
@@ -1198,14 +1201,14 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Stage" value={contact?.leadStage} isEditing={isEditing}>
+                                <RenderField label="Stage" value={crmStageLabel(realm, contact?.leadStage || "Unassigned")} isEditing={isEditing}>
                                     <Select name="leadStage" defaultValue={contact?.leadStage || "Unassigned"}>
                                         <SelectTrigger aria-label="Stage">
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {LEAD_STAGES.map(o => (
-                                                <SelectItem key={o} value={o}>{o}</SelectItem>
+                                                <SelectItem key={o} value={o}>{crmStageLabel(realm, o)}</SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
@@ -1222,9 +1225,9 @@ export function ContactForm({ initialMode = 'create', contact: initialContact, l
                                         </SelectContent>
                                     </Select>
                                 </RenderField>
-                                <RenderField label="Assigned Agent" value={contact?.assignedUserId ? (users.find(u => u.id === contact.assignedUserId)?.name || contact.assignedUserId) : null} isEditing={isEditing}>
+                                <RenderField label={vocabulary.assignedPerson} value={contact?.assignedUserId ? (users.find(u => u.id === contact.assignedUserId)?.name || contact.assignedUserId) : null} isEditing={isEditing}>
                                     <Select name="leadAssignedToAgent" defaultValue={contact?.assignedUserId || undefined}>
-                                        <SelectTrigger aria-label="Assigned agent"><SelectValue placeholder="Select Agent" /></SelectTrigger>
+                                        <SelectTrigger aria-label={vocabulary.assignedPerson}><SelectValue placeholder={vocabulary.selectPerson} /></SelectTrigger>
                                         <SelectContent>
                                             {users.map(u => (
                                                 <SelectItem key={u.id} value={u.id}>{u.name || u.email}</SelectItem>

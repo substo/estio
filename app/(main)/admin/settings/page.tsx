@@ -94,6 +94,8 @@ export default async function SettingsPage() {
   const isAdmin = access?.role === "ADMIN";
   const visibleSections = SETTINGS_SECTIONS.filter((section) => (!section.requiresAdmin || isAdmin) && (realm === "estio" || isSubstoCrmPage(section.href))).map((section) => realm === "substo" && section.href === "/admin/team" ? { ...section, description: "Manage your brand team.", href: "/brand/team" } : section);
 
+  if (realm === "substo" && isAdmin) visibleSections.unshift({ title: "Brand settings", description: "Rename your brand.", href: "/brand/settings", actionLabel: "Manage Brand" });
+
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>

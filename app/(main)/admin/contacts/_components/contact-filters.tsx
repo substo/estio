@@ -26,6 +26,8 @@ import {
     SheetTrigger,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+import { useCrmRealm, useCrmVocabulary } from '../../_components/crm-realm';
+import { crmContactTypeLabel, crmGoalLabel, crmGoalValues, crmStageLabel, SUBSTO_CONTACT_TYPES } from '@/lib/branding/crm-vocabulary';
 import { CONTACT_TYPES, LEAD_GOALS, LEAD_STAGES } from './contact-types';
 
 // --- Constants ---
@@ -82,6 +84,8 @@ interface ContactFiltersProps {
 }
 
 export function ContactFilters({ leadSources = [], agents = [], view = 'table', isAdmin = false, scope = 'my' }: ContactFiltersProps) {
+    const realm = useCrmRealm();
+    const vocabulary = useCrmVocabulary();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [isPending, startTransition] = useTransition();
@@ -165,6 +169,8 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
         availableTypes = [...REAL_ESTATE_TYPES, ...BUSINESS_TYPES];
     }
 
+    if (realm === "substo") availableTypes = availableTypes.filter((type) => (SUBSTO_CONTACT_TYPES as readonly string[]).includes(type));
+
     const activeFilterCount = [
         urlState.filter,
         urlState.source,
@@ -188,8 +194,8 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                 <SelectValue />
             </SelectTrigger>
             <SelectContent>
-                <SelectItem value="real_estate">Real Estate</SelectItem>
-                <SelectItem value="business">Business</SelectItem>
+                <SelectItem value="real_estate">{vocabulary.leadCategory}</SelectItem>
+                <SelectItem value="business">{vocabulary.businessCategory}</SelectItem>
                 <SelectItem value="all">All Contacts</SelectItem>
             </SelectContent>
         </Select>
@@ -203,7 +209,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
             <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
                 {availableTypes.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                    <SelectItem key={t} value={t}>{crmContactTypeLabel(realm, t)}</SelectItem>
                 ))}
             </SelectContent>
         </Select>
@@ -248,8 +254,8 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                 </SelectTrigger>
                 <SelectContent>
                     <SelectItem value="all">Quick Filter...</SelectItem>
-                    {QUICK_FILTERS.map((f) => (
-                        <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                    {QUICK_FILTERS.filter((filter) => realm === "estio" || filter.value !== "has_manual_matches").map((f) => (
+                        <SelectItem key={f.value} value={f.value}>{f.value === "not_assigned" ? vocabulary.notAssigned : f.label}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
@@ -261,17 +267,17 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                 <SelectContent>
                     <SelectItem value="all">Source...</SelectItem>
                     {leadSources.map((s) => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                        <SelectItem key={s} value={s}>{crmStageLabel(realm, s)}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
 
             <Select value={urlState.agent || 'all'} onValueChange={(v) => updateParams({ agent: v === 'all' ? null : v })}>
                 <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.agent && "text-muted-foreground")}>
-                    <SelectValue placeholder="Agent" />
+                    <SelectValue placeholder={vocabulary.person} />
                 </SelectTrigger>
                 <SelectContent>
-                    <SelectItem value="all">Agent...</SelectItem>
+                    <SelectItem value="all">{vocabulary.person}...</SelectItem>
                     {agents.map((a) => (
                         <SelectItem key={a.id} value={a.id}>{a.name || a.email}</SelectItem>
                     ))}
@@ -284,8 +290,8 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                 </SelectTrigger>
                 <SelectContent>
                     <SelectItem value="all">Goal...</SelectItem>
-                    {LEAD_GOALS.map((g) => (
-                        <SelectItem key={g} value={g}>{g}</SelectItem>
+                    {crmGoalValues(realm).map((g) => (
+                        <SelectItem key={g} value={g}>{crmGoalLabel(realm, g)}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
@@ -297,12 +303,12 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                 <SelectContent>
                     <SelectItem value="all">Stage...</SelectItem>
                     {LEAD_STAGES.map((s) => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                        <SelectItem key={s} value={s}>{crmStageLabel(realm, s)}</SelectItem>
                     ))}
                 </SelectContent>
             </Select>
 
-            <Select value={urlState.district || 'all'} onValueChange={(v) => updateParams({ district: v === 'all' ? null : v })}>
+            {realm === "estio" ? <Select value={urlState.district || 'all'} onValueChange={(v) => updateParams({ district: v === 'all' ? null : v })}>
                 <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.district && "text-muted-foreground")}>
                     <SelectValue placeholder="District" />
                 </SelectTrigger>
@@ -312,7 +318,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                         <SelectItem key={d} value={d}>{d}</SelectItem>
                     ))}
                 </SelectContent>
-            </Select>
+            </Select> : null}
 
             <Select value={urlState.createdPreset || 'all'} onValueChange={(v) => updateParams({ createdPreset: v === 'all' ? null : v })}>
                 <SelectTrigger className={cn("h-9 text-xs w-full", !urlState.createdPreset && "text-muted-foreground")}>
@@ -326,7 +332,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                 </SelectContent>
             </Select>
 
-            <div className="flex gap-1 w-full">
+            {realm === "estio" ? <div className="flex gap-1 w-full">
                 <Input
                     className="h-9 text-xs min-w-0 flex-1"
                     placeholder="Prop Ref..."
@@ -341,7 +347,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                         Apply
                     </Button>
                 )}
-            </div>
+            </div> : null}
         </>
     );
 
@@ -360,7 +366,7 @@ export function ContactFilters({ leadSources = [], agents = [], view = 'table', 
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="my">My assignments</SelectItem>
-                            <SelectItem value="location">All location</SelectItem>
+                            <SelectItem value="location">{vocabulary.allContacts}</SelectItem>
                         </SelectContent>
                     </Select>
                 ) : (

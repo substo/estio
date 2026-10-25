@@ -1,3 +1,5 @@
+import { getRequestAuthRealm } from '@/lib/auth/request-realm';
+import { crmVocabulary } from '@/lib/branding/crm-vocabulary';
 import { Suspense } from 'react';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { fetchConversations } from './actions';
@@ -12,6 +14,7 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 
 export default async function ConversationsPage({ searchParams }: { searchParams?: any }) {
+    const vocabulary = crmVocabulary(await getRequestAuthRealm());
     const [location, access] = await Promise.all([
         getLocationContext(),
         getActiveContactsAccess(),
@@ -69,7 +72,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
                 {canViewLocationContacts(access) ? (
                     <>
                         <Link className={conversationScope === 'my' ? 'font-semibold underline' : ''} href="/admin/conversations?scope=my">My assignments</Link>
-                        <Link className={conversationScope === 'location' ? 'font-semibold underline' : ''} href="/admin/conversations?scope=location">All location</Link>
+                        <Link className={conversationScope === 'location' ? 'font-semibold underline' : ''} href="/admin/conversations?scope=location">{vocabulary.allContacts}</Link>
                     </>
                 ) : (
                     <span className="font-medium">My assignments</span>

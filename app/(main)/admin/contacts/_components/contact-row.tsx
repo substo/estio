@@ -1,5 +1,8 @@
 "use client";
 
+import { useCrmRealm } from "../../_components/crm-realm";
+import { crmContactTypeLabel, crmGoalLabel } from "@/lib/branding/crm-vocabulary";
+
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -59,7 +62,8 @@ export function ContactRow({ contact, leadSources, allContacts, currentIndex, is
     const hasConversation = !!conversation?.id;
     const canStartConversation = canStartContactConversation(contact);
     const contactType = isKnownContactType(contact.contactType) ? contact.contactType : DEFAULT_CONTACT_TYPE;
-    const contactTypeLabel = CONTACT_TYPE_CONFIG[contactType].label;
+    const realm = useCrmRealm();
+    const contactTypeLabel = crmContactTypeLabel(realm, contactType);
     const getConversationHref = (conversationId: string) => {
         const params = new URLSearchParams({
             id: conversationId,

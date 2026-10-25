@@ -10,7 +10,7 @@ import config from '@/config'
 import { HamburgerMenuIcon } from '@radix-ui/react-icons'
 import Link from 'next/link'
 import { ReactNode } from 'react'
-import { APP_NAME } from "@/components/app-logo"
+import { appIdentity } from "@/lib/branding/app-identity"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
 import { AdminNavigationGroups } from "./admin-navigation"
 import { AdminProductSwitcher } from "./admin-product-switcher"
@@ -48,7 +48,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
             <SheetHeader className="p-4 border-b text-left">
               <Link href="/">
                 <SheetTitle className="flex items-center gap-2">
-                  <span className="font-bold">{APP_NAME}</span>
+                  <span className="font-bold">{appIdentity(realm).name}</span>
                 </SheetTitle>
               </Link>
             </SheetHeader>

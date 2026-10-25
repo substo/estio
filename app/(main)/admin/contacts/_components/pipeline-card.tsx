@@ -1,5 +1,8 @@
 'use client';
 
+import { useCrmRealm } from "../../_components/crm-realm";
+import { crmContactTypeLabel, crmGoalLabel } from "@/lib/branding/crm-vocabulary";
+
 import { formatDistanceToNow } from 'date-fns';
 import { LeadSourceBadge } from './lead-source-badge';
 import { LeadScoreBadge } from './lead-score-badge';
@@ -20,7 +23,8 @@ interface PipelineCardProps {
 export function PipelineCard({ contact, leadSources, isGoogleConnected, isGhlConnected }: PipelineCardProps) {
     const unreadCount = contact.conversations?.[0]?.unreadCount || 0;
     const contactType = isKnownContactType(contact.contactType) ? contact.contactType : DEFAULT_CONTACT_TYPE;
-    const contactTypeLabel = CONTACT_TYPE_CONFIG[contactType].label;
+    const realm = useCrmRealm();
+    const contactTypeLabel = crmContactTypeLabel(realm, contactType);
 
     return (
         <div className="bg-white dark:bg-gray-950 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow hover:border-gray-300 dark:hover:border-gray-700 p-3 group">
@@ -61,8 +65,8 @@ export function PipelineCard({ contact, leadSources, isGoogleConnected, isGhlCon
                 {contact.leadGoal && (
                     <div className="flex items-center gap-1 text-[11px] font-medium text-foreground/80">
                         <Building2 className="h-3 w-3" /> 
-                        {contact.leadGoal}
-                        {contact.requirementStatus && <span className="text-muted-foreground font-normal">({contact.requirementStatus})</span>}
+                        {crmGoalLabel(realm, contact.leadGoal)}
+                        {realm === "estio" && contact.requirementStatus && <span className="text-muted-foreground font-normal">({contact.requirementStatus})</span>}
                     </div>
                 )}
             </div>

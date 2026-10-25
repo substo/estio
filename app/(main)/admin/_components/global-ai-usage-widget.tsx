@@ -1,5 +1,6 @@
 "use client";
 
+import { useCrmVocabulary } from "./crm-realm";
 import { useEffect, useState } from "react";
 import {
     getCurrentUserAiUsageSummary,
@@ -67,6 +68,7 @@ export function GlobalAiUsageWidget({
 }: {
     canViewLocationUsage: boolean;
 }) {
+    const vocabulary = useCrmVocabulary();
     const [data, setData] = useState<LocationAiUsageSummary | null>(null);
     const [loading, setLoading] = useState(true);
     const [scope, setScope] = useState<AiUsageViewScope>("user");
@@ -96,7 +98,7 @@ export function GlobalAiUsageWidget({
     }, [scope]);
 
     const heading = scope === "location"
-        ? "Location AI Usage This Month"
+        ? `${vocabulary.tenantTitle} AI Usage This Month`
         : "Your AI Usage This Month";
 
     const scopeSwitch = canViewLocationUsage ? (
@@ -117,7 +119,7 @@ export function GlobalAiUsageWidget({
                 aria-pressed={scope === "location"}
                 onClick={() => setScope("location")}
             >
-                Location usage
+                {vocabulary.tenantTitle} usage
             </Button>
         </div>
     ) : null;
@@ -133,7 +135,7 @@ export function GlobalAiUsageWidget({
                     {scopeSwitch}
                 </div>
                 <div className="animate-pulse" role="status" aria-live="polite">
-                    <span className="sr-only">Loading {scope === "location" ? "location" : "your"} AI usage</span>
+                    <span className="sr-only">Loading {scope === "location" ? vocabulary.tenant : "your"} AI usage</span>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div className="h-16 bg-muted rounded" />
                         <div className="h-16 bg-muted rounded" />

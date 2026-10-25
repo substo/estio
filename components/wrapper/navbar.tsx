@@ -73,7 +73,7 @@ export default function NavBar({ logoUrl, lightUrl }: NavBarProps) {
     if (brand === "substo") {
         return (
             <header className="flex min-w-full h-[55px] items-center fixed justify-between px-6 border-b z-10 bg-background">
-                <Link href="/studio" prefetch={false} className="font-semibold tracking-tight">Substo Studio</Link>
+                <AppLogo app="substo" href="/studio" size="sm" showName />
             </header>
         );
     }

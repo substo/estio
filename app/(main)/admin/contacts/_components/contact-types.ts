@@ -1,3 +1,5 @@
+import { crmContactTypeLabel } from "@/lib/branding/crm-vocabulary";
+
 /**
  * Contact Type Configuration
  * 
@@ -282,3 +284,21 @@ export const CONTACT_TYPE_CONFIG: Record<ContactType, ContactTypeConfig> = {
 };
 
 export const DEFAULT_CONTACT_TYPE: ContactType = 'Lead';
+
+/** Edition-specific presentation with shared persisted contact types and roles. */
+export function contactTypeConfigForApp(app: import("@/lib/auth/auth-realm").AuthRealm, type: ContactType): ContactTypeConfig {
+    const original = CONTACT_TYPE_CONFIG[type];
+    if (app === "estio") return original;
+    const companyType = ["Agent", "Partner", "Associate", "Company"].includes(type);
+    return {
+        ...original,
+        label: crmContactTypeLabel(app, type),
+        description: type === "Lead" ? "A person interested in your business" : type === "Company" ? "A contact at a company" : "A person or organisation you work with",
+        visibleTabs: ["details"],
+        entityType: companyType ? "company" : "none",
+        impliedRole: companyType ? original.impliedRole : undefined,
+        entityRequired: false,
+        entityLabel: companyType ? "Company" : undefined,
+        multiEntity: false,
+    };
+}

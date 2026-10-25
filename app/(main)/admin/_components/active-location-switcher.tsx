@@ -1,5 +1,6 @@
 "use client";
 
+import { useCrmVocabulary } from "./crm-realm";
 import { useState } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import {
 type LocationOption = { id: string; name: string | null };
 
 export function ActiveLocationSwitcher({ activeLocationId, locations }: { activeLocationId: string; locations: LocationOption[] }) {
+  const vocabulary = useCrmVocabulary();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const active = locations.find((location) => location.id === activeLocationId);
@@ -30,11 +32,11 @@ export function ActiveLocationSwitcher({ activeLocationId, locations }: { active
         body: JSON.stringify({ locationId, returnTo: window.location.pathname + window.location.search }),
       });
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.error || "Location could not be changed.");
+      if (!response.ok) throw new Error(result?.error || `${vocabulary.tenantTitle} could not be changed.`);
       window.location.reload();
     } catch (reason) {
       setPendingId(null);
-      setError(reason instanceof Error ? reason.message : "Location could not be changed.");
+      setError(reason instanceof Error ? reason.message : `${vocabulary.tenantTitle} could not be changed.`);
     }
   }
 
@@ -45,12 +47,12 @@ export function ActiveLocationSwitcher({ activeLocationId, locations }: { active
           <Button
             type="button"
             variant="ghost"
-            aria-label="Switch location"
+            aria-label={vocabulary.switchTenant}
             disabled={Boolean(pendingId)}
             className="h-10 min-w-0 max-w-[11rem] gap-1.5 px-2 text-sm font-medium sm:max-w-[16rem] focus-visible:ring-2"
           >
             {pendingId ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" /> : null}
-            <span className="truncate">{active?.name || "Unnamed location"}</span>
+            <span className="truncate">{active?.name || vocabulary.unnamedTenant}</span>
             <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
@@ -58,7 +60,7 @@ export function ActiveLocationSwitcher({ activeLocationId, locations }: { active
           <DropdownMenuRadioGroup value={activeLocationId} onValueChange={switchLocation}>
             {locations.map((location) => (
               <DropdownMenuRadioItem key={location.id} value={location.id} disabled={Boolean(pendingId)} className="min-h-10">
-                <span className="truncate">{location.name || "Unnamed location"}</span>
+                <span className="truncate">{location.name || vocabulary.unnamedTenant}</span>
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>

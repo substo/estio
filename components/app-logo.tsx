@@ -1,5 +1,7 @@
 "use client";
 
+import { useBrandExperience } from "@/components/wrapper/brand-experience";
+import type { AuthRealm } from "@/lib/auth/auth-realm";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -7,6 +9,8 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
 interface AppLogoProps {
+    app?: AuthRealm;
+    href?: string;
     size?: "sm" | "md" | "lg";
     showName?: boolean;
     linkToHome?: boolean;
@@ -25,6 +29,8 @@ const sizeConfig = {
 export const APP_NAME = "Estio";
 
 export function AppLogo({
+    app,
+    href = "/",
     size = "md",
     showName = false,
     linkToHome = true,
@@ -33,6 +39,8 @@ export function AppLogo({
     lightUrl,
     iconOnly = false,
 }: AppLogoProps) {
+    const experience = useBrandExperience();
+    const selectedApp = app ?? (experience === "substo" ? "substo" : "estio");
     const { resolvedTheme } = useTheme();
     const config = sizeConfig[size];
     const [mounted, setMounted] = useState(false);
@@ -65,7 +73,12 @@ export function AppLogo({
 
     const effectiveUrl = iconOnly ? DEFAULT_ICON_LOGO : targetUrl;
 
-    const content = (
+    const content = selectedApp === "substo" ? (
+        <span className={cn("flex items-center gap-2 font-semibold tracking-tight", className)}>
+            <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">S</span>
+            <span className={iconOnly ? "sr-only" : "truncate text-base"}>Substo</span>
+        </span>
+    ) : (
         <div className={cn("flex items-center gap-2", className)}>
             <img
                 src={effectiveUrl}
@@ -82,7 +95,7 @@ export function AppLogo({
 
     if (linkToHome) {
         return (
-            <Link href="/" className="flex items-center gap-2" aria-label="Home">
+            <Link href={href} className="flex items-center gap-2" aria-label="Home">
                 {content}
             </Link>
         );

@@ -55,3 +55,16 @@ export async function createSubstoBrandAction(formData: FormData) {
   (await cookies()).set(ACTIVE_LOCATION_COOKIE, brandId, ACTIVE_LOCATION_COOKIE_OPTIONS);
   redirect("/studio");
 }
+
+/** Select the workspace's current brand before entering its CRM; never trust a posted brand ID. */
+export async function openSubstoStudioCrmAction(workspaceId: string) {
+  if (await getRequestBrand() !== "substo") redirect("/studio?error=access");
+  const access = await getStudioWorkspaceAccess(workspaceId);
+  if (!access || access.brand !== "substo") redirect("/studio?error=access");
+  const resolution = await validateActiveLocationSelection(access.brandId);
+  if (resolution.status !== "authorized" || resolution.location?.authRealm !== "substo" || resolution.location.id !== access.brandId) {
+    redirect("/studio?error=access");
+  }
+  (await cookies()).set(ACTIVE_LOCATION_COOKIE, resolution.location.id, ACTIVE_LOCATION_COOKIE_OPTIONS);
+  redirect("/admin");
+}
