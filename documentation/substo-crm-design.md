@@ -1,5 +1,8 @@
 # Substo CRM: design direction
 
+Live-test scope confirmed and deployed 2026-10-25: both apps share the CRM/Studio implementation; the Substo CRM may remain incomplete, with pending capabilities visible. Detailed CRM/provider parity and app-specific optimization are deferred while Studio work continues. Release `d4700a6c` is live after the staged realm migration; see [the rollout result](studio-implementation-progress.md).
+
+
 Implementation correction (2026-10-25): develop generic features once using shared Estio components and services. Do not build separate Substo editors/renderers/workflows. See [the corrective parity audit](shared-website-parity.md) for verified reuse and outstanding acceptance.
 
 
