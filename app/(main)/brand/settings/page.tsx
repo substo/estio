@@ -5,7 +5,7 @@ import { getSubstoBrandActor } from "@/lib/brands/substo-brands";
 import { RenameBrandForm } from "../_components/brand-forms";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Brand settings" };
+export const metadata = { title: "General settings" };
 
 export default async function BrandSettingsPage({ searchParams }: { searchParams: Promise<{ locationId?: string }> }) {
   const { locationId } = await searchParams;
@@ -18,8 +18,8 @@ export default async function BrandSettingsPage({ searchParams }: { searchParams
   return (
     <StudioShell {...shell} key={actor.locationId}><main className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6 md:p-10">
       <header className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight">Brand settings</h1>
-        <p className="text-muted-foreground">A brand is what your team works on: its CRM, website, Studio research and content.</p>
+        <h1 className="text-3xl font-semibold tracking-tight">General settings</h1>
+        <p className="text-muted-foreground">Manage the name used across CRM and Studio for {actor.brandName}.</p>
       </header>
       <section className="rounded-xl border bg-card p-5">
         <h2 className="text-lg font-medium">Name</h2>

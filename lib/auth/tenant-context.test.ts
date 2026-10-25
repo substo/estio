@@ -74,3 +74,37 @@ test("native tenant switches reauthorize before provisioning or changing the coo
     assert.equal(foreign.status, 403); assert.equal(checks.length, 3);
   }
 });
+
+test("Studio shell loads the same platform location choices as CRM without replacing route context", async () => {
+  for (const platform of [true, false]) {
+    let optionsCalls = 0;
+    const available = [{ id: "tenant-b", name: "Canonical" }];
+    const choices = [{ id: "master", name: "Master" }, { id: "support-target", name: "Support" }];
+    const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
+      "server-only": {},
+      "@/lib/auth/platform-access": { getPlatformAdminContext: async () => platform ? { internalUserId: "platform-actor" } : null },
+      "@/lib/auth/platform-location-options": { listPlatformLocationLoginOptions: async (id: string) => { assert.equal(id, "platform-actor"); optionsCalls++; return choices; } },
+      "@clerk/nextjs/server": { auth: async () => ({ actor: null }) },
+      "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ app: "estio", workspaceId, resolution: { location: { id: "tenant-b" }, availableLocations: available } }) },
+      "@/lib/auth/impersonation": {},
+    });
+    const result = await api.getStudioShellData({ workspaceId });
+    assert.equal(result.activeBrandId, "tenant-b");
+    assert.equal(result.platformLoginLocations, platform ? choices : null);
+    assert.equal(optionsCalls, platform ? 1 : 0);
+    assert.deepEqual(Array.from(result.brands, (row: any) => row.id), ["tenant-b"]);
+  }
+});
+
+test("platform login accepts only the two known product destinations", async () => {
+  const products: string[] = [];
+  const api = load("app/api/platform/impersonation/start/route.ts", {
+    "next/server": { NextResponse }, "@/lib/auth/impersonation": { startImpersonation: async (input: any) => { products.push(input.product); return { launchUrl: "/sign-in" }; } },
+    "@/lib/auth/impersonation-policy": { describeImpersonationStartError: () => "Denied" },
+  });
+  for (const product of ["studio", "crm", "https://foreign.invalid"]) {
+    const response = await api.POST(new Request("https://estio.co/api/platform/impersonation/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product, targetUserId: "target", locationId: "tenant" }) }));
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(products, ["studio", "crm", "crm"]);
+});

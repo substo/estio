@@ -1,5 +1,8 @@
 # CRM and Studio tenant context: investigation and implementation plan
 
+**Presentation correction, 2026-10-25:** the user's later clarification supersedes this document's app-adjacent logo, create/manage-tenant entry and separate support-control recommendations. The sidebar owns the sole app logo; the header contains only the current tenant selector. CRM and Studio use the same selector and the same existing access choices. Location = brand = subscribed tenant; there is no separate user-managed Studio workspace. Remove additional tenant creation from Studio, and put Team/General configuration in Settings. Preserve internal workspace storage IDs, realm boundaries and audited support access.
+
+
 Research only, 2026-10-25. Source baseline `8e7d4bb0`; deployed runtime `aef15c20`. No implementation, deployment, invitation, migration, rename or data repair is included.
 
 ## Recommendation

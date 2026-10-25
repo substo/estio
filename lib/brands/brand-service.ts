@@ -208,17 +208,6 @@ export async function prepareSubstoSignIn(deps: BrandDeps, identity: ClerkIdenti
   return { user, brands: await listUserBrands(deps.db, user.id) };
 }
 
-/** Explicit "create a brand"; the creator becomes its admin. */
-export async function createBrand(db: PrismaClient, userId: string, rawName: unknown): Promise<string | null> {
-  const name = normalizeBrandName(rawName);
-  if (!name) return null;
-  return db.$transaction(async (tx) => {
-    const brand = await tx.location.create({ data: { authRealm: REALM, name }, select: { id: true } });
-    await joinBrand(tx, { userId, locationId: brand.id, role: "ADMIN" });
-    return brand.id;
-  });
-}
-
 /** Attach (once) and return the Studio workspace of a Substo brand. */
 export async function ensureBrandWorkspace(deps: BrandDeps, brand: { id: string; name: string | null }, actorClerkUserId: string): Promise<string> {
   const current = await deps.db.location.findFirst({ where: { id: brand.id, authRealm: REALM }, select: { studioWorkspaceId: true } });

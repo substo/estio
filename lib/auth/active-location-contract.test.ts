@@ -8,7 +8,7 @@ const resolver = read("lib/auth/active-location.ts");
 const layout = read("app/(main)/admin/layout.tsx");
 const topNav = read("app/(main)/admin/_components/dashbord-top-nav.tsx");
 const adminNavigation = read("app/(main)/admin/_components/admin-navigation.tsx");
-const switcher = read("app/(main)/admin/_components/active-location-switcher.tsx");
+const switcher = read("components/tenant-header-selector.tsx");
 const platformAccess = read("lib/auth/platform-access.ts");
 const platformPage = read("app/(main)/admin/platform/page.tsx");
 const platformLayout = read("app/(main)/admin/platform/layout.tsx");
@@ -39,11 +39,11 @@ test("admin layout blocks multi-location tenant rendering until selection", () =
 });
 
 test("header always renders the shared selector, with tenant selection owned by the server", () => {
-  assert.match(topNav, /<AppTenantIdentity/);
-  assert.match(topNav, /<ActiveLocationSwitcher/);
+  assert.match(topNav, /<TenantHeaderSelector/);
+  assert.match(topNav, /platformLoginLocations=\{platformLoginLocations\}/);
   assert.doesNotMatch(topNav, /availableLocations\.length > 1/);
   assert.match(switcher, /<TenantSelector/);
-  assert.match(switcher, /window\.location\.assign\("\/admin"\)/);
+  assert.match(switcher, /form\.action = "\/api\/studio\/tenant-switch"/);
 });
 
 test("platform access is role-based, tenant-independent, and offers location-user master login", () => {
@@ -58,7 +58,7 @@ test("platform access is role-based, tenant-independent, and offers location-use
   assert.doesNotMatch(layout, /MasterLoginPage/);
   assert.match(platformLocationOptions, /user\.locations\.some/);
   assert.match(platformLocationOptions, /canImpersonate: membership\.user\.id !== platformAdminUserId/);
-  assert.match(platformLocationSwitcher, /aria-label="Choose location"/);
+  assert.match(platformLocationSwitcher, /aria-label="Switch location"/);
   assert.match(platformLocationSwitcher, /aria-label="Choose user"/);
   assert.match(platformLocationSwitcher, /DropdownMenuRadioGroup/);
   assert.match(platformLocationSwitcher, /Log in/);

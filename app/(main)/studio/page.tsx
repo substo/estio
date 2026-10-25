@@ -8,7 +8,7 @@ import { resolveActiveLocation } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { ensureBrandWorkspace } from "@/lib/brands/brand-service";
 import { prepareCurrentSubstoUser, substoBrandDeps } from "@/lib/brands/substo-brands";
-import { createSubstoBrandAction, openEstioStudioLocation, openSubstoBrandStudioAction } from "./actions";
+import { openEstioStudioLocation, openSubstoBrandStudioAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -62,29 +62,10 @@ async function StudioWorkspaceSelector({
           </section>
         ) : (
           <p className="rounded-xl border bg-muted/20 p-5 text-sm text-muted-foreground">
-            You are not on a brand&apos;s team. Create a brand, or ask a brand admin to invite your email address.
+            You do not have access to a brand. Ask its administrator to invite you.
           </p>
         )}
 
-        <section className="max-w-xl rounded-xl border bg-card p-5">
-          <h2 className="text-lg font-medium">Create a brand</h2>
-          <p className="mt-1 text-sm text-muted-foreground">You will be its admin and can invite your team from the Team page.</p>
-          {params.error === "brand" ? <p className="mt-3 text-sm text-destructive">Enter a name up to 100 characters.</p> : null}
-          <form action={createSubstoBrandAction} className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <label className="sr-only" htmlFor="brand-name">Brand name</label>
-            <input
-              id="brand-name"
-              name="name"
-              required
-              maxLength={100}
-              placeholder="e.g. My channel"
-              className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
-            />
-            <button type="submit" className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">
-              Create brand
-            </button>
-          </form>
-        </section>
       </main>
     );
   }

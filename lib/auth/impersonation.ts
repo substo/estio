@@ -39,7 +39,7 @@ function displayName(user: { firstName: string | null; lastName: string | null; 
   return [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
 }
 
-export async function startImpersonation(input: { targetUserId: string; locationId: string }) {
+export async function startImpersonation(input: { targetUserId: string; locationId: string; product?: "crm" | "studio" }) {
   const authState = await auth();
   if (!authState.userId || authState.actor) throw new Error("Not authorized to use master login.");
 
@@ -111,7 +111,7 @@ export async function startImpersonation(input: { targetUserId: string; location
 
     const launchUrl = new URL("/sign-in", APP_URL);
     launchUrl.searchParams.set("__clerk_ticket", actorToken.token);
-    launchUrl.searchParams.set("redirect_url", "/admin");
+    launchUrl.searchParams.set("redirect_url", input.product === "studio" ? "/studio" : "/admin");
     return { auditId: audit.id, launchUrl: launchUrl.toString(), expiresAt: tokenExpiresAt.toISOString() };
   } catch (error) {
     if (actorTokenId) await clerk.actorTokens.revoke(actorTokenId).catch(() => undefined);

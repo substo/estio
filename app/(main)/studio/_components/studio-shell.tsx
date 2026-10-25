@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { SignedIn, UserButton } from "@clerk/nextjs";
@@ -23,8 +22,8 @@ import ModeToggle from "@/components/mode-toggle";
 import { AppLogo } from "@/components/app-logo";
 import { ProductSwitcher, type ProductTarget } from "@/components/product-switcher";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { AppTenantIdentity } from "@/components/app-tenant-identity";
-import { TenantSelector } from "@/components/tenant-selector";
+import { TenantHeaderSelector } from "@/components/tenant-header-selector";
+import type { PlatformLocationLoginOption } from "@/lib/auth/platform-location-options";
 import { TenantSelectionSync } from "./tenant-selection-sync";
 import { ImpersonationBanner, type ImpersonationBannerData } from "../../admin/_components/impersonation-banner";
 import DashboardSideBar from "../../admin/_components/dashboard-side-bar";
@@ -59,16 +58,15 @@ export function studioNavGroups(app: App, workspaceId: string | null, locationId
   const settings: AdminNavGroup["items"] = [];
   if (base) settings.push({ href: `${base}/settings/ai`, label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith(`${base}/settings`) });
   settings.push({ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") });
-  groups.push({ label: "Settings", items: settings });
-  if (app === "substo") {
-    groups.push({
-      label: "Brand",
-      items: [
-        { href: `/brand/team${scope}`, label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
-        { href: `/brand/settings${scope}`, label: "Brand settings", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
-      ],
-    });
+  if (app === "substo" && locationId) {
+    settings.push(
+      { href: `/brand/team${scope}`, label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
+      { href: `/brand/settings${scope}`, label: "General", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
+    );
+  } else if (app === "estio" && locationId) {
+    settings.push({ href: "/admin/team", label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/admin/team"), formTarget: { action: "/api/studio/tenant-switch", fields: { product: "team", locationId } } });
   }
+  groups.push({ label: "Settings", items: settings });
   return groups;
 }
 
@@ -80,6 +78,7 @@ export function StudioShell({
   app,
   brands,
   activeBrandId,
+  platformLoginLocations,
   impersonation,
   fallbackWorkspaceId,
   children,
@@ -87,6 +86,7 @@ export function StudioShell({
   app: App;
   brands: StudioShellBrand[];
   activeBrandId: string | null;
+  platformLoginLocations?: PlatformLocationLoginOption[] | null;
   impersonation?: ImpersonationBannerData | null;
   /** Workspace for menu links on pages outside /studio/workspace (brand pages). */
   fallbackWorkspaceId: string | null;
@@ -133,29 +133,13 @@ export function StudioShell({
                 </div>
               </SheetContent>
             </Sheet>
-            <AppTenantIdentity app={app} homeHref={workspaceId ? `/studio/workspace/${workspaceId}` : "/studio?choose=1"}>
-              <TenantSelector activeLocationId={activeBrandId} locations={brands} noun={app === "substo" ? "brand" : "location"} onSelect={async (locationId) => {
-                const form = document.createElement("form");
-                form.method = "post"; form.action = "/api/studio/tenant-switch";
-                for (const [name, value] of Object.entries({ locationId, product: "studio" })) {
-                  const input = document.createElement("input"); input.type = "hidden"; input.name = name; input.value = value; form.appendChild(input);
-                }
-                document.body.appendChild(form); form.submit();
-              }} />
-            </AppTenantIdentity>
+            <TenantHeaderSelector app={app} product="studio" activeLocationId={activeBrandId} locations={brands} platformLoginLocations={platformLoginLocations} />
             <div className="ml-auto flex items-center gap-2">
               {config.auth.enabled ? <SignedIn><UserButton afterSignOutUrl="/sign-in" /></SignedIn> : null}
               <ModeToggle />
             </div>
           </header>
           {workspaceId ? <TenantSelectionSync workspaceId={workspaceId} /> : null}
-          {pathname === "/studio" ? null : <div className="flex gap-4 px-4 pt-3 text-xs text-muted-foreground">
-            <Link href="/studio?choose=1">{app === "substo" ? "Manage brands" : "Manage locations"}</Link>
-            {app === "estio" && activeBrandId ? <form action="/api/studio/tenant-switch" method="post">
-              <input type="hidden" name="product" value="team" /><input type="hidden" name="locationId" value={activeBrandId} />
-              <button type="submit">Team</button>
-            </form> : null}
-          </div>}
           {children}
         </div>
       </div>

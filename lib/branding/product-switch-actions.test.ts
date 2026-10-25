@@ -143,3 +143,57 @@ test("both Studio menus bind CRM to the displayed workspace; chooser uses the au
     }
   }
 });
+
+test("CRM and Studio headers render the same tenant-only control including platform access choices", () => {
+  const TenantHeaderSelector = () => {};
+  const workspace = "11111111-1111-4111-8111-111111111111";
+  const locations = [{ id: "a", name: "Agency A" }, { id: "b", name: "Agency B" }];
+  const platformLoginLocations = [{ id: "a", name: "Agency A", isPlatformMaster: true, members: [] }, { id: "c", name: "Support tenant", isPlatformMaster: false, members: [] }];
+  const dependencies = {
+    "@/components/tenant-header-selector": { TenantHeaderSelector },
+    "next/navigation": { usePathname: () => `/studio/workspace/${workspace}` },
+    "@/config": { auth: { enabled: false } },
+    "@/lib/utils": { cn: (...args: string[]) => args.filter(Boolean).join(" ") },
+    "./crm-realm": { useCrmRealm: () => "estio" },
+    "@/lib/branding/app-identity": { appIdentity: () => ({ name: "Estio" }) },
+    "@/lib/viewings/sessions/types": { VIEWING_SESSION_MODES: { assistantLiveTranslate: "live" }, VIEWING_SESSION_KINDS: { twoWayInterpreter: "interpreter" } },
+    "../../admin/_components/admin-shell-layout": { useSidebarCollapsed: () => [false, () => {}] },
+    "../actions": { openEstioStudioBusinessAction: () => {} },
+  };
+  const StudioShell = uiModule("app/(main)/studio/_components/studio-shell.tsx", dependencies).StudioShell;
+  const DashboardTopNav = uiModule("app/(main)/admin/_components/dashbord-top-nav.tsx", dependencies).default;
+  function find(tree: any, type: any): any[] {
+    if (!tree || typeof tree !== "object") return [];
+    return [...(tree.type === type ? [tree] : []), ...Object.values(tree).flatMap((child) => find(child, type))];
+  }
+  const studio = StudioShell({ app: "estio", brands: locations, activeBrandId: "a", fallbackWorkspaceId: workspace, platformLoginLocations, children: null });
+  const crm = DashboardTopNav({ activeLocation: locations[0], availableLocations: locations, platformLoginLocations, children: null });
+  for (const [tree, product] of [[crm, "crm"], [studio, "studio"]] as const) {
+    const headers = find(tree, "header"); assert.equal(headers.length, 1);
+    const controls = find(headers[0], TenantHeaderSelector); assert.equal(controls.length, 1);
+    assert.equal(controls[0].props.product, product);
+    assert.equal(controls[0].props.locations, locations);
+    assert.equal(controls[0].props.platformLoginLocations, platformLoginLocations);
+    assert.equal(controls[0].props.activeLocationId, "a");
+    assert.doesNotMatch(JSON.stringify(headers), /AppLogo|AppTenantIdentity|Support access/);
+  }
+  assert.doesNotMatch(JSON.stringify(studio), /Manage brands|Manage locations/);
+});
+
+test("Studio team management is in Settings and no independent brand management section is added", () => {
+  const { studioNavGroups } = uiModule("app/(main)/studio/_components/studio-shell.tsx", {});
+  for (const app of ["estio", "substo"]) {
+    const groups = studioNavGroups(app, "workspace", "location-a");
+    assert.equal(groups.some((group: any) => group.label === "Brand" || group.label === "Workspace"), false);
+    const settings = groups.find((group: any) => group.label === "Settings");
+    const team = settings.items.find((item: any) => item.label === "Team"); assert.ok(team);
+    if (app === "estio") { assert.equal(team.formTarget.fields.locationId, "location-a"); assert.equal(team.formTarget.fields.product, "team"); }
+    else assert.equal(team.href, "/brand/team?locationId=location-a");
+  }
+});
+
+test("Studio exposes no action for creating an additional tenant", () => {
+  assert.equal(actions().createSubstoBrandAction, undefined);
+  const chooser = fs.readFileSync("app/(main)/studio/page.tsx", "utf8");
+  assert.doesNotMatch(chooser, /Create a brand|createSubstoBrandAction|Create brand/);
+});

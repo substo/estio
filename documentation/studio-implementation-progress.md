@@ -1,5 +1,14 @@
 # Shared Studio implementation progress
 
+## Tenant header correction (2026-10-25)
+
+User clarified that Location and brand are one subscribed tenant; Studio must not expose another workspace/brand-management level.
+
+- Removed the second app logo from CRM and Studio headers. A shared `TenantHeaderSelector` shows only the current tenant name, or its dropdown for multiple access choices. Both shells receive the same Estio platform location options, preserving the audited user-login boundary; support login keeps the chosen product. The existing sidebar remains the sole app logo.
+- Removed the Studio Manage brands/Manage locations row and its inline Team button. Team and General settings are under the Settings navigation group, with explicit tenant scope. Removed the additional-brand creation form, server action and unused manual creation service. First-sign-in tenant preparation and existing mappings/memberships are preserved; no production data is renamed, merged or deleted.
+- Validation: **146/146** focused tests pass, including one/multiple tenant headers without logos, identical CRM/Studio selector inputs including platform options, Settings placement, absence of the extra creation action, explicit route context, restricted product destinations and existing realm/impersonation boundaries. The disposable PostgreSQL realm rehearsal and **17/17** service tests pass. Affected-file compiler check reports **0 diagnostics across 18 changed/deleted/new TypeScript paths**; whitespace checks pass. Production build and rollout are pending. Logs: `/tmp/estio-tenant-correction-{tests,types,db}.log`.
+
+
 
 ## Unified CRM/Studio tenant context (2026-10-25)
 

@@ -30,6 +30,7 @@ export type AdminNavItem = {
   label: string
   icon: LucideIcon
   activePath: (pathname: string) => boolean
+  formTarget?: { action: string; fields: Record<string, string> }
   setupPending?: boolean
 }
 
@@ -200,6 +201,16 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
         {!collapsed && <span className="ml-auto shrink-0 text-[10px]">Setup pending</span>}
       </div>
     )
+  }
+
+  if (item.formTarget) {
+    return <form action={item.formTarget.action} method="post">
+      {Object.entries(item.formTarget.fields).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
+      <button type="submit" aria-label={item.label} title={item.label} className={clsx("flex min-h-10 w-full items-center rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground", collapsed ? "justify-center" : "gap-2 px-2.5 py-2")}>
+        <AdminNavIcon icon={Icon} active={active} variant={variant} collapsed={collapsed} />
+        <span className={collapsed ? "sr-only" : "truncate"}>{item.label}</span>
+      </button>
+    </form>
   }
 
   if (variant === "mobile") {

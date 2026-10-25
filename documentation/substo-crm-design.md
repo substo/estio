@@ -1,5 +1,10 @@
 # Substo CRM: design direction
 
+## Tenant model clarification (2026-10-25)
+
+User correction supersedes any earlier reference to creating additional brands from Studio: **Location and brand are the same tenant**, provisioned once for the subscriber. A user may have memberships in several existing tenants; the same header selector opens those tenants in CRM and Studio. Studio has no independently managed workspace or team. Its storage container remains an implementation detail. CRM Companies are contact/business records, not tenants; a tenant need not represent a registered company. The app logo belongs in the sidebar only. Team and tenant configuration belong under Settings. No additional-brand creation form or public creation action is offered by Studio.
+
+
 Live-test scope confirmed and deployed 2026-10-25: both apps share the CRM/Studio implementation; the Substo CRM may remain incomplete, with pending capabilities visible. Detailed CRM/provider parity and app-specific optimization are deferred while Studio work continues. Release `d4700a6c` is live after the staged realm migration; see [the rollout result](studio-implementation-progress.md).
 
 

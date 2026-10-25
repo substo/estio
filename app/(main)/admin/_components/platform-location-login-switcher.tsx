@@ -15,9 +15,15 @@ import type { PlatformLocationLoginOption } from "@/lib/auth/platform-location-o
 export function PlatformLocationLoginSwitcher({
   activeLocationId,
   locations,
+  product = "crm",
+  directLocationIds = [],
+  onDirectSelection,
 }: {
   activeLocationId: string;
   locations: PlatformLocationLoginOption[];
+  product?: "crm" | "studio";
+  directLocationIds?: string[];
+  onDirectSelection?: (locationId: string) => Promise<void>;
 }) {
   const [selectedLocationId, setSelectedLocationId] = useState(activeLocationId);
   const selectedLocation = useMemo(
@@ -29,7 +35,14 @@ export function PlatformLocationLoginSwitcher({
   const [error, setError] = useState("");
   const targetUser = selectedLocation?.members.find((member) => member.id === targetUserId);
 
-  function selectLocation(locationId: string) {
+  async function selectLocation(locationId: string) {
+    if (locationId === activeLocationId) { setSelectedLocationId(locationId); setTargetUserId(""); return; }
+    if (directLocationIds.includes(locationId) && onDirectSelection) {
+      setBusy(true); setError("");
+      try { await onDirectSelection(locationId); }
+      catch { setBusy(false); setError("Could not change location."); }
+      return;
+    }
     const location = locations.find((candidate) => candidate.id === locationId);
     setSelectedLocationId(locationId);
     setTargetUserId(location?.isPlatformMaster ? "" : location?.members.find((member) => member.canImpersonate)?.id || "");
@@ -44,7 +57,7 @@ export function PlatformLocationLoginSwitcher({
       const response = await fetch("/api/platform/impersonation/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId, locationId: selectedLocation.id }),
+        body: JSON.stringify({ targetUserId, locationId: selectedLocation.id, product }),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.launchUrl) throw new Error(result?.error || "Unable to log in as this user.");
@@ -55,6 +68,8 @@ export function PlatformLocationLoginSwitcher({
     }
   }
 
+  const activeName = locations.find((location) => location.id === activeLocationId)?.name || "Unnamed location";
+  if (locations.length <= 1) return <span className="truncate text-sm font-medium" title={activeName}>{activeName}</span>;
   return (
     <div className="flex min-w-0 items-center gap-1 sm:gap-2">
       <DropdownMenu>
@@ -62,11 +77,11 @@ export function PlatformLocationLoginSwitcher({
           <Button
             type="button"
             variant="ghost"
-            aria-label="Choose location"
+            aria-label="Switch location"
             disabled={busy}
             className="h-10 min-w-0 max-w-[10rem] gap-1.5 px-2 text-sm font-medium sm:max-w-[16rem]"
           >
-            <span className="truncate">{selectedLocation?.name || "Estio"}</span>
+            <span className="truncate">{activeName}</span>
             <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
@@ -81,8 +96,9 @@ export function PlatformLocationLoginSwitcher({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {selectedLocation && !selectedLocation.isPlatformMaster ? (
+      {selectedLocation && selectedLocation.id !== activeLocationId && !selectedLocation.isPlatformMaster ? (
         <>
+          <span className="truncate text-xs text-muted-foreground">Access {selectedLocation.name}</span>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

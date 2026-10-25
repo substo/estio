@@ -1,7 +1,7 @@
 "use client"
 
 import { useCrmRealm } from "./crm-realm"
-import { AppTenantIdentity } from "@/components/app-tenant-identity"
+import { TenantHeaderSelector } from "@/components/tenant-header-selector"
 import ModeToggle from '@/components/mode-toggle'
 import { AdminNotificationBell } from '@/components/notifications/admin-notification-bell'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
@@ -17,8 +17,6 @@ import { AdminNavigationGroups } from "./admin-navigation"
 import { AdminProductSwitcher } from "./admin-product-switcher"
 import { cn } from "@/lib/utils"
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
-import { ActiveLocationSwitcher } from "./active-location-switcher"
-import { PlatformLocationLoginSwitcher } from "./platform-location-login-switcher"
 import type { PlatformLocationLoginOption } from "@/lib/auth/platform-location-options"
 
 export default function DashboardTopNav({ children, appSurface = false, activeLocation, availableLocations, platformLoginLocations }: {
@@ -75,15 +73,7 @@ export default function DashboardTopNav({ children, appSurface = false, activeLo
             </div>
           </SheetContent>
         </Sheet>
-        <AppTenantIdentity app={realm === "substo" ? "substo" : "estio"}>
-          <ActiveLocationSwitcher activeLocationId={activeLocation.id} locations={availableLocations} />
-        </AppTenantIdentity>
-        {platformLoginLocations ? <details className="relative shrink-0">
-          <summary className="cursor-pointer text-xs text-muted-foreground">Support access</summary>
-          <div className="absolute left-0 top-full z-50 rounded-md border bg-background p-3 shadow-md">
-            <PlatformLocationLoginSwitcher activeLocationId={activeLocation.id} locations={platformLoginLocations} />
-          </div>
-        </details> : null}
+        <TenantHeaderSelector app={realm === "substo" ? "substo" : "estio"} product="crm" activeLocationId={activeLocation.id} locations={availableLocations} platformLoginLocations={platformLoginLocations} />
         <div className="ml-auto flex min-w-0 items-center justify-center gap-1.5 sm:gap-2">
           <div className="hidden sm:flex">
             {realm === "estio" ? <QuickAssistStartButton
