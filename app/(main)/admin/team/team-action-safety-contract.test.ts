@@ -15,7 +15,7 @@ test('calendar, profile, and role actions authorize the server location and reje
     action('getGHLCalendars', 'updateUserCalendar'), action('updateUserCalendar', 'createGHLCalendarForUser'),
     action('createGHLCalendarForUser', 'updateTeamMemberProfile'), action('updateTeamMemberProfile', '__end__'),
   ]) {
-    assert.match(source, /getCurrentLocationId\(\)/);
+    assert.match(source, /getCurrentLocationId\(\)|getSubmittedTeamLocation\(/);
     assert.match(source, /requireAdminRole\(/);
   }
   assert.match(action('updateUserCalendar', 'createGHLCalendarForUser'), /locations: \{ some: \{ id: locationId \} \}/);

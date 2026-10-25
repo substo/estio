@@ -1,4 +1,5 @@
 'use client';
+import { useTeamTenant } from './team-tenant';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,7 @@ export function InviteUserDialog({
     title = 'Invite Team Member',
     description = 'Invite a new user to access this location. Existing Estio accounts are restored without sending another invitation.',
 }: InviteUserDialogProps = {}) {
+    const locationId = useTeamTenant();
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function InviteUserDialog({
         setError(null);
 
         const formData = new FormData(e.currentTarget);
+        formData.set('locationId', locationId);
         const result = await inviteUserToLocation(formData);
 
         setLoading(false);

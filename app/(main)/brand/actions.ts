@@ -17,15 +17,17 @@ export type BrandFormState = { error?: string; message?: string };
 
 const toState = (result: TeamResult): BrandFormState => (result.ok ? { message: result.message } : { error: result.error });
 
-/** Every action acts on the caller's active brand, resolved on the server. */
-async function requireActor() {
-  const actor = await getSubstoBrandActor();
+/** Bind to the rendered tenant and recheck current membership/role on every submission. */
+async function requireActor(formData: FormData) {
+  const locationId = formData.get("locationId");
+  if (typeof locationId !== "string" || !locationId) redirect("/studio?error=access");
+  const actor = await getSubstoBrandActor(locationId);
   if (!actor) redirect("/studio?choose=1");
   return actor;
 }
 
 export async function inviteBrandMemberAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
-  const actor = await requireActor();
+  const actor = await requireActor(formData);
   const role = parseBrandRole(formData.get("role"));
   if (!role) return { error: "Choose a role." };
   const signUpUrl = await substoSignUpUrl();
@@ -36,13 +38,13 @@ export async function inviteBrandMemberAction(_previous: BrandFormState, formDat
 }
 
 export async function revokeBrandInvitationAction(formData: FormData) {
-  const actor = await requireActor();
+  const actor = await requireActor(formData);
   await revokeBrandInvitation(substoBrandDeps(), actor, String(formData.get("invitationId") || ""));
   revalidatePath("/brand/team");
 }
 
 export async function changeBrandMemberRoleAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
-  const actor = await requireActor();
+  const actor = await requireActor(formData);
   const role = parseBrandRole(formData.get("role"));
   if (!role) return { error: "Choose a role." };
   const result = await changeMemberRole(substoBrandDeps(), actor, String(formData.get("userId") || ""), role);
@@ -51,7 +53,7 @@ export async function changeBrandMemberRoleAction(_previous: BrandFormState, for
 }
 
 export async function removeBrandMemberAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
-  const actor = await requireActor();
+  const actor = await requireActor(formData);
   const targetUserId = String(formData.get("userId") || "");
   const result = await removeMember(substoBrandDeps(), actor, targetUserId);
   if (result.ok && targetUserId === actor.userId) redirect("/studio?choose=1");
@@ -60,7 +62,7 @@ export async function removeBrandMemberAction(_previous: BrandFormState, formDat
 }
 
 export async function renameBrandAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
-  const actor = await requireActor();
+  const actor = await requireActor(formData);
   const result = await renameBrand(substoBrandDeps(), actor, formData.get("name"));
   revalidatePath("/brand", "layout");
   revalidatePath("/studio", "layout");

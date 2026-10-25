@@ -1,4 +1,5 @@
 'use client';
+import { useTeamTenant } from './team-tenant';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,12 +25,13 @@ interface PendingInvitationsListProps {
 }
 
 export function PendingInvitationsList({ invitations, isAdmin }: PendingInvitationsListProps) {
+    const locationId = useTeamTenant();
     const router = useRouter();
 
     if (invitations.length === 0) return null;
 
     const handleRevoke = async (invitationId: string) => {
-        const result = await revokeInvitation(invitationId);
+        const result = await revokeInvitation(invitationId, locationId);
         if (result.success) {
             toast.success('Invitation revoked');
             router.refresh();

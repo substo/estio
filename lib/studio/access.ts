@@ -82,14 +82,16 @@ export async function getStudioWorkspaceAccess(workspaceId: string): Promise<Stu
     // (added, re-roled or removed) so Studio's SQL checks agree.
     const brandAccess = await resolveBrandWorkspaceAccess(substoBrandDeps(), workspaceId, state.userId);
     if (!brandAccess) return null;
+    const selection = await validateActiveLocationSelection(brandAccess.brand.id);
+    if (selection.status !== "authorized") return null;
     const workspace = await getSubstoStudioWorkspace(workspaceId);
     return workspace
-      ? { brand, userId: state.userId, workspace: { ...workspace, role: brandAccess.studioRole }, role: brandAccess.studioRole, brandId: brandAccess.brand.id }
+      ? { brand, userId: state.userId, workspace: { ...workspace, name: brandAccess.brand.name?.trim() || "Untitled brand", role: brandAccess.studioRole }, role: brandAccess.studioRole, brandId: brandAccess.brand.id }
       : null;
   }
 
   const workspace = await getEstioStudioWorkspaceById(workspaceId);
   if (!workspace?.estio_location_id) return null;
   const access = await resolveEstioLocationAccess(workspace.estio_location_id, state);
-  return access ? { brand, userId: access.userId, workspace, role: access.role, locationId: access.location.id } : null;
+  return access ? { brand, userId: access.userId, workspace: { ...workspace, name: access.location.name?.trim() || "Unnamed location" }, role: access.role, locationId: access.location.id } : null;
 }

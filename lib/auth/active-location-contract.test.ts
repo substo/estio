@@ -38,13 +38,12 @@ test("admin layout blocks multi-location tenant rendering until selection", () =
   assert.doesNotMatch(layout, /take:\s*1|locations\[0\]/);
 });
 
-test("one-location header renders no label or disabled selector and multi-location switcher is accessible", () => {
-  assert.doesNotMatch(topNav, /Current location/);
-  assert.match(topNav, /availableLocations\.length > 1/);
-  assert.match(switcher, /aria-label=\{vocabulary\.switchTenant\}/);
-  assert.match(switcher, /DropdownMenuRadioGroup/);
-  assert.match(switcher, /role="alert" aria-live="assertive"/);
-  assert.match(switcher, /window\.location\.reload\(\)/);
+test("header always renders the shared selector, with tenant selection owned by the server", () => {
+  assert.match(topNav, /<AppTenantIdentity/);
+  assert.match(topNav, /<ActiveLocationSwitcher/);
+  assert.doesNotMatch(topNav, /availableLocations\.length > 1/);
+  assert.match(switcher, /<TenantSelector/);
+  assert.match(switcher, /window\.location\.assign\("\/admin"\)/);
 });
 
 test("platform access is role-based, tenant-independent, and offers location-user master login", () => {

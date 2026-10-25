@@ -45,7 +45,7 @@ import {
     verifyAssignmentRecoveryToken,
     type AssignmentRecoveryCounts,
 } from '@/lib/team/assignment-recovery';
-import { resolveActiveLocation } from '@/lib/auth/active-location';
+import { resolveActiveLocation, validateActiveLocationSelection } from '@/lib/auth/active-location';
 import { realmEmailWhere } from '@/lib/auth/auth-realm';
 import { getRequestAuthRealm } from '@/lib/auth/request-realm';
 
@@ -78,6 +78,14 @@ async function getCurrentLocationId(): Promise<string> {
     if (resolution.status !== 'authorized' || !resolution.location || resolution.role !== 'ADMIN') {
         throw new Error('A current ADMIN role for the active location is required');
     }
+    return resolution.location.id;
+}
+
+/** Rendered form identity, independent of a different tab's last-used cookie. */
+async function getSubmittedTeamLocation(value: unknown): Promise<string> {
+    if (typeof value !== 'string' || !value) throw new Error('Reload the team page before submitting');
+    const resolution = await validateActiveLocationSelection(value);
+    if (resolution.status !== 'authorized' || !resolution.location || resolution.role !== 'ADMIN') throw new Error('Administrator access required');
     return resolution.location.id;
 }
 
@@ -174,7 +182,7 @@ export async function previewAssignmentRecovery(input: { sourceEmail: string }):
         ]);
         const clerkResult = await clerk.users.getUserList({ emailAddress: [targetEmail], limit: 10 });
         const target = requireExactPreviewIdentity({
-            label: 'Target',
+            label: 'Source',
             email: targetEmail,
             localMatches: targetRecords.map(toPreviewIdentity),
             clerkMatches: clerkResult.data.map((user) => ({ id: user.id, emails: user.emailAddresses.map((entry) => entry.emailAddress) })),
@@ -785,7 +793,7 @@ export async function updateMemberContactAccess(formData: FormData): Promise<voi
     await assertCrmActionAllowed("team/actions.ts", "updateMemberContactAccess");
     let outcome = 'error';
     try {
-        const locationId = await getCurrentLocationId();
+        const locationId = await getSubmittedTeamLocation(formData.get('locationId'));
         await requireAdminRole(locationId);
         const targetUserId = String(formData.get('userId') || '').trim();
         const scope = String(formData.get('contactAccessScope') || '');
@@ -812,7 +820,7 @@ export async function updateMemberContactAccess(formData: FormData): Promise<voi
 
 export async function inviteUserToLocation(formData: FormData) {
     await assertCrmActionAllowed("team/actions.ts", "inviteUserToLocation");
-    const locationId = await getCurrentLocationId();
+    const locationId = await getSubmittedTeamLocation(formData.get('locationId'));
     const adminUserId = await requireAdminRole(locationId);
 
     const email = formData.get('email') as string;
@@ -832,7 +840,6 @@ export async function inviteUserToLocation(formData: FormData) {
         const client = await clerkClient();
 
         if (user) {
-            const activeTargetLocation = user.locations.find((location) => location.id === locationId);
             // User exists in DB. Check if they exist in Clerk (REAL user vs ZOMBIE user)
             // If they were deleted from Clerk but remain in our DB, we should NOT just link them.
             // We should treat it as a new invitation.
@@ -1032,9 +1039,9 @@ export async function inviteUserToLocation(formData: FormData) {
     }
 }
 
-export async function revokeInvitation(invitationId: string) {
+export async function revokeInvitation(invitationId: string, expectedLocationId?: string) {
     await assertCrmActionAllowed("team/actions.ts", "revokeInvitation");
-    const locationId = await getCurrentLocationId();
+    const locationId = await getSubmittedTeamLocation(expectedLocationId);
     await requireAdminRole(locationId);
 
     try {
@@ -1051,10 +1058,10 @@ export async function revokeInvitation(invitationId: string) {
     }
 }
 
-export async function resendInvitation(invitationId: string) {
+export async function resendInvitation(invitationId: string, expectedLocationId?: string) {
     await assertCrmActionAllowed("team/actions.ts", "resendInvitation");
     console.log(`[ResendInvitation] Started for invitationId: ${invitationId}`);
-    const locationId = await getCurrentLocationId();
+    const locationId = await getSubmittedTeamLocation(expectedLocationId);
     await requireAdminRole(locationId);
 
     try {
@@ -1115,9 +1122,9 @@ export async function resendInvitation(invitationId: string) {
 
 
 
-export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER') {
+export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER', expectedLocationId?: string) {
     await assertCrmActionAllowed("team/actions.ts", "updateUserRole");
-    const locationId = await getCurrentLocationId();
+    const locationId = await getSubmittedTeamLocation(expectedLocationId);
     const adminUserId = await requireAdminRole(locationId);
 
     try {
@@ -1143,6 +1150,7 @@ export async function updateUserRole(userId: string, newRole: 'ADMIN' | 'MEMBER'
         });
 
         if (user) {
+            const activeTargetLocation = user.locations.find((location) => location.id === locationId);
             // Sync Clerk Metadata
             if (user.clerkId) {
                 try {
@@ -1242,10 +1250,10 @@ export async function getGHLCalendars() {
     return await getCalendars(location.ghlLocationId);
 }
 
-export async function updateUserCalendar(userId: string, calendarId: string | null) {
+export async function updateUserCalendar(userId: string, calendarId: string | null, expectedLocationId?: string) {
     await assertCrmActionAllowed("team/actions.ts", "updateUserCalendar");
     try {
-        const locationId = await getCurrentLocationId();
+        const locationId = await getSubmittedTeamLocation(expectedLocationId);
         await requireAdminRole(locationId);
         const target = await db.user.findFirst({ where: { id: userId, locations: { some: { id: locationId } } }, select: { id: true } });
         if (!target) return { success: false, error: 'Team member not found for this location' };
@@ -1263,11 +1271,12 @@ export async function updateUserCalendar(userId: string, calendarId: string | nu
 
 export async function createGHLCalendarForUser(
     userId: string,
-    data: { name: string; slotDuration: number }
+    data: { name: string; slotDuration: number },
+    expectedLocationId?: string
 ) {
     await assertCrmActionAllowed("team/actions.ts", "createGHLCalendarForUser");
     try {
-        const activeLocationId = await getCurrentLocationId();
+        const activeLocationId = await getSubmittedTeamLocation(expectedLocationId);
         await requireAdminRole(activeLocationId);
         if (!isGhlIntegrationEnabled()) {
             return { success: false, message: 'GHL integration is paused.' };
@@ -1315,7 +1324,7 @@ export async function createGHLCalendarForUser(
 
 export async function updateTeamMemberProfile(formData: FormData) {
     await assertCrmActionAllowed("team/actions.ts", "updateTeamMemberProfile");
-    const locationId = await getCurrentLocationId();
+    const locationId = await getSubmittedTeamLocation(formData.get('locationId'));
     await requireAdminRole(locationId);
 
     const userId = formData.get('userId') as string;

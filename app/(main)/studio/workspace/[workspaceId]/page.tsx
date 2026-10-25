@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getStudioWorkspaceAccess } from "@/lib/studio/access";
-import { openEstioStudioBusinessAction } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +25,6 @@ export default async function StudioWorkspacePage({
             <p className="text-sm text-muted-foreground">Studio · {access.role}</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">{workspace.name}</h1>
           </div>
-          <Link className="text-sm text-primary underline-offset-4 hover:underline" href="/brand/team">Invite your team</Link>
         </div>
         <section className="rounded-xl border bg-card p-6">
           <h2 className="text-lg font-medium">Research library</h2>
@@ -55,12 +53,7 @@ export default async function StudioWorkspacePage({
           <p className="text-sm text-muted-foreground">Estio Studio · {access.role}</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{workspace.name}</h1>
         </div>
-        <div className="flex gap-4">
-          <Link className="text-sm text-primary underline-offset-4 hover:underline" href="/studio">Switch location</Link>
-          <form action={openEstioStudioBusinessAction.bind(null, workspace.id)}>
-            <button type="submit" className="text-sm text-primary underline-offset-4 hover:underline">Business</button>
-          </form>
-        </div>
+
       </div>
       <section className="rounded-xl border bg-card p-6">
         <h2 className="text-lg font-medium">Research library</h2>

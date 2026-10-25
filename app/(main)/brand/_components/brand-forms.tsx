@@ -18,10 +18,11 @@ function Feedback({ state }: { state: BrandFormState }) {
 
 const selectClass = "h-9 rounded-md border bg-background px-2 text-sm";
 
-export function InviteMemberForm() {
+export function InviteMemberForm({ locationId }: { locationId: string }) {
   const [state, action, pending] = useActionState(inviteBrandMemberAction, {});
   return (
     <form action={action} className="space-y-3">
+      <input type="hidden" name="locationId" value={locationId} />
       <div className="flex flex-col gap-2 sm:flex-row">
         <label className="sr-only" htmlFor="invite-email">Email address</label>
         <input id="invite-email" name="email" type="email" required maxLength={254} placeholder="name@example.com" className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" />
@@ -37,10 +38,11 @@ export function InviteMemberForm() {
   );
 }
 
-export function MemberRoleForm({ userId, role, disabled }: { userId: string; role: "ADMIN" | "MEMBER"; disabled: boolean }) {
+export function MemberRoleForm({ locationId, userId, role, disabled }: { locationId: string; userId: string; role: "ADMIN" | "MEMBER"; disabled: boolean }) {
   const [state, action, pending] = useActionState(changeBrandMemberRoleAction, {});
   return (
     <form action={action} className="flex flex-col items-end gap-1">
+      <input type="hidden" name="locationId" value={locationId} />
       <input type="hidden" name="userId" value={userId} />
       <select
         name="role"
@@ -58,7 +60,7 @@ export function MemberRoleForm({ userId, role, disabled }: { userId: string; rol
   );
 }
 
-export function RemoveMemberForm({ userId, label }: { userId: string; label: string }) {
+export function RemoveMemberForm({ locationId, userId, label }: { locationId: string; userId: string; label: string }) {
   const [state, action, pending] = useActionState(removeBrandMemberAction, {});
   return (
     <form
@@ -66,6 +68,7 @@ export function RemoveMemberForm({ userId, label }: { userId: string; label: str
       className="flex flex-col items-end gap-1"
       onSubmit={(event) => { if (!window.confirm(`${label}?`)) event.preventDefault(); }}
     >
+      <input type="hidden" name="locationId" value={locationId} />
       <input type="hidden" name="userId" value={userId} />
       <Button type="submit" variant="ghost" size="sm" disabled={pending}>{label}</Button>
       <Feedback state={state} />
@@ -73,10 +76,11 @@ export function RemoveMemberForm({ userId, label }: { userId: string; label: str
   );
 }
 
-export function RenameBrandForm({ name, disabled }: { name: string; disabled: boolean }) {
+export function RenameBrandForm({ locationId, name, disabled }: { locationId: string; name: string; disabled: boolean }) {
   const [state, action, pending] = useActionState(renameBrandAction, {});
   return (
     <form action={action} className="space-y-3">
+      <input type="hidden" name="locationId" value={locationId} />
       <div className="flex flex-col gap-2 sm:flex-row">
         <label className="sr-only" htmlFor="brand-name">Brand name</label>
         <input id="brand-name" name="name" defaultValue={name} required maxLength={100} disabled={disabled} className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" />

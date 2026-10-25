@@ -1,4 +1,5 @@
 'use client';
+import { useTeamTenant } from './team-tenant';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ interface CreateCalendarDialogProps {
 }
 
 export function CreateCalendarDialog({ userId, userName, onSuccess }: CreateCalendarDialogProps) {
+    const locationId = useTeamTenant();
     const [open, setOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [name, setName] = useState(`${userName}'s Calendar`);
@@ -38,7 +40,7 @@ export function CreateCalendarDialog({ userId, userName, onSuccess }: CreateCale
             const result = await createGHLCalendarForUser(userId, {
                 name,
                 slotDuration: Number(duration)
-            });
+            }, locationId);
 
             if (result.success) {
                 toast({

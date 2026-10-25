@@ -1,4 +1,5 @@
 'use client';
+import { useTeamTenant } from './team-tenant';
 
 import { useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,7 @@ interface EditTeamMemberDialogProps {
 }
 
 export function EditTeamMemberDialog({ user }: EditTeamMemberDialogProps) {
+    const locationId = useTeamTenant();
     const [open, setOpen] = useState(false);
     const [isPending, startTransition] = useTransition();
     const router = useRouter();
@@ -38,6 +40,7 @@ export function EditTeamMemberDialog({ user }: EditTeamMemberDialogProps) {
         const formData = new FormData(e.currentTarget);
         // Append userId to formData so the server action knows who to update
         formData.append('userId', user.id);
+        formData.set('locationId', locationId);
 
         startTransition(async () => {
             const result = await updateTeamMemberProfile(formData);

@@ -1,7 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import Link from "next/link";
+import { StudioShell } from "./_components/studio-shell";
+import { getStudioShellData } from "./_components/studio-shell-data";
+import { ensureEstioStudioWorkspace } from "@/lib/studio/supabase-service";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { ensureBrandWorkspace } from "@/lib/brands/brand-service";
@@ -10,7 +12,7 @@ import { createSubstoBrandAction, openEstioStudioLocation, openSubstoBrandStudio
 
 export const dynamic = "force-dynamic";
 
-export default async function StudioWorkspaceSelector({
+async function StudioWorkspaceSelector({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string; choose?: string }>;
@@ -31,9 +33,10 @@ export default async function StudioWorkspaceSelector({
     if (!prepared) return <SubstoSetupError reason="verified-email" />;
     const { brands } = prepared;
 
-    // One brand: open its Studio directly (attaching the workspace on first use).
-    if (brands.length === 1 && !params.choose && !params.error) {
-      const workspaceId = await ensureBrandWorkspace(substoBrandDeps(), brands[0], userId);
+    const active = await resolveActiveLocation();
+    // The validated active tenant, including a sole membership, wins on ordinary entry.
+    if (active.location && !params.choose && !params.error) {
+      const workspaceId = await ensureBrandWorkspace(substoBrandDeps(), active.location, userId);
       redirect(`/studio/workspace/${workspaceId}`);
     }
 
@@ -41,7 +44,7 @@ export default async function StudioWorkspaceSelector({
       <main className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6 md:p-10">
         <header className="space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight">Choose a brand</h1>
-          <p className="text-muted-foreground">Each brand has its own team, Studio research and content.</p>
+          <p className="text-muted-foreground">Each brand has its own team, CRM and Studio content.</p>
         </header>
 
         {params.error === "access" ? <p className="text-sm text-destructive">You no longer have access to that brand.</p> : null}
@@ -89,6 +92,10 @@ export default async function StudioWorkspaceSelector({
   if (brand !== "estio") notFound();
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect("/sign-in?redirect_url=%2Fstudio");
+  if (resolution.location && !params.choose && !params.error) {
+    const workspace = await ensureEstioStudioWorkspace(resolution.location);
+    redirect(`/studio/workspace/${workspace.id}`);
+  }
   const { actor } = await auth();
   const availableLocations = actor
     ? resolution.availableLocations.filter((location) => location.id === resolution.location?.id)
@@ -98,7 +105,7 @@ export default async function StudioWorkspaceSelector({
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
       <header className="space-y-2">
         <p className="text-sm font-medium text-muted-foreground">Estio Studio</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Choose a location workspace</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Choose a location</h1>
         <p className="text-muted-foreground">Studio access follows your Estio team access for each location.</p>
       </header>
 
@@ -121,7 +128,7 @@ export default async function StudioWorkspaceSelector({
         </p>
       )}
 
-      <p><Link className="text-sm text-primary underline-offset-4 hover:underline" href="/admin">Return to Estio Business</Link></p>
+
     </main>
   );
 }
@@ -137,4 +144,10 @@ function SubstoSetupError({ reason }: { reason?: "verified-email" }) {
       </p>
     </main>
   );
+}
+
+export default async function StudioPage(props: { searchParams: Promise<{ error?: string; choose?: string }> }) {
+  const content = await StudioWorkspaceSelector(props);
+  const shell = await getStudioShellData();
+  return shell ? <StudioShell {...shell}>{content}</StudioShell> : content;
 }

@@ -132,8 +132,8 @@ test("Substo invitations use Substo's own Clerk application, and Estio platform 
 });
 
 test("Studio and brand pages share the CRM sidebar shell in both apps", () => {
-  assert.match(read("app/(main)/studio/layout.tsx"), /<StudioShell \{\.\.\.shell\}>/);
-  assert.match(read("app/(main)/brand/layout.tsx"), /<StudioShell \{\.\.\.shell\}>/);
+  assert.match(read("app/(main)/studio/workspace/[workspaceId]/layout.tsx"), /<StudioShell \{\.\.\.shell\}/);
+  assert.match(read("app/(main)/brand/team/page.tsx"), /<StudioShell \{\.\.\.shell\}/);
   const shell = read("app/(main)/studio/_components/studio-shell.tsx");
   assert.match(shell, /<DashboardSideBar/);
   assert.match(shell, /useSidebarCollapsed\(\)/);

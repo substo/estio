@@ -69,7 +69,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
         const calendarId = value === "none" ? null : value;
         setSelectedCalendar(value);
 
-        const result = await updateUserCalendar(user.id, calendarId);
+        const result = await updateUserCalendar(user.id, calendarId, activeLocation.id);
 
         if (result.success) {
             toast.success("Calendar updated");
@@ -82,7 +82,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
 
     const handleRoleChange = async (value: 'ADMIN' | 'MEMBER') => {
         setLoading(true);
-        const result = await updateUserRole(user.id, value);
+        const result = await updateUserRole(user.id, value, activeLocation.id);
         if (result.success) {
             toast.success(`Role updated to ${value}`);
             router.refresh();
@@ -125,7 +125,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                     </Button>
                     {showManagement && isAdmin && !isCurrentUser && roleData && (
                         <Select
-                            value={role}
+                            value={roleData.role}
                             onValueChange={(val: 'ADMIN' | 'MEMBER') => handleRoleChange(val)}
                             disabled={loading}
                         >
@@ -174,6 +174,7 @@ export function TeamMemberCard({ user, calendars, isAdmin, isCurrentUser, active
                 )}
                 {isAdmin && roleData && role === 'MEMBER' && (
                     <form action={updateMemberContactAccess} className="mb-4 flex items-end gap-2 rounded-md border p-3">
+                        <input type="hidden" name="locationId" value={activeLocation.id} />
                         <input type="hidden" name="userId" value={user.id} />
                         <div className="space-y-1">
                             <label htmlFor={`contact-access-${user.id}`} className="text-xs font-medium">Contact visibility</label>

@@ -75,10 +75,13 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
   if (authState.actor && !impersonation) {
     return { status: "no_access", clerkUserId, user: null, location: null, role: null, availableLocations: [], locationCount: 0 };
   }
-  const availableLocations = scopeDirectLocationsForSession(authorizedLocations, {
+  const sessionLocations = scopeDirectLocationsForSession(authorizedLocations, {
     platformRole: user.platformRole,
     isImpersonating: Boolean(impersonation),
   });
+  const availableLocations = impersonation
+    ? sessionLocations.filter((location) => location.id === impersonation.locationId)
+    : sessionLocations;
   const requestedLocationId = impersonation?.locationId ?? (await cookies()).get(ACTIVE_LOCATION_COOKIE)?.value;
   const selection = chooseActiveLocation(availableLocations, requestedLocationId);
   const localIdentity: LocalIdentity = {

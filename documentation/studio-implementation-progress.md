@@ -1,5 +1,19 @@
 # Shared Studio implementation progress
 
+
+## Unified CRM/Studio tenant context (2026-10-25)
+
+User authorized implementation and deployment after the research in [the tenant context plan](crm-studio-tenant-context-plan.md).
+
+- Shared app-adjacent top-left identity and tenant selector in both products/realms: one eligible tenant is a plain name, multiple offer a dropdown. Location.name is the display authority across Studio, including older workspace-name drift. Product controls remain CRM/Studio; overview/sidebar tenant switch duplicates and Business wording are removed. Estio support login remains a separate control, with the actual selected tenant always visible.
+- Workspace layouts resolve explicit route authority before rendering the shell. A pure mapping lookup never creates or adopts records; last-used selection is saved via a separate same-origin POST. Explicit context governs product exits and Substo Team/Settings links/forms, independent of cookie changes in another tab. Restored history pages revalidate. Tenant switches open a safe overview rather than carrying a foreign record URL. Normal Studio entry opens the validated current tenant; explicit chooser access remains.
+- Team membership remains Prisma connection + role, mirrored into Studio SQL by the existing services. Substo forms bind their rendered tenant ID and reauthorize; Estio invite/role/contact-access/calendar/profile actions likewise bind the rendered team tenant. Impersonation now restricts explicit location selection as well as cookie selection to the audited Location; Studio shows the existing support session banner.
+- Corrected existing team compiler issues encountered in affected code (misplaced activeTargetLocation variable, nullable role prop and unsupported recovery identity label). Updated obsolete contract tests to reflect authoritative active selection and the one-tenant label requirement.
+- Validation: **128/128** focused auth/realm/header/product/team tests pass, including new render/context/POST/form-scope and pinned-impersonation regressions. **17/17** service tests plus the existing disposable PostgreSQL realm migration, uniqueness and cross-realm denial checks pass via `bash scripts/test-user-auth-realm-db.sh`. Compiler diagnostics are **0 in 40 affected TypeScript files** with project settings; this is not a whole-project typecheck. `git diff --check` passes. Logs: `/tmp/estio-tenant-{tests,db-tests,types}.log`.
+- No schema migration, production rename, master-role grant, membership repair or website publication is part of this release. The real Substo tenant and workspace remain named `test`. Existing UUID routes remain stable; optional readable entry aliases and root marketing-site routing remain separate follow-ups as recommended in the plan.
+- Deployment authorized; production build, rollout and signed-in post-deploy acceptance are pending at this entry.
+
+
 ## Substo CRM handoff regression fix (2026-10-25)
 
 Signed-in browser reproduction on the reported workspace: Studio → CRM returned through sign-in to Studio, while a document load of `/admin` opened the correct Substo CRM. The earlier anonymous sign-in/route checks did not cover this product-switch failure.

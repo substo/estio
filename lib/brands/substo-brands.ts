@@ -3,7 +3,7 @@ import "server-only";
 import { createClerkClient, currentUser, type User } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import db from "@/lib/db";
-import { resolveActiveLocation } from "@/lib/auth/active-location";
+import { resolveActiveLocation, validateActiveLocationSelection } from "@/lib/auth/active-location";
 import { getClerkBrandKeys } from "@/lib/auth/clerk-runtime";
 import { getHostOrigin } from "@/lib/auth/host-brand";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
@@ -83,9 +83,9 @@ export async function prepareCurrentSubstoUser() {
 }
 
 /** The signed-in user acting on their active Substo brand. */
-export async function getSubstoBrandActor(): Promise<(BrandActor & { brandName: string; clerkUserId: string; studioWorkspaceId: string | null }) | null> {
+export async function getSubstoBrandActor(locationId?: string): Promise<(BrandActor & { brandName: string; clerkUserId: string; studioWorkspaceId: string | null }) | null> {
   if (await getRequestAuthRealm() !== "substo") return null;
-  const resolution = await resolveActiveLocation();
+  const resolution = locationId === undefined ? await resolveActiveLocation() : await validateActiveLocationSelection(locationId);
   if (resolution.status !== "authorized" || !resolution.user || !resolution.location || !resolution.role) return null;
   return {
     userId: resolution.user.id,

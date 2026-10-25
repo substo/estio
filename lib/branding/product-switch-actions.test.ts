@@ -116,7 +116,7 @@ test("both Studio menus bind CRM to the displayed workspace; chooser uses the au
         "@/components/product-switcher": { ProductSwitcher },
         "../actions": { openEstioStudioBusinessAction: (id: string) => opened.push(`estio:${id}`), openSubstoStudioCrmAction: (id: string) => opened.push(`substo:${id}`) },
       });
-      const tree = StudioShell({ app, brands: [], activeBrandId: null, activeLocationName: null, fallbackWorkspaceId: null, children: null });
+      const tree = StudioShell({ app, brands: [], activeBrandId: null, fallbackWorkspaceId: null, children: null });
       const switches: any[] = [];
       function walk(value: any) {
         if (!value || typeof value !== "object") return;

@@ -39,7 +39,7 @@ const apis = [
   "/api/notifications/events", "/api/notifications/subscriptions", "/api/media/attachments/estio-attachment", "/api/images/direct-upload",
 ];
 
-function resolver(options: { cookie?: string; realm?: string; userRealm?: string; wrongFullRealm?: boolean; actor?: unknown } = {}) {
+function resolver(options: { cookie?: string; realm?: string; userRealm?: string; wrongFullRealm?: boolean; actor?: unknown; impersonationLocationId?: string } = {}) {
   const realm = options.realm ?? "substo";
   const brands = [
     { id: "substo-a", authRealm: "substo", name: "One", isPlatformMaster: false },
@@ -51,8 +51,8 @@ function resolver(options: { cookie?: string; realm?: string; userRealm?: string
     "@clerk/nextjs/server": { auth: async () => ({ userId: "substo-clerk", actor: options.actor }) },
     "next/headers": { cookies: async () => ({ get: () => ({ value: options.cookie }) }) },
     "@/lib/auth/active-location-policy": locationPolicy,
-    "@/lib/auth/impersonation-policy": { extractImpersonationClaim: () => null },
-    "@/lib/auth/impersonation": { getImpersonationContextFromAuth: async () => null },
+    "@/lib/auth/impersonation-policy": { extractImpersonationClaim: () => options.impersonationLocationId ? { locationId: options.impersonationLocationId } : null },
+    "@/lib/auth/impersonation": { getImpersonationContextFromAuth: async () => options.impersonationLocationId ? { locationId: options.impersonationLocationId } : null },
     "@/lib/auth/auth-realm": realmPolicy,
     "@/lib/auth/request-realm": { getRequestAuthRealm: async () => realm },
     "@/lib/db": { user: { findUnique: async (query: any) => {
@@ -206,4 +206,13 @@ test("push subscription ownership is included in the atomic unique write", async
   await service.upsertWebPushSubscriptionForUser({ userId: "substo-user", endpoint: "estio-endpoint", p256dh: "key", auth: "key" });
   assert.equal(write.where.endpoint, "estio-endpoint");
   assert.equal(write.where.userId, "substo-user");
+});
+
+// A connected second tenant must not become selectable during a location-pinned actor session.
+test("explicit selection and cookie resolution both remain pinned to the audited tenant", async () => {
+  const boundary = resolver({ cookie: "substo-b", actor: { sub: "support" }, impersonationLocationId: "substo-a" });
+  const active = await boundary.resolveActiveLocation();
+  assert.equal(active.location.id, "substo-a");
+  assert.deepEqual(Array.from(active.availableLocations, (row: any) => row.id), ["substo-a"]);
+  assert.equal((await boundary.validateActiveLocationSelection("substo-b")).status, "no_access");
 });

@@ -8,10 +8,8 @@ import { HamburgerMenuIcon } from "@radix-ui/react-icons";
 import {
   BookOpenText,
   CalendarClock,
-  ChevronsUpDown,
   Clapperboard,
   Compass,
-  Layers,
   LayoutDashboard,
   Library,
   ListChecks,
@@ -25,12 +23,14 @@ import ModeToggle from "@/components/mode-toggle";
 import { AppLogo } from "@/components/app-logo";
 import { ProductSwitcher, type ProductTarget } from "@/components/product-switcher";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { AppTenantIdentity } from "@/components/app-tenant-identity";
+import { TenantSelector } from "@/components/tenant-selector";
+import { TenantSelectionSync } from "./tenant-selection-sync";
+import { ImpersonationBanner, type ImpersonationBannerData } from "../../admin/_components/impersonation-banner";
 import DashboardSideBar from "../../admin/_components/dashboard-side-bar";
 import { AdminNavigationGroups, type AdminNavGroup } from "../../admin/_components/admin-navigation";
 import { AdminSidebarPreferenceScript, useSidebarCollapsed } from "../../admin/_components/admin-shell-layout";
-import { openEstioStudioBusinessAction, openSubstoBrandStudioAction } from "../actions";
+import { openEstioStudioBusinessAction } from "../actions";
 
 type App = "estio" | "substo";
 
@@ -39,7 +39,8 @@ export type StudioShellBrand = { id: string; name: string };
 const WORKSPACE_PATH = /^\/studio\/workspace\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i;
 
 /** Sidebar menu for Studio, in the same groups and style as the CRM menu. */
-export function studioNavGroups(app: App, workspaceId: string | null): AdminNavGroup[] {
+export function studioNavGroups(app: App, workspaceId: string | null, locationId: string | null = null): AdminNavGroup[] {
+  const scope = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
   const base = workspaceId ? `/studio/workspace/${workspaceId}` : null;
   const groups: AdminNavGroup[] = [];
   if (base) {
@@ -63,44 +64,12 @@ export function studioNavGroups(app: App, workspaceId: string | null): AdminNavG
     groups.push({
       label: "Brand",
       items: [
-        { href: "/brand/team", label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
-        { href: "/brand/settings", label: "Brand settings", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
-        { href: "/studio?choose=1", label: "All brands", icon: Layers, activePath: (pathname) => pathname === "/studio" },
+        { href: `/brand/team${scope}`, label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
+        { href: `/brand/settings${scope}`, label: "Brand settings", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
       ],
     });
-  } else {
-    groups.push({ label: "Workspace", items: [{ href: "/studio", label: "Locations", icon: Layers, activePath: (pathname) => pathname === "/studio" }] });
   }
   return groups;
-}
-
-/** Substo: switch the active brand. Each option re-checks membership on the server. */
-function BrandSwitcher({ brands, activeBrandId }: { brands: StudioShellBrand[]; activeBrandId: string | null }) {
-  const active = brands.find((brand) => brand.id === activeBrandId);
-  if (brands.length === 0) return null;
-  if (brands.length === 1) return <span className="truncate text-sm font-medium">{brands[0].name}</span>;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="flex min-w-0 max-w-[16rem] items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent">
-        <span className="truncate">{active?.name ?? "Choose a brand"}</span>
-        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel>Your brands</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {brands.map((brand) => (
-          <DropdownMenuItem key={brand.id} asChild>
-            <form action={openSubstoBrandStudioAction} className="w-full">
-              <input type="hidden" name="brandId" value={brand.id} />
-              <button type="submit" className="w-full truncate text-left" aria-current={brand.id === activeBrandId ? "true" : undefined}>{brand.name}</button>
-            </form>
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild><Link href="/studio?choose=1">Create or manage brands</Link></DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 }
 
 /**
@@ -111,15 +80,14 @@ export function StudioShell({
   app,
   brands,
   activeBrandId,
-  activeLocationName,
+  impersonation,
   fallbackWorkspaceId,
   children,
 }: {
   app: App;
   brands: StudioShellBrand[];
   activeBrandId: string | null;
-  /** Estio: the active location shown in the top bar. */
-  activeLocationName: string | null;
+  impersonation?: ImpersonationBannerData | null;
   /** Workspace for menu links on pages outside /studio/workspace (brand pages). */
   fallbackWorkspaceId: string | null;
   children: ReactNode;
@@ -127,19 +95,20 @@ export function StudioShell({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const workspaceId = pathname.match(WORKSPACE_PATH)?.[1] ?? fallbackWorkspaceId;
-  const groups = studioNavGroups(app, workspaceId);
+  const groups = studioNavGroups(app, workspaceId, activeBrandId);
   const targets: { crm: ProductTarget; studio: ProductTarget } = {
     crm: workspaceId
       ? app === "substo" ? { formAction: "/api/studio/product-switch", fields: { product: "crm", workspaceId } } : { action: openEstioStudioBusinessAction.bind(null, workspaceId) }
-      : { href: "/admin", document: app === "substo" },
+      : activeBrandId ? { formAction: "/api/studio/tenant-switch", fields: { product: "crm", locationId: activeBrandId } } : { href: "/admin", document: true },
     studio: { href: "/studio" },
   };
   const switcher = <ProductSwitcher active="studio" compact={collapsed} className={collapsed ? "mx-3.5" : "mx-3"} targets={targets} />;
-  const logo = <AppLogo app={app} href={app === "substo" ? "/studio" : "/"} size="sm" showName iconOnly={collapsed} className={collapsed ? "justify-center" : "min-w-0"} />;
+  const logo = <AppLogo app={app} href={workspaceId ? `/studio/workspace/${workspaceId}` : "/studio?choose=1"} size="sm" showName iconOnly={collapsed} className={collapsed ? "justify-center" : "min-w-0"} />;
 
   return (
     <>
       <AdminSidebarPreferenceScript />
+      {impersonation ? <ImpersonationBanner context={impersonation} /> : null}
       <div className="grid min-h-screen w-full lg:[grid-template-columns:var(--admin-sidebar-width,160px)_minmax(0,1fr)]">
         <DashboardSideBar
           collapsed={collapsed}
@@ -164,14 +133,29 @@ export function StudioShell({
                 </div>
               </SheetContent>
             </Sheet>
-            {app === "substo"
-              ? <BrandSwitcher brands={brands} activeBrandId={activeBrandId} />
-              : activeLocationName ? <span className="truncate text-sm font-medium">{activeLocationName}</span> : null}
+            <AppTenantIdentity app={app} homeHref={workspaceId ? `/studio/workspace/${workspaceId}` : "/studio?choose=1"}>
+              <TenantSelector activeLocationId={activeBrandId} locations={brands} noun={app === "substo" ? "brand" : "location"} onSelect={async (locationId) => {
+                const form = document.createElement("form");
+                form.method = "post"; form.action = "/api/studio/tenant-switch";
+                for (const [name, value] of Object.entries({ locationId, product: "studio" })) {
+                  const input = document.createElement("input"); input.type = "hidden"; input.name = name; input.value = value; form.appendChild(input);
+                }
+                document.body.appendChild(form); form.submit();
+              }} />
+            </AppTenantIdentity>
             <div className="ml-auto flex items-center gap-2">
               {config.auth.enabled ? <SignedIn><UserButton afterSignOutUrl="/sign-in" /></SignedIn> : null}
               <ModeToggle />
             </div>
           </header>
+          {workspaceId ? <TenantSelectionSync workspaceId={workspaceId} /> : null}
+          {pathname === "/studio" ? null : <div className="flex gap-4 px-4 pt-3 text-xs text-muted-foreground">
+            <Link href="/studio?choose=1">{app === "substo" ? "Manage brands" : "Manage locations"}</Link>
+            {app === "estio" && activeBrandId ? <form action="/api/studio/tenant-switch" method="post">
+              <input type="hidden" name="product" value="team" /><input type="hidden" name="locationId" value={activeBrandId} />
+              <button type="submit">Team</button>
+            </form> : null}
+          </div>}
           {children}
         </div>
       </div>

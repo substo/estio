@@ -1,29 +1,20 @@
 import "server-only";
+import { auth } from "@clerk/nextjs/server";
+import { resolveTenantContext } from "@/lib/auth/tenant-context";
+import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
 
-import { headers } from "next/headers";
-import { resolveActiveLocation } from "@/lib/auth/active-location";
-import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
-import type { StudioShellBrand } from "./studio-shell";
-
-export type StudioShellData = {
-  app: "estio" | "substo";
-  brands: StudioShellBrand[];
-  activeBrandId: string | null;
-  activeLocationName: string | null;
-  fallbackWorkspaceId: string | null;
-};
-
-/** Shell context for the request's app: brands (Substo) or the active location (Estio). */
-export async function getStudioShellData(): Promise<StudioShellData | null> {
-  const brand = resolveHostBrand((await headers()).get("host"), getHostBrandConfig());
-  if (brand !== "estio" && brand !== "substo") return null;
-  const resolution = await resolveActiveLocation();
-  const brands = resolution.availableLocations.map((location) => ({ id: location.id, name: location.name || "Untitled brand" }));
+/** The explicit workspace wins over last-used cookies throughout the shell. */
+export async function getStudioShellData(input: { workspaceId?: string; locationId?: string } = {}) {
+  const context = await resolveTenantContext(input);
+  if (!context) return null;
+  const { app, resolution, workspaceId } = context;
+  const state = await auth();
+  const impersonation = state.actor ? await getImpersonationContextFromAuth({ userId: state.userId, sessionId: state.sessionId, actor: state.actor }) : null;
   return {
-    app: brand,
-    brands,
+    app,
+    brands: resolution.availableLocations.map((location) => ({ id: location.id, name: location.name || (app === "substo" ? "Unnamed brand" : "Unnamed location") })),
     activeBrandId: resolution.location?.id ?? null,
-    activeLocationName: brand === "estio" ? resolution.location?.name ?? null : null,
-    fallbackWorkspaceId: brand === "substo" ? resolution.location?.studioWorkspaceId ?? null : null,
+    fallbackWorkspaceId: workspaceId,
+    impersonation: impersonation ? { targetName: impersonation.targetName, targetEmail: impersonation.targetEmail, locationName: impersonation.locationName, sessionId: impersonation.sessionId } : null,
   };
 }

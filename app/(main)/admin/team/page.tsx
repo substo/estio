@@ -1,3 +1,4 @@
+import { TeamTenantProvider } from "./_components/team-tenant";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { redirect } from "next/navigation";
 import db from "@/lib/db";
@@ -112,12 +113,12 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
     const isAdmin = true;
 
     return (
-        <div className="p-6">
+        <TeamTenantProvider locationId={locationId}><div className="p-6">
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold">Team Management</h1>
                     <p className="text-gray-500 text-sm">
-                        Manage team access and GoHighLevel booking calendars for {location.name || 'this location'}
+                        Manage CRM and Studio team access for {location.name || 'this location'}
                     </p>
                 </div>
                 {isAdmin && <InviteUserDialog />}
@@ -180,6 +181,6 @@ export default async function TeamPage({ searchParams }: { searchParams?: Promis
                     </div>
                 ))}
             </div>
-        </div>
+        </div></TeamTenantProvider>
     );
 }

@@ -17,7 +17,8 @@ test('legacy bulk recovery is not exposed in normal Team member management', () 
 test('retained emergency recovery preview resolves exact identity and all counts server-side', () => {
   assert.match(preview, /normalizeOffboardingEmail/);
   assert.match(preview, /requireExactPreviewIdentity/);
-  assert.match(preview, /resolveStrictAdminLocation/);
+  assert.match(preview, /getCurrentLocationId\(\)/);
+  assert.match(preview, /activeMembership\?\.connected/);
   assert.match(preview, /countAssignmentRecovery\(db/);
   assert.doesNotMatch(preview, /input\.(locationId|targetUserId|counts|role)/);
 });
