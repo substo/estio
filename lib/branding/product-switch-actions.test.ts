@@ -171,7 +171,7 @@ test("Studio team management is in Settings and no independent brand management 
     const settings = groups.find((group: any) => group.label === "Settings");
     const team = settings.items.find((item: any) => item.label === "Team"); assert.ok(team);
     if (app === "estio") { assert.equal(team.formTarget.fields.locationId, "location-a"); assert.equal(team.formTarget.fields.product, "team"); }
-    else assert.equal(team.href, "/brand/team?locationId=location-a");
+    else assert.equal(team.href, "/brand/team");
   }
 });
 

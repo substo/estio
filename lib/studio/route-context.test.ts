@@ -55,11 +55,12 @@ test("both old app links authorize their Location before clean redirect; revoked
   for (const host of ["estio.co", "substo.com"]) for (const allowed of [true, false]) {
     let calls = 0;
     const api = load("app/(main)/studio/workspace/[workspaceId]/[[...path]]/route.ts", {
+      "@/lib/auth/host-brand": { getHostOrigin: (requestHost: string) => requestHost === host ? `https://${host}` : null },
       "next/server": { NextResponse }, "@/lib/studio/route-policy": { cleanStudioLegacyPath },
       "@/lib/auth/tenant-context": { resolveWorkspaceTenant: async (id: string) => { assert.equal(id, workspaceId); calls++; return allowed ? { location: { id: "location-b" } } : null; } },
       "@/lib/auth/active-location": { ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/", sameSite: "lax" } },
     });
-    const response = await api.GET(new NextRequest(`https://${host}/studio/workspace/${workspaceId}/library?page=2`), { params: Promise.resolve({ workspaceId, path: ["library"] }) });
+    const response = await api.GET(new NextRequest(`http://localhost:3002/studio/workspace/${workspaceId}/library?page=2`, { headers: { host } }), { params: Promise.resolve({ workspaceId, path: ["library"] }) });
     assert.equal(response.status, allowed ? 303 : 404); assert.equal(response.cookies.get("active_location_id")?.value, allowed ? "location-b" : undefined);
     if (allowed) { const destination = new URL(response.headers.get("location")); assert.equal(destination.host, host); assert.equal(destination.pathname, "/studio/library"); assert.equal(destination.search, "?page=2"); }
     const post = await api.POST(); assert.equal(post.status, 409); assert.equal(calls, 1);

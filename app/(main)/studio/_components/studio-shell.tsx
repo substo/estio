@@ -38,7 +38,6 @@ export type StudioShellBrand = { id: string; name: string };
 
 /** Sidebar menu for Studio, in the same groups and style as the CRM menu. */
 export function studioNavGroups(app: App, workspaceId: string | null, locationId: string | null = null): AdminNavGroup[] {
-  const scope = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
   const base = workspaceId ? `/studio` : null;
   const groups: AdminNavGroup[] = [];
   if (base) {
@@ -59,8 +58,8 @@ export function studioNavGroups(app: App, workspaceId: string | null, locationId
   settings.push({ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") });
   if (app === "substo" && locationId) {
     settings.push(
-      { href: `/brand/team${scope}`, label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
-      { href: `/brand/settings${scope}`, label: "General", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
+      { href: "/brand/team", label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
+      { href: "/brand/settings", label: "General", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
     );
   } else if (app === "estio" && locationId) {
     settings.push({ href: "/admin/team", label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/admin/team"), formTarget: { action: "/api/studio/tenant-switch", fields: { product: "team", locationId } } });
