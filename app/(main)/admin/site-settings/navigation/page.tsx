@@ -1,3 +1,4 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { MenuBuilder } from "./_components/menu-builder";
 import { FooterBioEditor } from "./_components/footer-bio-editor";
@@ -27,6 +28,7 @@ export default async function NavigationSettingsPage() {
         }),
     ]);
 
+    const realEstateEnabled = await getRequestAuthRealm() !== "substo";
     const livePages = await getLivePages(orgId);
     const readNew = isSettingsReadFromNewEnabled() && Boolean(navigationDoc);
     const theme = (config?.theme as any) || {};
@@ -54,6 +56,7 @@ export default async function NavigationSettingsPage() {
                 <MenuBuilder locationId={orgId} type="nav" initialLinks={navLinks} availablePages={livePages} />
                 <MenuBuilder locationId={orgId} type="footer" initialLinks={footerLinks} availablePages={livePages} />
 
+                {realEstateEnabled && <>
                 <div className="border-t my-4 py-4" />
                 <h2 className="text-xl font-bold">Public Contributions</h2>
                 <div className="bg-card border rounded-lg p-4 flex items-center justify-between">
@@ -70,6 +73,7 @@ export default async function NavigationSettingsPage() {
                 </div>
 
                 <div className="border-t my-4 py-4" />
+                </>}
                 <h2 className="text-xl font-bold">Bottom Footer</h2>
                 <MenuBuilder locationId={orgId} type="legal" initialLinks={legalLinks} availablePages={livePages} />
                 <FooterBioEditor locationId={orgId} initialText={footerBio} />

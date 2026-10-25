@@ -39,7 +39,10 @@ const ALLOWED: Record<string, readonly string[]> = {
     "getUsersForSelect",
     "getContactHistory"
   ],
+  "site-settings/actions.ts": ["updateSiteSettings"],
+  "site-settings/navigation/actions.ts": ["saveNavigation", "getLivePages", "saveFooterDisclaimer", "saveFooterBio", "saveNavigationStyle"],
   "content/actions.ts": [
+    "updateHomeConfig",
     "upsertPage",
     "deletePage",
     "upsertPost",

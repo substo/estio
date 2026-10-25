@@ -12,7 +12,7 @@ The route list is `lib/auth/substo-crm-policy.ts`; the Server Action list is `li
 | Contacts list, pipeline, view/edit and intercepted modals | `getActiveContactsAccess`, active location plus assignment scope; relationship IDs validated in that location |
 | Companies list/detail | Active contacts access; `Company` queries include the active location; CRUD uses the company access policy |
 | Conversations, deals and tasks | Active contacts access and conversation/deal assignment filters; deals/tasks live inside conversations rather than separate standalone pages |
-| Page/post lists and editors | Active location; reads and mutations include location ownership; first-party public website addresses are added in [slice 5](substo-public-websites.md); property system pages and custom domains remain closed |
+| Homepage/page/post editors, website theme and navigation | Shared Estio components/actions; active location and role checks; public addressing/realm filters from [slice 5](substo-public-websites.md). [The corrective parity audit](shared-website-parity.md) documents the shared homepage/theme/menu flow. Property section writes/listing toggles, domain operations and provider configuration remain closed. |
 | Settings and notification preferences | Active contacts access and current user; team entry redirects to `/brand/team`; provider/prospecting/destructive settings are closed |
 | Team | Existing Substo brand team service, verified actor and same-realm membership/invitation checks |
 | Location selection and switch API | Authorized connection/role intersection within the host realm; posted IDs and cookies are selectors only |

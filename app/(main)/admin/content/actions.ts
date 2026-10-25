@@ -3,6 +3,7 @@
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { auth } from "@clerk/nextjs/server";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -31,7 +32,7 @@ async function resolveUserContext() {
     }
 
     const user = await db.user.findUnique({
-        where: { clerkId: userId },
+        where: { authRealm_clerkId: { authRealm: (await getRequestAuthRealm()) || "estio", clerkId: userId } },
         select: { id: true },
     });
 
@@ -329,6 +330,10 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
         return { message: "Invalid Data format", success: false };
     }
 
+    if (!Array.isArray(blocks) || blocks.length > 100) return { message: "Use at most 100 homepage sections.", success: false };
+    const genericEdition = await getRequestAuthRealm() === "substo";
+    if (genericEdition && blocks.some(block => !block || ["featured-properties", "trusted-partners", "categories"].includes(block.type))) return { message: "Property sections are unavailable in this edition.", success: false };
+
     // --- TRANSFORM BLOCKS BACK TO SITE CONFIG ---
 
     // 1. Extract Hero Content
@@ -390,7 +395,7 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
             schemaVersion: 1,
         });
 
-        if (isSettingsDualWriteLegacyEnabled()) {
+        if (isSettingsDualWriteLegacyEnabled() || genericEdition) {
             await db.siteConfig.upsert({
                 where: { locationId },
                 create: {

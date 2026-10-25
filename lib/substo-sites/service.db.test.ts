@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { PrismaClient } from "@prisma/client";
-import { getPublishedWebsite, getWebsitePage, getWebsitePost, listWebsitePages, listWebsitePosts, saveWebsiteSettings } from "./service";
+import { getPublishedWebsite, getWebsitePage, getWebsitePost, listWebsitePages, listWebsitePosts, saveWebsiteSettings, saveWebsiteDesign } from "./service";
 const url = process.env.BRANDS_TEST_DATABASE_URL;
 if (!url || !["127.0.0.1", "localhost"].includes(new URL(url).hostname) || new URL(url).pathname !== "/estio_user_auth_realm_test") throw new Error("Use bash scripts/test-user-auth-realm-db.sh with its disposable local database");
 const db = new PrismaClient({ datasourceUrl: url });
@@ -98,4 +98,39 @@ test("website address races have one winner and address changes require explicit
   assert.ok("message" in await saveWebsiteSettings(db, winner, { ...input(next), confirmAddressChange: true }));
   assert.equal(await getPublishedWebsite(db, slug), null);
   assert.ok(await getPublishedWebsite(db, next));
+});
+
+
+test("shared website design saves only public fields inside the actor's current Substo brand", async () => {
+  const actor = await brand(); const other = await brand(); const estio = await brand("estio");
+  const form = new FormData(); form.set("locationId", actor.locationId); form.set("brandName", "Shared design");
+  form.set("primaryColor", "#123456"); form.set("contactEmail", "public@example.com"); form.set("googleAiApiKey", "FORGED");
+  await saveWebsiteDesign(db, actor, form);
+  const row = await db.siteConfig.findUniqueOrThrow({ where: { locationId: actor.locationId } });
+  assert.equal((row.theme as any).primaryColor, "#123456"); assert.equal(row.googleAiApiKey, null);
+  const slug = unique("shared-design");
+  await saveWebsiteSettings(db, actor, input(slug));
+  const published = await getPublishedWebsite(db, slug);
+  assert.equal(published?.settings.title, "Shared design");
+  assert.equal(published?.settings.email, "public@example.com");
+  assert.equal(published?.settings.accent, "#123456");
+  form.set("locationId", other.locationId);
+  assert.match((await saveWebsiteDesign(db, actor, form)).message, /access is required/);
+  assert.equal(await db.siteConfig.findUnique({ where: { locationId: other.locationId } }), null);
+  form.set("locationId", estio.locationId);
+  assert.match((await saveWebsiteDesign(db, { ...actor, locationId: estio.locationId }, form)).message, /access is required/);
+  form.set("locationId", actor.locationId);
+  await db.userLocationRole.delete({ where: { userId_locationId: { userId: actor.userId, locationId: actor.locationId } } });
+  assert.match((await saveWebsiteDesign(db, actor, form)).message, /access is required/);
+});
+
+
+test("published homepage uses shared section storage and sanitizes it without repeating its URL base", async () => {
+  const actor = await brand(); const slug = unique("home-shared");
+  await saveWebsiteSettings(db, actor, input(slug));
+  await db.siteConfig.update({ where: { locationId: actor.locationId }, data: { heroContent: { headline: "Shared homepage", ctaLink: "/about" }, homeSections: [{ type: "text", enabled: true, order: 1, htmlContent: '<p onclick="bad()">Welcome</p>' }, { type: "hero", enabled: true, order: 0 }, { type: "featured-properties", enabled: true, order: 2 }] } });
+  const site = (await getPublishedWebsite(db, slug))!;
+  assert.deepEqual(site.homeBlocks?.map(block => block.type), ["hero", "text"]);
+  assert.equal(site.homeBlocks?.[0].ctaLink, `/sites/${slug}/about`);
+  assert.doesNotMatch(JSON.stringify(site.homeBlocks), /onclick|featured-properties/);
 });

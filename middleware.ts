@@ -204,7 +204,7 @@ export default async function middleware(req: NextRequest, evt: any) {
       if (!["GET", "HEAD"].includes(req.method)) return new NextResponse("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
       const response = NextResponse.next();
       response.headers.set("Cache-Control", "no-store");
-      response.headers.set("Content-Security-Policy", "default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+      response.headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
       response.headers.set("X-Content-Type-Options", "nosniff");
       response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
       return response;

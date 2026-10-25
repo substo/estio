@@ -3,6 +3,7 @@
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { auth } from "@clerk/nextjs/server";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
@@ -37,7 +38,7 @@ async function assertAdmin(locationId: string): Promise<string> {
     }
 
     const localUser = await db.user.findUnique({
-        where: { clerkId: userId },
+        where: { authRealm_clerkId: { authRealm: (await getRequestAuthRealm()) || "estio", clerkId: userId } },
         select: { id: true }
     });
     if (!localUser?.id) {
@@ -91,7 +92,7 @@ async function saveNavigationPayload(
         schemaVersion: 1,
     });
 
-    if (isSettingsDualWriteLegacyEnabled()) {
+    if (isSettingsDualWriteLegacyEnabled() || await getRequestAuthRealm() === "substo") {
         const existing = await db.siteConfig.findUnique({ where: { locationId } });
         const currentTheme = (existing?.theme as any) || {};
         await db.siteConfig.upsert({
@@ -173,7 +174,7 @@ export async function getLivePages(locationId: string) {
 
     const systemPages = [
         { label: "Home", value: "/" },
-        { label: "Properties / Search", value: "/properties/search" },
+        ...(await getRequestAuthRealm() === "substo" ? [{ label: "Blog", value: "/blog" }] : [{ label: "Properties / Search", value: "/properties/search" }]),
     ];
 
     const contentPages = pages.map(p => ({

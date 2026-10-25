@@ -2,12 +2,13 @@
 
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 
 import { COMPONENT_SCHEMA } from "@/lib/ai/component-schema";
-import { DESIGN_SYSTEM_PROMPT, RECOMPOSITION_PROMPT } from "@/lib/ai/prompts/design-system";
+import { websiteDesignPrompt, RECOMPOSITION_PROMPT } from "@/lib/ai/prompts/design-system";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 
@@ -212,7 +213,7 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         - Primary Color: ${primaryColor}
         - Mood: ${designMood}
 
-        ${DESIGN_SYSTEM_PROMPT}
+        ${websiteDesignPrompt(await getRequestAuthRealm())}
         
         - Strategy: Use the "theme" property to complement this primary color.
           - If the content is "heavy" or "exclusive", use "dark" theme.
@@ -317,6 +318,8 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
+    if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
+
     try {
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const configAny = siteConfig as any;
@@ -350,7 +353,7 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
         Voice: ${finalBrandVoice}
         Primary Color: ${primaryColor}
 
-        ${DESIGN_SYSTEM_PROMPT}
+        ${websiteDesignPrompt(await getRequestAuthRealm())}
 
         ${RECOMPOSITION_PROMPT}
         
@@ -508,6 +511,8 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
+    if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
+
     try {
         // 1. Fetch Site Config
         const siteConfig = await db.siteConfig.findUnique({
@@ -589,6 +594,8 @@ export async function refineBlockContent(currentBlock: any, instruction: string,
     await assertCrmActionAllowed("content/ai-actions.ts", "refineBlockContent");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
+
+    if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
     try {
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
@@ -678,6 +685,8 @@ export async function generateSiteTheme(
     await assertCrmActionAllowed("content/ai-actions.ts", "generateSiteTheme");
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
+
+    if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
     try {
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
@@ -810,6 +819,8 @@ export async function generateSectionFromPrompt(
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
+    if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
+
     try {
         const siteConfig = await db.siteConfig.findUnique({ where: { locationId } });
         const configAny = siteConfig as any;
@@ -837,7 +848,7 @@ export async function generateSectionFromPrompt(
         Voice: "${finalBrandVoice}"
         Primary Color: ${primaryColor}
 
-        ${DESIGN_SYSTEM_PROMPT}
+        ${websiteDesignPrompt(await getRequestAuthRealm())}
         
         ${COMPONENT_SCHEMA}
 

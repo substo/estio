@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button";
 interface PublicFooterProps {
     siteConfig: any; // Using any to handle the flexible JSON structure safely
     primaryColor?: string;
+    realEstateEnabled?: boolean;
 }
 
-export function PublicFooter({ siteConfig, primaryColor }: PublicFooterProps) {
+export function PublicFooter({ siteConfig, primaryColor, realEstateEnabled = true }: PublicFooterProps) {
     const currentYear = new Date().getFullYear();
     // Default to "Real Estate" if name is missing
-    const locationName = siteConfig?.location?.name || "Real Estate";
+    const locationName = siteConfig?.location?.name || (realEstateEnabled ? "Real Estate" : "Our Company");
 
     // Parse Footer Links or use specific defaults matching the image/demo
     const footerLinks = siteConfig?.footerLinks ? (
@@ -45,12 +46,12 @@ export function PublicFooter({ siteConfig, primaryColor }: PublicFooterProps) {
 
     // Placeholder Contact Info
     const contactInfo = {
-        address: siteConfig?.contactInfo?.address || "123 Makariou Avenue, Limassol 3030, Cyprus",
+        address: siteConfig?.contactInfo?.address || (realEstateEnabled ? "123 Makariou Avenue, Limassol 3030, Cyprus" : ""),
         mapsLink: siteConfig?.contactInfo?.mapsLink || "#",
         mapsLinkTitle: siteConfig?.contactInfo?.mapsLinkTitle || "",
-        mobile: siteConfig?.contactInfo?.mobile || siteConfig?.contactInfo?.phone || "+357 99 123 456",
-        landline: siteConfig?.contactInfo?.landline || "+357 25 123 456",
-        email: siteConfig?.contactInfo?.email || "info@downtowncyprus.com",
+        mobile: siteConfig?.contactInfo?.mobile || siteConfig?.contactInfo?.phone || (realEstateEnabled ? "+357 99 123 456" : ""),
+        landline: siteConfig?.contactInfo?.landline || (realEstateEnabled ? "+357 25 123 456" : ""),
+        email: siteConfig?.contactInfo?.email || (realEstateEnabled ? "info@downtowncyprus.com" : ""),
     };
 
     // Use specific provided color or fallback to a hardcoded "Deep Red" to simulate the design if primaryColor is missing
@@ -59,7 +60,7 @@ export function PublicFooter({ siteConfig, primaryColor }: PublicFooterProps) {
 
     const theme = siteConfig?.theme as any;
     const brandName = theme?.logo?.textTop || locationName;
-    const brandTagline = theme?.logo?.textBottom || "REAL ESTATE AGENCY";
+    const brandTagline = theme?.logo?.textBottom || (realEstateEnabled ? "REAL ESTATE AGENCY" : "");
 
     return (
         <footer
@@ -118,13 +119,13 @@ export function PublicFooter({ siteConfig, primaryColor }: PublicFooterProps) {
                             </div>
                         )}
                         <p className="text-white/80 text-sm leading-relaxed font-medium max-w-xs whitespace-pre-wrap">
-                            {siteConfig?.footerBio || "Your trusted partner in real estate. We bring professionalism and local expertise to every transaction."}
+                            {siteConfig?.footerBio || (realEstateEnabled ? "Your trusted partner in real estate. We bring professionalism and local expertise to every transaction." : "")}
                         </p>
                     </div>
 
                     {/* Quick Links */}
                     <div>
-                        <h3 className="font-heading font-bold text-lg mb-6">Properties</h3>
+                        <h3 className="font-heading font-bold text-lg mb-6">{realEstateEnabled ? "Properties" : "Explore"}</h3>
                         <ul className="space-y-4 text-sm font-medium text-white/80">
                             {footerLinks.map((link: any, idx: number) => (
                                 <li key={idx}>
@@ -198,7 +199,7 @@ export function PublicFooter({ siteConfig, primaryColor }: PublicFooterProps) {
                     <div>
                         <h3 className="font-heading font-bold text-lg mb-6">Stay Connected</h3>
                         <p className="text-sm font-medium text-white/80 mb-4">
-                            Market insights and exclusive listings delivered to your inbox.
+                            {realEstateEnabled ? "Market insights and exclusive listings delivered to your inbox." : "News and updates delivered to your inbox."}
                         </p>
                         <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
                             <Input

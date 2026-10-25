@@ -38,12 +38,14 @@ export function SiteSettingsForm({
     locationName,
     locationTimeZone,
     settingsVersion,
+    realEstateEnabled = true,
 }: {
     initialData: any,
     locationId: string,
     locationName: string,
     locationTimeZone: string,
-    settingsVersion: number
+    settingsVersion: number,
+    realEstateEnabled?: boolean
 }) {
     const [state, action] = useActionState(updateSiteSettings, initialState);
     const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -94,7 +96,7 @@ export function SiteSettingsForm({
             let targetResearchUrl = undefined;
             if (useResearchUrl) {
                 // Use local researchUrl state
-                targetResearchUrl = researchUrl || (initialData?.domain ? `https://${initialData.domain}` : undefined);
+                targetResearchUrl = researchUrl || (initialData?.domain ? (initialData.domain.startsWith("/") ? new URL(initialData.domain, window.location.origin).href : `https://${initialData.domain}`) : undefined);
 
                 if (!targetResearchUrl) {
                     toast.error("Enter an Existing Website URL to research.");
@@ -245,6 +247,7 @@ export function SiteSettingsForm({
                 <input type="hidden" name="settingsVersion" value={String(settingsVersion)} />
 
 
+                {realEstateEnabled && <>
                 {/* Domain Section */}
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium">Domain Configuration</h3>
@@ -395,6 +398,8 @@ export function SiteSettingsForm({
                 </div>
 
                 <Separator />
+
+                </>}
 
                 {/* Theme & Branding Section */}
                 <div className="space-y-4">

@@ -28,7 +28,7 @@ function load(file: string, deps: Record<string, unknown>): any {
 const pages = [
   "/admin", "/admin/contacts", "/admin/contacts/estio-contact/view", "/admin/contacts/estio-contact/edit",
   "/admin/companies", "/admin/companies/estio-company/view", "/admin/projects", "/admin/conversations",
-  "/admin/content/website", "/admin/content/pages/page-id/preview",
+  "/admin/content/website", "/admin/content/pages/page-id/preview", "/admin/site-settings", "/admin/site-settings/navigation", "/admin/content/home",
   "/admin/content/pages", "/admin/content/pages/estio-page", "/admin/content/posts", "/admin/content/posts/estio-post",
   "/admin/settings", "/admin/settings/notifications", "/admin/team", "/admin/user-profile", "/select-location",
 ];
@@ -96,8 +96,8 @@ test("valid Substo selection works; stale realm and impersonation fail closed; E
 test("hidden pages and API suffix/lookalike/extra segment bypasses stay closed", () => {
   for (const route of [
     "/admin/properties", "/admin/prospecting", "/admin/viewings/sessions", "/admin/live-assist", "/admin/platform",
-    "/admin/settings/integrations/ghl", "/admin/settings/prospecting", "/admin/settings/location-data", "/admin/site-settings",
-    "/admin/conversations/import", "/admin/content/home", "/admin/contacts-x", "/admin/contacts/x/view/extra",
+    "/admin/settings/integrations/ghl", "/admin/settings/prospecting", "/admin/settings/location-data", "/admin/site-settings/domains",
+    "/admin/conversations/import", "/admin/content/home/extra", "/admin/contacts-x", "/admin/contacts/x/view/extra",
     "/api/admin/conversations/property-match-campaigns/x/processing", "/api/admin/conversations/send-reply",
     "/api/admin/companies/feed-sync", "/api/admin/properties/upsert", "/api/google/auth", "/api/cron/task-sync",
     "/api/webhooks/ghl", "/api/viewings/sessions/quick-start", "/api/admin/debug-sync", "/api/test/seed",

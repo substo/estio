@@ -1,5 +1,8 @@
 # Substo CRM: design direction
 
+Implementation correction (2026-10-25): develop generic features once using shared Estio components and services. Do not build separate Substo editors/renderers/workflows. See [the corrective parity audit](shared-website-parity.md) for verified reuse and outstanding acceptance.
+
+
 Status: direction approved by the user on 2026-10-24. Slices 0–5 are implemented locally (Clerk email branding remains an external acceptance step) on `feature/crm-realm-identity`; nothing is deployed. See [the rollout runbook](crm-realm-identity-rollout.md). This changes one boundary of the approved brief in [the Studio audit handoff](studio-audit-continuation-handoff.md): there, Substo was "Studio only" with standalone workspace memberships.
 
 ## Decisions (user, 2026-10-24)

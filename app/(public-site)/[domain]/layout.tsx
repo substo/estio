@@ -1,15 +1,11 @@
+import { WebsiteShell } from "@/components/website/shell";
 import { getSiteConfig } from "@/lib/public-data";
 import { ensureContactExists } from "@/lib/auth/ensure-contact";
 import { notFound } from "next/navigation";
 import { Metadata } from "next";
-import { Montserrat, Inter } from 'next/font/google';
-import { PublicHeader } from "./_components/public-header";
-import { PublicFooter } from "./_components/public-footer";
+import { websiteBodyClassName } from "@/lib/website/fonts";
 import "@/app/globals.css";
-import { hexToHsl, getContrastColor } from "@/lib/utils";
 import { ClerkProvider } from '@clerk/nextjs';
-import { ThemeProvider } from "@/components/theme-provider";
-import { HeaderProvider } from "./_components/header-context";
 import { currentUser } from "@clerk/nextjs/server";
 import { verifyUserHasAccessToLocation } from "@/lib/auth/permissions";
 import { CLERK_DEV_FAPI } from "@/lib/auth/clerk-config";
@@ -18,19 +14,6 @@ import { Suspense } from "react";
 
 // Force dynamic rendering as domains vary
 export const dynamic = "force-dynamic";
-
-// Font Configuration
-const montserrat = Montserrat({
-    subsets: ['latin'],
-    variable: '--font-heading',
-    weight: ['300', '400', '500', '600', '700', '800']
-});
-
-const inter = Inter({
-    subsets: ['latin'],
-    variable: '--font-sans',
-    weight: ['300', '400', '500', '600']
-});
 
 type Props = {
     children: React.ReactNode;
@@ -76,10 +59,6 @@ export default async function PublicSiteLayout(props: Props) {
         notFound();
     }
 
-    // 3. Theming (Safe access to JSON)
-    const theme = config.theme as any | null;
-    const globalHeaderStyle = theme?.headerStyle || "transparent";
-
     // 4. Fail-Safe: Ensure Contact Exists (Public User)
     // If user is logged in via OAuth/Google, metadata might be missing.
     // This check ensures they are created as a Contact on valid access.
@@ -89,13 +68,6 @@ export default async function PublicSiteLayout(props: Props) {
         // Since it's server component, awaiting is safer to ensure consistency
         await ensureContactExists(config.locationId);
     }
-    // Map existing primary color handling to new CSS variable structure
-    const primaryColor = theme?.primaryColor;
-
-    // Convert to HSL for Tailwind
-    const primaryHsl = primaryColor ? hexToHsl(primaryColor) : null;
-    const primaryForegroundHsl = primaryColor ? getContrastColor(primaryColor) : null;
-
     // 4. Navigation (Safe access to JSON)
     // Cast to any first to avoid strict type mismatch, then shape it
     const rawNavLinks = (config.navLinks as any[]) || [];
@@ -169,57 +141,11 @@ export default async function PublicSiteLayout(props: Props) {
     return (
         <ClerkProvider {...providerProps}>
             <html lang="en" suppressHydrationWarning>
-                <body className={`${inter.variable} ${montserrat.variable} font-sans min-h-screen flex flex-col`}>
-                    <ThemeProvider
-                        attribute="class"
-                        defaultTheme="light"
-                        enableSystem={false}
-                        forcedTheme="light"
-                        disableTransitionOnChange
-                    >
-                        <HeaderProvider defaultStyle={globalHeaderStyle}>
-                            {/* Dynamic Theme Injection */}
-                            {primaryHsl && (
-                                <style>{`:root { 
-                            --primary-brand: ${primaryHsl};
-                            --primary: ${primaryHsl};
-                            --primary-foreground: ${primaryForegroundHsl};
-                            --ring: ${primaryHsl};
-                            --input: ${primaryHsl};
-
-                            ${theme?.secondaryColor ? `--secondary: ${hexToHsl(theme.secondaryColor)};` : ''}
-                            ${theme?.accentColor ? `--accent: ${hexToHsl(theme.accentColor)};` : ''}
-                            ${theme?.backgroundColor ? `--background: ${hexToHsl(theme.backgroundColor)};` : ''}
-                            ${theme?.textColor ? `--foreground: ${hexToHsl(theme.textColor)};` : ''}
-                        }`}</style>
-                            )}
-
-                            {/* Public Site Header */}
-                            <PublicHeader
-                                domain={config.domain || config.location.name || "Real Estate"}
-                                navLinks={navLinks}
-                                primaryColor={primaryColor}
-                                logo={theme?.logo}
-                                menuStyle={theme?.menuStyle}
-                                publicListingEnabled={config.publicListingEnabled ?? true}
-                                isTeamMember={isTeamMember}
-                            />
-
-                            {/* Main Content */}
-                            <Suspense fallback={null}>
-                                <AnalyticsTracker domain={params.domain} eventName="page_view" />
-                            </Suspense>
-                            <main className="flex-1">
-                                {children}
-                            </main>
-
-                            {/* Public Footer */}
-                            <PublicFooter
-                                siteConfig={config}
-                                primaryColor={primaryColor}
-                            />
-                        </HeaderProvider>
-                    </ThemeProvider>
+                <body className={websiteBodyClassName}>
+                    <WebsiteShell config={config} navLinks={navLinks} isTeamMember={isTeamMember}
+                        analytics={<Suspense fallback={null}><AnalyticsTracker domain={params.domain} eventName="page_view" /></Suspense>}>
+                        {children}
+                    </WebsiteShell>
                 </body>
             </html>
         </ClerkProvider>

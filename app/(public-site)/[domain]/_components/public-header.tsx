@@ -30,6 +30,8 @@ export interface NavLink {
 
 interface PublicHeaderProps {
     domain: string;
+    realEstateEnabled?: boolean;
+    basePath?: string;
     navLinks: NavLink[];
     primaryColor?: string;
     logo?: {
@@ -44,7 +46,7 @@ interface PublicHeaderProps {
     isTeamMember?: boolean;
 }
 
-export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle = "side", publicListingEnabled = true, isTeamMember = false }: PublicHeaderProps) {
+export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle = "side", publicListingEnabled = true, isTeamMember = false, realEstateEnabled = true, basePath = "" }: PublicHeaderProps) {
     const [scrolled, setScrolled] = useState(false);
     const [sheetOpen, setSheetOpen] = useState(false);
     const pathname = usePathname();
@@ -94,7 +96,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
         return () => window.removeEventListener("scroll", handleScroll);
     }, []);
 
-    const links = navLinks.length > 0 ? navLinks : [
+    const links = navLinks.length > 0 ? navLinks : !realEstateEnabled ? [{ label: "Home", href: basePath || "/" }, { label: "Blog", href: `${basePath}/blog` }] : [
         { label: "Buy", href: "/properties/search?status=sale", type: 'custom' },
         { label: "Rent", href: "/properties/search?status=rent", type: 'custom' },
         { label: "New Developments", href: "/properties/search?type=development", type: 'custom' },
@@ -216,7 +218,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                 <div className="container mx-auto px-4 md:px-6">
                     <div className="flex items-center justify-between h-16">
                         {/* Brand Logo */}
-                        <Link href="/" className="flex items-center gap-3 group z-50 relative">
+                        <Link href={basePath || "/"} className="flex items-center gap-3 group z-50 relative">
                             {(logo?.url || logo?.lightUrl) && (
                                 <img
                                     src={activeLogoUrl}
@@ -260,7 +262,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                 scrolled ? "text-gray-600" : "text-white/90"
                                             )}
                                         >
-                                            {logo?.textBottom || "REAL ESTATE AGENCY"}
+                                            {logo?.textBottom || (realEstateEnabled ? "REAL ESTATE AGENCY" : "")}
                                         </span>
                                     </div>
                                 </>
@@ -272,7 +274,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
 
                             {/* Desktop: Show Search & List Your Property CTAs */}
                             <div className="hidden md:flex items-center gap-3">
-                                <Link href="/properties/search">
+                                {realEstateEnabled && <Link href="/properties/search">
                                     <Button
                                         variant="ghost"
                                         className={cn(
@@ -285,13 +287,13 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                         <Search className="h-4 w-4" />
                                         Search Properties
                                     </Button>
-                                </Link>
+                                </Link>}
 
 
 
                                 {publicListingEnabled && (
                                     <>
-                                        <SignedOut>
+                                        {realEstateEnabled && <SignedOut>
                                             <SignInButton mode="modal">
                                                 <Button
                                                     variant={scrolled ? "default" : "secondary"}
@@ -309,9 +311,9 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                     List Your Property
                                                 </Button>
                                             </SignInButton>
-                                        </SignedOut>
+                                        </SignedOut>}
 
-                                        <SignedIn>
+                                        {realEstateEnabled && <SignedIn>
                                             <Link href="/properties/add">
                                                 <Button
                                                     variant={scrolled ? "default" : "secondary"}
@@ -329,13 +331,13 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                     List Your Property
                                                 </Button>
                                             </Link>
-                                        </SignedIn>
+                                        </SignedIn>}
                                     </>
                                 )}
                             </div>
 
                             {/* Signed In Icons (Favorites etc) - Visible on Desktop/Mobile */}
-                            <SignedIn>
+                            {realEstateEnabled && <SignedIn>
                                 <div className="hidden md:flex items-center gap-3 mr-2">
                                     {isTeamMember && (
                                         <Link
@@ -365,7 +367,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                         <Heart className="h-6 w-6" />
                                     </Link>
                                 </div>
-                            </SignedIn>
+                            </SignedIn>}
 
                             {/* Hamburger Menu Trigger */}
                             <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -407,7 +409,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
 
                                                     {/* Call to Action in Horizontal Menu */}
                                                     <div className="flex items-center gap-6 mt-8">
-                                                        <Link href="/properties/search" onClick={() => setSheetOpen(false)}>
+                                                        {realEstateEnabled && <Link href="/properties/search" onClick={() => setSheetOpen(false)}>
                                                             <Button
                                                                 variant="outline"
                                                                 className="rounded-sm font-bold tracking-wider px-8 py-6 text-xs uppercase flex items-center gap-2 border-gray-300 hover:bg-gray-50"
@@ -415,12 +417,12 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                 <Search className="h-4 w-4" />
                                                                 Search Properties
                                                             </Button>
-                                                        </Link>
+                                                        </Link>}
 
 
                                                         {publicListingEnabled && (
                                                             <>
-                                                                <SignedOut>
+                                                                {realEstateEnabled && <SignedOut>
                                                                     <SignInButton mode="modal">
                                                                         <Button
                                                                             className="rounded-sm font-bold uppercase tracking-wider px-8 py-6 text-sm flex items-center gap-2"
@@ -430,9 +432,9 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                             List Your Property
                                                                         </Button>
                                                                     </SignInButton>
-                                                                </SignedOut>
+                                                                </SignedOut>}
 
-                                                                <SignedIn>
+                                                                {realEstateEnabled && <SignedIn>
                                                                     <Link href="/properties/add" onClick={() => setSheetOpen(false)}>
                                                                         <Button
                                                                             className="rounded-sm font-bold uppercase tracking-wider px-8 py-6 text-sm flex items-center gap-2"
@@ -442,26 +444,26 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                             List Your Property
                                                                         </Button>
                                                                     </Link>
-                                                                </SignedIn>
+                                                                </SignedIn>}
                                                             </>
                                                         )}
 
-                                                        <SignedOut>
+                                                        {realEstateEnabled && <SignedOut>
                                                             <SignInButton mode="modal">
                                                                 <Button variant="outline" className="py-6 px-8 text-sm uppercase tracking-wider font-bold">
                                                                     Log In
                                                                 </Button>
                                                             </SignInButton>
-                                                        </SignedOut>
+                                                        </SignedOut>}
 
-                                                        <SignedIn>
+                                                        {realEstateEnabled && <SignedIn>
                                                             <div className="flex items-center gap-4">
                                                                 <UserButton afterSignOutUrl="/"
                                                                     appearance={{ elements: { avatarBox: "h-10 w-10" } }}
                                                                 />
                                                                 <span className="text-sm font-bold text-gray-900">My Account</span>
                                                             </div>
-                                                        </SignedIn>
+                                                        </SignedIn>}
                                                     </div>
                                                 </div>
                                             ) : (
@@ -472,7 +474,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
 
                                                     {/* Button Group: Visible on Mobile, Hidden on Desktop */}
                                                     <div className="flex flex-col gap-4 mt-8 md:hidden">
-                                                        <Link href="/properties/search" className="block" onClick={() => setSheetOpen(false)}>
+                                                        {realEstateEnabled && <Link href="/properties/search" className="block" onClick={() => setSheetOpen(false)}>
                                                             <Button
                                                                 variant="outline"
                                                                 className="w-full rounded-sm font-bold tracking-wider py-6 text-xs uppercase flex items-center justify-center gap-2 border-gray-300 hover:bg-gray-50"
@@ -480,12 +482,12 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                 <Search className="h-4 w-4" />
                                                                 Search Properties
                                                             </Button>
-                                                        </Link>
+                                                        </Link>}
 
 
                                                         {publicListingEnabled && (
                                                             <>
-                                                                <SignedOut>
+                                                                {realEstateEnabled && <SignedOut>
                                                                     <SignInButton mode="modal">
                                                                         <Button
                                                                             className="w-full rounded-sm font-bold uppercase tracking-wider py-6 text-xs flex items-center justify-center gap-2"
@@ -495,9 +497,9 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                             List Your Property
                                                                         </Button>
                                                                     </SignInButton>
-                                                                </SignedOut>
+                                                                </SignedOut>}
 
-                                                                <SignedIn>
+                                                                {realEstateEnabled && <SignedIn>
                                                                     <Link href="/properties/add" onClick={() => setSheetOpen(false)}>
                                                                         <Button
                                                                             className="w-full rounded-sm font-bold uppercase tracking-wider py-6 text-xs flex items-center justify-center gap-2"
@@ -507,14 +509,14 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                             List Your Property
                                                                         </Button>
                                                                     </Link>
-                                                                </SignedIn>
+                                                                </SignedIn>}
                                                             </>
                                                         )}
                                                     </div>
 
                                                     {/* Profile / Log In Section: Integrated into list */}
                                                     <div className="flex flex-col">
-                                                        <SignedOut>
+                                                        {realEstateEnabled && <SignedOut>
                                                             <SignInButton mode="modal">
                                                                 <button
                                                                     className="block w-full text-left py-3 px-2 text-lg font-heading font-bold text-gray-900 hover:text-primary hover:bg-gray-50 rounded-md transition-colors border-b border-gray-50 last:border-0"
@@ -523,9 +525,9 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                     Log In / Sign Up
                                                                 </button>
                                                             </SignInButton>
-                                                        </SignedOut>
+                                                        </SignedOut>}
 
-                                                        <SignedIn>
+                                                        {realEstateEnabled && <SignedIn>
                                                             {/* My Account Header */}
                                                             <div className="py-3 px-2 border-b border-gray-50">
                                                                 <div className="flex items-center justify-between">
@@ -564,7 +566,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                                     </Link>
                                                                 </div>
                                                             </div>
-                                                        </SignedIn>
+                                                        </SignedIn>}
                                                     </div>
                                                 </>
                                             )}
@@ -613,7 +615,7 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                     <div className="flex items-center gap-6 md:hidden">
                                         {publicListingEnabled && (
                                             <>
-                                                <SignedOut>
+                                                {realEstateEnabled && <SignedOut>
                                                     <SignInButton mode="modal">
                                                         <Button
                                                             className="rounded-sm font-bold uppercase tracking-wider px-8 py-6 text-xs flex items-center gap-2"
@@ -624,9 +626,9 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                             List Your Property
                                                         </Button>
                                                     </SignInButton>
-                                                </SignedOut>
+                                                </SignedOut>}
 
-                                                <SignedIn>
+                                                {realEstateEnabled && <SignedIn>
                                                     <Link href="/properties/add" onClick={() => setSheetOpen(false)}>
                                                         <Button
                                                             className="rounded-sm font-bold uppercase tracking-wider px-8 py-6 text-xs flex items-center gap-2"
@@ -636,27 +638,27 @@ export function PublicHeader({ domain, navLinks, primaryColor, logo, menuStyle =
                                                             List Your Property
                                                         </Button>
                                                     </Link>
-                                                </SignedIn>
+                                                </SignedIn>}
                                             </>
                                         )}
                                     </div>
 
-                                    <SignedOut>
+                                    {realEstateEnabled && <SignedOut>
                                         <SignInButton mode="modal">
                                             <Button variant="outline" className="py-6 px-8 text-sm uppercase tracking-wider font-bold">
                                                 Log In
                                             </Button>
                                         </SignInButton>
-                                    </SignedOut>
+                                    </SignedOut>}
 
-                                    <SignedIn>
+                                    {realEstateEnabled && <SignedIn>
                                         <div className="flex items-center gap-4">
                                             <UserButton afterSignOutUrl="/"
                                                 appearance={{ elements: { avatarBox: "h-10 w-10" } }}
                                             />
                                             <span className="text-sm font-bold text-gray-900">My Account</span>
                                         </div>
-                                    </SignedIn>
+                                    </SignedIn>}
                                 </div>
                             </div>
                         </div>

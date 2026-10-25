@@ -27,7 +27,7 @@ const initialState = {
     success: false,
 };
 
-export function HomePageForm({ initialBlocks, siteConfig }: { initialBlocks: any[]; siteConfig: any }) {
+export function HomePageForm({ initialBlocks, siteConfig, realEstateEnabled = true }: { initialBlocks: any[]; siteConfig: any; realEstateEnabled?: boolean }) {
     const [blocks, setBlocks] = useState<any[]>(() => {
         // Auto-populate defaults for Categories if missing items
         return initialBlocks.map(block => {
@@ -103,9 +103,12 @@ export function HomePageForm({ initialBlocks, siteConfig }: { initialBlocks: any
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={addHeroBlock}>Hero Section</DropdownMenuItem>
+                                {realEstateEnabled && <>
                                 <DropdownMenuItem onClick={() => addSystemBlock("categories")}>Categories (Search Grid)</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => addSystemBlock("featured-properties")}>Featured Properties</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => addSystemBlock("trusted-partners")}>Trusted Partners</DropdownMenuItem>
+                                </>}
+                                {["text", "features", "feature-section", "stats", "cta", "testimonials", "pricing", "accordion", "gallery", "form"].map(type => <DropdownMenuItem key={type} onClick={() => setBlocks(previous => [...previous, { type, enabled: true, title: "New section", animation: "none" }])}>{type.replaceAll("-", " ")}</DropdownMenuItem>)}
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
@@ -113,7 +116,7 @@ export function HomePageForm({ initialBlocks, siteConfig }: { initialBlocks: any
                     <BlockEditor
                         blocks={blocks}
                         onChange={setBlocks}
-                        onPreview={() => window.open(`http://${siteConfig.domain}${siteConfig.domain.includes('localhost') ? ':3000' : ''}`, '_blank')}
+                        onPreview={() => window.open(siteConfig.domain?.startsWith("/") ? siteConfig.domain : `${siteConfig.domain?.includes("localhost") ? "http" : "https"}://${siteConfig.domain}`, "_blank", "noopener,noreferrer")}
                         siteConfig={siteConfig}
                     />
                 </div>

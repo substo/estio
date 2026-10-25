@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import db from "@/lib/db";
 import { loadPublicWebsite } from "@/lib/substo-sites/request";
 import { getWebsitePage } from "@/lib/substo-sites/service";
-import { PublicPageContent } from "@/lib/substo-sites/content";
+import { WebsitePageView } from "@/components/website/page-view";
+import { hostedPage } from "@/lib/website/hosted-content";
 type Props = { params: Promise<{ siteSlug: string; pageSlug: string }> };
 export async function generateMetadata({ params }: Props) {
   const path = await params;
@@ -16,5 +17,5 @@ export default async function WebsitePage({ params }: Props) {
   if (!site) notFound();
   const page = await getWebsitePage(db, site, path.pageSlug);
   if (!page) notFound();
-  return <article className="space-y-8"><h1 className="text-4xl font-semibold tracking-tight">{page.title}</h1><PublicPageContent {...page} slug={site.slug} settings={site.settings} /></article>;
+  return <WebsitePageView page={hostedPage(page, site.slug, site.config)} config={site.config} />;
 }

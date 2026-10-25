@@ -36,3 +36,8 @@ RULES:
     *   **Badges:** Invent a "Kicker" (Badge) for every section if one is missing. (e.g. for a Pricing section, add Badge: "INVESTMENT").
     *   **Highlights:** Wrap the most expensive/impressive words in \`<span class="text-primary"> ... </span>\`.
 `;
+
+/** Same design engine; only the audience and examples vary by edition. */
+export function websiteDesignPrompt(realm: string | null) {
+    return realm === "substo" ? DESIGN_SYSTEM_PROMPT.replace("Premium Real Estate", "Premium Business").replace('$50M Sold', '50K Customers') : DESIGN_SYSTEM_PROMPT;
+}

@@ -26,7 +26,7 @@ test("website reads bypass Clerk readiness while writes are rejected before auth
       assert.equal(result?.status, ["GET", "HEAD"].includes(method) ? 200 : 405);
       if (method === "GET") {
         assert.equal(result?.headers.get("cache-control"), "no-store");
-        assert.match(result?.headers.get("content-security-policy") || "", /script-src 'none'/);
+        assert.match(result?.headers.get("content-security-policy") || "", /script-src 'self' 'unsafe-inline'/);
       }
     }
   } finally { if (before === undefined) delete process.env.SUBSTO_APP_HOSTS; else process.env.SUBSTO_APP_HOSTS = before; }

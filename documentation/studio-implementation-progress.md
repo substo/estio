@@ -1,6 +1,16 @@
 # Shared Studio implementation progress
 
-## Latest local slice: Substo public brand websites (slice 5)
+## Corrective local slice: one shared website implementation (2026-10-25)
+
+The user identified architectural drift in slice 5. Its separate Substo page form, simplified renderer and public header/footer/blog did not satisfy the shared-code/UI requirement. They have been removed or replaced with the existing Estio components, now used by both editions. No production change, migration or deployment occurred.
+
+- Both brands use `HomePageForm`/`updateHomeConfig`, `PageForm`/`BlockEditor`, `PublicBlockRenderer`, shared page/blog views, website shell, typography, responsive header/footer, theme settings and navigation builder. Differences are passed as capabilities, vocabulary and URL/data adapters. Substo's remaining dedicated form handles its address and publication only.
+- Host/realm/publication filters, explicit public data projection, safe hosted content, draft protection and current brand-admin authority remain. Five shared AI functions gained missing active-location argument checks; all six website AI entry points are covered by foreign-brand rejection tests.
+- [The corrective parity audit](shared-website-parity.md) records actual reuse, known gaps and the remaining work. Complete feature-by-feature signed-in acceptance has **not** been done. Functional lead capture, custom domains and integration acceptance remain pending.
+- Validation: 167/167 focused tests and 17/17 disposable PostgreSQL integration tests pass, including the migration/schema rehearsal. Zero compiler diagnostics in 45 changed/new TypeScript files. Build exits 0, 130/130 pages. Synthetic local HTTP/browser checks cover shared menu/homepage/page/blog rendering, draft/realm/host rejection, blocked public writes, withdrawing the site and zero User/Contact creation. T3 screenshots timed out twice; Chrome fallback supplied visual acceptance. Signed-in CMS and real provider/media acceptance remain pending. Logs: `/tmp/crm-website-shared-{focused-final,db-final,types-final,build-final,http}.log`.
+
+
+## Historical slice 5: Substo public brand websites (presentation superseded above)
 
 Implemented locally on `feature/crm-realm-identity`. No production data, migration, DNS, external publication or deployment was changed.
 
