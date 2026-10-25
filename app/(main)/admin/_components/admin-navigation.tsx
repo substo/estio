@@ -30,6 +30,7 @@ export type AdminNavItem = {
   label: string
   icon: LucideIcon
   activePath: (pathname: string) => boolean
+  setupPending?: boolean
 }
 
 export type AdminNavGroup = {
@@ -185,6 +186,22 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
   const active = item.activePath(pathname)
   const Icon = item.icon
 
+  if (item.setupPending) {
+    return (
+      <div
+        role="link"
+        aria-disabled="true"
+        aria-label={`${item.label} — setup pending`}
+        title={`${item.label}: setup pending on Substo`}
+        className={clsx("flex min-h-10 items-center rounded-lg text-sm text-muted-foreground opacity-60", collapsed ? "h-10 w-10 justify-center" : "gap-2 px-2.5 py-2")}
+      >
+        <AdminNavIcon icon={Icon} active={false} variant={variant} collapsed={collapsed} />
+        <span className={clsx(collapsed ? "sr-only" : "truncate")}>{item.label}</span>
+        {!collapsed && <span className="ml-auto shrink-0 text-[10px]">Setup pending</span>}
+      </div>
+    )
+  }
+
   if (variant === "mobile") {
     return (
       <SheetClose asChild>
@@ -238,7 +255,7 @@ export function AdminNavigationGroups({
 }) {
   const realm = useCrmRealm()
   const visibleGroups = realm === "substo" && groups === ADMIN_NAV_GROUPS
-    ? groups.map((group) => ({ ...group, items: group.items.filter((item) => isSubstoCrmPage(item.href)) })).filter((group) => group.items.length > 0)
+    ? groups.map((group) => ({ ...group, items: group.items.map((item) => ({ ...item, setupPending: !isSubstoCrmPage(item.href) })) })).filter((group) => group.items.length > 0)
     : groups
   if (realm === "substo" && groups === ADMIN_NAV_GROUPS) {
     visibleGroups.find((group) => group.label === "Content")?.items.unshift({ href: "/admin/content/website", label: "Website", icon: PanelsTopLeft, activePath: (pathname) => pathname === "/admin/content/website" })

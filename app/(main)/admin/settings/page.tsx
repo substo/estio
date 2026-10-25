@@ -17,6 +17,7 @@ type SettingsSection = {
   href: string;
   actionLabel: string;
   requiresAdmin?: boolean;
+  setupPending?: boolean;
 };
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -80,9 +81,9 @@ function SettingsCard({ section }: { section: SettingsSection }) {
         <CardDescription>{section.description}</CardDescription>
       </CardHeader>
       <CardContent className="p-4 pt-2">
-        <Button variant="outline" asChild>
+        {section.setupPending ? <Button variant="outline" disabled>Setup pending</Button> : <Button variant="outline" asChild>
           <Link href={section.href}>{section.actionLabel}</Link>
-        </Button>
+        </Button>}
       </CardContent>
     </Card>
   );
@@ -92,7 +93,7 @@ export default async function SettingsPage() {
   const realm = await getRequestAuthRealm();
   const access = await getActiveContactsAccess();
   const isAdmin = access?.role === "ADMIN";
-  const visibleSections = SETTINGS_SECTIONS.filter((section) => (!section.requiresAdmin || isAdmin) && (realm === "estio" || isSubstoCrmPage(section.href))).map((section) => realm === "substo" && section.href === "/admin/team" ? { ...section, description: "Manage your brand team.", href: "/brand/team" } : section);
+  const visibleSections = SETTINGS_SECTIONS.filter((section) => (!section.requiresAdmin || isAdmin)).map((section) => realm === "substo" && section.href === "/admin/team" ? { ...section, description: "Manage your brand team.", href: "/brand/team" } : realm === "substo" ? { ...section, setupPending: !isSubstoCrmPage(section.href) } : section);
 
   if (realm === "substo" && isAdmin) visibleSections.unshift({ title: "Brand website", description: "Publish your brand’s pages and blog on Substo.", href: "/admin/content/website", actionLabel: "Manage Website" });
   if (realm === "substo" && isAdmin) visibleSections.unshift({ title: "Brand settings", description: "Rename your brand.", href: "/brand/settings", actionLabel: "Manage Brand" });

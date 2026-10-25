@@ -1,5 +1,15 @@
 # Shared Studio implementation progress
 
+## Live-test baseline preparation (2026-10-25)
+
+User scope: get both apps live for testing now; the Substo CRM can remain incomplete. Both apps use the existing CRM/Studio infrastructure. Page-by-page specialization and unfinished CRM integrations are deferred, not release prerequisites.
+
+- The shared CRM sidebar now shows all existing capability names on Substo. Unready routes appear as **Setup pending** without links, across desktop, collapsed and mobile menus. Settings uses the same cards and shows pending setup rather than hiding those capabilities. Existing working tools and both product switches remain active; protected workflows remain blocked server-side.
+- Validation: 50 focused navigation/switch/isolation tests pass; zero compiler diagnostics in the three changed TypeScript files. The owned deployment performs the production builds.
+- Release input: clean `feature/crm-realm-identity`, based on the current production release history. The environment comes from the existing main checkout; none of its unrelated uncommitted source is included.
+- Production read-only preflight: all current PM2 services online, no failed migrations, and none of the realm/brand/website migrations applied. Therefore deploy expand commit `9e2d34ad` first, verify, observe the existing 10-minute contract guard, then deploy the live-test baseline with `PRISMA_SCHEMA_SYNC_MODE=migrate-only`. Deployment outcome is recorded below after verification.
+
+
 ## Corrective local slice: one shared website implementation (2026-10-25)
 
 The user identified architectural drift in slice 5. Its separate Substo page form, simplified renderer and public header/footer/blog did not satisfy the shared-code/UI requirement. They have been removed or replaced with the existing Estio components, now used by both editions. No production change, migration or deployment occurred.
