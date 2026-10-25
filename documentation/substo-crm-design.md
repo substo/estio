@@ -27,6 +27,8 @@ Status: direction approved by the user on 2026-10-24. Slices 0–5 are implement
 8. **Billing:** none yet. Studio is included with access to the software.
 9. **Rollout:** public from the start. There are no users yet, and being live shows what to change.
 10. **A brand is created automatically** at a user's first Substo sign-in (see below).
+11. **One header for CRM and Studio** (2026-10-25, done in `5247acba`): a single shared app shell and header (`components/app-shell/`) in both apps.
+12. **One AI usage total per tenant** (2026-10-25, not built yet): the header's usage badge will eventually combine CRM AI usage (Business database) and Studio AI spend (Studio database, e.g. transcription and text jobs) into one daily and monthly total per tenant (Location).
 
 ## Glossary (use these words everywhere)
 
