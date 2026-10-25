@@ -216,3 +216,30 @@ test("explicit selection and cookie resolution both remain pinned to the audited
   assert.deepEqual(Array.from(active.availableLocations, (row: any) => row.id), ["substo-a"]);
   assert.equal((await boundary.validateActiveLocationSelection("substo-b")).status, "no_access");
 });
+
+test("shared header widgets work from Studio pages on Substo against the tenant the header shows", async () => {
+  // The guard is path-independent: it allowlists the action and checks the active Location,
+  // which is also what Studio's shell resolves (studioRouteParams → resolveTenantContext()).
+  let resolved = 0;
+  const guard = load("lib/auth/crm-action-guard.ts", {
+    "server-only": {}, "./request-realm": { getRequestAuthRealm: async () => "substo" },
+    "./substo-crm-actions": actionPolicy, "./substo-crm-policy": { hasPropertyContactInput },
+    "./active-location": { resolveActiveLocation: async () => { resolved++; return { status: "authorized", location: { id: "brand-b", authRealm: "substo" } }; } },
+  });
+  for (const [module, action] of [
+    ["notifications/actions.ts", "getNotificationSnapshot"], ["notifications/actions.ts", "markNotificationReadAction"],
+    ["notifications/actions.ts", "markAllNotificationsReadAction"], ["_actions/ai-usage.ts", "getLocationAiUsageSummary"],
+  ]) await guard.assertCrmActionAllowed(module, action);
+  assert.equal(resolved, 4);
+  assert.equal(classifySubstoRoute("/api/notifications/events"), "crm-api");
+  assert.equal(classifySubstoRoute("/admin/user-profile"), "crm");
+  for (const page of ["/studio", "/studio/library", "/brand/team"]) assert.notEqual(classifySubstoRoute(page), "blocked");
+  const tenantContext = fs.readFileSync("lib/auth/tenant-context.ts", "utf8");
+  assert.match(tenantContext, /: await resolveActiveLocation\(\);/);
+  assert.match(fs.readFileSync("lib/studio/route-context.ts", "utf8"), /const context = await resolveTenantContext\(\);/);
+  for (const page of ["app/(main)/brand/team/page.tsx", "app/(main)/brand/settings/page.tsx"]) {
+    const source = fs.readFileSync(page, "utf8");
+    assert.match(source, /getSubstoBrandActor\(\);/);
+    assert.doesNotMatch(source, /searchParams/);
+  }
+});

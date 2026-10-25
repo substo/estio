@@ -83,88 +83,81 @@ function uiModule(file: string, dependencies: Record<string, any>) {
   return exports;
 }
 
+const productConfigModule = (dependencies: Record<string, any> = {}) => uiModule("components/app-shell/product-config.ts", dependencies);
+
 test("CRM switch uses the correct realm action and brand field on desktop, collapsed and mobile renders", () => {
-  const substo = () => {};
   const estio = () => {};
-  const ProductSwitcher = () => {};
   for (const realm of ["estio", "substo"]) {
-    const { AdminProductSwitcher } = uiModule("app/(main)/admin/_components/admin-product-switcher.tsx", {
-      "./crm-realm": { useCrmRealm: () => realm }, "@/components/product-switcher": { ProductSwitcher },
-      "../../studio/actions": { openEstioStudioLocation: estio, openSubstoBrandStudioAction: substo },
-    });
-    for (const compact of [false, true]) {
-      const node = AdminProductSwitcher({ locationId: "brand-b", compact });
-      assert.equal(node.type, ProductSwitcher);
-      assert.equal(node.props.active, "crm");
-      assert.equal(node.props.compact, compact);
-      if (realm === "substo") { assert.equal(node.props.targets.studio.formAction, "/api/studio/product-switch"); assert.equal(node.props.targets.studio.fields.product, "studio"); } else assert.equal(node.props.targets.studio.action, estio);
-      assert.equal(node.props.targets.studio.fields[realm === "substo" ? "brandId" : "locationId"], "brand-b");
-    }
+    const { productShellConfig } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: estio } });
+    const { targets } = productShellConfig(realm, "crm", { locationId: "brand-b", workspaceId: null });
+    assert.equal(targets.crm.href, "/admin");
+    if (realm === "substo") { assert.equal(targets.studio.formAction, "/api/studio/product-switch"); assert.equal(targets.studio.fields.product, "studio"); } else assert.equal(targets.studio.action, estio);
+    assert.equal(targets.studio.fields[realm === "substo" ? "brandId" : "locationId"], "brand-b");
   }
 });
 
-test("both Studio menus bind CRM to the displayed Location rather than a storage UUID", () => {
+/** Render the one shell with stub widgets; returns the sidebar switch and the header element. */
+function renderShell(app: string, product: "crm" | "studio", overrides: Record<string, unknown> = {}) {
   const ProductSwitcher = () => {};
-  for (const app of ["estio", "substo"]) {
-    const { StudioShell } = uiModule("app/(main)/studio/_components/studio-shell.tsx", {
-      "next/navigation": { usePathname: () => "/studio/library" }, "@/config": { auth: { enabled: false } },
-      "../../admin/_components/admin-shell-layout": { useSidebarCollapsed: () => [false, () => {}] },
-      "@/components/product-switcher": { ProductSwitcher },
-    });
-    const tree = StudioShell({ app, brands: [{ id: "location-b", name: "Tenant B" }], activeBrandId: "location-b", fallbackWorkspaceId: "private-storage-key", children: null });
-    const switches: any[] = [];
-    function walk(value: any) {
+  const AppHeader = () => {};
+  const { productShellConfig } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: () => {} } });
+  const { AppShell } = uiModule("components/app-shell/app-shell.tsx", {
+    "./sidebar-preference": { useSidebarCollapsed: () => [false, () => {}], SidebarPreferenceScript: () => null },
+    "@/app/(main)/admin/_components/admin-layout-policy": { useResolvedAdminLayoutPolicy: () => ({ appSurface: false }), AdminLayoutPolicyProvider: "policy" },
+    "@/app/(main)/admin/_components/crm-realm": { CrmRealmProvider: "realm" },
+    "@/lib/utils": { cn: (...args: string[]) => args.filter(Boolean).join(" ") },
+    "@/components/product-switcher": { ProductSwitcher },
+    "./app-header": { AppHeader },
+    "./product-config": { productShellConfig },
+  });
+  const tree = AppShell({
+    product, app, activeLocationId: "location-b", locations: [{ id: "location-b", name: "Tenant B" }], platformLoginLocations: null,
+    impersonation: null, canViewAiUsage: true, workspaceId: "private-storage-key", children: null, ...overrides,
+  });
+  const find = (type: unknown): any[] => {
+    const found: any[] = [];
+    (function walk(value: any) {
       if (!value || typeof value !== "object") return;
-      if (value.type === ProductSwitcher) switches.push(value.props);
+      if (value.type === type) found.push(value);
       for (const child of Object.values(value)) walk(child);
-    }
-    walk(tree); assert.equal(switches.length, 2);
-    for (const props of switches) {
-      assert.equal(props.targets.crm.formAction, "/api/studio/tenant-switch");
-      assert.equal(props.targets.crm.fields.locationId, "location-b");
-      assert.equal(props.targets.crm.fields.workspaceId, undefined);
+    })(tree);
+    return found;
+  };
+  return { tree, switches: find(ProductSwitcher), headers: find(AppHeader) };
+}
+
+test("both Studio menus bind CRM to the displayed Location rather than a storage UUID", () => {
+  for (const app of ["estio", "substo"]) {
+    const { switches, headers } = renderShell(app, "studio");
+    assert.equal(switches.length, 1); assert.equal(headers.length, 1);
+    // Desktop sidebar and mobile header menu share one target set.
+    for (const targets of [switches[0].props.targets, headers[0].props.productConfig.targets]) {
+      assert.equal(targets.crm.formAction, "/api/studio/tenant-switch");
+      assert.equal(targets.crm.fields.locationId, "location-b");
+      assert.equal(targets.crm.fields.workspaceId, undefined);
     }
   }
 });
 
 test("CRM and Studio headers render the same tenant-only control including platform access choices", () => {
-  const TenantHeaderSelector = () => {};
-  const workspace = "11111111-1111-4111-8111-111111111111";
   const locations = [{ id: "a", name: "Agency A" }, { id: "b", name: "Agency B" }];
   const platformLoginLocations = [{ id: "a", name: "Agency A", isPlatformMaster: true, members: [] }, { id: "c", name: "Support tenant", isPlatformMaster: false, members: [] }];
-  const dependencies = {
-    "@/components/tenant-header-selector": { TenantHeaderSelector },
-    "next/navigation": { usePathname: () => `/studio` },
-    "@/config": { auth: { enabled: false } },
-    "@/lib/utils": { cn: (...args: string[]) => args.filter(Boolean).join(" ") },
-    "./crm-realm": { useCrmRealm: () => "estio" },
-    "@/lib/branding/app-identity": { appIdentity: () => ({ name: "Estio" }) },
-    "@/lib/viewings/sessions/types": { VIEWING_SESSION_MODES: { assistantLiveTranslate: "live" }, VIEWING_SESSION_KINDS: { twoWayInterpreter: "interpreter" } },
-    "../../admin/_components/admin-shell-layout": { useSidebarCollapsed: () => [false, () => {}] },
-    "../actions": { openEstioStudioBusinessAction: () => {} },
-  };
-  const StudioShell = uiModule("app/(main)/studio/_components/studio-shell.tsx", dependencies).StudioShell;
-  const DashboardTopNav = uiModule("app/(main)/admin/_components/dashbord-top-nav.tsx", dependencies).default;
-  function find(tree: any, type: any): any[] {
-    if (!tree || typeof tree !== "object") return [];
-    return [...(tree.type === type ? [tree] : []), ...Object.values(tree).flatMap((child) => find(child, type))];
+  for (const product of ["crm", "studio"] as const) {
+    const { headers } = renderShell("estio", product, { activeLocationId: "a", locations, platformLoginLocations });
+    assert.equal(headers.length, 1);
+    const props = headers[0].props;
+    assert.equal(props.product, product);
+    assert.equal(props.locations, locations);
+    assert.equal(props.platformLoginLocations, platformLoginLocations);
+    assert.equal(props.activeLocationId, "a");
   }
-  const studio = StudioShell({ app: "estio", brands: locations, activeBrandId: "a", fallbackWorkspaceId: workspace, platformLoginLocations, children: null });
-  const crm = DashboardTopNav({ activeLocation: locations[0], availableLocations: locations, platformLoginLocations, children: null });
-  for (const [tree, product] of [[crm, "crm"], [studio, "studio"]] as const) {
-    const headers = find(tree, "header"); assert.equal(headers.length, 1);
-    const controls = find(headers[0], TenantHeaderSelector); assert.equal(controls.length, 1);
-    assert.equal(controls[0].props.product, product);
-    assert.equal(controls[0].props.locations, locations);
-    assert.equal(controls[0].props.platformLoginLocations, platformLoginLocations);
-    assert.equal(controls[0].props.activeLocationId, "a");
-    assert.doesNotMatch(JSON.stringify(headers), /AppLogo|AppTenantIdentity|Support access/);
-  }
-  assert.doesNotMatch(JSON.stringify(studio), /Manage brands|Manage locations/);
+  const header = fs.readFileSync("components/app-shell/app-header.tsx", "utf8");
+  assert.match(header, /<TenantHeaderSelector app=\{app\} product=\{product\} activeLocationId=\{activeLocationId\} locations=\{locations\} platformLoginLocations=\{platformLoginLocations\} \/>/);
+  assert.doesNotMatch(header, /AppLogo|AppTenantIdentity|Support access|Manage brands|Manage locations/);
 });
 
 test("Studio team management is in Settings and no independent brand management section is added", () => {
-  const { studioNavGroups } = uiModule("app/(main)/studio/_components/studio-shell.tsx", {});
+  const { studioNavGroups } = productConfigModule();
   for (const app of ["estio", "substo"]) {
     const groups = studioNavGroups(app, "workspace", "location-a");
     assert.equal(groups.some((group: any) => group.label === "Brand" || group.label === "Workspace"), false);

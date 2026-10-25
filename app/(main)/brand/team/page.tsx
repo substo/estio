@@ -1,4 +1,4 @@
-import { StudioShell } from "../../studio/_components/studio-shell";
+import { AppShell } from "@/components/app-shell/app-shell";
 import { getStudioShellData } from "../../studio/_components/studio-shell-data";
 import { redirect } from "next/navigation";
 import db from "@/lib/db";
@@ -11,9 +11,9 @@ import { InviteMemberForm, MemberRoleForm, RemoveMemberForm } from "../_componen
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Team" };
 
-export default async function BrandTeamPage({ searchParams }: { searchParams: Promise<{ locationId?: string }> }) {
-  const { locationId } = await searchParams;
-  const actor = await getSubstoBrandActor(locationId);
+export default async function BrandTeamPage() {
+  // The active Location is the only tenant input, as for the header and its widgets.
+  const actor = await getSubstoBrandActor();
   if (!actor) redirect("/studio/select?choose=1");
   const shell = await getStudioShellData({ locationId: actor.locationId });
   if (!shell) redirect("/studio/select?error=access");
@@ -21,7 +21,7 @@ export default async function BrandTeamPage({ searchParams }: { searchParams: Pr
   const { members, invitations } = await listBrandTeam(db, actor.locationId);
 
   return (
-    <StudioShell {...shell} key={actor.locationId}><main className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6 md:p-10">
+    <AppShell product="studio" {...shell} key={actor.locationId}><main className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6 md:p-10">
       <header className="space-y-1">
         <p className="text-sm text-muted-foreground">{actor.brandName}</p>
         <h1 className="text-3xl font-semibold tracking-tight">Team</h1>
@@ -79,6 +79,6 @@ export default async function BrandTeamPage({ searchParams }: { searchParams: Pr
           </ul>
         </section>
       ) : null}
-    </main></StudioShell>
+    </main></AppShell>
   );
 }

@@ -1,5 +1,16 @@
 # Shared Studio implementation progress
 
+## One application shell and header for CRM and Studio (2026-10-25)
+
+User asked for one header across CRM and Studio in both apps (bell, AI usage, profile, theme), from shared code and without shifting on product switches.
+
+- `components/app-shell/` is now the only shell: `AppShell` (sidebar + header frame), `AppHeader` (the single `<header>`), `AppSidebar`, `productShellConfig`/`studioNavGroups` (per-product menu, home link and CRM/Studio switch targets) and server-only `getAppShellData` (tenant, locations, platform options, tenant logo, admin-only AI usage flag). CRM (`app/(main)/admin/layout.tsx`), Studio (`studio/(tenant)/layout.tsx`, `studio/select`) and Substo brand pages render `<AppShell product=...>`. Removed `AdminShellLayout`, `DashboardTopNav`, `DashboardSideBar`, `AdminProductSwitcher` and `StudioShell`; Studio's Clerk `UserButton` is replaced by the shared `UserProfile`.
+- Header items, order, sizes and responsive rules are identical in both products: mobile menu (theme, Live Assist on Estio, product switch, current product menu), tenant selector, then Live Assist (Estio only), notification bell, AI usage badge (location admins, fixed 13rem slot with matching skeleton), profile, theme toggle (skeleton now the button's 40px). Studio also shows the tenant's sidebar logo like CRM.
+- Tenant: header widgets act on the active Location, which is what both shells render (Studio resolves via `resolveTenantContext()`). Substo brand pages no longer accept a `?locationId=` override, so the header can never show a different tenant from the one the bell/usage actions use. Substo's action allowlist already covers the bell and usage actions independent of page path; no Substo route was opened.
+- Static across switches: kept separate CRM/Studio layouts rendering the same shell. Product switches are document navigations/redirects by design (tenant cookie handoff), so a shared parent layout would not prevent a remount and would mean moving every admin/studio/brand route; pixel-identical rendering plus reserved async slots gives the no-shift result.
+- AI usage scope unchanged: the badge shows the tenant's existing CRM AI usage; Studio's hosted AI spend (Studio database) is not aggregated (follow-up question for the user).
+- Validation: focused suites **572 tests, 566 pass, 6 fail** — the same 6 pre-existing failures as the base commit (5 conversations `server-only` tests, `brand-service.db` needs a database); 7 new tests lock the single shell/header, identical CRM/Studio item lists per app, no Clerk `UserButton` in Studio, and Substo widget actions from Studio. Affected-file compiler check **0 diagnostics across 26 files**. `npm run build` passes.
+
 ## Studio uses the active Location and clean product routes (2026-10-25)
 
 - Replaced the UUID route tree with `/studio`, `/studio/library`, `/studio/content`, `/studio/knowledge`, `/studio/schedules`, `/studio/jobs`, `/studio/youtube`, `/studio/settings/ai` and their resource/API descendants. All generated links, redirects, fetch endpoints, media URLs and revalidation paths use these selected-Location routes. The existing chooser is `/studio/select`; there is no separate workspace selector.

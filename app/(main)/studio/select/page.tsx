@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { StudioShell } from "../_components/studio-shell";
+import { AppShell } from "@/components/app-shell/app-shell";
 import { getStudioShellData } from "../_components/studio-shell-data";
 import { ensureEstioStudioWorkspace } from "@/lib/studio/supabase-service";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
@@ -130,5 +130,5 @@ function SubstoSetupError({ reason }: { reason?: "verified-email" }) {
 export default async function StudioPage(props: { searchParams: Promise<{ error?: string; choose?: string }> }) {
   const content = await StudioWorkspaceSelector(props);
   const shell = await getStudioShellData();
-  return shell ? <StudioShell {...shell}>{content}</StudioShell> : content;
+  return shell ? <AppShell product="studio" {...shell}>{content}</AppShell> : content;
 }

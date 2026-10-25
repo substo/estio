@@ -1,17 +1,15 @@
 import { Suspense, type ReactNode } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { AdminShellLayout, AdminSidebarPreferenceScript } from "./_components/admin-shell-layout";
+import { AppShell } from "@/components/app-shell/app-shell";
+import { getAppShellData } from "@/components/app-shell/app-shell-data";
 import { AdminContentFrame } from "./_components/admin-content-frame";
 import { OnboardingWrapper } from "@/components/onboarding-wrapper";
 import { AnalyticsTracker } from "@/components/analytics/analytics-tracker";
 import { LocationPresenceTracker } from "./_components/location-presence-tracker";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
-import db from "@/lib/db";
 import { activateCurrentImpersonation } from "@/lib/auth/impersonation";
 import { auth } from "@clerk/nextjs/server";
-import { getPlatformAdminContext } from "@/lib/auth/platform-access";
-import { listPlatformLocationLoginOptions } from "@/lib/auth/platform-location-options";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
@@ -21,7 +19,6 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     const { prepareCurrentSubstoUser } = await import("@/lib/brands/substo-brands");
     await prepareCurrentSubstoUser();
   }
-  const platformAdmin = await getPlatformAdminContext();
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect(realm === "substo" ? "/sign-in?redirect_url=%2Fadmin" : "/sign-in");
   if (resolution.status === "selection_required") redirect("/select-location");
@@ -34,33 +31,25 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     redirect(isSystemDomain ? "/" : "/favorites");
   }
 
-  const { location, user } = resolution;
+  const { user } = resolution;
   const impersonation = (await auth()).actor ? await activateCurrentImpersonation() : null;
   const needsOnboarding = !user.firstName || !user.lastName;
-  const [siteConfig, platformLoginLocations] = await Promise.all([
-    db.siteConfig.findUnique({ where: { locationId: location.id }, select: { theme: true } }),
-    platformAdmin ? listPlatformLocationLoginOptions(platformAdmin.internalUserId) : Promise.resolve(null),
-  ]);
-  const theme = siteConfig?.theme as { logo?: { url?: string; lightUrl?: string } } | null;
+  const shell = await getAppShellData({
+    app: realm,
+    resolution,
+    workspaceId: null,
+    impersonation: impersonation ? {
+      targetName: impersonation.targetName,
+      targetEmail: impersonation.targetEmail,
+      locationName: impersonation.locationName,
+      sessionId: impersonation.sessionId,
+    } : null,
+  });
 
   return (
     <>
-      <AdminSidebarPreferenceScript />
       <LocationPresenceTracker />
-      <AdminShellLayout
-        realm={realm}
-        logoUrl={theme?.logo?.url}
-        lightUrl={theme?.logo?.lightUrl}
-        activeLocation={{ id: location.id, name: location.name }}
-        availableLocations={resolution.availableLocations}
-        platformLoginLocations={platformLoginLocations}
-        impersonation={impersonation ? {
-          targetName: impersonation.targetName,
-          targetEmail: impersonation.targetEmail,
-          locationName: impersonation.locationName,
-          sessionId: impersonation.sessionId,
-        } : null}
-      >
+      <AppShell product="crm" {...shell}>
         <AdminContentFrame>
           {realm === "estio" ? <Suspense fallback={null}><AnalyticsTracker eventName="admin_page_view" /></Suspense> : null}
           {needsOnboarding ? (
@@ -72,7 +61,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
             </div>
           ) : children}
         </AdminContentFrame>
-      </AdminShellLayout>
+      </AppShell>
       <OnboardingWrapper
         needsOnboarding={needsOnboarding}
         existingData={{ firstName: user.firstName || "", lastName: user.lastName || "", timeZone: user.timeZone || "" }}

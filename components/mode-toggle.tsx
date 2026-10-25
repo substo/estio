@@ -16,7 +16,7 @@ export default function ModeToggle() {
 
     if (!mounted) {
        return (
-        <Skeleton className="w-9 h-9"/>
+        <Skeleton className="w-10 h-10"/>
        )
     }
 

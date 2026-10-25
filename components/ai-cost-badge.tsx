@@ -102,7 +102,7 @@ export function AICostBadge() {
 
     if (isLoading) {
         return (
-            <div className="h-8 w-28 bg-gray-100 dark:bg-gray-800 rounded-full animate-pulse" />
+            <div className="h-8 w-[13rem] bg-gray-100 dark:bg-gray-800 rounded-full animate-pulse" />
         );
     }
 

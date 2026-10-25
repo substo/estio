@@ -70,22 +70,34 @@ test("native tenant switches reauthorize before provisioning or changing the coo
 
 test("Studio shell loads the same platform location choices as CRM without replacing route context", async () => {
   for (const platform of [true, false]) {
-    let optionsCalls = 0;
-    const available = [{ id: "tenant-b", name: "Canonical" }];
-    const choices = [{ id: "master", name: "Master" }, { id: "support-target", name: "Support" }];
-    const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
-      "server-only": {},
-      "@/lib/auth/platform-access": { getPlatformAdminContext: async () => platform ? { internalUserId: "platform-actor" } : null },
-      "@/lib/auth/platform-location-options": { listPlatformLocationLoginOptions: async (id: string) => { assert.equal(id, "platform-actor"); optionsCalls++; return choices; } },
-      "@clerk/nextjs/server": { auth: async () => ({ actor: null }) },
-      "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ app: "estio", workspaceId, resolution: { location: { id: "tenant-b" }, availableLocations: available } }) },
-      "@/lib/auth/impersonation": {},
-    });
-    const result = await api.getStudioShellData({ workspaceId });
-    assert.equal(result.activeBrandId, "tenant-b");
-    assert.equal(result.platformLoginLocations, platform ? choices : null);
-    assert.equal(optionsCalls, platform ? 1 : 0);
-    assert.deepEqual(Array.from(result.brands, (row: any) => row.id), ["tenant-b"]);
+    for (const role of ["ADMIN", "MEMBER"]) {
+      let optionsCalls = 0;
+      const available = [{ id: "tenant-b", name: "Canonical", role, isPlatformMaster: false, contactAccessScope: "ALL" }];
+      const choices = [{ id: "master", name: "Master" }, { id: "support-target", name: "Support" }];
+      const shellData = load("components/app-shell/app-shell-data.ts", {
+        "server-only": {},
+        "@/lib/db": { default: { siteConfig: { findUnique: async (args: any) => { assert.equal(args.where.locationId, "tenant-b"); return { theme: { logo: { url: "/logo.png", lightUrl: "/logo-light.png" } } }; } } } },
+        "@/lib/ai/usage-summary-scope": { canAccessAiUsageView: (scope: string, isAdmin: boolean) => scope === "user" || isAdmin },
+        "@/lib/auth/platform-access": { getPlatformAdminContext: async () => platform ? { internalUserId: "platform-actor" } : null },
+        "@/lib/auth/platform-location-options": { listPlatformLocationLoginOptions: async (id: string) => { assert.equal(id, "platform-actor"); optionsCalls++; return choices; } },
+      });
+      const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
+        "server-only": {},
+        "@clerk/nextjs/server": { auth: async () => ({ actor: null }) },
+        "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ app: "estio", workspaceId, resolution: { location: { id: "tenant-b" }, role, availableLocations: available } }) },
+        "@/lib/auth/impersonation": {},
+        "@/components/app-shell/app-shell-data": shellData,
+      });
+      const result = await api.getStudioShellData({ workspaceId });
+      assert.equal(result.activeLocationId, "tenant-b");
+      assert.equal(result.workspaceId, workspaceId);
+      assert.equal(result.platformLoginLocations, platform ? choices : null);
+      assert.equal(optionsCalls, platform ? 1 : 0);
+      assert.deepEqual(Array.from(result.locations, (row: any) => row.id), ["tenant-b"]);
+      // The same tenant logo and admin-only AI usage rule as the CRM header.
+      assert.equal(result.logoUrl, "/logo.png");
+      assert.equal(result.canViewAiUsage, role === "ADMIN");
+    }
   }
 });
 

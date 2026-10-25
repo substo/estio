@@ -132,11 +132,12 @@ test("Substo invitations use Substo's own Clerk application, and Estio platform 
 });
 
 test("Studio and brand pages share the CRM sidebar shell in both apps", () => {
-  assert.match(read("app/(main)/studio/(tenant)/layout.tsx"), /<StudioShell \{\.\.\.shell\}/);
-  assert.match(read("app/(main)/brand/team/page.tsx"), /<StudioShell \{\.\.\.shell\}/);
-  const shell = read("app/(main)/studio/_components/studio-shell.tsx");
-  assert.match(shell, /<DashboardSideBar/);
+  assert.match(read("app/(main)/studio/(tenant)/layout.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
+  assert.match(read("app/(main)/brand/team/page.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
+  assert.match(read("app/(main)/admin/layout.tsx"), /<AppShell product="crm" \{\.\.\.shell\}/);
+  const shell = read("components/app-shell/app-shell.tsx");
+  assert.match(shell, /<AppSidebar/);
   assert.match(shell, /useSidebarCollapsed\(\)/);
-  assert.match(shell, /<AdminNavigationGroups collapsed=\{collapsed\} groups=\{groups\} \/>/);
+  assert.match(shell, /<AdminNavigationGroups collapsed=\{collapsed\} groups=\{productConfig\.navGroups\} \/>/);
   assert.equal(fs.existsSync("app/(main)/studio/_components/studio-header.tsx"), false);
 });
