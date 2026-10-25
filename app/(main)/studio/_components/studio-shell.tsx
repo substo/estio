@@ -23,14 +23,14 @@ import {
 import config from "@/config";
 import ModeToggle from "@/components/mode-toggle";
 import { AppLogo } from "@/components/app-logo";
-import { ProductSwitcher } from "@/components/product-switcher";
+import { ProductSwitcher, type ProductTarget } from "@/components/product-switcher";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import DashboardSideBar from "../../admin/_components/dashboard-side-bar";
 import { AdminNavigationGroups, type AdminNavGroup } from "../../admin/_components/admin-navigation";
 import { AdminSidebarPreferenceScript, useSidebarCollapsed } from "../../admin/_components/admin-shell-layout";
-import { openEstioStudioBusinessAction, openSubstoBrandStudioAction, openSubstoStudioCrmAction } from "../actions";
+import { openEstioStudioBusinessAction, openSubstoBrandStudioAction } from "../actions";
 
 type App = "estio" | "substo";
 
@@ -128,10 +128,10 @@ export function StudioShell({
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const workspaceId = pathname.match(WORKSPACE_PATH)?.[1] ?? fallbackWorkspaceId;
   const groups = studioNavGroups(app, workspaceId);
-  const targets = {
+  const targets: { crm: ProductTarget; studio: ProductTarget } = {
     crm: workspaceId
-      ? { action: (app === "substo" ? openSubstoStudioCrmAction : openEstioStudioBusinessAction).bind(null, workspaceId) }
-      : { href: "/admin" },
+      ? app === "substo" ? { formAction: "/api/studio/product-switch", fields: { product: "crm", workspaceId } } : { action: openEstioStudioBusinessAction.bind(null, workspaceId) }
+      : { href: "/admin", document: app === "substo" },
     studio: { href: "/studio" },
   };
   const switcher = <ProductSwitcher active="studio" compact={collapsed} className={collapsed ? "mx-3.5" : "mx-3"} targets={targets} />;

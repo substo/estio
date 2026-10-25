@@ -10,6 +10,8 @@ function actions(options: { app?: string; access?: any; resolution?: any } = {})
   const checks: string[] = [];
   const workspace = "11111111-1111-4111-8111-111111111111";
   const deps: Record<string, any> = {
+    "server-only": {},
+    "@/lib/auth/request-realm": { getRequestAuthRealm: async () => options.app ?? "substo" },
     "next/headers": { headers: async () => ({ get: () => "substo.com" }), cookies: async () => ({ set: (...args: unknown[]) => writes.push(args) }) },
     "next/navigation": { redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); } },
     "@/lib/db": {},
@@ -23,6 +25,12 @@ function actions(options: { app?: string; access?: any; resolution?: any } = {})
     "@/lib/brands/brand-service": { ensureBrandWorkspace: async (_deps: unknown, brand: any, clerkId: string) => { assert.equal(brand.authRealm, "substo"); assert.equal(clerkId, "substo-user"); return workspace; } },
     "@/lib/brands/substo-brands": { substoBrandDeps: () => ({}) },
   };
+  deps["./request-realm"] = deps["@/lib/auth/request-realm"];
+  deps["./active-location"] = deps["@/lib/auth/active-location"];
+  const sharedSource = ts.transpileModule(fs.readFileSync("lib/auth/product-navigation.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  const sharedExports: any = {};
+  vm.runInNewContext(`(function(require, exports) {${sharedSource}\n})`)((name: string) => { assert.ok(name in deps, name); return deps[name]; }, sharedExports);
+  deps["@/lib/auth/product-navigation"] = sharedExports;
   const source = ts.transpileModule(fs.readFileSync("app/(main)/studio/actions.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const exports: any = {};
   vm.runInNewContext(`(function(require, exports) {${source}\n})`)((name: string) => { assert.ok(name in deps, name); return deps[name]; }, exports);
@@ -89,7 +97,7 @@ test("CRM switch uses the correct realm action and brand field on desktop, colla
       assert.equal(node.type, ProductSwitcher);
       assert.equal(node.props.active, "crm");
       assert.equal(node.props.compact, compact);
-      assert.equal(node.props.targets.studio.action, realm === "substo" ? substo : estio);
+      if (realm === "substo") { assert.equal(node.props.targets.studio.formAction, "/api/studio/product-switch"); assert.equal(node.props.targets.studio.fields.product, "studio"); } else assert.equal(node.props.targets.studio.action, estio);
       assert.equal(node.props.targets.studio.fields[realm === "substo" ? "brandId" : "locationId"], "brand-b");
     }
   }
@@ -122,8 +130,14 @@ test("both Studio menus bind CRM to the displayed workspace; chooser uses the au
         assert.ok(props.targets.studio);
         if (pathname === "/studio") assert.equal(props.targets.crm.href, "/admin");
         else {
-          props.targets.crm.action(new FormData());
-          assert.equal(opened.at(-1), `${app}:${workspace}`);
+          if (app === "substo") {
+            assert.equal(props.targets.crm.formAction, "/api/studio/product-switch");
+            assert.equal(props.targets.crm.fields.product, "crm");
+            assert.equal(props.targets.crm.fields.workspaceId, workspace);
+          } else {
+            props.targets.crm.action(new FormData());
+            assert.equal(opened.at(-1), `${app}:${workspace}`);
+          }
         }
       }
     }

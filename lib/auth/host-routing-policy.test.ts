@@ -147,3 +147,11 @@ test("signed-in Substo sign-in pages hand off once with a full load, then stop",
   assert.equal(signedInHandoff("substo", now - SIGNED_IN_HANDOFF_WINDOW_MS, now), "redirect");
   assert.equal(signedInHandoff("substo", now + 5_000, now), "redirect");
 });
+
+
+test("Clerk's absolute same-origin return preserves CRM while cross-app/open redirects are rejected", () => {
+  assert.equal(safeAuthRedirect("https://substo.com/admin", "substo", "https://substo.com"), "/admin");
+  assert.equal(safeAuthRedirect("https://substo.com/admin/contacts?view=pipeline", "substo", "https://substo.com"), "/admin/contacts?view=pipeline");
+  assert.equal(safeAuthRedirect("https://estio.co/admin", "substo", "https://substo.com"), "/studio");
+  for (const target of ["https://evil.example/admin", "//evil.example/admin", "https://evil.example@substo.com/admin", "https://substo.com/admin/properties", "javascript:alert(1)", "/\\evil.example/admin"]) assert.equal(safeAuthRedirect(target, "substo", "https://substo.com"), "/studio");
+});

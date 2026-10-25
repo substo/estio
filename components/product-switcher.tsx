@@ -8,7 +8,8 @@ export type ProductKey = "crm" | "studio"
 
 /** A product is opened by a plain link or by a server action that first selects its workspace/location. */
 export type ProductTarget =
-  | { href: string }
+  | { href: string; document?: boolean }
+  | { formAction: string; fields?: Record<string, string> }
   | { action: (formData: FormData) => void | Promise<void>; fields?: Record<string, string> }
 
 const PRODUCTS: { key: ProductKey; label: string; icon: LucideIcon }[] = [
@@ -65,10 +66,10 @@ export function ProductSwitcher({
           return <span key={key} aria-current="page" title={compact ? label : undefined} className={classes}>{content}</span>
         }
         if ("href" in target) {
-          return <Link key={key} href={target.href} prefetch title={compact ? label : undefined} className={classes}>{content}</Link>
+          return target.document ? <a key={key} href={target.href} title={compact ? label : undefined} className={classes}>{content}</a> : <Link key={key} href={target.href} prefetch title={compact ? label : undefined} className={classes}>{content}</Link>
         }
         return (
-          <form key={key} action={target.action} className="contents">
+          <form key={key} action={"formAction" in target ? target.formAction : target.action} method={"formAction" in target ? "post" : undefined} className="contents">
             {Object.entries(target.fields ?? {}).map(([name, value]) => (
               <input key={name} type="hidden" name={name} value={value} />
             ))}

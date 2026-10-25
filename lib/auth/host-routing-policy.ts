@@ -34,17 +34,17 @@ export function skipsLegacyEstioMiddleware(pathname: string): boolean {
 }
 
 /** Ticket sign-in must stay on this origin and within the selected experience. */
-export function safeAuthRedirect(value: string | null, brand: HostBrand): string {
+export function safeAuthRedirect(value: string | null, brand: HostBrand, origin?: string): string {
   const fallback = brand === "substo" ? "/studio" : "/admin";
-  if (!value?.startsWith("/") || value.startsWith("//")) return fallback;
+  if (!value || /[\\\x00-\x20]/.test(value) || value.startsWith("//")) return fallback;
   try {
-    const target = new URL(value, "https://auth.invalid");
-    if (target.origin !== "https://auth.invalid") return fallback;
+    const base = origin ? new URL(origin).origin : "https://auth.invalid";
+    if (!value.startsWith("/") && !origin) return fallback;
+    const target = new URL(value, base);
+    if (target.origin !== base || target.username || target.password) return fallback;
     if (brand === "substo" && !isSubstoCrmPage(target.pathname) && !isPathOrNested(target.pathname, "/studio") && !isPathOrNested(target.pathname, "/brand") && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
     return `${target.pathname}${target.search}${target.hash}`;
-  } catch {
-    return fallback;
-  }
+  } catch { return fallback; }
 }
 
 /** A recent hard handoff that returned to sign-in means the server rejected the session. */

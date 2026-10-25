@@ -23,7 +23,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
   const platformAdmin = await getPlatformAdminContext();
   const resolution = await resolveActiveLocation();
-  if (resolution.status === "unauthenticated") redirect("/sign-in");
+  if (resolution.status === "unauthenticated") redirect(realm === "substo" ? "/sign-in?redirect_url=%2Fadmin" : "/sign-in");
   if (resolution.status === "selection_required") redirect("/select-location");
 
   if (resolution.status !== "authorized" || !resolution.location || !resolution.user) {

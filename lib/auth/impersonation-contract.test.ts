@@ -41,7 +41,7 @@ test("server and client detect actor state, show a banner, and provide an exit",
 });
 
 test("the local one-time ticket handoff signs out the actor before consuming the ticket once", () => {
-  const signInPage = read("app/(main)/(auth)/sign-in/[[...sign-in]]/page.tsx");
+  const signInPage = read("app/(main)/(auth)/sign-in/[[...sign-in]]/sign-in-content.tsx");
   const service = read("lib/auth/impersonation.ts");
   assert.match(service, /new URL\("\/sign-in", APP_URL\)/);
   assert.match(service, /actorToken\.token/);

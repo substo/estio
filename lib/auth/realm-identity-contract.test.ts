@@ -116,7 +116,8 @@ test("Substo Studio access comes from the brand team, never from Studio membersh
   assert.doesNotMatch(service, /getSubstoStudioWorkspaceForUser|createSubstoStudioInvitation|acceptSubstoStudioInvitation/);
   const actions = read("app/(main)/studio/actions.ts");
   assert.doesNotMatch(actions, /Invite|invitation/i);
-  assert.match(actions, /validateActiveLocationSelection\(brandId\)/);
+  assert.match(actions, /substoStudioDestination\(brandId\)/);
+  assert.match(read("lib/auth/product-navigation.ts"), /validateActiveLocationSelection\(brandId\)/);
   assert.doesNotMatch(read("app/(main)/studio/invite/[token]/page.tsx"), /accept|getSubstoStudioInvitation/i);
   assert.equal(fs.existsSync("app/(main)/studio/_components/studio-invite-form.tsx"), false);
 });

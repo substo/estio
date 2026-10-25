@@ -1,5 +1,15 @@
 # Shared Studio implementation progress
 
+## Substo CRM handoff regression fix (2026-10-25)
+
+Signed-in browser reproduction on the reported workspace: Studio → CRM returned through sign-in to Studio, while a document load of `/admin` opened the correct Substo CRM. The earlier anonymous sign-in/route checks did not cover this product-switch failure.
+
+- Substo CRM/Studio switches now use native same-origin POST forms to `/api/studio/product-switch`, followed by a 303 document redirect. This avoids retaining cached router auth/layout state and avoids deploy-specific Server Action IDs for product navigation. Estio's working switch behavior is preserved.
+- The route and legacy actions share the same workspace/brand destination resolver. Current realm, workspace access, active brand membership/role and exact selected brand are rechecked before setting the selector cookie. Foreign origins/realms are rejected, and revoked access cannot change the cookie.
+- Sign-in gets its branding from the verified request host on the page itself. Validated same-origin absolute Clerk return URLs retain their CRM destination; cross-origin/cross-app returns remain blocked. Substo's sign-in return, loading/retry labels and expired-session handoff preserve CRM versus Studio intent. Loop detection is scoped to the intended destination.
+- Validation: 145/145 focused auth/branding/switch tests; zero compiler diagnostics in 16 changed/new TypeScript files. Production build and signed-in live round trips are pending. No schema/migration or account-data repair is involved.
+
+
 ## Live-test baseline preparation (2026-10-25)
 
 User scope: get both apps live for testing now; the Substo CRM can remain incomplete. Both apps use the existing CRM/Studio infrastructure. Page-by-page specialization and unfinished CRM integrations are deferred, not release prerequisites.

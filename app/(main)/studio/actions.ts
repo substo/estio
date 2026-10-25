@@ -2,13 +2,14 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { substoCrmDestination, substoStudioDestination } from "@/lib/auth/product-navigation";
 import db from "@/lib/db";
-import { ACTIVE_LOCATION_COOKIE, ACTIVE_LOCATION_COOKIE_OPTIONS, validateActiveLocationSelection } from "@/lib/auth/active-location";
+import { ACTIVE_LOCATION_COOKIE, ACTIVE_LOCATION_COOKIE_OPTIONS } from "@/lib/auth/active-location";
 import { getEstioStudioLocationAccess, getStudioWorkspaceAccess } from "@/lib/studio/access";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { ensureEstioStudioWorkspace } from "@/lib/studio/supabase-service";
-import { createBrand, ensureBrandWorkspace } from "@/lib/brands/brand-service";
-import { prepareCurrentSubstoUser, substoBrandDeps } from "@/lib/brands/substo-brands";
+import { createBrand } from "@/lib/brands/brand-service";
+import { prepareCurrentSubstoUser } from "@/lib/brands/substo-brands";
 
 async function getRequestBrand() {
   return resolveHostBrand((await headers()).get("host"), getHostBrandConfig());
@@ -38,11 +39,10 @@ export async function openEstioStudioBusinessAction(workspaceId: string) {
 export async function openSubstoBrandStudioAction(formData: FormData) {
   if (await getRequestBrand() !== "substo") redirect("/studio");
   const brandId = String(formData.get("brandId") || "").trim();
-  const resolution = await validateActiveLocationSelection(brandId);
-  if (resolution.status !== "authorized" || !resolution.location || !resolution.user) redirect("/studio?error=access");
-  (await cookies()).set(ACTIVE_LOCATION_COOKIE, resolution.location.id, ACTIVE_LOCATION_COOKIE_OPTIONS);
-  const workspaceId = await ensureBrandWorkspace(substoBrandDeps(), resolution.location, resolution.user.clerkId);
-  redirect(`/studio/workspace/${workspaceId}`);
+  const destination = await substoStudioDestination(brandId);
+  if (!destination) redirect("/studio?error=access");
+  (await cookies()).set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
+  redirect(destination.path);
 }
 
 /** Create another brand; the creator becomes its admin. */
@@ -59,12 +59,8 @@ export async function createSubstoBrandAction(formData: FormData) {
 /** Select the workspace's current brand before entering its CRM; never trust a posted brand ID. */
 export async function openSubstoStudioCrmAction(workspaceId: string) {
   if (await getRequestBrand() !== "substo") redirect("/studio?error=access");
-  const access = await getStudioWorkspaceAccess(workspaceId);
-  if (!access || access.brand !== "substo") redirect("/studio?error=access");
-  const resolution = await validateActiveLocationSelection(access.brandId);
-  if (resolution.status !== "authorized" || resolution.location?.authRealm !== "substo" || resolution.location.id !== access.brandId) {
-    redirect("/studio?error=access");
-  }
-  (await cookies()).set(ACTIVE_LOCATION_COOKIE, resolution.location.id, ACTIVE_LOCATION_COOKIE_OPTIONS);
-  redirect("/admin");
+  const destination = await substoCrmDestination(workspaceId);
+  if (!destination) redirect("/studio?error=access");
+  (await cookies()).set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
+  redirect(destination.path);
 }
