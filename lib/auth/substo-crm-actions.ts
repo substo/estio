@@ -1,6 +1,7 @@
 /** Reviewed Server Actions for the generic CRM. Unknown modules/exports fail closed.
  * Providers, property workflows, GHL, public sites and legacy team writes stay Estio-only. */
 const ALLOWED: Record<string, readonly string[]> = {
+  "content/website/actions.ts": ["saveSubstoWebsiteAction"],
   "companies/actions.ts": [
     "createCompany",
     "updateCompany",

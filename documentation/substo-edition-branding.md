@@ -52,4 +52,4 @@ No migration is added. Follow release A → release B in [the realm rollout runb
 
 Rollback the code to `4408b7b7` to hide Substo's product switch and restore the previous presentation while retaining slice 3's CRM firewall. Saved IDs, enums, memberships and content remain compatible; do not reverse or delete data. External Clerk email-branding changes, if later applied, have their own account configuration history and do not require a database reversal.
 
-Remaining: signed-in two-app acceptance, Clerk branding preview/delivery and authorized rollout; slice 5 public brand websites; slice 6+ integrations, automated workflow adaptation, custom domains, custom fields/objects and billing.
+Remaining: signed-in two-app acceptance, Clerk branding preview/delivery and authorized rollout; [slice 5 public brand websites](substo-public-websites.md) are implemented locally; slice 6+ integrations, automated workflow adaptation, custom domains, custom fields/objects and billing.

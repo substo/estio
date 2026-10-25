@@ -551,6 +551,11 @@ model SiteConfig {
   updatedAt  DateTime @updatedAt
   locationId String   @unique
 
+  // Substo first-party websites. Separate from Estio domain provisioning.
+  substoSiteSlug      String? @unique @db.VarChar(63)
+  substoSitePublished Boolean @default(false)
+  substoSiteConfig    Json?
+
   // New Fields
   domain                     String? @unique
   theme                      Json?

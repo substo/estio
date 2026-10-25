@@ -1,3 +1,4 @@
+import { isSubstoSitePath } from "@/lib/substo-sites/policy";
 import { isSubstoCrmPage, isSubstoCrmApi } from "./substo-crm-policy";
 import type { HostBrand } from "./host-brand";
 
@@ -7,10 +8,11 @@ function isPathOrNested(pathname: string, root: string): boolean {
 
 export const CLERK_PROFILE_WEBHOOK_PATH = "/api/webhooks/clerk-profile";
 
-export type SubstoRouteKind = "root" | "auth" | "studio" | "studio-api" | "brand" | "crm" | "crm-api" | "profile" | "webhook" | "blocked";
+export type SubstoRouteKind = "root" | "auth" | "studio" | "studio-api" | "brand" | "crm" | "crm-api" | "profile" | "webhook" | "site" | "blocked";
 
 /** Substo reaches reviewed application routes and never the tenant-site resolver. */
 export function classifySubstoRoute(pathname: string): SubstoRouteKind {
+  if (isSubstoSitePath(pathname)) return "site";
   if (pathname === CLERK_PROFILE_WEBHOOK_PATH) return "webhook";
   if (pathname === "/") return "root";
   if (isPathOrNested(pathname, "/sign-in") || isPathOrNested(pathname, "/sign-up")) return "auth";

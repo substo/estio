@@ -1,6 +1,6 @@
 # Substo CRM: design direction
 
-Status: direction approved by the user on 2026-10-24. Slices 0–4 are implemented locally (Clerk email branding remains an external acceptance step) on `feature/crm-realm-identity`; nothing is deployed. See [the rollout runbook](crm-realm-identity-rollout.md). This changes one boundary of the approved brief in [the Studio audit handoff](studio-audit-continuation-handoff.md): there, Substo was "Studio only" with standalone workspace memberships.
+Status: direction approved by the user on 2026-10-24. Slices 0–5 are implemented locally (Clerk email branding remains an external acceptance step) on `feature/crm-realm-identity`; nothing is deployed. See [the rollout runbook](crm-realm-identity-rollout.md). This changes one boundary of the approved brief in [the Studio audit handoff](studio-audit-continuation-handoff.md): there, Substo was "Studio only" with standalone workspace memberships.
 
 ## Decisions (user, 2026-10-24)
 
@@ -64,7 +64,7 @@ Consequences:
 | 2 | **Studio on top of the brand** | A Substo Studio workspace attaches 1:1 to its brand with inherited roles. Existing Substo workspaces are migrated, and Studio memberships and invite links are retired. The Substo Studio chooser lists brands, not workspaces. |
 | 3 | **Open the CRM on Substo** (implemented locally) | `/admin` opens on substo.com for the shown modules only, with server-side blocking of hidden ones. An isolation test proves, for every opened route, that a Substo user cannot reach Estio data. |
 | 4 | **Look generic** (implemented locally) | CRM option in the product switch, Substo branding (logo, emails, titles) and the vocabulary layer with the generic terms. |
-| 5 | **Website on Substo** | Pages, blog and posting for a brand on a substo.com address. |
+| 5 | **Website on Substo** (implemented locally) | Pages, blog and posting for a brand on a substo.com address. |
 | 6+ | **Feature by feature** | Integrations one at a time; custom domains for brand websites (needs Substo sign-in on those domains); custom fields/objects per niche; billing. |
 
 Each slice is a separate local branch and release, with additive migrations that stay compatible with the previous release.

@@ -240,6 +240,9 @@ export function AdminNavigationGroups({
   const visibleGroups = realm === "substo" && groups === ADMIN_NAV_GROUPS
     ? groups.map((group) => ({ ...group, items: group.items.filter((item) => isSubstoCrmPage(item.href)) })).filter((group) => group.items.length > 0)
     : groups
+  if (realm === "substo" && groups === ADMIN_NAV_GROUPS) {
+    visibleGroups.find((group) => group.label === "Content")?.items.unshift({ href: "/admin/content/website", label: "Website", icon: PanelsTopLeft, activePath: (pathname) => pathname === "/admin/content/website" })
+  }
   const compact = variant === "desktop" && collapsed
 
   return (

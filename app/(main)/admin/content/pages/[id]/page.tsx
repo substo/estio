@@ -1,3 +1,6 @@
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
+import { notFound } from "next/navigation";
+import { SubstoPageForm } from "../_components/substo-page-form";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { PageForm } from "../_components/page-form";
@@ -13,6 +16,11 @@ export default async function PageEditor(props: { params: Promise<{ id: string }
         page = await db.contentPage.findUnique({
             where: { id: params.id, locationId: orgId! }
         });
+    }
+
+    if (await getRequestAuthRealm() === "substo") {
+        if (params.id !== "new" && !page) notFound();
+        return <div className="space-y-6 p-6"><h1 className="text-2xl font-semibold">{page ? "Edit page" : "New page"}</h1><SubstoPageForm page={page} locationId={orgId} /></div>;
     }
 
     const siteConfig = await db.siteConfig.findUnique({

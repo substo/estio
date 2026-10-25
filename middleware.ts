@@ -4,6 +4,7 @@ import { APP_DOMAIN, APP_URL, SYSTEM_DOMAINS } from "@/lib/app-config";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { getClerkBrandKeys, getSubstoClerkConfigConflicts, hasClerkEncryptionKey } from "@/lib/auth/clerk-runtime";
 import { hasStudioSupabaseConfig } from "@/lib/studio/config";
+import { isSubstoSitePath } from "@/lib/substo-sites/policy";
 import { CLERK_PROFILE_WEBHOOK_PATH, classifySubstoRoute, skipsLegacyEstioMiddleware } from "@/lib/auth/host-routing-policy";
 
 const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)", "/studio(.*)", "/account/connections(.*)"]);
@@ -189,12 +190,25 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
 // Standard Middleware for Production (Live Keys)
 // With Live Keys, Clerk handles domain logic natively.
 export default async function middleware(req: NextRequest, evt: any) {
+  if (isSubstoSitePath(req.nextUrl.pathname) && getRequestBrand(req) !== "substo") {
+    return new NextResponse("Not Found", { status: 404 });
+  }
   // Exact profile-only webhook uses its realm signature, independent of browser
   // Clerk/Studio readiness. No tenant or adjacent API path shares this bypass.
   if (req.nextUrl.pathname === CLERK_PROFILE_WEBHOOK_PATH) {
     return getRequestBrand(req) === "tenant" ? new NextResponse("Not Found", { status: 404 }) : NextResponse.next();
   }
   if (getRequestBrand(req) === "substo") {
+    // Public websites are read-only and independent of Clerk/Studio readiness.
+    if (classifySubstoRoute(req.nextUrl.pathname) === "site") {
+      if (!["GET", "HEAD"].includes(req.method)) return new NextResponse("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+      const response = NextResponse.next();
+      response.headers.set("Cache-Control", "no-store");
+      response.headers.set("Content-Security-Policy", "default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+      response.headers.set("X-Content-Type-Options", "nosniff");
+      response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+      return response;
+    }
     if (classifySubstoRoute(req.nextUrl.pathname) === "blocked") {
       return new NextResponse("Not Found", { status: 404 });
     }

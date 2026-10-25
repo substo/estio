@@ -6,6 +6,8 @@ export const SUBSTO_CRM_PAGE_PATTERNS = [
   /^\/admin\/projects$/,
   /^\/admin\/conversations$/,
   /^\/admin\/content\/(?:pages|posts)(?:\/[^/]+)?$/,
+  /^\/admin\/content\/website$/,
+  /^\/admin\/content\/pages\/[^/]+\/preview$/,
   /^\/admin\/settings(?:\/notifications)?$/,
   /^\/admin\/team$/,
   /^\/admin\/user-profile(?:\/.*)?$/,

@@ -28,6 +28,7 @@ function load(file: string, deps: Record<string, unknown>): any {
 const pages = [
   "/admin", "/admin/contacts", "/admin/contacts/estio-contact/view", "/admin/contacts/estio-contact/edit",
   "/admin/companies", "/admin/companies/estio-company/view", "/admin/projects", "/admin/conversations",
+  "/admin/content/website", "/admin/content/pages/page-id/preview",
   "/admin/content/pages", "/admin/content/pages/estio-page", "/admin/content/posts", "/admin/content/posts/estio-post",
   "/admin/settings", "/admin/settings/notifications", "/admin/team", "/admin/user-profile", "/select-location",
 ];

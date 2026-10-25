@@ -1,5 +1,16 @@
 # Shared Studio implementation progress
 
+## Latest local slice: Substo public brand websites (slice 5)
+
+Implemented locally on `feature/crm-realm-identity`. No production data, migration, DNS, external publication or deployment was changed.
+
+- Brand admins can configure and explicitly publish one website at `/sites/<address>`. It starts hidden; changing an existing address requires confirmation. Members can view settings and use the existing content editors, while publication settings require current connected admin authority.
+- Public homepage, pages, blog, individual posts and sitemap read only published Substo content. Drafts, future-dated posts, disabled sites and Estio data remain inaccessible. Disabling a website withdraws all its public surfaces without deleting content.
+- Substo gets a basic rich-text page editor and private saved-draft preview. Existing static sections are rendered through a safe React element vocabulary. Public forms/property widgets, raw scripts and custom CSS/embeds are not enabled.
+- Public routes have a separate root layout without Clerk/onboarding/contact writes, are read-only and uncached, and retain independent host and database realm checks. Existing CRM/API/action isolation remains intact.
+- Additive migration: `20261025010000_substo_public_sites_expand`; no Studio migration or DNS/cron change. [The website runbook](substo-public-websites.md) contains rollout, queries, rollback, validation and remaining scope.
+- Validation: 158 focused tests, disposable migration/schema checks and 15 database integration tests pass. Zero compiler diagnostics in 30 TypeScript files. Build exits 0, 130/130 pages. Public website browser/HTTP checks pass using synthetic local data, including withdrawing all tested public routes and zero User/Contact creation. Studio/team retains its known assignment-recovery failure (103/104 pass). Signed-in CMS acceptance remains pending.
+
 ## Latest local slice: Substo branding and generic CRM vocabulary (slice 4)
 
 Implemented locally on `feature/crm-realm-identity`. No production data, Clerk configuration, migration, real email delivery or deployment was changed.

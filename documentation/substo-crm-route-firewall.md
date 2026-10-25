@@ -12,7 +12,7 @@ The route list is `lib/auth/substo-crm-policy.ts`; the Server Action list is `li
 | Contacts list, pipeline, view/edit and intercepted modals | `getActiveContactsAccess`, active location plus assignment scope; relationship IDs validated in that location |
 | Companies list/detail | Active contacts access; `Company` queries include the active location; CRUD uses the company access policy |
 | Conversations, deals and tasks | Active contacts access and conversation/deal assignment filters; deals/tasks live inside conversations rather than separate standalone pages |
-| Page/post lists and editors | Active location; reads and mutations include location ownership; public website addresses, system pages and domains remain closed until slice 5 |
+| Page/post lists and editors | Active location; reads and mutations include location ownership; first-party public website addresses are added in [slice 5](substo-public-websites.md); property system pages and custom domains remain closed |
 | Settings and notification preferences | Active contacts access and current user; team entry redirects to `/brand/team`; provider/prospecting/destructive settings are closed |
 | Team | Existing Substo brand team service, verified actor and same-realm membership/invitation checks |
 | Location selection and switch API | Authorized connection/role intersection within the host realm; posted IDs and cookies are selectors only |
@@ -47,7 +47,7 @@ Logs: `/tmp/crm-slice3-auth-final.log`, `/tmp/crm-slice3-isolation.log`, `/tmp/c
 3. Verify the runbook's cross-realm membership/role/invitation queries return zero, and that sample same-email users resolve to different user IDs and same-realm brands.
 4. With two real signed-in sessions, test every opened surface in the table: ordinary Substo access works, and Estio location cookies, location IDs, contact/company/project/page/post/conversation/task/deal/message/attachment IDs cannot disclose or mutate Estio data. Check direct paths, intercepted contact views, query strings and Server Action submissions. Repeat representative Estio workflows.
 5. Confirm hidden pages/APIs return 404, forbidden actions reject when posted to `/admin/contacts`, team invitations use Substo Clerk, and no GHL/provider setup/send is exposed. Confirm Studio team access still follows the brand.
-6. Slice 4 enables the product switch in both directions. Verify that it preserves the selected brand as described in [the edition runbook](substo-edition-branding.md). Public website routing and integrations are separately scoped later slices.
+6. Slice 4 enables the product switch in both directions. Verify that it preserves the selected brand as described in [the edition runbook](substo-edition-branding.md). First-party public website routing is added in [slice 5](substo-public-websites.md); integrations remain separately scoped.
 
 Rollback this code to `cad79180` to close Substo `/admin` again while preserving brand/Studio access. Keep all database records; no reverse migration or deletion is needed. CRM records created on Substo remain for a subsequent release. Rolling back before release B has the contract restrictions documented in the realm rollout runbook.
 
@@ -55,6 +55,6 @@ Rollback this code to `cad79180` to close Substo `/admin` again while preserving
 
 - Signed-in two-app acceptance and real Clerk invitation delivery; separately authorized release A/release B rollout, backup and operational verification.
 - Slice 4 is implemented locally; Substo Clerk email branding preview/delivery remains an external acceptance step.
-- Slice 5: public brand websites, pages/blog/posting addresses on Substo.
+- Slice 5 is implemented locally; signed-in CMS acceptance and authorized rollout remain.
 - Slice 6+: review and enable messaging, WhatsApp/SIM relay, Google/Microsoft and other integrations individually; adapt automated AI/property-specific tools before opening them.
 - Custom domains and their Clerk login, custom fields/objects per niche, and billing.

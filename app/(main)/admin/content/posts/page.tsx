@@ -1,3 +1,4 @@
+import { sitePath } from "@/lib/substo-sites/policy";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
@@ -22,9 +23,10 @@ export default async function PostsListPage() {
 
     const siteConfig = await db.siteConfig.findUnique({
         where: { locationId: orgId },
-        select: { domain: true }
+        select: { domain: true, substoSiteSlug: true, substoSitePublished: true }
     });
 
+    const substoBase = siteConfig?.substoSitePublished && siteConfig.substoSiteSlug ? sitePath(siteConfig.substoSiteSlug) : null;
     const domain = siteConfig?.domain || "your-domain.com";
     const protocol = domain.includes("localhost") ? "http" : "https";
     const port = domain.includes("localhost") ? ":3000" : "";
@@ -38,6 +40,7 @@ export default async function PostsListPage() {
                 </Link>
             </div>
 
+            {realm === "substo" ? <p className="text-sm text-muted-foreground"><Link className="underline" href="/admin/content/website">Manage brand website</Link>{substoBase ? " · Your published content is public." : " · Publish the brand website to make published content public."}</p> : null}
             <div className="border rounded-md bg-white">
                 <Table>
                     <TableHeader>
@@ -93,6 +96,7 @@ export default async function PostsListPage() {
                                             <Button variant="ghost" size="icon" title="View Live"><ExternalLink className="w-4 h-4" /></Button>
                                         </a>
                                     )}
+                                    {realm === "substo" && substoBase && post.published ? <a href={substoBase + `/blog/${encodeURIComponent(post.slug)}`} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="icon" title="View live"><ExternalLink className="w-4 h-4" /></Button></a> : null}
                                     <form action={async () => {
                                         "use server";
                                         await deletePost(post.id);
