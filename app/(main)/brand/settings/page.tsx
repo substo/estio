@@ -10,9 +10,9 @@ export const metadata = { title: "General settings" };
 export default async function BrandSettingsPage({ searchParams }: { searchParams: Promise<{ locationId?: string }> }) {
   const { locationId } = await searchParams;
   const actor = await getSubstoBrandActor(locationId);
-  if (!actor) redirect("/studio?choose=1");
+  if (!actor) redirect("/studio/select?choose=1");
   const shell = await getStudioShellData({ locationId: actor.locationId });
-  if (!shell) redirect("/studio?error=access");
+  if (!shell) redirect("/studio/select?error=access");
   const isAdmin = actor.role === "ADMIN";
 
   return (

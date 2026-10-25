@@ -16,7 +16,7 @@ export function StudioUploads({ workspaceId, uploads }: { workspaceId: string; u
   return <section className="space-y-3">
     <h2 className="font-medium">Uploads</h2>
     {uploads.map(upload => {
-      const href = `/studio/workspace/${workspaceId}/uploads/${upload.id}`;
+      const href = `/studio/uploads/${upload.id}`;
       const kind = studioMediaKind(upload.content_type);
       return <article key={upload.id} className="space-y-2 rounded-xl border bg-card p-4 text-sm">
         <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{upload.original_filename}</span><a className="text-primary hover:underline" href={href} download>Download</a></div>

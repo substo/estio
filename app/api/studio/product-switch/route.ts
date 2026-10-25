@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(signIn, 303);
   }
   const destination = product === "crm" ? await substoCrmDestination(id) : await substoStudioDestination(id);
-  if (!destination) return NextResponse.redirect(new URL("/studio?error=access", origin), 303);
+  if (!destination) return NextResponse.redirect(new URL("/studio/select?error=access", origin), 303);
   const response = NextResponse.redirect(new URL(destination.path, origin), 303);
   response.cookies.set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
   response.headers.set("Cache-Control", "no-store");

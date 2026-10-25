@@ -1,5 +1,8 @@
 # CRM and Studio tenant context: investigation and implementation plan
 
+**Implemented routing correction, 2026-10-25:** Studio now uses clean `/studio/...` product routes with the CRM active Location as sole tenant authority. The original recommendation to retain UUID URLs/readable aliases is superseded. Legacy UUID links are authorized compatibility handoffs to the same Location and a clean URL; existing UUID storage keys remain private and do not select a separate tenant. See the latest [implementation record](studio-implementation-progress.md).
+
+
 **Presentation correction, 2026-10-25:** the user's later clarification supersedes this document's app-adjacent logo, create/manage-tenant entry and separate support-control recommendations. The sidebar owns the sole app logo; the header contains only the current tenant selector. CRM and Studio use the same selector and the same existing access choices. Location = brand = subscribed tenant; there is no separate user-managed Studio workspace. Remove additional tenant creation from Studio, and put Team/General configuration in Settings. Preserve internal workspace storage IDs, realm boundaries and audited support access.
 
 

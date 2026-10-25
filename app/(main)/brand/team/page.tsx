@@ -14,9 +14,9 @@ export const metadata = { title: "Team" };
 export default async function BrandTeamPage({ searchParams }: { searchParams: Promise<{ locationId?: string }> }) {
   const { locationId } = await searchParams;
   const actor = await getSubstoBrandActor(locationId);
-  if (!actor) redirect("/studio?choose=1");
+  if (!actor) redirect("/studio/select?choose=1");
   const shell = await getStudioShellData({ locationId: actor.locationId });
-  if (!shell) redirect("/studio?error=access");
+  if (!shell) redirect("/studio/select?error=access");
   const isAdmin = actor.role === "ADMIN";
   const { members, invitations } = await listBrandTeam(db, actor.locationId);
 

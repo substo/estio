@@ -41,32 +41,25 @@ test("foreign/revoked, deleted profile, unmapped and malformed workspaces fail c
 test("explicit denied Location never falls back to the cookie", async () => {
   assert.equal(await context({ denied: true }).api.resolveTenantContext({ locationId: "foreign" }), null);
 });
-test("preference POST validates origin and authorization before setting any cookie", async () => {
-  for (const allowed of [true, false]) {
-    const api = load("app/api/studio/tenant-selection/route.ts", {
-      "next/server": { NextResponse }, "@/lib/auth/host-brand": { getHostOrigin: () => "https://substo.com" },
-      "@/lib/auth/active-location": { ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/", sameSite: "lax" } },
-      "@/lib/auth/tenant-context": { resolveWorkspaceTenant: async () => allowed ? { location: { id: "tenant-b" } } : null },
-    });
-    const request = (origin: string) => new NextRequest("https://substo.com/api/studio/tenant-selection", { method: "POST", headers: { host: "substo.com", origin, "Content-Type": "application/json" }, body: JSON.stringify({ workspaceId }) });
-    const foreign = await api.POST(request("https://estio.co")); assert.equal(foreign.status, 403); assert.equal(foreign.cookies.get("active_location_id"), undefined);
-    const response = await api.POST(request("https://substo.com")); assert.equal(response.status, allowed ? 200 : 403);
-    assert.equal(response.cookies.get("active_location_id")?.value, allowed ? "tenant-b" : undefined);
-  }
+test("the retired workspace preference protocol cannot change selection", async () => {
+  const api = load("app/api/studio/tenant-selection/route.ts", { "next/server": { NextResponse } });
+  const response = await api.POST();
+  assert.equal(response.status, 409); assert.equal(response.cookies.get("active_location_id"), undefined);
 });
+
 test("native tenant switches reauthorize before provisioning or changing the cookie", async () => {
   for (const allowed of [true, false]) {
     const checks: string[] = [];
     const api = load("app/api/studio/tenant-switch/route.ts", {
       "next/server": { NextResponse }, "@/lib/auth/host-brand": { getHostOrigin: () => "https://substo.com" },
-      "@/lib/auth/product-navigation": { studioDestination: async (id: string) => { checks.push(id); return allowed ? { locationId: id, path: `/studio/workspace/${workspaceId}` } : null; } },
+      "@/lib/auth/product-navigation": { studioDestination: async (id: string) => { checks.push(id); return allowed ? { locationId: id, path: `/studio` } : null; } },
       "@/lib/auth/active-location": { ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/", sameSite: "lax" }, validateActiveLocationSelection: async (id: string) => { checks.push(id); return allowed ? { status: "authorized", location: { id } } : { status: "no_access" }; } },
     });
     for (const product of ["studio", "crm", "team"]) {
       const body = new FormData(); body.set("product", product); body.set("locationId", "tenant-b");
       const response = await api.POST(new NextRequest("https://substo.com/api/studio/tenant-switch", { method: "POST", headers: { host: "substo.com", origin: "https://substo.com" }, body }));
       assert.equal(response.status, 303); assert.equal(response.cookies.get("active_location_id")?.value, allowed ? "tenant-b" : undefined);
-      assert.equal(new URL(response.headers.get("location")!).pathname, allowed ? product === "studio" ? `/studio/workspace/${workspaceId}` : product === "team" ? "/admin/team" : "/admin" : "/studio");
+      assert.equal(new URL(response.headers.get("location")!).pathname, allowed ? product === "studio" ? `/studio` : product === "team" ? "/admin/team" : "/admin" : "/studio/select");
     }
     assert.deepEqual(checks, Array(3).fill("tenant-b"));
     const foreignBody = new FormData(); foreignBody.set("product", "studio"); foreignBody.set("locationId", "foreign");

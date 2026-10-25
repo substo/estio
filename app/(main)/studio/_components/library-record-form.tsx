@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { saveLibraryAction } from "../workspace/[workspaceId]/library/actions";
+import { saveLibraryAction } from "../(tenant)/library/actions";
 
 export function LibraryRecordForm({ workspaceId, recordId, version, kind = "reference", title = "", payload = {} }: {
   workspaceId: string; recordId: string; version: number;

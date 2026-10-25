@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { CONTENT_LEVELS, CONTENT_STAGES } from "@/lib/studio/content-policy";
-import { saveContentAction } from "../workspace/[workspaceId]/content/actions";
+import { saveContentAction } from "../(tenant)/content/actions";
 
 export function ContentRecordForm({ workspaceId, recordId, version, title = "", payload = {} }: {
   workspaceId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;

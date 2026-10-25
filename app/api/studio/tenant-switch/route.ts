@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const resolution = await validateActiveLocationSelection(locationId);
     if (resolution.status === "authorized" && resolution.location) destination = { locationId: resolution.location.id, path: product === "team" ? "/admin/team" : "/admin" };
   }
-  if (!destination) return NextResponse.redirect(new URL("/studio?error=access", origin), 303);
+  if (!destination) return NextResponse.redirect(new URL("/studio/select?error=access", origin), 303);
   const response = NextResponse.redirect(new URL(destination.path, origin), 303);
   response.cookies.set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
   response.headers.set("Cache-Control", "no-store");

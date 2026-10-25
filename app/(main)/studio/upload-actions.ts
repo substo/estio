@@ -15,6 +15,6 @@ export async function startUploadAction(workspaceId: string, input: { recordId: 
 export async function finishUploadAction(workspaceId: string, uploadId: string, recordPath: string): Promise<{ ok: boolean; error?: string }> {
   try { await finishStudioUpload(workspaceId, uploadId); }
   catch (error) { return { ok: false, error: error instanceof StudioUploadError ? error.message : "Could not register the upload. Try again." }; }
-  if (recordPath.startsWith(`/studio/workspace/${workspaceId}/`)) revalidatePath(recordPath);
+  if (recordPath.startsWith(`/studio/`)) revalidatePath(recordPath);
   return { ok: true };
 }

@@ -16,7 +16,7 @@ function handler(options: { realm?: string; signedIn?: boolean; allowed?: boolea
     "@/lib/auth/active-location": { ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, secure: true, path: "/", sameSite: "lax" } },
     "@/lib/auth/product-navigation": {
       substoCrmDestination: async (id: string) => { selections.push(id); return options.allowed === false ? null : { locationId: "brand-b", path: "/admin" }; },
-      substoStudioDestination: async (id: string) => { selections.push(id); return options.allowed === false ? null : { locationId: "brand-b", path: "/studio/workspace/own-workspace" }; },
+      substoStudioDestination: async (id: string) => { selections.push(id); return options.allowed === false ? null : { locationId: "brand-b", path: "/studio" }; },
     },
   };
   const module = { exports: {} as any };
@@ -33,7 +33,7 @@ test("native product handoff redirects with 303 and sets only the server-authori
   for (const product of ["crm", "studio"]) {
     const api = handler(); const response = await api.POST(request(product));
     assert.equal(response.status, 303);
-    assert.equal(new URL(response.headers.get("location")).pathname, product === "crm" ? "/admin" : "/studio/workspace/own-workspace");
+    assert.equal(new URL(response.headers.get("location")).pathname, product === "crm" ? "/admin" : "/studio");
     assert.equal(response.cookies.get("active_location_id").value, "brand-b");
     assert.equal(api.selections[0], "selected-id");
     assert.equal(response.headers.get("cache-control"), "no-store");

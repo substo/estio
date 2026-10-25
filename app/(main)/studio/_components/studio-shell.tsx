@@ -24,23 +24,22 @@ import { ProductSwitcher, type ProductTarget } from "@/components/product-switch
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { TenantHeaderSelector } from "@/components/tenant-header-selector";
 import type { PlatformLocationLoginOption } from "@/lib/auth/platform-location-options";
-import { TenantSelectionSync } from "./tenant-selection-sync";
+import { TenantSessionGuard } from "./tenant-session-guard";
+import { StudioTenantProvider } from "./studio-tenant-context";
 import { ImpersonationBanner, type ImpersonationBannerData } from "../../admin/_components/impersonation-banner";
 import DashboardSideBar from "../../admin/_components/dashboard-side-bar";
 import { AdminNavigationGroups, type AdminNavGroup } from "../../admin/_components/admin-navigation";
 import { AdminSidebarPreferenceScript, useSidebarCollapsed } from "../../admin/_components/admin-shell-layout";
-import { openEstioStudioBusinessAction } from "../actions";
 
 type App = "estio" | "substo";
 
 export type StudioShellBrand = { id: string; name: string };
 
-const WORKSPACE_PATH = /^\/studio\/workspace\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i;
 
 /** Sidebar menu for Studio, in the same groups and style as the CRM menu. */
 export function studioNavGroups(app: App, workspaceId: string | null, locationId: string | null = null): AdminNavGroup[] {
   const scope = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
-  const base = workspaceId ? `/studio/workspace/${workspaceId}` : null;
+  const base = workspaceId ? `/studio` : null;
   const groups: AdminNavGroup[] = [];
   if (base) {
     groups.push({
@@ -88,25 +87,23 @@ export function StudioShell({
   activeBrandId: string | null;
   platformLoginLocations?: PlatformLocationLoginOption[] | null;
   impersonation?: ImpersonationBannerData | null;
-  /** Workspace for menu links on pages outside /studio/workspace (brand pages). */
+  /** Private storage mapping; tenant selection always uses the Location ID. */
   fallbackWorkspaceId: string | null;
   children: ReactNode;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useSidebarCollapsed();
-  const workspaceId = pathname.match(WORKSPACE_PATH)?.[1] ?? fallbackWorkspaceId;
+  const workspaceId = fallbackWorkspaceId;
   const groups = studioNavGroups(app, workspaceId, activeBrandId);
   const targets: { crm: ProductTarget; studio: ProductTarget } = {
-    crm: workspaceId
-      ? app === "substo" ? { formAction: "/api/studio/product-switch", fields: { product: "crm", workspaceId } } : { action: openEstioStudioBusinessAction.bind(null, workspaceId) }
-      : activeBrandId ? { formAction: "/api/studio/tenant-switch", fields: { product: "crm", locationId: activeBrandId } } : { href: "/admin", document: true },
+    crm: activeBrandId ? { formAction: "/api/studio/tenant-switch", fields: { product: "crm", locationId: activeBrandId } } : { href: "/admin", document: true },
     studio: { href: "/studio" },
   };
   const switcher = <ProductSwitcher active="studio" compact={collapsed} className={collapsed ? "mx-3.5" : "mx-3"} targets={targets} />;
-  const logo = <AppLogo app={app} href={workspaceId ? `/studio/workspace/${workspaceId}` : "/studio?choose=1"} size="sm" showName iconOnly={collapsed} className={collapsed ? "justify-center" : "min-w-0"} />;
+  const logo = <AppLogo app={app} href={workspaceId ? `/studio` : "/studio/select?choose=1"} size="sm" showName iconOnly={collapsed} className={collapsed ? "justify-center" : "min-w-0"} />;
 
   return (
-    <>
+    <StudioTenantProvider locationId={activeBrandId}>
       <AdminSidebarPreferenceScript />
       {impersonation ? <ImpersonationBanner context={impersonation} /> : null}
       <div className="grid min-h-screen w-full lg:[grid-template-columns:var(--admin-sidebar-width,160px)_minmax(0,1fr)]">
@@ -139,10 +136,10 @@ export function StudioShell({
               <ModeToggle />
             </div>
           </header>
-          {workspaceId ? <TenantSelectionSync workspaceId={workspaceId} /> : null}
+          <TenantSessionGuard locationId={activeBrandId} />
           {children}
         </div>
       </div>
-    </>
+    </StudioTenantProvider>
   );
 }

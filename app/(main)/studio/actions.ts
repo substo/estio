@@ -15,19 +15,19 @@ async function getRequestBrand() {
 export async function openEstioStudioLocation(formData: FormData) {
   const locationId = String(formData.get("locationId") || "").trim();
   const access = await getEstioStudioLocationAccess(locationId);
-  if (!access) redirect("/studio?error=access");
+  if (!access) redirect("/studio/select?error=access");
 
   (await cookies()).set(ACTIVE_LOCATION_COOKIE, access.location.id, ACTIVE_LOCATION_COOKIE_OPTIONS);
   const workspace = await ensureEstioStudioWorkspace({
     id: access.location.id,
     name: access.location.name,
   });
-  redirect(`/studio/workspace/${workspace.id}`);
+  redirect(`/studio`);
 }
 
 export async function openEstioStudioBusinessAction(workspaceId: string) {
   const access = await getStudioWorkspaceAccess(workspaceId);
-  if (!access || access.brand !== "estio") redirect("/studio?error=access");
+  if (!access || access.brand !== "estio") redirect("/studio/select?error=access");
   (await cookies()).set(ACTIVE_LOCATION_COOKIE, access.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
   redirect("/admin");
 }
@@ -37,16 +37,16 @@ export async function openSubstoBrandStudioAction(formData: FormData) {
   if (await getRequestBrand() !== "substo") redirect("/studio");
   const brandId = String(formData.get("brandId") || "").trim();
   const destination = await substoStudioDestination(brandId);
-  if (!destination) redirect("/studio?error=access");
+  if (!destination) redirect("/studio/select?error=access");
   (await cookies()).set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
   redirect(destination.path);
 }
 
 /** Select the workspace's current brand before entering its CRM; never trust a posted brand ID. */
 export async function openSubstoStudioCrmAction(workspaceId: string) {
-  if (await getRequestBrand() !== "substo") redirect("/studio?error=access");
+  if (await getRequestBrand() !== "substo") redirect("/studio/select?error=access");
   const destination = await substoCrmDestination(workspaceId);
-  if (!destination) redirect("/studio?error=access");
+  if (!destination) redirect("/studio/select?error=access");
   (await cookies()).set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
   redirect(destination.path);
 }

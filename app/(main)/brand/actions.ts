@@ -20,9 +20,9 @@ const toState = (result: TeamResult): BrandFormState => (result.ok ? { message: 
 /** Bind to the rendered tenant and recheck current membership/role on every submission. */
 async function requireActor(formData: FormData) {
   const locationId = formData.get("locationId");
-  if (typeof locationId !== "string" || !locationId) redirect("/studio?error=access");
+  if (typeof locationId !== "string" || !locationId) redirect("/studio/select?error=access");
   const actor = await getSubstoBrandActor(locationId);
-  if (!actor) redirect("/studio?choose=1");
+  if (!actor) redirect("/studio/select?choose=1");
   return actor;
 }
 
@@ -56,7 +56,7 @@ export async function removeBrandMemberAction(_previous: BrandFormState, formDat
   const actor = await requireActor(formData);
   const targetUserId = String(formData.get("userId") || "");
   const result = await removeMember(substoBrandDeps(), actor, targetUserId);
-  if (result.ok && targetUserId === actor.userId) redirect("/studio?choose=1");
+  if (result.ok && targetUserId === actor.userId) redirect("/studio/select?choose=1");
   revalidatePath("/brand/team");
   return toState(result);
 }

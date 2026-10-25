@@ -11,7 +11,7 @@ export function StudioAttachments({ workspaceId, files }: { workspaceId: string;
       <ul className="space-y-4 text-sm">
         {files.map((file) => {
           const name = typeof file.payload.name === "string" ? file.payload.name : file.id;
-          const href = `/studio/workspace/${workspaceId}/media/${file.id}`;
+          const href = `/studio/media/${file.id}`;
           const kind = file.media_object_id ? studioMediaKind(typeof file.payload.type === "string" ? file.payload.type : null) : null;
           return (
             <li key={file.id} className="space-y-2">

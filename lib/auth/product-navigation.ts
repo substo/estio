@@ -22,7 +22,7 @@ export async function substoStudioDestination(brandId: string): Promise<ProductD
   const resolution = await validateActiveLocationSelection(brandId);
   if (resolution.status !== "authorized" || resolution.location?.authRealm !== "substo" || resolution.location.id !== brandId || !resolution.user) return null;
   const workspaceId = await ensureBrandWorkspace(substoBrandDeps(), resolution.location, resolution.user.clerkId);
-  return { locationId: resolution.location.id, path: `/studio/workspace/${workspaceId}` };
+  return { locationId: resolution.location.id, path: `/studio` };
 }
 
 /** Shared Studio tenant selection; provisioning is explicit and follows authorization. */
@@ -35,5 +35,5 @@ export async function studioDestination(locationId: string): Promise<ProductDest
   if (!access) return null;
   const { ensureEstioStudioWorkspace } = await import("@/lib/studio/supabase-service");
   const workspace = await ensureEstioStudioWorkspace(access.location);
-  return { locationId: access.location.id, path: `/studio/workspace/${workspace.id}` };
+  return { locationId: access.location.id, path: `/studio` };
 }

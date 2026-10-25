@@ -5,7 +5,7 @@ import { studioRest } from "./rest";
 import { auth } from "@clerk/nextjs/server";
 import type { UserRole } from "@prisma/client";
 import { headers } from "next/headers";
-import { validateActiveLocationSelection, type ActiveLocationResolution } from "@/lib/auth/active-location";
+import { resolveActiveLocation, validateActiveLocationSelection, type ActiveLocationResolution } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
 import { isStudioLocationAllowedForSession } from "./access-policy";
@@ -77,11 +77,15 @@ export async function getStudioWorkspaceAccess(workspaceId: string): Promise<Stu
   if (!state.userId) return null;
   if (await isPlatformProfileDeleted(studioRest, brand, state.userId)) return null;
 
+  const active = await resolveActiveLocation();
+  if (active.status !== "authorized" || !active.location) return null;
+
   if (brand === "substo") {
+    if (active.location.studioWorkspaceId !== workspaceId) return null;
     // The brand team decides; the Studio membership row is re-synced to it
     // (added, re-roled or removed) so Studio's SQL checks agree.
     const brandAccess = await resolveBrandWorkspaceAccess(substoBrandDeps(), workspaceId, state.userId);
-    if (!brandAccess) return null;
+    if (!brandAccess || brandAccess.brand.id !== active.location.id) return null;
     const selection = await validateActiveLocationSelection(brandAccess.brand.id);
     if (selection.status !== "authorized") return null;
     const workspace = await getSubstoStudioWorkspace(workspaceId);
@@ -91,7 +95,7 @@ export async function getStudioWorkspaceAccess(workspaceId: string): Promise<Stu
   }
 
   const workspace = await getEstioStudioWorkspaceById(workspaceId);
-  if (!workspace?.estio_location_id) return null;
+  if (!workspace?.estio_location_id || workspace.estio_location_id !== active.location.id) return null;
   const access = await resolveEstioLocationAccess(workspace.estio_location_id, state);
   return access ? { brand, userId: access.userId, workspace: { ...workspace, name: access.location.name?.trim() || "Unnamed location" }, role: access.role, locationId: access.location.id } : null;
 }

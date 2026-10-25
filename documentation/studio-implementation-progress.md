@@ -1,5 +1,14 @@
 # Shared Studio implementation progress
 
+## Studio uses the active Location and clean product routes (2026-10-25)
+
+- Replaced the UUID route tree with `/studio`, `/studio/library`, `/studio/content`, `/studio/knowledge`, `/studio/schedules`, `/studio/jobs`, `/studio/youtube`, `/studio/settings/ai` and their resource/API descendants. All generated links, redirects, fetch endpoints, media URLs and revalidation paths use these selected-Location routes. The existing chooser is `/studio/select`; there is no separate workspace selector.
+- The sole selected tenant is the same `Location.id` and host-only active-location cookie used by CRM. A server route adapter derives the existing private Studio storage key from that Location. Core Studio access also requires the storage row to belong to the currently active Location; an authorized membership in another Location cannot independently select a workspace for an operation. Browser commands carry the rendered Location ID and reject stale-tab selection with 409 before execution. Page/focus/history checks refresh the displayed context when another tab changes selection.
+- The old `/studio/workspace/[UUID]/...` tree is compatibility-only: it reauthorizes the mapping in the current app realm, selects that actual Location and sends a no-store 303 to the clean equivalent, preserving resource paths and query parameters. Invalid/foreign/revoked mappings return 404 without changing selection; old POST command paths return 409/reload and execute nothing. New navigation never emits the old prefix. The old workspace preference POST is retired.
+- Internal Studio SQL UUID foreign keys, imports, job provenance and object keys are retained as private storage compatibility, avoiding a destructive ID rewrite. They do not define another subscription, tenant, team or selected context. No Prisma or Studio migration, production data rename, backfill, invite or role change is required. Human-facing workspace wording was replaced with location/team/Studio wording.
+- Validation: **234/234** focused auth/navigation/Studio tests pass, including clean route mapping, stale-command denial, core active-Location storage access, both-realm legacy redirects and unchanged resource identity. The disposable realm migration/isolation rehearsal plus **17/17** service tests pass. Affected-file compiler check: **0 diagnostics across 150 changed/deleted/new TypeScript paths**; whitespace checks pass. Logs: `/tmp/estio-studio-clean-{tests,types,db}.log`. Production build/deployment acceptance pending.
+
+
 ## Tenant header correction (2026-10-25)
 
 User clarified that Location and brand are one subscribed tenant; Studio must not expose another workspace/brand-management level.

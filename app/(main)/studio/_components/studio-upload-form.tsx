@@ -1,4 +1,5 @@
 "use client";
+import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { readStudioUploadRequest } from "@/lib/studio/upload-policy";
@@ -10,6 +11,7 @@ type Pending = PendingStudioUpload & { start?: UploadCommand };
 export function StudioUploadForm({ workspaceId, recordId, pendingUploads = [] }: {
   workspaceId: string; recordId: string; pendingUploads?: PendingStudioUpload[];
 }) {
+  const tenantHeaders = useStudioTenantHeaders();
   const router = useRouter();
   const busy = useRef(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -17,8 +19,8 @@ export function StudioUploadForm({ workspaceId, recordId, pendingUploads = [] }:
   const [message, setMessage] = useState<{ error?: string; saved?: string }>({});
 
   async function command(value: UploadCommand): Promise<UploadRecoveryResult> {
-    const response = await fetch(`/studio/workspace/${workspaceId}/uploads/api`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value), cache: "no-store",
+    const response = await fetch(`/studio/uploads/api`, {
+      method: "POST", headers: { ...tenantHeaders, "Content-Type": "application/json" }, body: JSON.stringify(value), cache: "no-store",
       signal: AbortSignal.timeout(60_000),
     });
     const result = await response.json();
@@ -78,7 +80,7 @@ export function StudioUploadForm({ workspaceId, recordId, pendingUploads = [] }:
       <input type="file" accept="video/mp4,video/quicktime,video/webm,audio/*" disabled={progress !== null}
         onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(undefined, file); }}
         className="mt-2 block w-full text-sm" /></label>
-    <p className="text-xs text-muted-foreground">Up to 5 GB. Stored privately and transcribed automatically with this workspace&apos;s OpenAI key. If interrupted, recover the existing upload below before starting a new one.</p>
+    <p className="text-xs text-muted-foreground">Up to 5 GB. Stored privately and transcribed automatically with this location&apos;s OpenAI key. If interrupted, recover the existing upload below before starting a new one.</p>
     {pending.length ? <div className="space-y-3"><h3 className="font-medium">Your unfinished uploads</h3>
       <p className="text-xs text-muted-foreground">Check storage first. Recovery is available for seven hours after registration. Interrupted transfers restart from the beginning; select the original file. This list shows up to 100 uploads, oldest first.</p>
       {pending.map(entry => <div key={entry.id} className="space-y-2 rounded border p-3">

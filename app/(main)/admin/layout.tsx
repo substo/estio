@@ -28,7 +28,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   if (resolution.status !== "authorized" || !resolution.location || !resolution.user) {
     if ((await auth()).actor) redirect("/support-access-invalid");
-    if (realm === "substo") redirect("/studio?choose=1");
+    if (realm === "substo") redirect("/studio/select?choose=1");
     const hostname = (await headers()).get("host") || "";
     const isSystemDomain = ["localhost", "estio.co"].includes(hostname.replace(":3000", ""));
     redirect(isSystemDomain ? "/" : "/favorites");
