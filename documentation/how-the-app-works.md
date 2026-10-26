@@ -89,8 +89,7 @@ The rename runs as staged migrations: add the new names first, then switch the c
 - CRM integrations for Substo, one by one.
 - Custom fields per niche.
 - Custom domains for Substo Business websites.
-- The Mac network proxy.
-- The Mac as an optional processing unit for Studio (local transcription first; hosted stays the fallback), planned in `studio-mac-processing-plan.md`. Waiting on the owner's answers.
+- One Mac companion for the network proxy and optional Studio processing, configured from Settings with detected hardware, per-feature/model choices and a researched model catalogue. Local jobs wait without a timeout or automatic paid fallback; Process now promotes queued work. See [the connected-computer plan](studio-mac-processing-plan.md).
 - Billing.
 
 **Android device gateway (SIM relay):** optional. It sends WhatsApp Web traffic out through a connected Android phone. On this server it only runs for a test-access (canary) entry, which lasts at most 7 days and is never renewed automatically. When no canary is active, the gateway and the WhatsApp bridge are **off**. They log `disabled: canary_scope_expired` and exit cleanly, without restarting. Deploys remove them and still finish. The deploy records the state in `/home/martin/.deploy-state/device-egress-status`. No Business has a device connected (the last device activity was in August 2026).

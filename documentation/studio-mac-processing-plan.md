@@ -1,51 +1,52 @@
-# Studio: the owner's Mac as an optional processing unit
+# Studio: connected-computer processing plan
 
-Plan only, written 2026-10-26. Nothing here is built yet. It follows the original brief: hosted processing always works when the Mac is off, the Mac may take scoped local-model work while it is online, providers sit behind adapters, and the operator's Codex/Claude subscriptions are never the customer runtime.
+Updated 2026-10-26 with the owner's decisions. **Documentation only in this thread.** Reuse one Mac companion, sign-in and durable Studio Jobs queue. Connected computers serve only their paired Business. Hosted processing remains available when explicitly selected; local jobs never silently become paid API jobs.
 
-## 1. Which jobs go to the Mac
+## One companion, Settings-led setup
 
-The jobs that exist today are `studio.transcribe_upload`, `studio.knowledge_extract`, `studio.idea_review`, `studio.script_brief`, `studio.youtube_discovery` and `studio.diagnostic` (`lib/studio/worker/handlers.ts`). The old local app ran transcription on an 8 GB M1 with Parakeet TDT v3 (4-bit, MLX) in `Substo/app/transcribe-local.py`, and it used Codex for text. Codex is not reusable here.
+The parallel [connection conversation](t3-thread://v1/mcp:d16bd99e-a0c2-4488-8472-e093c5aa6135) owns implementation. Its `feature/studio-run-now` worktree already contains pairing/revocation, heartbeat, an HTTPS queue adapter, Mac diagnostics and native CLI connection checks. These are work-in-progress, not proof of deployment. Extend those pieces; do not build another connection system. It uses T3's local-provider pattern: Codex/Claude execute through their installed, authenticated local processes. Their inference runs in the provider's cloud; on-device models are an additional adapter, not the same thing. Native provider credentials remain on the Mac.
 
-| Job | Where | Why |
-| --- | --- | --- |
-| `studio.diagnostic` (Worker check) | Mac or hosted | The "hello" job. No models, no spend. |
-| `studio.transcribe_upload` | **Mac first**, hosted fallback | Parakeet-MLX is proven on this Mac and is free. It is also the biggest OpenAI cost (whisper-1). |
-| Embeddings | Mac later, if needed | Studio has no embeddings today. Add them only when a feature needs them, through the same adapter. |
-| `knowledge_extract`, `idea_review`, `script_brief`, onboarding chat | **Hosted (OpenAI)** | These need a strong model and structured output. An 8 GB Mac runs only small 3–4B models (Ollama/MLX), which do this poorly. Revisit if the Mac is upgraded. |
-| `youtube_discovery`, scheduled runs | **Hosted** | They use profile-owned Google OAuth on the server and have to run when the Mac is off. |
+All product controls live in **Settings → Connected computer / AI**, shared across Estio and Substo. The companion installs and grants OS permissions locally; subsequent configuration comes from Settings, with applied/pending/error status acknowledged by the device. Sensitive local path or OS permission changes may require a companion prompt. Do not promise a browser can silently grant macOS permissions.
 
-## 2. How the Mac connects
+1. Ask **“Use this computer for processing?”** Default off. Sign in through the browser, select an authorized Business and approve a short-lived pairing request. Reuse the existing revocable Business-scoped device credential; improve the current manual-token bootstrap rather than create parallel auth. Store the long-lived device secret in macOS Keychain. Switching the dashboard's Business never silently reassigns the computer.
+2. After consent, detect chip/architecture, OS, RAM/unified memory, GPU support, free disk, installed runtimes/models and power state. Report safe capacity metadata, never provider secrets. Rediscover on reconnect and before large downloads; do not assume the old 8 GB M1 is the connected machine. If detection fails, ask for the missing value in Settings.
+3. Ask which **features and languages** to support (English only or named languages, including translation targets), quality versus speed preference, and permitted resources. The setup agent explains recommended models, estimated download/disk/memory needs and limitations before applying an approved setup.
+4. Settings exposes storage folder, model/cache budget and cleanup, minimum free disk, runtime/model/version and quantization, advanced context/output limits, memory/concurrency limits, battery/AC and background/idle policy, launch at login, working hours/time zone, pause/resume, queue and per-feature routing. Detect the time zone with an override. Start with one active local model job and tune from measurements. Unsupported settings are visibly unavailable with a reason; missing preferences are asked in the setup flow.
+5. Download approved models, verify artifacts, run a small task-specific check, then mark the feature ready. Show download/progress/errors and offer repair, update/rollback, model removal, disconnect and revoke. Processing consent and model-install consent are separate, with an optional standing policy for future approved updates.
 
-**Pattern: an outbound-only agent.** A small Node agent (the `scripts/studio-worker.ts` runner, plus local handlers) runs on the Mac under `launchd`. It only makes HTTPS calls to the app: no inbound ports, tunnels or Caddy changes. It is the same runner loop and lease logic as the hosted worker (`lib/studio/worker/runner.ts`), with a different `StudioQueue` implementation that calls the app instead of Supabase.
+## Work and model selection
 
-- **Auth per Business.** A Business admin creates a *Mac device token* in Settings. The token is shown once, stored hashed and revocable, and tied to one Business plus a list of allowed job kinds. The Mac never holds the Supabase service-role key, R2 keys or the Business's OpenAI key.
-- **Endpoints.** A few thin Next.js routes, `/api/studio/device/{heartbeat,claim,extend,complete,fail}`, check the token and call the **existing** RPCs (`studio_claim_jobs`, `studio_extend_job_lease`, `studio_complete_job`, `studio_fail_job`, `studio_report_worker`). The jobs, leases, lease tokens, attempts and events are the same. The one SQL change: claim gains optional `business` and `kinds` filters, so a device can only claim its own Business's allowed kinds.
-- **Routing.** When a job is enqueued and the Business has a Mac that is *online* (healthy heartbeat under 60 s old, reporting that kind), the job gets `local_until = now + 10 min`. Hosted claims skip a job until `local_until` passes. After that, the hosted worker takes it. If no Mac is online, the job goes straight to hosted. One column and one claim condition; no second queue.
-- **Mac sleeps mid-job.** The lease stops renewing and expires (120 s). Then the existing lease-expiry path requeues the job and counts the attempt. On requeue, `local_until` is cleared, so the hosted worker picks the job up next. A Mac that wakes late can't complete it, because its lease token no longer matches. Chunked transcription already resumes from saved chunks.
-- **Media.** The claim response carries a short-lived (about 15 min) presigned R2 GET URL for exactly that job's object, made with the existing `media-r2.ts` presigner. The Mac never lists or writes R2. Results come back as JSON in `complete`. The server then applies them through the **same** code that saves a hosted transcript, so there is one write path.
-- **Usage.** Local work is free. It records a zero-cost usage row marked `local`, so the Business total stays complete (rule 10) and the reserve/settle step is skipped.
+| Work | Recommendation |
+| --- | --- |
+| Speech-to-text / upload transcription | First on-device workflow. Compare whisper.cpp/MLX Whisper and Parakeet-MLX against selected languages, timestamps, speed and memory. Reuse old `Substo/app/transcribe-local.py` as evidence, not a fixed model mandate. |
+| Summarisation, extraction, idea review, script briefs | Offer on-device LLMs through Ollama/MLX or an existing LM Studio installation after structured-output and quality checks. Also retain the selected native Codex/Claude path from the connection work. Choose by measured capability, not a fixed RAM cutoff. |
+| Embeddings, translation, text-to-speech | Add adapters when an app feature needs them, each with its own language/output validation. Embedding model changes require compatible indexing/reindexing. |
+| Image/video generation and future tasks | Include in the capability catalogue; enable only once an actual workflow, adapter and hardware/quality test exist. “Discovered” does not mean usable. |
+| Discovery, OAuth and orchestration | Keep Google credentials, scheduling and durable state on the server. Route eligible model steps to the selected computer; do not transfer every server operation to it. |
+| Hosted OpenAI | Optional per-feature/per-job choice with configured Business credentials, cost/budget checks and existing reservation/settlement. Never infer permission to spend from a saved key. |
 
-## 3. Testing the connection first
+**Dynamic model catalogue:** a recurring background research job discovers releases from model publishers, official model cards and runtime registries for the app's task types. Recommend daily incremental checks and a weekly reassessment, configurable in Settings with “Check now” and last-success/stale indicators. Use existing Jobs and `scripts/install-cron.sh`, not a separate agent daemon or scheduler. AI summarises evidence; deterministic checks establish runtime compatibility and required metadata.
 
-1. **Health indicator.** Studio Settings › AI shows a *Mac* row: online/offline, last seen, release, and the job kinds it accepts. The data comes from `studio_worker_heartbeats`, which already stores handlers, healthy and draining.
-2. **Hello job.** A *Run Mac check* button enqueues `studio.diagnostic` with `local_until` set. The Jobs page shows it claimed by `mac:<device>`, with the result `{ ok, workerId, checkedAt }`. With the Mac asleep, the same button shows the hosted worker taking it after the window: that is the fallback test.
-3. **By hand:** `curl -H "Authorization: Bearer <token>" https://<app>/api/studio/device/heartbeat` returns `200` for a valid token, and `401` after the token is revoked.
+Store source URLs, checked date, immutable revision/checksum, license, task/languages, runtime, download size, estimated memory/context, and validation results. Separate discovered, compatible, tested, recommended and installed states. Rank for this computer and Business preferences, showing the reason and uncertainty. Preserve the last good catalogue on research failure. Research cannot execute arbitrary downloaded code or silently change an active model. Approved installations use supported adapters, verified artifacts and smoke tests; jobs pin their model/configuration so later discoveries cannot change in-flight work.
 
-## 4. Slices
+Evidence checked 2026-10-26: [Parakeet v3's model card](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) lists 25 languages, so the earlier English-only assumption was wrong. [LM Studio requirements](https://lmstudio.ai/docs/app/system-requirements) permit smaller models/modest contexts on 8 GB Macs; benchmark the actual task. [Ollama's API](https://github.com/ollama/ollama/blob/main/docs/api/introduction.mdx) distinguishes local and cloud endpoints: an Ollama model must be verified as on-device before labelled local.
 
-| # | Slice | Done when |
-| --- | --- | --- |
-| 1 | **Device token + heartbeat.** Token create/revoke in Settings, the heartbeat route, and the Mac row. | The Mac shows online within 60 s of the agent starting, offline about 60 s after it stops, and a revoked token gets `401`. |
-| 2 | **Hello job end to end.** Scoped claim, the extend/complete/fail routes, `local_until` routing, the Mac agent with only `studio.diagnostic`. | *Run Mac check* succeeds on the Mac when it is online, and on hosted when it is asleep. Another Business's token cannot claim it (SQL test). |
-| 3 | **Local transcription.** Parakeet-MLX handler on the Mac, presigned media URL, server applies the result through the existing transcript path, zero-cost `local` usage row. | An uploaded video is transcribed on the Mac with no OpenAI spend. Closing the lid mid-job ends with a hosted transcript and one visible retry. |
-| 4 | **Later, on demand.** Embeddings or local text models via Ollama/MLX adapters, only when a feature needs them or the hardware allows it. | Decided per job when it comes up. |
+## Connection, queue and recovery
 
-Each slice is deployed with `deploy-local-build.sh` like any other change. The Mac agent ships from this repo.
+Use outbound authenticated HTTPS polling, the existing companion queue adapter, leases/attempts/events and worker heartbeats. No inbound ports or tunnels for processing. Authorize every claim, renewal, media request and completion against the paired Business, current membership and feature grants. The future network-proxy capability shares the app/sign-in but grants its own permissions.
 
-## Open questions for the owner
+- **Background is default.** Enabled local features enqueue persistently, even while offline. Jobs wait indefinitely for the selected computer with a clear waiting reason; remove the former ten-minute fallback. Unsupported/missing models are blocked with a repair action, not repeatedly claimed. Disabling a feature stops claims and asks whether pending jobs should remain queued, be cancelled or be explicitly rerouted.
+- **Process now** promotes the selected job ahead of pending work in the same queue. It respects dependencies, permissions and resource limits; it does not kill an active job or create unlimited concurrency. Show “next when capacity is free.” If the Mac is offline, offer “wait for computer” or an explicitly configured hosted route with cost disclosure. Repeated clicks must not duplicate work.
+- **Sleep or disconnect:** stop claiming when suspension is known; checkpoint supported work and drain where possible. Unexpected sleep/network loss lets the lease expire; existing recovery requeues with the same local target. Abort stale execution on wake; stale lease tokens cannot save results. Resume validated checkpoints or restart safely. Use backoff and bounded execution retries; exhaustion needs a visible retry action, never hidden paid fallback. Indefinite queue waiting is distinct from a bounded running attempt.
+- **Media/results:** short-lived job-scoped R2 URLs, renewed only while authorized; no storage account keys. Validate structured results and save through existing content/transcript paths with lease fencing and idempotency. Later generated media needs bounded, job-scoped upload authorization through that same storage system.
+- **Visibility/accounting:** Settings and Jobs show online/busy/paused/offline, last seen, hardware, ready features/models, current work, queue and failures. Separate on-device usage, subscription CLI usage and paid API cost. Local hardware work has no provider fee, but consumes disk/energy; CLI usage is subject to provider limits.
 
-1. **One Mac app.** The "Mac network proxy" (decided for later) and this agent should be one Mac app with one sign-in. Agreed?
-2. **Which Mac?** Is it still the 8 GB M1? That decides whether local text models are worth it at all.
-3. **Who may use it?** Should only your own Business's jobs run on your Mac, or should the Mac also serve other Businesses (e.g. as shared capacity)? The plan assumes your own Business only.
-4. **Fallback window.** Is 10 minutes of waiting for the Mac before hosted takes over right, or should urgent jobs skip the Mac?
-5. **Local quality.** Parakeet transcripts are English-focused and have no OpenAI fallback check. Is that acceptable for uploads, or should non-English uploads stay hosted?
+## Smallest slices and definitions of done
+
+1. **Connection first:** reuse the parallel pairing/heartbeat/diagnostic slice. Done: Settings shows safe device status; a hello job completes; revoked/cross-Business access and stale completions fail; offline jobs remain queued.
+2. **Guided setup:** consent, hardware discovery, language/features/resource preferences and configuration acknowledgements. Done: a user can configure, pause and revoke from Settings, and unavailable controls explain the next action.
+3. **One real local workflow:** transcription with approved model download and a pinned adapter. Done: a sample in each selected supported language produces validated output; sleep/resume and expired media URLs recover without duplicate content or API spend. Verify Process now ordering.
+4. **Model research and recommendations:** scheduled catalogue refresh, evidence, compatibility ranking and approved updates. Done: a newly discovered candidate appears without installing itself; failed refresh preserves prior recommendations; incompatible models cannot be activated.
+5. **Expand by feature:** text workflows, translation/TTS, embeddings and eventually image/video. Done per feature: adapter, resource/quality/language checks, validated outputs, routing controls and optional explicitly selected hosted execution all work through the existing queue.
+
+The owner's decisions above close the earlier hardware, Business scope and ten-minute-window questions. Language and resource preferences belong to each user's setup; no owner answer blocks this plan. Implementation and live acceptance remain owned by the connection/workflow conversation.
