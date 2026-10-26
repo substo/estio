@@ -2,7 +2,7 @@ import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canManageStudioAi } from "@/lib/studio/ai-settings-policy";
-import { listStudioJobs, studioDiagnosticDisplayResult } from "@/lib/studio/jobs";
+import { listStudioJobs, studioDiagnosticDisplayResult, canRetryStudioJob } from "@/lib/studio/jobs";
 import { studioJobKindLabels } from "@/lib/studio/worker/handlers";
 import { JobActionButton, WorkerCheckButton } from "./job-buttons";
 
@@ -38,7 +38,7 @@ export default async function StudioJobsPage({ params, searchParams }: { params:
           <p className="text-muted-foreground">Created {when(job.created_at)}{job.finished_at ? ` · finished ${when(job.finished_at)}` : job.status === "queued" && job.attempts > 0 ? ` · next try ${when(job.run_after)}` : ""}</p>
           {job.last_error_message && job.status !== "succeeded" ? <p className={job.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{job.last_error_message}</p> : null}
           {diagnosticResult ? <details className="pt-2"><summary className="cursor-pointer font-medium">Check result</summary><pre className="mt-2 whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">{diagnosticResult}</pre></details> : null}
-          {job.status === "failed" ? <JobActionButton workspaceId={workspaceId} jobId={job.id} action="retry" /> : null}
+          {job.status === "failed" && canRetryStudioJob(result.access, job) ? <JobActionButton workspaceId={workspaceId} jobId={job.id} action="retry" /> : null}
           {job.status === "queued" ? <JobActionButton workspaceId={workspaceId} jobId={job.id} action="cancel" /> : null}
         </article>; })}
         {!result.jobs.length ? <p className="text-sm text-muted-foreground">No jobs yet.</p> : null}

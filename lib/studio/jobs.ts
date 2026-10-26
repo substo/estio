@@ -1,6 +1,7 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
-import { getStudioWorkspaceAccess } from "./access";
+import { getStudioWorkspaceAccess, type StudioWorkspaceAccess } from "./access";
+import { canManageStudioAi } from "./ai-settings-policy";
 import { queryPath, studioRest } from "./rest";
 
 export interface StudioJobRow {
@@ -8,7 +9,14 @@ export interface StudioJobRow {
   attempts: number; max_attempts: number; run_after: string; last_error_code: string | null; last_error_message: string | null;
   created_at: string; finished_at: string | null;
   execution_target: "hosted" | "device"; device_id: string | null; result: unknown;
+  device: { revoked_at: string | null } | null;
 }
+/** Device retries consume the paired manager's subscription authority. */
+export function canRetryStudioJob(access: StudioWorkspaceAccess, job: Pick<StudioJobRow, "execution_target" | "device">) {
+  return job.execution_target === "hosted" || (access.brand === "substo" && canManageStudioAi(access)
+    && job.device !== null && job.device.revoked_at === null);
+}
+
 /** A worker seen within this window is considered online. */
 export const WORKER_ONLINE_SECONDS = 90;
 
@@ -32,7 +40,7 @@ export async function listStudioJobs(workspaceId: string, page = 0) {
   if (!access) return null;
   const [jobs, workers] = await Promise.all([
     studioRest<StudioJobRow[]>(queryPath("studio_jobs", {
-      select: "id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at,execution_target,device_id,result",
+      select: "id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at,execution_target,device_id,result,device:studio_devices(revoked_at)",
       workspace_id: `eq.${access.workspace.id}`, order: "created_at.desc,id.asc", limit: "26", offset: String(page * 25) })),
     studioRest<Array<{ seen_at: string }>>(queryPath("studio_worker_heartbeats", { select: "seen_at", order: "seen_at.desc", limit: "1" })),
   ]);
@@ -50,6 +58,12 @@ async function requireMember(workspaceId: string) {
 export async function studioJobAction(workspaceId: string, jobId: string, action: "retry" | "cancel") {
   const access = await requireMember(workspaceId);
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("Invalid job.");
+  if (action === "retry") {
+    const jobs = await studioRest<Array<Pick<StudioJobRow, "execution_target" | "device">>>(queryPath("studio_jobs", {
+      select: "execution_target,device:studio_devices(revoked_at)", workspace_id: `eq.${access.workspace.id}`, id: `eq.${jobId}`, limit: "1" }));
+    if (!jobs[0]) throw new Error("Job not found.");
+    if (!canRetryStudioJob(access, jobs[0])) throw new Error("A Business admin and an active paired Mac are required to retry this job.");
+  }
   return studioRest("rpc/studio_member_job_action", { method: "POST", body: JSON.stringify({
     p_workspace_id: access.workspace.id, p_actor_brand: access.brand, p_clerk_user_id: access.userId, p_job_id: jobId, p_action: action }) });
 }

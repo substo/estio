@@ -179,4 +179,53 @@ end $$;
 revoke all on function public.studio_claim_device_jobs(uuid,uuid,text,integer,integer) from public,anon,authenticated,service_role;
 revoke all on function public.studio_manage_device(uuid,text,text,text,uuid,text,uuid,text,text,text),public.studio_device_command(text,text,text,jsonb) from public,anon,authenticated;
 grant execute on function public.studio_manage_device(uuid,text,text,text,uuid,text,uuid,text,text,text),public.studio_device_command(text,text,text,jsonb) to service_role;
+-- Keep member hosted-job semantics, but fence device retries with manager authority.
+create or replace function public.studio_member_job_action(p_workspace_id uuid, p_actor_brand text, p_clerk_user_id text, p_job_id uuid, p_action text)
+returns public.studio_jobs language plpgsql security definer set search_path = '' as $$
+declare
+  v_brand text;
+  v_job public.studio_jobs%rowtype;
+  v_target text;
+  v_device_id uuid;
+begin
+  if p_action is null or p_action not in ('retry','cancel') or p_clerk_user_id is null or pg_catalog.btrim(p_clerk_user_id) = '' then
+    raise exception 'Invalid job action' using errcode = '22023';
+  end if;
+  -- Inspect routing without a job lock: manager/device operations lock in that order.
+  select execution_target,device_id into v_target,v_device_id from public.studio_jobs
+    where id=p_job_id and workspace_id=p_workspace_id;
+  if p_action = 'retry' and v_target = 'device' then
+    if p_actor_brand is distinct from 'substo' then raise exception 'Devices require Substo' using errcode = '42501'; end if;
+    perform public.studio_lock_ai_manager(p_workspace_id,p_actor_brand,p_clerk_user_id);
+    perform 1 from public.studio_devices where id=v_device_id and workspace_id=p_workspace_id
+      and brand=p_actor_brand and revoked_at is null for update;
+    if not found then raise exception 'Device unavailable' using errcode = '42501'; end if;
+  end if;
+  select brand into v_brand from public.studio_workspaces where id=p_workspace_id;
+  if v_brand is null or v_brand <> p_actor_brand then raise exception 'Job access denied' using errcode = '42501'; end if;
+  if v_brand = 'substo' then
+    perform 1 from public.studio_workspace_memberships where workspace_id=p_workspace_id and workspace_brand='substo' and clerk_user_id=p_clerk_user_id for share;
+    if not found then raise exception 'Job access denied' using errcode = '42501'; end if;
+  end if;
+  select * into v_job from public.studio_jobs where id=p_job_id and workspace_id=p_workspace_id for update;
+  if not found then raise exception 'Job not found' using errcode = '22023'; end if;
+  -- Routing may have changed after the unlocked read. Never upgrade locks from job
+  -- to manager/device; reject and let a fresh request follow the correct order.
+  if p_action = 'retry' and (v_job.execution_target is distinct from v_target or v_job.device_id is distinct from v_device_id) then
+    raise exception 'Job routing changed; retry the request' using errcode = '40001';
+  end if;
+  if p_action = 'retry' and v_job.status = 'failed' then
+    update public.studio_jobs set status='queued', attempts=0, run_after=pg_catalog.now(), finished_at=null, updated_at=pg_catalog.now()
+      where id=p_job_id returning * into v_job;
+    insert into public.studio_job_events(job_id,workspace_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.workspace_id,0,'requeued',p_clerk_user_id);
+  elsif p_action = 'cancel' and v_job.status = 'queued' then
+    update public.studio_jobs set status='cancelled', finished_at=pg_catalog.now(), updated_at=pg_catalog.now() where id=p_job_id returning * into v_job;
+    insert into public.studio_job_events(job_id,workspace_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.workspace_id,v_job.attempts,'cancelled',p_clerk_user_id);
+  else
+    raise exception 'Job is not in a state that allows this action' using errcode = '40001';
+  end if;
+  return v_job;
+end;
+$$;
+
 commit;

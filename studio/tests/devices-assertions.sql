@@ -68,3 +68,53 @@ begin
  begin perform public.studio_device_command(repeat('a',64),'substo','claim','{"workerId":"mac","limit":1,"leaseSeconds":60}'); raise exception 'Removed creator still authorized'; exception when sqlstate '42501' then null; end;
  delete from public.studio_workspaces where id in(w,w2);
 end $$;
+
+-- Manual retries must not let a member spend a paired manager's subscription.
+do $$
+declare
+ w uuid:='da000000-0000-4000-8000-000000000010';
+ d uuid; j uuid; hosted public.studio_jobs%rowtype; retried public.studio_jobs%rowtype;
+begin
+ perform public.studio_create_substo_workspace(w,'Device retry tests','retry-owner');
+ insert into public.studio_workspace_memberships(workspace_id,workspace_brand,clerk_user_id,role)
+ values(w,'substo','retry-member','member'),(w,'substo','retry-admin','admin');
+ d:=(public.studio_manage_device(w,'substo','retry-owner','create',gen_random_uuid(),'Retry Mac',null,repeat('d',64))->>'deviceId')::uuid;
+ j:=(public.studio_manage_device(w,'substo','retry-owner','diagnostic',gen_random_uuid(),null,d)->>'jobId')::uuid;
+ update public.studio_jobs set status='failed',attempts=max_attempts,finished_at=clock_timestamp() where id=j;
+ begin
+  perform public.studio_member_job_action(w,'substo','retry-member',j,'retry');
+  raise exception 'Member retried device job';
+ exception when sqlstate '42501' then null; end;
+ if exists(select 1 from public.studio_jobs where id=j and (status<>'failed' or attempts<>max_attempts))
+  or exists(select 1 from public.studio_job_events where job_id=j and event='requeued') then
+  raise exception 'Forbidden retry changed job or events';
+ end if;
+ retried:=public.studio_member_job_action(w,'substo','retry-admin',j,'retry');
+ if retried.status<>'queued' or retried.attempts<>0 or retried.finished_at is not null
+  or retried.execution_target<>'device' or retried.device_id<>d
+  or (select count(*) from public.studio_job_events where job_id=j and event='requeued' and actor_clerk_user_id='retry-admin')<>1 then
+  raise exception 'Admin device retry lost existing semantics';
+ end if;
+ -- Cancel remains a member action, including for device jobs.
+ retried:=public.studio_member_job_action(w,'substo','retry-member',j,'cancel');
+ if retried.status<>'cancelled' then raise exception 'Member device cancel regressed'; end if;
+ update public.studio_jobs set status='failed',attempts=max_attempts,finished_at=clock_timestamp() where id=j;
+ perform public.studio_manage_device(w,'substo','retry-owner','revoke',gen_random_uuid(),null,d);
+ begin
+  perform public.studio_member_job_action(w,'substo','retry-admin',j,'retry');
+  raise exception 'Admin retried revoked device job';
+ exception when sqlstate '42501' then null; end;
+ if exists(select 1 from public.studio_jobs where id=j and (status<>'failed' or attempts<>max_attempts))
+  or (select count(*) from public.studio_job_events where job_id=j and event='requeued')<>1 then
+  raise exception 'Revoked retry changed job or events';
+ end if;
+ hosted:=public.studio_enqueue_job(w,'studio.diagnostic','{}',null,'retry-member',3);
+ update public.studio_jobs set status='failed',attempts=max_attempts,finished_at=clock_timestamp() where id=hosted.id;
+ hosted:=public.studio_member_job_action(w,'substo','retry-member',hosted.id,'retry');
+ if hosted.status<>'queued' or hosted.attempts<>0 or hosted.finished_at is not null or hosted.execution_target<>'hosted' then
+  raise exception 'Member hosted retry regressed';
+ end if;
+ hosted:=public.studio_member_job_action(w,'substo','retry-member',hosted.id,'cancel');
+ if hosted.status<>'cancelled' then raise exception 'Member hosted cancel regressed'; end if;
+ delete from public.studio_workspaces where id=w;
+end $$;
