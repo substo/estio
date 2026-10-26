@@ -1,5 +1,6 @@
 # Shared Studio implementation progress
 
+- 2026-10-26 · Mac companion slices 1–2 for both apps: browser-approved pairing with Keychain token, Connected computer settings (status, hardware, processing consent off by default, pause/revoke, Codex/Claude connect via native CLI login, setup form acknowledged by the Mac); migration `20261026020000_studio_device_setup.sql`. Schema suite and 88 focused tests pass.
 - 2026-10-26 · Built Substo admin-scoped Mac pairing/revocation, local-only diagnostic Jobs, outbound companion and native Codex/Claude connection checks using T3 source patterns; optional API settings stay separate. Verified local schema/concurrency suite, 25 focused tests, scoped typecheck and native Codex inference; full content workflows/Parakeet and Mac packaging remain pending. No schedules or cron enabled.
 
 - 2026-10-26 · PLAN only: revised the existing Mac companion plan for owner-selected Codex/Claude native CLI subscription login, separate device pairing, existing Jobs over HTTPS, offline waiting without paid fallback, separate Parakeet/Google OAuth, optional Business API execution and provider eligibility checks; incorporated Claude unmodified-binary sign-in nuance. Owner reports both local logins verified; no companion implementation, integration verification or deployment.

@@ -15,7 +15,7 @@ export async function runStudioScheduleNow(workspaceId: string, command: ReturnT
 }
 
 export async function executeStudioScheduleCommand(workspaceId: string, command: ReturnType<typeof readScheduleCommand>) {
-  if (command.action === "enable_youtube" || command.action === "run_youtube_now") {
+  if (!("ideas" in command)) {
     return command.action === "enable_youtube" ? enableStudioYoutubeSchedule(workspaceId, command) : runStudioYoutubeScheduleNow(workspaceId, command);
   }
   if (command.action === "run_now") return runStudioScheduleNow(workspaceId, command);
