@@ -193,6 +193,10 @@ export default async function middleware(req: NextRequest, evt: any) {
   if (isSubstoSitePath(req.nextUrl.pathname) && getRequestBrand(req) !== "substo") {
     return new NextResponse("Not Found", { status: 404 });
   }
+  // Only these native device endpoints use bearer authentication, independently of Clerk.
+  if (/^\/api\/studio\/device\/(heartbeat|claim|extend|complete|fail)$/.test(req.nextUrl.pathname)) {
+    return getRequestBrand(req) === "tenant" ? new NextResponse("Not Found", { status: 404 }) : NextResponse.next();
+  }
   // Exact profile-only webhook uses its realm signature, independent of browser
   // Clerk/Studio readiness. No tenant or adjacent API path shares this bypass.
   if (req.nextUrl.pathname === CLERK_PROFILE_WEBHOOK_PATH) {
