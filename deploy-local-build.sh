@@ -864,7 +864,7 @@ NODE
                 pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
             fi
             NODE_ENV=production PROCESS_ROLE=device-tunnel-gateway DEVICE_TUNNEL_GATEWAY_PORT="\$DEVICE_TUNNEL_GATEWAY_PORT" \
-                pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --stop-exit-codes 0 --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway
+                pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --stop-exit-codes 0 --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway || record_post_cutover_failure "Android device tunnel gateway failed to start"
             TUNNEL_GATEWAY_READY=0
             for i in \$(seq 1 45); do
                 if curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" > /dev/null 2>&1; then
@@ -1009,7 +1009,7 @@ NODE
         fi
         stop_orphaned_whatsapp_bridge_browsers
         NODE_ENV=production PROCESS_ROLE=whatsapp-bridge DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID="\$ACTIVE_GATEWAY_RUNTIME_OWNER_INSTANCE_ID" WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
-            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --kill-timeout 200000 --stop-exit-codes 0 --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
+            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --kill-timeout 200000 --stop-exit-codes 0 --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge || record_post_cutover_failure "WhatsApp Web Bridge failed to start"
     fi
     echo "📱 WhatsApp Web Bridge app webhook: \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"
 

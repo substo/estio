@@ -149,3 +149,27 @@ test("no step between the gateway and pm2 save can abort the deploy", () => {
         assert.ok(start?.includes("--stop-exit-codes 0"), `${app} must treat exit 0 as final`);
     }
 });
+
+// A PM2 invocation can fail before any readiness probe. Exercise the actual
+// start commands under errexit so this failure cannot bypass final cleanup.
+test("PM2 start failures are reported after cleanup for both optional runtimes", () => {
+    for (const app of ["$DEVICE_TUNNEL_GATEWAY_APP_NAME", "$WHATSAPP_BRIDGE_APP_NAME"]) {
+        const start = remote.split("\n").find((line) => line.includes(`pm2 start npm --name "${app}"`));
+        assert.ok(start);
+        const result = spawnSync("bash", ["-c", [
+            "set -euo pipefail",
+            between(remote, '    POST_CUTOVER_FAILURES=""', "\n    VIEWING_RELAY_PORT="),
+            "pm2() { return 1; }",
+            start,
+            'echo "drain completed"',
+            'echo "pm2 save completed"',
+            between(remote, '    if [ -n "$POST_CUTOVER_FAILURES" ]; then', "\n    fi\n") + "\n    fi",
+        ].join("\n")], {
+            encoding: "utf8",
+            env: { ...process.env, DEVICE_TUNNEL_GATEWAY_APP_NAME: "gateway", WHATSAPP_BRIDGE_APP_NAME: "bridge", SYMLINK_PATH: "/unused", DEVICE_TUNNEL_GATEWAY_PORT: "3220", ACTIVE_GATEWAY_RUNTIME_OWNER_INSTANCE_ID: "test", WHATSAPP_BRIDGE_SESSION_DIR: "/unused", WHATSAPP_BRIDGE_APP_WEBHOOK_URL: "http://unused", EXPECTED_BRIDGE_CODE_HASH: "test" },
+        });
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stdout, /failed to start/, result.stderr);
+        assert.match(result.stdout, /drain completed\npm2 save completed/);
+    }
+});
