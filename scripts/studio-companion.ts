@@ -2,64 +2,47 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
-import { appOrigin, configSchema, loadConfig, saveConfig } from "../lib/studio/companion/config";
-import { createDeviceStudioQueue } from "../lib/studio/companion/http-queue";
+import { appOrigin } from "../lib/studio/companion/config";
+import { createDeviceStudioQueue, postCommandStatus, type ProviderCommand } from "../lib/studio/companion/http-queue";
 import { createCompanionDiagnostic } from "../lib/studio/companion/diagnostic";
-import { createLocalTextAdapter } from "../lib/studio/companion/providers";
+import { createLocalTextAdapter, type LocalProvider } from "../lib/studio/companion/providers";
+import { discover, discoverPowerAndDisk, type Discovery } from "../lib/studio/companion/discovery";
+import { loadCredentials } from "../lib/studio/companion/keychain";
+import { pairDevice, type PairingDeps } from "../lib/studio/companion/pairing";
+import { DeviceSettings, localGate } from "../lib/studio/companion/settings";
+import { executeProviderCommand } from "../lib/studio/companion/commands";
 import { runStudioJob, runStudioWorker } from "../lib/studio/worker/runner";
+import type { StudioQueue } from "../lib/studio/worker/queue";
 
-const version = "studio-companion-1";
-/** Token never appears in command-line args or logs. A terminal prompt disables echo. */
-async function readToken(): Promise<string> {
-  if (process.env.STUDIO_DEVICE_TOKEN) {
-    const token = process.env.STUDIO_DEVICE_TOKEN.trim(); delete process.env.STUDIO_DEVICE_TOKEN; return token;
-  }
-  const input = process.stdin;
-  if (input.isTTY) {
-    process.stderr.write("Device token (hidden): ");
-    input.setRawMode(true); input.resume();
-    try {
-      return await new Promise<string>((resolve, reject) => {
-        let value = "";
-        const cleanup = () => { input.off("data", onData); input.off("end", onEnd); process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); };
-        const onSignal = () => { cleanup(); reject(new Error("token_input_cancelled")); };
-        const onEnd = () => { cleanup(); reject(new Error("token_input_closed")); };
-        const onData = (data: Buffer) => {
-          for (const byte of data) {
-            if (byte === 3 || byte === 4) { cleanup(); reject(new Error("token_input_cancelled")); return; }
-            if (byte === 13 || byte === 10) { cleanup(); resolve(value.trim()); return; }
-            if (byte === 127 || byte === 8) value = value.slice(0, -1);
-            else if (byte >= 32 && byte <= 126) value += String.fromCharCode(byte);
-            if (value.length > 256) { cleanup(); reject(new Error("token_input_too_long")); return; }
-          }
-        };
-        input.on("data", onData); input.once("end", onEnd); process.once("SIGINT", onSignal); process.once("SIGTERM", onSignal);
-      });
-    } finally { input.setRawMode(false); input.pause(); process.stderr.write("\n"); }
-  }
-  let value = "";
-  for await (const chunk of input) { value += chunk.toString(); if (Buffer.byteLength(value) > 1024) throw new Error("token_input_too_long"); }
-  return value.trim();
-}
-export async function main(argv = process.argv.slice(2)) {
-  const [command, ...args] = argv;
+const version = "studio-companion-2";
+const rediscoverMs = 10 * 60_000;
+const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness";
+const messages: Record<string, string> = {
+  setup_replaced: "`setup` with a pasted device token was replaced by browser pairing. Run: npm run start:studio-companion -- pair --origin <https origin> --name 'My Mac'",
+  invalid_arguments: usage, invalid_app_origin: "Use the app's https origin, for example --origin https://substo.com",
+  pairing_denied: "Pairing was denied in the browser.", pairing_expired: "The pairing code expired. Run pair again.",
+  pairing_consumed: "This pairing was already used. Run pair again.", invalid_pairing_url: "The app returned an unexpected approval link. Pairing stopped.",
+  device_pair_start_failed: "Could not start pairing. Check the origin and your connection.",
+  keychain_write_failed: "Could not save the device key to macOS Keychain.",
+  not_paired: "This Mac is not paired yet. Run: npm run start:studio-companion -- pair --origin <https origin> --name 'My Mac'",
+};
+
+function parseArgs(args: string[]) {
   const flags = new Map<string, string>(); let once = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--once" && !once) { once = true; continue; }
     if (!["--origin", "--name"].includes(args[i]) || flags.has(args[i]) || !args[i + 1] || args[i + 1].startsWith("--")) throw new Error("invalid_arguments");
     flags.set(args[i], args[++i]);
   }
-  if (command === "setup") {
-    if (once || !flags.has("--origin")) throw new Error("setup_requires_origin");
-    const origin = appOrigin(flags.get("--origin")!);
-    const token = await readToken();
-    const config = configSchema.parse({ version: 1, origin, token, name: flags.get("--name") ?? os.hostname(), deviceId: randomUUID() });
-    // Authenticate before replacing a working local pairing; never claim jobs during setup.
-    const workerId = `mac:${config.deviceId}:setup:${process.pid}`;
-    await createDeviceStudioQueue(config, { capabilities: () => ({ platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic"] }) })
-      .heartbeat(workerId, version, new Date());
-    await saveConfig(config);
-    console.log("Studio companion paired locally. Run: npm run start:studio-companion -- start");
+  return { flags, once };
+}
+export async function main(argv = process.argv.slice(2), deps: { pairing?: PairingDeps } = {}) {
+  const [command, ...rest] = argv;
+  if (command === "setup") throw new Error("setup_replaced");
+  const { flags, once } = parseArgs(rest);
+  if (command === "pair") {
+    if (once || !flags.has("--origin")) throw new Error("invalid_arguments");
+    await pairDevice({ origin: appOrigin(flags.get("--origin")!), name: flags.get("--name") ?? os.hostname().replace(/\.local$/, ""), platform: os.platform() }, deps.pairing);
     return;
   }
   if (flags.size || !["start", "readiness"].includes(command) || command === "readiness" && once) throw new Error("invalid_arguments");
@@ -69,18 +52,53 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     const adapters = { codex: createLocalTextAdapter("codex"), claude: createLocalTextAdapter("claude") };
     const readiness = async () => ({ codex: await adapters.codex.readiness(controller.signal), claude: await adapters.claude.readiness(controller.signal) });
-    let providers = await readiness();
-    if (command === "readiness") { console.log(JSON.stringify(providers)); return; }
-    const config = await loadConfig();
+    let [providers, discovery]: [Awaited<ReturnType<typeof readiness>>, Discovery] = await Promise.all([readiness(), discover()]);
+    if (command === "readiness") { console.log(JSON.stringify({ ...providers, ...discovery })); return; }
+    const { config, credentials, migrated } = await loadCredentials().catch(error => {
+      throw error instanceof Error && error.message === "keychain_write_failed" ? error : new Error("not_paired"); });
+    const log = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
+    if (migrated) log({ event: "device_token_moved_to_keychain" });
     const instanceId = randomUUID();
     const workerId = `mac:${config.deviceId}:${process.pid}`;
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic"], ...providers });
-    const queue = createDeviceStudioQueue(config, { capabilities });
+    const settings = new DeviceSettings();
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic"], ...providers, ...discovery });
+
+    // Provider login/logout commands arrive with heartbeats; one at a time per provider.
+    const handled = new Set<string>(); const active = new Map<LocalProvider, Promise<void>>();
+    let pulse: () => void = () => {};
+    const runCommand = (cmd: ProviderCommand) => {
+      if (handled.has(cmd.id) || active.has(cmd.provider) || controller.signal.aborted) return;
+      handled.add(cmd.id);
+      log({ event: "provider_command_started", kind: cmd.kind, provider: cmd.provider });
+      const task = executeProviderCommand(cmd, { signal: controller.signal, readiness: provider => adapters[provider].readiness(),
+        post: status => postCommandStatus(credentials, workerId, status) })
+        .then(async status => { log({ event: "provider_command_finished", kind: cmd.kind, provider: cmd.provider, status });
+          providers = await readiness(); pulse(); })
+        .catch(() => log({ event: "provider_command_failed", provider: cmd.provider }))
+        .finally(() => active.delete(cmd.provider));
+      active.set(cmd.provider, task);
+    };
+    const inner = createDeviceStudioQueue(credentials, { capabilities, configAck: () => settings.pendingAck,
+      onHeartbeat: (state, sentAck) => {
+        if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
+        if (state && !once) for (const cmd of state.commands) runCommand(cmd);
+      } });
+    let last: Parameters<StudioQueue["heartbeat"]> | undefined; let pulsing = false;
+    pulse = () => { if (!last || pulsing) return; pulsing = true; void inner.heartbeat(...last).catch(() => {}).finally(() => { pulsing = false; }); };
+    let lastReasons = "";
+    const queue: StudioQueue = { ...inner,
+      heartbeat: (...args) => { last = args; return inner.heartbeat(...args); },
+      claim: async (id, limit, leaseSeconds) => {
+        // Local policy before claiming. Only diagnostics are registered; future processing kinds must also require gate.processing.
+        const gate = localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
+        const reasons = gate.reasons.join(",");
+        if (reasons !== lastReasons) { lastReasons = reasons; log({ event: "local_gate", diagnostics: gate.diagnostics, processing: gate.processing, reasons: gate.reasons }); }
+        return gate.diagnostics ? inner.claim(id, limit, leaseSeconds) : [];
+      } };
     const diagnostic = createCompanionDiagnostic(provider => adapters[provider]);
     const handlers = { "studio.diagnostic": (job: Parameters<typeof diagnostic>[0], context: Parameters<typeof diagnostic>[1]) =>
       diagnostic(job, { ...context, signal: AbortSignal.any([context.signal, controller.signal]) }) };
     const report = { instanceId, handlers: Object.keys(handlers) };
-    const log = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
     if (once) {
       const startedAt = new Date();
       await queue.heartbeat(workerId, version, startedAt, { ...report, healthy: true, draining: false });
@@ -89,17 +107,22 @@ export async function main(argv = process.argv.slice(2)) {
         for (const job of jobs) await runStudioJob(job, { queue, handlers, workerId, leaseSeconds: 120, log });
         log({ event: "companion_once_complete", claimed: jobs.length });
       } finally { await queue.heartbeat(workerId, version, startedAt, { ...report, healthy: false, draining: true }); }
-    } else {
-      // Refresh safe metadata, never claim text workflows from native CLI readiness alone.
-      let refreshing = false;
-      const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
-        refreshing = true; void readiness().then(value => { providers = value; }).finally(() => { refreshing = false; });
-      } }, 300_000);
-      try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1, signal: controller.signal, log }); }
-      finally { clearInterval(refresh); }
+      return;
     }
+    // Rediscover hardware/runtimes/models/CLI login every 10 minutes; power and disk every minute for local gating.
+    let refreshing = false;
+    const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
+      refreshing = true; void Promise.all([readiness(), discover()]).then(([p, d]) => { providers = p; discovery = d; }).catch(() => {}).finally(() => { refreshing = false; });
+    } }, rediscoverMs);
+    const quick = setInterval(() => { if (!refreshing) void discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }).catch(() => {}); }, 60_000);
+    try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1, heartbeatMs: 15_000, signal: controller.signal, log }); }
+    finally { clearInterval(refresh); clearInterval(quick); await Promise.allSettled(active.values()); }
   } finally { process.off("SIGINT", shutdown); process.off("SIGTERM", shutdown); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => { console.error("Studio companion failed. Check setup, native CLI login, app connection and selected model."); process.exitCode = 1; });
+  main().catch(error => {
+    const code = error instanceof Error ? error.message : "";
+    console.error(messages[code] ?? "Studio companion failed. Check pairing, native CLI login and the app connection.");
+    process.exitCode = 1;
+  });
 }

@@ -5,7 +5,19 @@ import { z } from "zod";
 import { runNativeProcess, type ProcessRunner } from "./process";
 
 export type LocalProvider = "codex" | "claude";
-export interface CliReadiness { installed: boolean; authenticated: boolean; ready: boolean; version?: string; models: string[] }
+export type LoginMethod = "chatgpt" | "api_key" | "claudeai" | "console" | "unknown";
+export interface CliReadiness { installed: boolean; authenticated: boolean; ready: boolean; version?: string; models: string[]; loginMethod?: LoginMethod }
+/** Parse only the login method; account/email/org fields are never read out of the status output. */
+export function codexLoginMethod(output: string): LoginMethod | undefined {
+  if (/logged in using chatgpt/i.test(output)) return "chatgpt";
+  if (/logged in using (an )?api key/i.test(output)) return "api_key";
+  return /logged in/i.test(output) && !/not logged in/i.test(output) ? "unknown" : undefined;
+}
+export function claudeLoginMethod(status: Record<string, unknown>): LoginMethod | undefined {
+  if (status.loggedIn !== true) return undefined;
+  const method = String(status.authMethod);
+  return method === "claude.ai" ? "claudeai" : method === "console" ? "console" : /api.?key/i.test(method) ? "api_key" : "unknown";
+}
 export interface TextRequest<T> {
   model?: string; prompt: string; jsonSchema: Record<string, unknown>; validate: (value: unknown) => T; signal: AbortSignal;
 }
@@ -36,11 +48,9 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
         : ["--safe-mode", "--restricted", "--tools", "--strict-mcp-config", "--json-schema", "--no-session-persistence"])
         .every(flag => help.stdout.includes(flag));
       const auth = await run({ command: provider, args: provider === "codex" ? ["login", "status"] : ["auth", "status", "--json"], cwd, signal, timeoutMs: 10_000, maxOutputBytes: 8192 });
-      if (provider === "codex") result.authenticated = /logged in using chatgpt/i.test(`${auth.stdout}\n${auth.stderr}`);
-      else {
-        const status = object.parse(JSON.parse(auth.stdout));
-        result.authenticated = status.loggedIn === true && status.authMethod === "claude.ai";
-      }
+      result.loginMethod = provider === "codex" ? codexLoginMethod(`${auth.stdout}\n${auth.stderr}`) : claudeLoginMethod(object.parse(JSON.parse(auth.stdout)));
+      // Only subscription logins count: API-key/Console logins would bill a different account.
+      result.authenticated = result.loginMethod === (provider === "codex" ? "chatgpt" : "claudeai");
       result.ready = result.authenticated && supported && Boolean(result.version);
     } catch { /* No raw CLI output or credential-bearing auth data leaves this function. */ }
     return result;
