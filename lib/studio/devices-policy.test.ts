@@ -19,3 +19,17 @@ test("queue bounds and failure shape are validated", () => {
   assert.throws(() => readDeviceCommand("complete", { workerId: "mac", jobId: requestId, leaseToken: requestId, result: { text: "a".repeat(4096) } }));
   assert.throws(() => readDeviceCommand("fail", { workerId: "mac", jobId: requestId, leaseToken: requestId, failure: { code: "bad", message: "safe", retryable: "yes" } }));
 });
+test("device config validator normalizes and rejects unsafe setups", async () => {
+  const { readDeviceConfig, defaultDeviceConfig } = await import("./devices-policy");
+  assert.deepEqual(readDeviceConfig(defaultDeviceConfig), defaultDeviceConfig);
+  const config = readDeviceConfig({ ...defaultDeviceConfig, languages: ["en", "EN", "en-gb", "el"], textProvider: "codex", textModel: "gpt-5",
+    resources: { ...defaultDeviceConfig.resources, workingHours: { start: "09:00", end: "18:00", timeZone: "Europe/Athens" } } });
+  assert.deepEqual(config.languages, ["en", "en-GB", "el"]);
+  assert.equal(config.resources.workingHours?.timeZone, "Europe/Athens");
+  for (const bad of [{ ...defaultDeviceConfig, extra: true }, { ...defaultDeviceConfig, languages: [] }, { ...defaultDeviceConfig, languages: ["$(rm)"] },
+    { ...defaultDeviceConfig, textModel: "gpt-5" }, { ...defaultDeviceConfig, preference: "fast" },
+    { ...defaultDeviceConfig, resources: { ...defaultDeviceConfig.resources, maxConcurrentJobs: 2 } },
+    { ...defaultDeviceConfig, resources: { ...defaultDeviceConfig.resources, minFreeDiskGb: 1 } },
+    { ...defaultDeviceConfig, resources: { ...defaultDeviceConfig.resources, workingHours: { start: "9:00", end: "18:00", timeZone: "Mars/Base" } } },
+    { ...defaultDeviceConfig, translationTargets: Array.from({ length: 21 }, () => "en") }]) assert.throws(() => readDeviceConfig(bad));
+});

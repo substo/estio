@@ -69,3 +69,69 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   }
   return out;
 }
+
+/** Desired setup sent from Settings to a paired computer. Shared by the server and the companion. */
+export interface StudioDeviceConfig {
+  features: { transcription: boolean; text: boolean };
+  languages: string[]; translationTargets: string[];
+  preference: "quality" | "balanced" | "speed";
+  textProvider: "codex" | "claude" | null; textModel: string | null;
+  resources: {
+    modelBudgetGb: number; minFreeDiskGb: number; allowOnBattery: boolean; maxConcurrentJobs: 1; launchAtLogin: boolean;
+    workingHours: null | { start: string; end: string; timeZone: string };
+  };
+}
+export const defaultDeviceConfig: StudioDeviceConfig = Object.freeze({
+  features: Object.freeze({ transcription: false, text: false }), languages: Object.freeze(["en"]) as unknown as string[], translationTargets: Object.freeze([]) as unknown as string[],
+  preference: "balanced", textProvider: null, textModel: null,
+  resources: Object.freeze({ modelBudgetGb: 20, minFreeDiskGb: 20, allowOnBattery: false, maxConcurrentJobs: 1, launchAtLogin: false, workingHours: null }),
+}) as StudioDeviceConfig;
+const modelName = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
+const time = /^([01]\d|2[0-3]):[0-5]\d$/;
+function exactKeys(v: Record<string, unknown>, keys: string[]) { valid(Object.keys(v).every(key => keys.includes(key)) && keys.every(key => key in v)); }
+export function isIanaTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(value)) return false;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return true; } catch { return false; }
+}
+function languageList(value: unknown, min: number): string[] {
+  valid(Array.isArray(value) && value.length >= min && value.length <= 20);
+  const out: string[] = [];
+  for (const item of value as unknown[]) {
+    valid(typeof item === "string" && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$/.test(item));
+    let canonical: string;
+    try { canonical = Intl.getCanonicalLocales(item)[0]; } catch { throw new StudioCommandError("Invalid command."); }
+    if (!out.includes(canonical)) out.push(canonical);
+  }
+  return out;
+}
+function numberIn(value: unknown, min: number, max: number): number {
+  valid(typeof value === "number" && Number.isFinite(value) && value >= min && value <= max);
+  return value as number;
+}
+/** Throws StudioCommandError on any unknown key or out-of-range value; returns a normalized copy. */
+export function readDeviceConfig(value: unknown): StudioDeviceConfig {
+  const v = object(value);
+  exactKeys(v, ["features", "languages", "translationTargets", "preference", "textProvider", "textModel", "resources"]);
+  const features = object(v.features); exactKeys(features, ["transcription", "text"]);
+  valid(typeof features.transcription === "boolean" && typeof features.text === "boolean");
+  valid(["quality", "balanced", "speed"].includes(String(v.preference)));
+  valid(v.textProvider === null || v.textProvider === "codex" || v.textProvider === "claude");
+  valid(v.textModel === null || v.textProvider !== null && typeof v.textModel === "string" && modelName.test(v.textModel));
+  const r = object(v.resources);
+  exactKeys(r, ["modelBudgetGb", "minFreeDiskGb", "allowOnBattery", "maxConcurrentJobs", "launchAtLogin", "workingHours"]);
+  valid(typeof r.allowOnBattery === "boolean" && typeof r.launchAtLogin === "boolean" && r.maxConcurrentJobs === 1);
+  let workingHours: StudioDeviceConfig["resources"]["workingHours"] = null;
+  if (r.workingHours !== null) {
+    const w = object(r.workingHours); exactKeys(w, ["start", "end", "timeZone"]);
+    valid(typeof w.start === "string" && time.test(w.start) && typeof w.end === "string" && time.test(w.end) && w.start !== w.end && isIanaTimeZone(w.timeZone));
+    workingHours = { start: w.start as string, end: w.end as string, timeZone: w.timeZone as string };
+  }
+  return {
+    features: { transcription: features.transcription as boolean, text: features.text as boolean },
+    languages: languageList(v.languages, 1), translationTargets: languageList(v.translationTargets, 0),
+    preference: v.preference as StudioDeviceConfig["preference"],
+    textProvider: v.textProvider as StudioDeviceConfig["textProvider"], textModel: v.textModel as string | null,
+    resources: { modelBudgetGb: numberIn(r.modelBudgetGb, 1, 500), minFreeDiskGb: numberIn(r.minFreeDiskGb, 5, 500),
+      allowOnBattery: r.allowOnBattery as boolean, maxConcurrentJobs: 1, launchAtLogin: r.launchAtLogin as boolean, workingHours },
+  };
+}
