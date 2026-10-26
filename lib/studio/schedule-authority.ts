@@ -2,8 +2,8 @@ import { isPlatformProfileDeleted } from "../platform/profile-lifecycle";
 import { intersectAuthorizedLocations, scopeDirectLocationsForSession } from "../auth/active-location-policy";
 import { queryPath } from "./rest-client";
 export type ScheduleRest = <T>(path: string, init?: RequestInit) => Promise<T>;
-/** Same direct-location intersection/platform-admin scope as an own Estio session. */
-export async function currentEstioScheduleAuthority(userId: string, locationId: string): Promise<boolean> {
+/** Same direct-location intersection/platform-admin scope as an own Estio session; optionally require a location role. */
+export async function currentEstioScheduleAuthority(userId: string, locationId: string, requiredRole?: "ADMIN"): Promise<boolean> {
   const { default: db } = await import("../db");
   // Estio actors only: the Business user must be in the estio realm.
   const user = await db.user.findUnique({ where: { authRealm_clerkId: { authRealm: "estio", clerkId: userId } }, select: { clerkId: true, platformRole: true,
@@ -11,7 +11,7 @@ export async function currentEstioScheduleAuthority(userId: string, locationId: 
     locationRoles: { select: { locationId: true, role: true, contactAccessScope: true } } } });
   if (!user || user.clerkId !== userId) return false;
   return scopeDirectLocationsForSession(intersectAuthorizedLocations({ connectedLocations: user.locations, roles: user.locationRoles }),
-    { platformRole: user.platformRole, isImpersonating: false }).some(location => location.id === locationId);
+    { platformRole: user.platformRole, isImpersonating: false }).some(location => location.id === locationId && (!requiredRole || location.role === requiredRole));
 }
 export async function authorizeEstioSchedule(rest: ScheduleRest, workspaceId: string, userId: string,
   check = currentEstioScheduleAuthority): Promise<boolean> {

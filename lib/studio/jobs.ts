@@ -13,7 +13,7 @@ export interface StudioJobRow {
 }
 /** Device retries consume the paired manager's subscription authority. */
 export function canRetryStudioJob(access: StudioWorkspaceAccess, job: Pick<StudioJobRow, "execution_target" | "device">) {
-  return job.execution_target === "hosted" || (access.brand === "substo" && canManageStudioAi(access)
+  return job.execution_target === "hosted" || (canManageStudioAi(access)
     && job.device !== null && job.device.revoked_at === null);
 }
 
