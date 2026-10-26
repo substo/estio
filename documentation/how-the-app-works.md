@@ -90,6 +90,7 @@ The rename runs as staged migrations: add the new names first, then switch the c
 - Custom fields per niche.
 - Custom domains for Substo Business websites.
 - The Mac network proxy.
+- The Mac as an optional processing unit for Studio (local transcription first; hosted stays the fallback), planned in `studio-mac-processing-plan.md`. Waiting on the owner's answers.
 - Billing.
 
 **Open ops item:** the Android device gateway keeps restarting because its test-access (canary) period expired. No Business has a device connected. A fix is being researched.
