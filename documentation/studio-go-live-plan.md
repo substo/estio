@@ -58,9 +58,10 @@ not approval. Recheck the observations in
 - The script then exited non-zero at `estio-device-tunnel-gateway`: its
   `DEVICE_TUNNEL_CANARY_SCOPES` entry in the WhatsApp overlay expired on
   2026-09-18, and the gateway had already been crash-looping before this deploy.
-  Renew or retire that canary before the next full-scope deploy, or the deploy
-  will stop at the same step after cutover (skipping the bridge, drain and
-  `pm2 save` steps).
+  Resolved on 2026-10-26: an expired or absent canary now counts as "device
+  egress disabled". The gateway and bridge exit cleanly, and full-scope deploys
+  remove them and still drain and `pm2 save`. Post-cutover failures are reported
+  after those steps instead of skipping them.
 - Follow-up release `39a37942` (build `Bsu-6iWBcggPJ76Z2tFl9`, blue :3001, deployed with
   `DEPLOY_RUNTIME_SCOPE=web-viewing-scrape` to skip the expired gateway step) fixes a
   post-sign-in loop on Substo: a signed-in sign-in page now hands off with one guarded

@@ -53,6 +53,11 @@ import { redactOperationalIdentifier } from "../lib/device-tunnel/operational-re
 const PORT = Math.max(Number(process.env.DEVICE_TUNNEL_GATEWAY_PORT || 3220), 1);
 const INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
 const STARTUP_CONFIGURATION = validateWhatsAppDeviceEgressStartupConfiguration();
+if (STARTUP_CONFIGURATION.disabledReason) {
+    // Disabled is a clean final state: PM2 is started with --stop-exit-codes 0.
+    console.log(`[device tunnel gateway] disabled: ${STARTUP_CONFIGURATION.disabledReason} (no active canary or production scope); exiting`);
+    process.exit(0);
+}
 const DISTRIBUTED_PLACEMENT = STARTUP_CONFIGURATION.distributedPlacement;
 const CONFIGURED_GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || "").trim();
 if (DISTRIBUTED_PLACEMENT && !CONFIGURED_GATEWAY_NODE_ID) {

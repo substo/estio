@@ -76,6 +76,11 @@ const SECRET = String(process.env.WHATSAPP_WEB_BRIDGE_SECRET || process.env.CRON
 const DEVICE_TUNNEL_GATEWAY_URL = String(process.env.DEVICE_TUNNEL_GATEWAY_URL || "http://127.0.0.1:3220").replace(/\/+$/, "");
 const DEVICE_TUNNEL_INTERNAL_SECRET = String(process.env.DEVICE_TUNNEL_INTERNAL_SECRET || "").trim();
 const STARTUP_CONFIGURATION = validateWhatsAppDeviceEgressStartupConfiguration();
+if (STARTUP_CONFIGURATION.disabledReason) {
+    // Disabled is a clean final state: PM2 is started with --stop-exit-codes 0.
+    console.log(`[WhatsApp Web bridge] disabled: ${STARTUP_CONFIGURATION.disabledReason} (no active canary or production scope); exiting`);
+    process.exit(0);
+}
 const RUNTIME_LEASE_ENFORCEMENT = STARTUP_CONFIGURATION.runtimeLeaseEnforcement;
 const GATEWAY_NODE_ID = String(process.env.DEVICE_TUNNEL_GATEWAY_NODE_ID || "").trim();
 const RUNTIME_OWNER_INSTANCE_ID = String(process.env.DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID || "").trim();

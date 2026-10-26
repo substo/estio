@@ -89,7 +89,7 @@ PR 7 final verification passed 156 focused device-tunnel/rate-limit/session-auth
 
 ## Explicit canary scope
 
-Canary selection is a JSON array in `DEVICE_TUNNEL_CANARY_SCOPES`. Every entry must exactly name tenant, database bridge session, binding, target node, canonical gateway URL, review/change reference, and expiry. Maximum scope count is 25 and maximum lifetime is seven days. Duplicate, expired, or excessively long-lived entries fail closed; an expiry also fences a connected canary on its next work/renewal boundary.
+Canary selection is a JSON array in `DEVICE_TUNNEL_CANARY_SCOPES`. Every entry must exactly name tenant, database bridge session, binding, target node, canonical gateway URL, review/change reference, and expiry. Maximum scope count is 25 and maximum lifetime is seven days. Duplicate or excessively long-lived entries fail startup. An expired entry is inactive: token routing refuses it, and an expiry also fences a connected canary on its next work/renewal boundary. When distributed placement has no unexpired canary and no production scope, device egress is disabled rather than failed. The gateway and bridge log `disabled: <reason>` and exit 0, and PM2 runs them with `--stop-exit-codes 0`. `deploy-local-build.sh` checks `scripts/ops/device-egress-activation.ts`, removes both processes and continues. Re-enable only by writing a new, reviewed canary entry.
 
 ```json
 [

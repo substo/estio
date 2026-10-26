@@ -459,6 +459,14 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
 
     mkdir -p "\$DEPLOY_STATE_DIR"
 
+    # After the traffic switch, a failing optional runtime must not skip the
+    # old-slot drain or pm2 save: record it and fail once the deploy is complete.
+    POST_CUTOVER_FAILURES=""
+    record_post_cutover_failure() {
+        POST_CUTOVER_FAILURES="\$POST_CUTOVER_FAILURES; \$1"
+        echo "❌ \$1 (recorded: the deploy finishes its drain and pm2 save, then fails)"
+    }
+
     VIEWING_RELAY_PORT="\$VIEWING_RELAY_DEFAULT_PORT"
     if [ -f "\$TARGET_DIR/.env" ]; then
         RAW_VIEWING_RELAY_PORT=\$(grep -E '^VIEWING_SESSION_RELAY_PORT=' "\$TARGET_DIR/.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]' || true)
@@ -788,7 +796,25 @@ NODE
         fi
     }
 
-    if [ -n "\${DEVICE_TUNNEL_JWT_SECRET:-}" ] && [ -n "\${DEVICE_TUNNEL_INTERNAL_SECRET:-}" ]; then
+    # Distributed device egress with no active canary or production scope is a
+    # clean "disabled" state: remove the gateway and bridge instead of letting
+    # them crash-loop, and carry on. Canaries are never renewed automatically.
+    DEVICE_EGRESS_STATE=\$(cd "\$SYMLINK_PATH" && ./node_modules/.bin/tsx scripts/ops/device-egress-activation.ts 2>/dev/null || true)
+    printf '%s %s\n' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" "\${DEVICE_EGRESS_STATE:-invalid:unreadable}" > "\$DEPLOY_STATE_DIR/device-egress-status"
+    RUN_WHATSAPP_BRIDGE=1
+    if [ "\${DEVICE_EGRESS_STATE%%:*}" = "disabled" ]; then
+        RUN_WHATSAPP_BRIDGE=0
+        echo "⏸️  Android device egress is disabled (\${DEVICE_EGRESS_STATE#disabled:}): no active canary or production scope."
+        echo "⏸️  Removing \$DEVICE_TUNNEL_GATEWAY_APP_NAME and \$WHATSAPP_BRIDGE_APP_NAME; renew or retire the canary deliberately to re-enable."
+        fence_whatsapp_browser_for_gateway_restart
+        if pm2 describe "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" > /dev/null 2>&1; then
+            pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
+        fi
+        rm -f "\$DEPLOY_STATE_DIR/device-tunnel-gateway.sha256"
+    elif [ "\$DEVICE_EGRESS_STATE" != "enabled" ]; then
+        RUN_WHATSAPP_BRIDGE=0
+        record_post_cutover_failure "Android device egress configuration is invalid (\${DEVICE_EGRESS_STATE:-invalid:unreadable}); gateway and WhatsApp bridge left unchanged"
+    elif [ -n "\${DEVICE_TUNNEL_JWT_SECRET:-}" ] && [ -n "\${DEVICE_TUNNEL_INTERNAL_SECRET:-}" ]; then
         echo "🔐 Ensuring Android device tunnel gateway is running (\$DEVICE_TUNNEL_GATEWAY_APP_NAME) on :\$DEVICE_TUNNEL_GATEWAY_PORT..."
         GATEWAY_HASH_FILE="\$DEPLOY_STATE_DIR/device-tunnel-gateway.sha256"
         EXPECTED_GATEWAY_CODE_HASH=\$(cd "\$SYMLINK_PATH" && sha256sum scripts/device-tunnel-gateway.ts lib/device-tunnel/*.ts lib/whatsapp/rate-limit*.ts package-lock.json 2>/dev/null | sha256sum | awk '{print \$1}' || true)
@@ -838,7 +864,7 @@ NODE
                 pm2 delete "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" || true
             fi
             NODE_ENV=production PROCESS_ROLE=device-tunnel-gateway DEVICE_TUNNEL_GATEWAY_PORT="\$DEVICE_TUNNEL_GATEWAY_PORT" \
-                pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway
+                pm2 start npm --name "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --stop-exit-codes 0 --cwd "\$SYMLINK_PATH" -- run start:device-tunnel-gateway
             TUNNEL_GATEWAY_READY=0
             for i in \$(seq 1 45); do
                 if curl -fsS -H "x-device-tunnel-secret: \$DEVICE_TUNNEL_INTERNAL_SECRET" "http://127.0.0.1:\$DEVICE_TUNNEL_GATEWAY_PORT/health" > /dev/null 2>&1; then
@@ -851,8 +877,8 @@ NODE
             done
             if [ "\$TUNNEL_GATEWAY_READY" -ne 1 ]; then
                 pm2 logs "\$DEVICE_TUNNEL_GATEWAY_APP_NAME" --lines 120 --nostream || true
-                echo "❌ Android device tunnel gateway failed readiness checks."
-                exit 1
+                RUN_WHATSAPP_BRIDGE=0
+                record_post_cutover_failure "Android device tunnel gateway failed readiness checks; WhatsApp bridge step skipped"
             fi
         fi
     else
@@ -864,6 +890,7 @@ NODE
         echo "⚠️  Android device tunnel gateway is disabled; configure DEVICE_TUNNEL_JWT_SECRET and DEVICE_TUNNEL_INTERNAL_SECRET to enable it."
     fi
 
+    if [ "\$RUN_WHATSAPP_BRIDGE" -eq 1 ]; then
     echo "📱 Ensuring WhatsApp Web Bridge process is running (\$WHATSAPP_BRIDGE_APP_NAME) on :\$WHATSAPP_BRIDGE_PORT..."
     mkdir -p "\$WHATSAPP_BRIDGE_SESSION_DIR"
     stop_orphaned_whatsapp_bridge_browsers() {
@@ -982,7 +1009,7 @@ NODE
         fi
         stop_orphaned_whatsapp_bridge_browsers
         NODE_ENV=production PROCESS_ROLE=whatsapp-bridge DEVICE_TUNNEL_RUNTIME_OWNER_INSTANCE_ID="\$ACTIVE_GATEWAY_RUNTIME_OWNER_INSTANCE_ID" WHATSAPP_WEB_BRIDGE_SESSION_DIR="\$WHATSAPP_BRIDGE_SESSION_DIR" WHATSAPP_WEB_BRIDGE_APP_WEBHOOK_URL="\$WHATSAPP_BRIDGE_APP_WEBHOOK_URL" WHATSAPP_WEB_BRIDGE_CODE_HASH="\$EXPECTED_BRIDGE_CODE_HASH" \
-            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --kill-timeout 200000 --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
+            pm2 start npm --name "\$WHATSAPP_BRIDGE_APP_NAME" --kill-timeout 200000 --stop-exit-codes 0 --cwd "\$SYMLINK_PATH" -- run start:whatsapp-web-bridge
     fi
     echo "📱 WhatsApp Web Bridge app webhook: \$WHATSAPP_BRIDGE_APP_WEBHOOK_URL"
 
@@ -1004,10 +1031,10 @@ NODE
         pm2 logs "\$WHATSAPP_BRIDGE_APP_NAME" --lines 120 --nostream || true
         write_whatsapp_bridge_deploy_status "\${BRIDGE_HEALTH_JSON:-{}}" "unreachable"
         if [ "\$REQUIRE_WHATSAPP_BRIDGE_READY" = "true" ]; then
-            echo "❌ REQUIRE_WHATSAPP_BRIDGE_READY=true, failing deploy."
-            exit 1
+            record_post_cutover_failure "WhatsApp Web Bridge is unreachable and REQUIRE_WHATSAPP_BRIDGE_READY=true"
+        else
+            echo "⚠️  Continuing deploy because app cutover is healthy and bridge readiness is non-blocking."
         fi
-        echo "⚠️  Continuing deploy because app cutover is healthy and bridge readiness is non-blocking."
     fi
 
     BRIDGE_SESSION_READY=0
@@ -1048,10 +1075,10 @@ NODE
             echo "⚠️  WhatsApp Web Bridge service is reachable, but no WhatsApp session became ready during the deploy grace period."
             echo "⚠️  Deploy status for this subsystem: degraded_no_ready_session. Details saved to \$DEPLOY_STATE_DIR/whatsapp-web-bridge-readiness.json"
             if [ "\$REQUIRE_WHATSAPP_BRIDGE_READY" = "true" ]; then
-                echo "❌ REQUIRE_WHATSAPP_BRIDGE_READY=true, failing deploy because no WhatsApp session is ready."
-                exit 1
+                record_post_cutover_failure "No WhatsApp session became ready and REQUIRE_WHATSAPP_BRIDGE_READY=true"
+            else
+                echo "⚠️  Continuing deploy because app cutover is healthy and WhatsApp session readiness is non-blocking."
             fi
-            echo "⚠️  Continuing deploy because app cutover is healthy and WhatsApp session readiness is non-blocking."
         fi
     fi
 
@@ -1091,6 +1118,7 @@ if (needsQr) {
     console.log('⏳ WhatsApp recovery is continuing automatically. Do not restart Android or scan a QR while status is starting/authenticated.');
 }
 NODE
+    fi
     fi
 
     for RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAME in \$RETIRED_WHATSAPP_CALL_BRIDGE_APP_NAMES; do
@@ -1157,6 +1185,11 @@ DRAIN_EOF
 
     pm2 save
     pm2 list
+
+    if [ -n "\$POST_CUTOVER_FAILURES" ]; then
+        echo "❌ Traffic is switched, the old slot drain is scheduled and PM2 state is saved, but these steps failed:\${POST_CUTOVER_FAILURES#; }"
+        exit 1
+    fi
 ENDSSH
 
 echo "✅ Local Build Deployment Complete!"

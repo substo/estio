@@ -56,6 +56,7 @@ test("unset and explicit-off controls preserve narrow local compatibility", () =
         canaryScopeCount: 0,
         productionScopeCount: 0,
         distributedCanaryCapable: false,
+        disabledReason: null,
     });
     for (const rateLimitMode of ["disabled", "shadow", "enforce"] as const) {
         const config = validateWhatsAppDeviceEgressStartupConfiguration({
@@ -95,7 +96,6 @@ test("every partial or contradictory four-control configuration fails closed", (
         DEVICE_TUNNEL_RUNTIME_LEASE_ENFORCEMENT: "true",
     }, "durable_auth_control_mismatch");
     expectCode({ WHATSAPP_SESSION_AUTH_MODE: "encrypted_snapshot" }, "durable_auth_control_mismatch");
-    expectCode(canaryEnv({ DEVICE_TUNNEL_CANARY_SCOPES: "[]" }), "canary_scope_missing");
     expectCode(canaryEnv({ WHATSAPP_SESSION_AUTH_KMS_KEY_PATH: "wrong" }), "kms_configuration_invalid");
     expectCode(canaryEnv({ WHATSAPP_SESSION_AUTH_R2_SECRET_ACCESS_KEY: "" }), "r2_configuration_invalid");
 });
@@ -116,9 +116,6 @@ test("scopes cannot be staged ambiguously or outlive their review window", () =>
     }, "durable_auth_control_mismatch");
     expectCode(canaryEnv({ DEVICE_TUNNEL_CANARY_SCOPES: "not-json" }), "canary_scope_invalid");
     expectCode(canaryEnv({
-        DEVICE_TUNNEL_CANARY_SCOPES: JSON.stringify([{ ...scope, expiresAt: "2026-07-20T11:00:00.000Z" }]),
-    }), "canary_scope_expired");
-    expectCode(canaryEnv({
         DEVICE_TUNNEL_CANARY_SCOPES: JSON.stringify([{ ...scope, expiresAt: "2026-08-20T00:00:00.000Z" }]),
     }), "canary_scope_expiry_too_distant");
     expectCode(canaryEnv({
@@ -128,4 +125,24 @@ test("scopes cannot be staged ambiguously or outlive their review window", () =>
         DEVICE_TUNNEL_CANARY_SCOPES: "[]",
         DEVICE_TUNNEL_PRODUCTION_SCOPES: "not-json",
     }), "production_scope_invalid");
+});
+
+test("distributed placement without an active scope is disabled, not a startup failure", () => {
+    const expired = { ...scope, expiresAt: "2026-07-20T11:00:00.000Z" };
+    assert.equal(validateWhatsAppDeviceEgressStartupConfiguration(canaryEnv({
+        DEVICE_TUNNEL_CANARY_SCOPES: JSON.stringify([expired]),
+    }), now).disabledReason, "canary_scope_expired");
+    assert.equal(validateWhatsAppDeviceEgressStartupConfiguration(canaryEnv({
+        DEVICE_TUNNEL_CANARY_SCOPES: "[]",
+    }), now).disabledReason, "canary_scope_missing");
+    // Expired entries are inactive; any remaining active scope keeps egress enabled.
+    assert.equal(validateWhatsAppDeviceEgressStartupConfiguration(canaryEnv({
+        DEVICE_TUNNEL_CANARY_SCOPES: JSON.stringify([expired, { ...scope, bindingId: "binding-2" }]),
+    }), now).disabledReason, null);
+    assert.equal(validateWhatsAppDeviceEgressStartupConfiguration(canaryEnv(), now).disabledReason, null);
+    // Disabled never relaxes real misconfiguration.
+    expectCode(canaryEnv({
+        DEVICE_TUNNEL_CANARY_SCOPES: JSON.stringify([expired]),
+        WHATSAPP_SESSION_AUTH_KMS_KEY_PATH: "wrong",
+    }), "kms_configuration_invalid");
 });

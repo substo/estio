@@ -13,7 +13,12 @@ export type WhatsAppDeviceEgressStartupConfiguration = {
     canaryScopeCount: number;
     productionScopeCount: number;
     distributedCanaryCapable: boolean;
+    // Distributed placement is configured but no canary or production scope is
+    // active, so device egress is switched off rather than failing startup.
+    disabledReason: WhatsAppDeviceEgressDisabledReason | null;
 };
+
+export type WhatsAppDeviceEgressDisabledReason = "canary_scope_expired" | "canary_scope_missing";
 
 export type WhatsAppDeviceEgressConfigurationErrorCode =
     | "control_boolean_invalid"
@@ -105,21 +110,21 @@ export function validateWhatsAppDeviceEgressStartupConfiguration(
     if (!distributedPlacement && (scopes.length > 0 || productionScopes.length > 0)) {
         throw new WhatsAppDeviceEgressConfigurationError("durable_auth_control_mismatch");
     }
-    if (distributedPlacement && scopes.length === 0 && productionScopes.length === 0) {
-        throw new WhatsAppDeviceEgressConfigurationError("canary_scope_missing");
-    }
     const productionKeys = new Set(productionScopes.map((scope) =>
         `${scope.locationId}\0${scope.sessionId}\0${scope.bindingId}`));
     if (scopes.some((scope) =>
         productionKeys.has(`${scope.locationId}\0${scope.sessionId}\0${scope.bindingId}`))) {
         throw new WhatsAppDeviceEgressConfigurationError("placement_scope_overlap");
     }
+    let disabledReason: WhatsAppDeviceEgressDisabledReason | null = null;
     if (distributedPlacement) {
-        for (const scope of scopes) {
+        // An expired canary is inactive, never renewed; token routing refuses it per request.
+        const activeScopes = scopes.filter((scope) => new Date(scope.expiresAt).getTime() > now.getTime());
+        if (activeScopes.length === 0 && productionScopes.length === 0) {
+            disabledReason = scopes.length > 0 ? "canary_scope_expired" : "canary_scope_missing";
+        }
+        for (const scope of activeScopes) {
             const expiresAt = new Date(scope.expiresAt).getTime();
-            if (expiresAt <= now.getTime()) {
-                throw new WhatsAppDeviceEgressConfigurationError("canary_scope_expired");
-            }
             if (expiresAt - now.getTime() > 7 * 86_400_000) {
                 throw new WhatsAppDeviceEgressConfigurationError("canary_scope_expiry_too_distant");
             }
@@ -144,5 +149,6 @@ export function validateWhatsAppDeviceEgressStartupConfiguration(
         canaryScopeCount: scopes.length,
         productionScopeCount: productionScopes.length,
         distributedCanaryCapable: distributedPlacement,
+        disabledReason,
     };
 }
