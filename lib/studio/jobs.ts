@@ -7,16 +7,32 @@ export interface StudioJobRow {
   id: string; kind: string; status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   attempts: number; max_attempts: number; run_after: string; last_error_code: string | null; last_error_message: string | null;
   created_at: string; finished_at: string | null;
+  execution_target: "hosted" | "device"; device_id: string | null; result: unknown;
 }
 /** A worker seen within this window is considered online. */
 export const WORKER_ONLINE_SECONDS = 90;
+
+/** Render only the diagnostic protocol, never arbitrary provider output or other job results. */
+export function studioDiagnosticDisplayResult(kind: string, value: unknown): string | null {
+  if (kind !== "studio.diagnostic" || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const safe: Record<string, unknown> = {};
+  if (typeof raw.ok === "boolean") safe.ok = raw.ok;
+  if (typeof raw.workerId === "string" && /^[A-Za-z0-9:._-]{1,100}$/.test(raw.workerId)) safe.workerId = raw.workerId;
+  if (typeof raw.checkedAt === "string" && /^\d{4}-\d{2}-\d{2}T[0-9:.+-]+Z?$/.test(raw.checkedAt) && raw.checkedAt.length <= 40 && Number.isFinite(Date.parse(raw.checkedAt))) safe.checkedAt = raw.checkedAt;
+  if (raw.provider === "codex" || raw.provider === "claude") safe.provider = raw.provider;
+  if (typeof raw.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(raw.model)) safe.model = raw.model;
+  if (raw.summary === "Studio Mac connection works") safe.summary = raw.summary;
+  if (typeof raw.durationMs === "number" && Number.isFinite(raw.durationMs) && raw.durationMs >= 0 && raw.durationMs <= 300_000) safe.durationMs = raw.durationMs;
+  return Object.keys(safe).length ? JSON.stringify(safe, null, 2) : null;
+}
 
 export async function listStudioJobs(workspaceId: string, page = 0) {
   const access = await getStudioWorkspaceAccess(workspaceId);
   if (!access) return null;
   const [jobs, workers] = await Promise.all([
     studioRest<StudioJobRow[]>(queryPath("studio_jobs", {
-      select: "id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at",
+      select: "id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at,execution_target,device_id,result",
       workspace_id: `eq.${access.workspace.id}`, order: "created_at.desc,id.asc", limit: "26", offset: String(page * 25) })),
     studioRest<Array<{ seen_at: string }>>(queryPath("studio_worker_heartbeats", { select: "seen_at", order: "seen_at.desc", limit: "1" })),
   ]);
