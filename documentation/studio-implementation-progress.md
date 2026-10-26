@@ -1,5 +1,7 @@
 # Shared Studio implementation progress
 
+- 2026-10-26 · Live Substo pairing to Martin Mac succeeded with Keychain storage; dashboard Mac/Codex checks and setup acknowledgement passed, offline checks remained queued without hosted fallback. Claude native login is detected but inference is blocked by its session limit. Shutdown reports now immediately mark the computer offline; processing and schedules remain off.
+
 - 2026-10-26 · Mac companion slices 1–2 for both apps: browser-approved pairing with Keychain token, Connected computer settings (status, hardware, processing consent off by default, pause/revoke, Codex/Claude connect via native CLI login, setup form acknowledged by the Mac); migration `20261026020000_studio_device_setup.sql`. Schema suite and 88 focused tests pass.
 - 2026-10-26 · Built Substo admin-scoped Mac pairing/revocation, local-only diagnostic Jobs, outbound companion and native Codex/Claude connection checks using T3 source patterns; optional API settings stay separate. Verified local schema/concurrency suite, 25 focused tests, scoped typecheck and native Codex inference; full content workflows/Parakeet and Mac packaging remain pending. No schedules or cron enabled.
 

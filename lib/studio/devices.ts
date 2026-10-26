@@ -67,7 +67,7 @@ export async function getStudioDevices(workspaceId: string) {
   const busy = new Set(running.map(job => job.device_id));
   const now = Date.now();
   return { canManage: canManageStudioAi(access), devices: rows.map((row): StudioDeviceSummary => {
-    const online = !row.revoked_at && row.seen_at !== null && now - Date.parse(row.seen_at) < WORKER_ONLINE_SECONDS * 1000;
+    const online = !row.revoked_at && row.report.draining !== true && row.seen_at !== null && now - Date.parse(row.seen_at) < WORKER_ONLINE_SECONDS * 1000;
     const status: StudioDeviceStatus = row.revoked_at ? "revoked" : row.paused ? "paused" : !online ? "offline" : busy.has(row.id) ? "busy" : "online";
     const latest: StudioDeviceCommandSummary[] = [];
     for (const { device_id, ...command } of commands) if (device_id === row.id && !latest.some(c => c.provider === command.provider))
