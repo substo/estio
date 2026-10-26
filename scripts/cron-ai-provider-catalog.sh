@@ -18,7 +18,9 @@ LOCK_FILE="/tmp/ai-provider-catalog-cron.lock"
 APP_URL="${APP_BASE_URL:-https://estio.co}"
 # Use the credential for the currently deployed app. Crontab values can lag
 # behind a rotated .env credential after a blue/green release.
-APP_CRON_SECRET="$(cd "${SCRIPT_DIR}/.." && node -e 'require("dotenv").config({path:".env"}); process.stdout.write(process.env.CRON_SECRET || "")' 2>/dev/null || true)"
+# Clear the inherited value so Node's env-file reader prefers the deployed file.
+# Node 20+ provides this without a dependency in the standalone bundle.
+APP_CRON_SECRET="$(cd "${SCRIPT_DIR}/.." && env -u CRON_SECRET node --env-file=.env -e 'process.stdout.write(process.env.CRON_SECRET || "")' 2>/dev/null || true)"
 CRON_SECRET="${APP_CRON_SECRET:-${CRON_SECRET:-}}"
 TIMEOUT_SECONDS=240
 
