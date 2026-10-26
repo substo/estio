@@ -2,25 +2,24 @@ import { studioRouteParams } from "@/lib/studio/route-context";
 import { notFound } from "next/navigation";
 import { formatUsd } from "@/lib/studio/ai-settings-policy";
 import { getStudioAiSettings } from "@/lib/studio/ai-settings";
-import { getStudioDevices } from "@/lib/studio/devices";
 import { BudgetForm, OpenAiKeyForm } from "./ai-settings-forms";
-import { CompanionSettings } from "./companion-settings";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudioAiSettingsPage({ params }: { params: Promise<{  }> }) {
   const { workspaceId } = await studioRouteParams(params);
-  const [settings, devices] = await Promise.all([getStudioAiSettings(workspaceId), getStudioDevices(workspaceId)]);
-  if (!settings || !devices) notFound();
+  const settings = await getStudioAiSettings(workspaceId);
+  if (!settings) notFound();
   const { openai, monthlyBudgetMicros, spentMicros, heldMicros, canManage, encryptionReady } = settings;
   const active = Boolean(openai) && monthlyBudgetMicros > 0;
   return (
     <main className="mx-auto max-w-3xl space-y-8 p-6 md:p-10">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">AI settings</h1>
-        <p className="text-muted-foreground">Connect your Mac companion or configure optional hosted processing for this Business.</p>
+        <p className="text-muted-foreground">Configure optional hosted processing for this Business.</p>
       </header>
-      <CompanionSettings {...devices} />
+      <p className="text-sm">To process on your own Mac instead, go to <Link className="text-primary hover:underline" href="/studio/settings/computer">Connected computer</Link>.</p>
       <section className="space-y-2 rounded-xl border bg-card p-5 text-sm">
         <h2 className="text-lg font-medium">Optional hosted API</h2>
         <p className="text-muted-foreground">Hosted transcription and AI processing use this Business&apos;s OpenAI API key and monthly cap. A key is not required for Mac checks. Adding a key does not enable automatic paid fallback for Mac jobs.</p>

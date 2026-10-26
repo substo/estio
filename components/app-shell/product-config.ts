@@ -3,6 +3,7 @@ import {
   CalendarClock,
   Clapperboard,
   Compass,
+  Laptop,
   LayoutDashboard,
   Library,
   ListChecks,
@@ -42,7 +43,10 @@ export function studioNavGroups(app: ShellApp, workspaceId: string | null, locat
     })
   }
   const settings: AdminNavGroup["items"] = []
-  if (base) settings.push({ href: `${base}/settings/ai`, label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith(`${base}/settings`) })
+  if (base) settings.push(
+    { href: `${base}/settings/ai`, label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith(`${base}/settings/ai`) },
+    { href: `${base}/settings/computer`, label: "Connected computer", icon: Laptop, activePath: (pathname) => pathname.startsWith(`${base}/settings/computer`) },
+  )
   settings.push({ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") })
   if (app === "substo" && locationId) {
     settings.push(
