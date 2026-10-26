@@ -1,5 +1,7 @@
 # Shared Studio implementation progress
 
+- 2026-10-26: Imported the approved legacy Substo data into the Substo Business on substo.com: 10 records (4 full transcripts), 4 knowledge sources, 200 pending insights/evidence, 1,738 units, 471 R2 frame references verified with no pending media, and 1 inactive schedule plus its historical run; exact source payloads and metadata replay verified, signed-in transcripts/citations/source links checked; final frame rendering check blocked by browser automation timeouts; test leftovers and temporary/history artifacts skipped; existing importers unchanged, no application deployment required.
+
 - 2026-10-26 · Live Substo pairing to Martin Mac succeeded with Keychain storage; dashboard Mac/Codex checks and setup acknowledgement passed, offline checks remained queued without hosted fallback. Claude native login is detected but inference is blocked by its session limit. Shutdown reports now immediately mark the computer offline; processing and schedules remain off.
 
 - 2026-10-26 · Mac companion slices 1–2 for both apps: browser-approved pairing with Keychain token, Connected computer settings (status, hardware, processing consent off by default, pause/revoke, Codex/Claude connect via native CLI login, setup form acknowledged by the Mac); migration `20261026020000_studio_device_setup.sql`. Schema suite and 88 focused tests pass.
