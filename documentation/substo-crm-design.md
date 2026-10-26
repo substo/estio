@@ -1,5 +1,7 @@
 # Substo CRM: design direction
 
+> **Superseded summary:** read [How Estio and Substo work](how-the-app-works.md) first. This page is kept as history.
+
 ## Tenant model clarification (2026-10-25)
 
 Studio routes now mirror CRM: `/studio` and `/studio/...` resolve the same active Location, without a workspace UUID in the address. Existing UUIDs are private storage keys only; legacy links authorize their mapped Location before redirecting. No separate Studio tenant or workspace preference exists.

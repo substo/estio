@@ -1,5 +1,7 @@
 # CRM and Studio tenant context: investigation and implementation plan
 
+> **Superseded summary:** read [How Estio and Substo work](how-the-app-works.md) first. This page is kept as history.
+
 **Implemented routing correction, 2026-10-25:** Studio now uses clean `/studio/...` product routes with the CRM active Location as sole tenant authority. The original recommendation to retain UUID URLs/readable aliases is superseded. Legacy UUID links are authorized compatibility handoffs to the same Location and a clean URL; existing UUID storage keys remain private and do not select a separate tenant. See the latest [implementation record](studio-implementation-progress.md).
 
 
