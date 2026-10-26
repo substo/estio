@@ -7,6 +7,7 @@ import { StudioJobError } from "./handlers";
 import { encryptStudioSecret } from "../secrets";
 import { youtubeProfileContext } from "../../google/youtube-policy";
 import { readYoutubeScheduleCommand } from "../youtube-schedule-policy";
+import { readScheduleCommand } from "../schedule-execution-policy";
 const runId = "c2400000-0000-4000-8000-000000000001";
 const channel = "UC" + "a".repeat(22);
 const input: YoutubeDiscoveryContext = { outcome: "ready", brand: "substo", userId: "profile-owner", connectionVersion: "grant-version", source: "subscription", channelId: channel, query: "Saved query" };
@@ -30,11 +31,14 @@ function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; provi
  };
  return { deps, calls, controller, count: () => reads };
 }
-test("discovery activation requires explicit sharing, bounded sources and current versions", () => {
+test("manual and recurring discovery require explicit sharing, bounded sources and current versions", () => {
  const command = { action: "enable_youtube", scheduleId: runId, version: 1, stateVersion: 0, requestId: runId, connectionVersion: runId, source: "subscription", channelId: channel, titlePrefix: "My label", confirmShare: true };
  assert.equal(readYoutubeScheduleCommand(command).source, "subscription");
  assert.equal(readYoutubeScheduleCommand({ ...command, source: "search", channelId: "ignored" }).channelId, "");
- for (const patch of [{ connectionVersion: undefined }, { connectionVersion: "invalid" }, { confirmShare: false }, { source: "all_subscriptions" }, { source: "home_feed" }, { channelId: "bad" }, { titlePrefix: "" }, { titlePrefix: "x".repeat(101) }, { stateVersion: -1 }, { version: 0 }]) assert.throws(() => readYoutubeScheduleCommand({ ...command, ...patch }));
+ assert.equal(readYoutubeScheduleCommand({ ...command, action: "run_youtube_now" }).action, "run_youtube_now");
+ assert.equal(readScheduleCommand({ ...command, action: "run_youtube_now" }).action, "run_youtube_now");
+ assert.throws(() => readYoutubeScheduleCommand({ ...command, action: "run_now" }));
+ for (const action of ["enable_youtube", "run_youtube_now"]) for (const patch of [{ connectionVersion: undefined }, { connectionVersion: "invalid" }, { confirmShare: false }, { source: "all_subscriptions" }, { source: "home_feed" }, { channelId: "bad" }, { titlePrefix: "" }, { titlePrefix: "x".repeat(101) }, { stateVersion: -1 }, { version: 0 }]) assert.throws(() => readYoutubeScheduleCommand({ ...command, action, ...patch }));
 });
 test("saved discovery survives lost commit response without more Google reads", async () => {
  const f = fixture({ lostFinish: true }); const handle = createYoutubeDiscoveryHandler(f.deps);

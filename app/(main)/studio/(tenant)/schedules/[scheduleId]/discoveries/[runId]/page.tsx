@@ -12,7 +12,7 @@ export default async function YoutubeDiscoveryRunPage({ params }: { params: Prom
   <h1 className="text-3xl font-semibold">YouTube discovery run</h1>
   <p>{data.job?.status ?? "Status unavailable"} · queued {data.run.created_at}</p>
   {data.job?.last_error_message ? <p>{data.job.last_error_message}</p> : null}<RefreshScheduleHistory />
-  <p className="text-sm text-muted-foreground">Public research links shared with explicit recurring consent. Private profile grants and subscription selections are not part of this result. Existing research may have been reused without changing its title, approval or notes.</p>
+  <p className="text-sm text-muted-foreground">Public research links shared with explicit consent. Private profile grants and subscription selections are not part of this result. Existing research may have been reused without changing its title, approval or notes.</p>
   {data.run.result ? <><p>Observed {data.run.result.observedAt} · {data.run.result.links.length} links</p>
    <ul className="space-y-3">{data.run.result.links.map(link => <li key={link.videoId}><Link className="text-primary hover:underline" href={`/studio/library/${link.recordId}`}>Research link · {link.videoId}</Link> · {link.reused ? "Existing research preserved" : "Added as pending research"}</li>)}</ul>
   </> : <p>Results have not been saved. Check Jobs for retry or cancellation.</p>}

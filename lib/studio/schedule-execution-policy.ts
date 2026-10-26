@@ -15,7 +15,7 @@ export function readScheduleRunCommand(value: unknown) {
 }
 
 export function readScheduleCommand(value: unknown) {
-  if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).action === "enable_youtube") return readYoutubeScheduleCommand(value);
+  if (value && typeof value === "object" && !Array.isArray(value) && ["enable_youtube", "run_youtube_now"].includes(String((value as Record<string, unknown>).action))) return readYoutubeScheduleCommand(value);
   if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).action === "run_now") return readScheduleRunCommand(value);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioCommandError("Invalid recurring command.");
   const body = value as Record<string, unknown>;

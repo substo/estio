@@ -1,5 +1,7 @@
 # Shared Studio implementation progress
 
+- 2026-10-26 · Schedules: every schedule shows **Run now** and **Active: On/Off · frequency** (list + detail); YouTube discovery gains a manual one-off run (migration `20261026000000_studio_youtube_run_now.sql`, reuses the run/job tables and worker). New schedules stay off by default; no cron installation or production changes. Verified: 34 focused TS tests, full disposable schema/concurrency/recovery suite; typecheck limited by local memory/time: fixed the scoped command-narrowing error and regenerated stale Prisma types; final scoped retry stopped without diagnostics after two minutes (full default-heap check exhausted memory).
+
 ## One application shell and header for CRM and Studio (2026-10-25)
 
 User asked for one header across CRM and Studio in both apps (bell, AI usage, profile, theme), from shared code and without shifting on product switches.

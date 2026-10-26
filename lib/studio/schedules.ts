@@ -22,7 +22,11 @@ export async function listStudioSchedules(workspaceId: string, page: number) {
     select: "id,version,preset_id,focus,interval_hours,daily_time,time_zone,updated_at",
     workspace_id: `eq.${access.workspace.id}`, order: "created_at.desc,id.asc", limit: "21", offset: String(page * 20),
   }));
-  return { access, schedules: schedules.slice(0, 20), hasMore: schedules.length > 20 };
+  const visible = schedules.slice(0, 20);
+  const active = visible.length ? await studioRest<Array<{ schedule_id: string }>>(queryPath("studio_schedule_recurring", {
+    select: "schedule_id", workspace_id: `eq.${access.workspace.id}`, schedule_id: `in.(${visible.map(s => s.id).join(",")})`, enabled: "eq.true", limit: "20" })) : [];
+  const activeIds = new Set(active.map(row => row.schedule_id));
+  return { access, schedules: visible.map(s => ({ ...s, active: activeIds.has(s.id) })), hasMore: schedules.length > 20 };
 }
 
 export async function saveStudioSchedule(workspaceId: string, id: string, version: number, draft: ScheduleDraft) {

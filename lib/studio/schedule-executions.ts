@@ -1,4 +1,4 @@
-import { enableStudioYoutubeSchedule } from "./youtube-schedules";
+import { enableStudioYoutubeSchedule, runStudioYoutubeScheduleNow } from "./youtube-schedules";
 import "server-only";
 import { getStudioWorkspaceAccess } from "./access";
 import { requireOwnStudioCommandWorkspace } from "./paid-workspace";
@@ -15,7 +15,9 @@ export async function runStudioScheduleNow(workspaceId: string, command: ReturnT
 }
 
 export async function executeStudioScheduleCommand(workspaceId: string, command: ReturnType<typeof readScheduleCommand>) {
-  if (command.action === "enable_youtube") return enableStudioYoutubeSchedule(workspaceId, command);
+  if (command.action === "enable_youtube" || command.action === "run_youtube_now") {
+    return command.action === "enable_youtube" ? enableStudioYoutubeSchedule(workspaceId, command) : runStudioYoutubeScheduleNow(workspaceId, command);
+  }
   if (command.action === "run_now") return runStudioScheduleNow(workspaceId, command);
   const access = await requireOwnStudioCommandWorkspace(workspaceId);
   return studioRest<{ enabled: boolean; stateVersion: number; nextRunAt: string | null }>("rpc/studio_set_schedule_recurring", {

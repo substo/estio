@@ -157,6 +157,14 @@ owner remains `scripts/install-cron.sh`; no installation or deployment occurred.
 Current validation and remaining release gates are in
 [the progress record](studio-implementation-progress.md).
 
+**Run now** (migration `20261026000000_studio_youtube_run_now.sql`) queues one
+discovery for the same source choice without turning the schedule on. The run
+row pins its own source, profile grant version and definition version, so no
+recurring authorization is created; edits, grant changes and channel removal
+fence it like a recurring run. Removing or replacing the connection also clears
+the private source pinned on manual runs. The same daily cap and one-active-run
+rule apply.
+
 ## Validation
 
 - 25 focused tests passed: Google/YouTube adapters and input validation,

@@ -27,3 +27,8 @@ export function isScheduleRequest(id: string, version: number): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
     && Number.isSafeInteger(version) && version >= 0;
 }
+
+/** One wording for a schedule's frequency on the list and detail pages. */
+export function scheduleFrequency(schedule: { interval_hours: number; daily_time: string; time_zone: string }) {
+  return schedule.interval_hours === 24 ? `Daily at ${schedule.daily_time.slice(0, 5)} ${schedule.time_zone}` : "Every 7 days";
+}

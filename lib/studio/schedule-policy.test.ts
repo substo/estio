@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isScheduleRequest, readScheduleDraft } from "./schedule-policy";
+import { isScheduleRequest, readScheduleDraft, scheduleFrequency } from "./schedule-policy";
 function draft(patch: Record<string, string> = {}) {
   const form = new FormData();
   for (const [key, value] of Object.entries({ presetId: "idea-review", query: "  exact focus  ", intervalHours: "24", dailyTime: "09:00", ...patch })) form.set(key, value);
@@ -21,4 +21,9 @@ test("requires UUID and safe nonnegative optimistic version", () => {
   assert.equal(isScheduleRequest(id, 0), true);
   for (const version of [-1, NaN, 1.1, Number.MAX_SAFE_INTEGER + 1]) assert.equal(isScheduleRequest(id, version), false);
   assert.equal(isScheduleRequest("invalid", 1), false);
+});
+
+test("describes schedule frequency in one shared wording", () => {
+  assert.equal(scheduleFrequency({ interval_hours: 24, daily_time: "09:00:00", time_zone: "Asia/Nicosia" }), "Daily at 09:00 Asia/Nicosia");
+  assert.equal(scheduleFrequency({ interval_hours: 168, daily_time: "09:00", time_zone: "Asia/Nicosia" }), "Every 7 days");
 });

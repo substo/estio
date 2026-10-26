@@ -7,7 +7,9 @@ import { profileYoutubeAccess, profileYoutubeConnection } from "../google/profil
 import { createYoutubeApi } from "../google/youtube-api";
 import { StudioCommandError } from "./command-error";
 import type { readYoutubeScheduleCommand } from "./youtube-schedule-policy";
-export async function enableStudioYoutubeSchedule(workspaceId: string, command: ReturnType<typeof readYoutubeScheduleCommand>) {
+type YoutubeScheduleCommand = ReturnType<typeof readYoutubeScheduleCommand>;
+// Shared by activation and Run now: own profile, current grant, subscription check.
+async function verifyYoutubeScheduleSource(workspaceId: string, command: YoutubeScheduleCommand) {
   const access = await requireOwnStudioCommandWorkspace(workspaceId);
   const profile = await getPlatformProfile();
   if (!profile) throw new StudioCommandError("Use your own profile.", 403);
@@ -24,8 +26,19 @@ export async function enableStudioYoutubeSchedule(workspaceId: string, command: 
     const subscribed = await createYoutubeApi({ accessToken: grant.token }).subscriptions("", command.channelId);
     if (!subscribed.channels.some(channel => channel.id === command.channelId)) throw new StudioCommandError("Choose a channel subscribed by this connected profile.");
   }
+  return { access, connection };
+}
+export async function enableStudioYoutubeSchedule(workspaceId: string, command: YoutubeScheduleCommand) {
+  const { access, connection } = await verifyYoutubeScheduleSource(workspaceId, command);
   return studioRest("rpc/studio_enable_youtube_schedule", { method: "POST", body: JSON.stringify({ p_workspace: access.workspace.id, p_brand: access.brand,
     p_user: access.userId, p_schedule: command.scheduleId, p_version: command.version, p_state_version: command.stateVersion,
+    p_request: command.requestId, p_connection_version: connection.version, p_source: command.source, p_channel: command.channelId,
+    p_title: command.titlePrefix, p_confirm_share: command.confirmShare }) });
+}
+export async function runStudioYoutubeScheduleNow(workspaceId: string, command: YoutubeScheduleCommand) {
+  const { access, connection } = await verifyYoutubeScheduleSource(workspaceId, command);
+  return studioRest<{ executionId: string; discoveryRunId: string; jobId: string; workflow: "youtube_discovery" }>("rpc/studio_run_youtube_schedule_now", { method: "POST", body: JSON.stringify({
+    p_workspace: access.workspace.id, p_brand: access.brand, p_user: access.userId, p_schedule: command.scheduleId, p_version: command.version,
     p_request: command.requestId, p_connection_version: connection.version, p_source: command.source, p_channel: command.channelId,
     p_title: command.titlePrefix, p_confirm_share: command.confirmShare }) });
 }
