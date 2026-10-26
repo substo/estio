@@ -1,6 +1,15 @@
 # Studio: connected-computer processing plan
 
-Updated 2026-10-26 with the owner's decisions. **Documentation only in this thread.** Reuse one Mac companion, sign-in and durable Studio Jobs queue. Connected computers serve only their paired Business. Hosted processing remains available when explicitly selected; local jobs never silently become paid API jobs.
+Updated 2026-10-26 with the owner's decisions. Reuse one Mac companion, sign-in and durable Studio Jobs queue. Connected computers serve only their paired Business. Hosted processing remains available when explicitly selected; local jobs never silently become paid API jobs.
+
+## Current implementation
+
+- Substo Business admins can pair/revoke devices and queue Mac or CLI checks in **Studio → AI settings**. Device secrets are shown once, stored hashed on the server and saved in a private local config by the companion. Estio pairing is not enabled in this first slice.
+- `scripts/studio-companion.ts` uses the existing worker runner through scoped HTTPS endpoints. Hosted workers skip device-target Jobs; offline work waits without API fallback. Jobs shows status and validated diagnostic results. Full idea review, script brief and knowledge extraction still use their existing hosted API path; the companion cannot claim them yet.
+- Native Codex/Claude adapters run a fixed structured-output connection check with tools disabled and provider API environment overrides removed. They use installed CLI login and never copy provider tokens to Substo. The first source reference was T3 commit `d6fb62ac`, especially `CodexAdapterV2.ts`, `ClaudeAdapterV2.ts` and `AuthPairingLinks.ts`; no T3 runtime dependency was added.
+- From this repository, run `npm run start:studio-companion -- setup --origin https://substo.com`, enter the device token at the hidden prompt, then `npm run start:studio-companion -- start`. Setup verifies server access before saving. `readiness` reports safe CLI readiness; `start --once` handles at most one queued check. No launch-at-login service or packaged Mac app is installed by these commands.
+
+The sections below are the target design; only the current implementation above is available so far.
 
 ## One companion, Settings-led setup
 
