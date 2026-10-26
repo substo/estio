@@ -1,5 +1,7 @@
 # Shared Studio implementation progress
 
+- 2026-10-26 · PLAN only: revised the existing Mac companion plan for owner-selected Codex/Claude native CLI subscription login, separate device pairing, existing Jobs over HTTPS, offline waiting without paid fallback, separate Parakeet/Google OAuth, optional Business API execution and provider eligibility checks; incorporated Claude unmodified-binary sign-in nuance. Owner reports both local logins verified; no companion implementation, integration verification or deployment.
+
 - 2026-10-26 · Schedules: every schedule shows **Run now** and **Active: On/Off · frequency** (list + detail); YouTube discovery gains a manual one-off run (migration `20261026000000_studio_youtube_run_now.sql`, reuses the run/job tables and worker). New schedules stay off by default; no cron installation or production changes. Verified: 34 focused TS tests, full disposable schema/concurrency/recovery suite; typecheck limited by local memory/time: fixed the scoped command-narrowing error and regenerated stale Prisma types; final scoped retry stopped without diagnostics after two minutes (full default-heap check exhausted memory).
 
 ## One application shell and header for CRM and Studio (2026-10-25)
