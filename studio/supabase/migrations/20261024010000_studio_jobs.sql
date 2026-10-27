@@ -1,4 +1,4 @@
--- Durable workspace-scoped job queue for the hosted Studio worker (pm2 process
+-- Durable location-scoped job queue for the hosted Studio worker (pm2 process
 -- beside Next.js on Hetzner). Workers claim with leases; a crashed worker's
 -- lease expires and the job is retried. Every attempt is recorded so members
 -- can see retries and failures. Only the service role can call these RPCs.
@@ -6,7 +6,7 @@ begin;
 
 create table public.studio_jobs (
   id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null references public.studio_workspaces(id) on delete cascade,
+  location_id text not null references public.studio_locations(location_id) on delete cascade,
   kind text not null check (kind ~ '^[a-z][a-z0-9_.-]{0,63}$'),
   status text not null default 'queued' check (status in ('queued','running','succeeded','failed','cancelled')),
   payload jsonb not null default '{}'::jsonb check (jsonb_typeof(payload) = 'object' and octet_length(payload::text) <= 65536),
@@ -23,18 +23,18 @@ create table public.studio_jobs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   finished_at timestamptz,
-  unique (workspace_id,idempotency_key),
+  unique (location_id,idempotency_key),
   check ((status = 'running') = (lease_owner is not null and lease_expires_at is not null)),
   check ((status in ('succeeded','failed','cancelled')) = (finished_at is not null))
 );
 create index studio_jobs_claim_idx on public.studio_jobs(run_after) where status = 'queued';
 create index studio_jobs_lease_idx on public.studio_jobs(lease_expires_at) where status = 'running';
-create index studio_jobs_workspace_idx on public.studio_jobs(workspace_id,created_at desc);
+create index studio_jobs_location_idx on public.studio_jobs(location_id,created_at desc);
 
 create table public.studio_job_events (
   id bigint generated always as identity primary key,
   job_id uuid not null references public.studio_jobs(id) on delete cascade,
-  workspace_id uuid not null references public.studio_workspaces(id) on delete cascade,
+  location_id text not null references public.studio_locations(location_id) on delete cascade,
   attempt integer not null,
   event text not null check (event in ('queued','started','succeeded','retry_scheduled','failed','lease_expired','cancelled','requeued')),
   error_code text,
@@ -58,23 +58,23 @@ revoke all on public.studio_jobs, public.studio_job_events, public.studio_worker
 grant select on public.studio_jobs, public.studio_job_events, public.studio_worker_heartbeats to service_role;
 
 -- Server-side enqueue (requests already authorized by the app, or other RPCs).
--- Idempotent per workspace key: the same key returns the existing job.
-create function public.studio_enqueue_job(p_workspace_id uuid, p_kind text, p_payload jsonb, p_idempotency_key text,
+-- Idempotent per location key: the same key returns the existing job.
+create function public.studio_enqueue_job(p_location_id text, p_kind text, p_payload jsonb, p_idempotency_key text,
   p_created_by text, p_max_attempts integer default 5)
 returns public.studio_jobs language plpgsql security definer set search_path = '' as $$
 declare v_job public.studio_jobs%rowtype;
 begin
-  insert into public.studio_jobs(workspace_id,kind,payload,idempotency_key,created_by_clerk_user_id,max_attempts)
-    values(p_workspace_id,p_kind,coalesce(p_payload,'{}'::jsonb),p_idempotency_key,p_created_by,coalesce(p_max_attempts,5))
-    on conflict (workspace_id,idempotency_key) do nothing returning * into v_job;
+  insert into public.studio_jobs(location_id,kind,payload,idempotency_key,created_by_clerk_user_id,max_attempts)
+    values(p_location_id,p_kind,coalesce(p_payload,'{}'::jsonb),p_idempotency_key,p_created_by,coalesce(p_max_attempts,5))
+    on conflict (location_id,idempotency_key) do nothing returning * into v_job;
   if v_job.id is null then
-    select * into v_job from public.studio_jobs where workspace_id=p_workspace_id and idempotency_key=p_idempotency_key;
+    select * into v_job from public.studio_jobs where location_id=p_location_id and idempotency_key=p_idempotency_key;
     if v_job.kind <> p_kind or v_job.payload <> coalesce(p_payload,'{}'::jsonb) then
       raise exception 'Idempotency key already used for a different job' using errcode = '23505';
     end if;
     return v_job;
   end if;
-  insert into public.studio_job_events(job_id,workspace_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.workspace_id,0,'queued',p_created_by);
+  insert into public.studio_job_events(job_id,location_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.location_id,0,'queued',p_created_by);
   return v_job;
 end;
 $$;
@@ -91,12 +91,12 @@ begin
   end if;
   for v_job in select * from public.studio_jobs where status='running' and lease_expires_at < pg_catalog.now()
       order by lease_expires_at limit 100 for update skip locked loop
-    insert into public.studio_job_events(job_id,workspace_id,attempt,event,worker_id,error_code)
-      values(v_job.id,v_job.workspace_id,v_job.attempts,'lease_expired',v_job.lease_owner,'worker_lease_expired');
+    insert into public.studio_job_events(job_id,location_id,attempt,event,worker_id,error_code)
+      values(v_job.id,v_job.location_id,v_job.attempts,'lease_expired',v_job.lease_owner,'worker_lease_expired');
     if v_job.attempts >= v_job.max_attempts then
       update public.studio_jobs set status='failed',lease_owner=null,lease_expires_at=null,last_error_code='worker_lease_expired',
         last_error_message='The worker stopped before finishing this job.',finished_at=pg_catalog.now(),updated_at=pg_catalog.now() where id=v_job.id;
-      insert into public.studio_job_events(job_id,workspace_id,attempt,event,error_code) values(v_job.id,v_job.workspace_id,v_job.attempts,'failed','worker_lease_expired');
+      insert into public.studio_job_events(job_id,location_id,attempt,event,error_code) values(v_job.id,v_job.location_id,v_job.attempts,'failed','worker_lease_expired');
     else
       update public.studio_jobs set status='queued',lease_owner=null,lease_expires_at=null,last_error_code='worker_lease_expired',
         last_error_message='The worker stopped before finishing this job; it will be retried.',run_after=pg_catalog.now(),updated_at=pg_catalog.now() where id=v_job.id;
@@ -111,8 +111,8 @@ begin
         lease_expires_at=pg_catalog.now() + pg_catalog.make_interval(secs => p_lease_seconds), updated_at=pg_catalog.now()
       from due where j.id=due.id returning j.*
     ), logged as (
-      insert into public.studio_job_events(job_id,workspace_id,attempt,event,worker_id)
-        select id,workspace_id,attempts,'started',p_worker_id from claimed
+      insert into public.studio_job_events(job_id,location_id,attempt,event,worker_id)
+        select id,location_id,attempts,'started',p_worker_id from claimed
     )
     select * from claimed;
 end;
@@ -137,7 +137,7 @@ begin
     last_error_code=null, last_error_message=null, finished_at=pg_catalog.now(), updated_at=pg_catalog.now()
     where id=p_job_id and status='running' and lease_owner=p_worker_id returning * into v_job;
   if v_job.id is null then return false; end if;
-  insert into public.studio_job_events(job_id,workspace_id,attempt,event,worker_id) values(v_job.id,v_job.workspace_id,v_job.attempts,'succeeded',p_worker_id);
+  insert into public.studio_job_events(job_id,location_id,attempt,event,worker_id) values(v_job.id,v_job.location_id,v_job.attempts,'succeeded',p_worker_id);
   return true;
 end;
 $$;
@@ -161,12 +161,12 @@ begin
     update public.studio_jobs set status='queued', lease_owner=null, lease_expires_at=null, last_error_code=p_error_code,
       last_error_message=pg_catalog.left(p_error_message,500), run_after=pg_catalog.now() + pg_catalog.make_interval(secs => v_delay), updated_at=pg_catalog.now()
       where id=p_job_id;
-    insert into public.studio_job_events(job_id,workspace_id,attempt,event,worker_id,error_code) values(v_job.id,v_job.workspace_id,v_job.attempts,'retry_scheduled',p_worker_id,p_error_code);
+    insert into public.studio_job_events(job_id,location_id,attempt,event,worker_id,error_code) values(v_job.id,v_job.location_id,v_job.attempts,'retry_scheduled',p_worker_id,p_error_code);
     return 'retry_scheduled';
   end if;
   update public.studio_jobs set status='failed', lease_owner=null, lease_expires_at=null, last_error_code=p_error_code,
     last_error_message=pg_catalog.left(p_error_message,500), finished_at=pg_catalog.now(), updated_at=pg_catalog.now() where id=p_job_id;
-  insert into public.studio_job_events(job_id,workspace_id,attempt,event,worker_id,error_code) values(v_job.id,v_job.workspace_id,v_job.attempts,'failed',p_worker_id,p_error_code);
+  insert into public.studio_job_events(job_id,location_id,attempt,event,worker_id,error_code) values(v_job.id,v_job.location_id,v_job.attempts,'failed',p_worker_id,p_error_code);
   return 'failed';
 end;
 $$;
@@ -174,30 +174,30 @@ $$;
 -- Member actions: requeue a failed job with a fresh attempt budget, or cancel a
 -- queued one. Running jobs are not interrupted. Estio authority is checked by
 -- the server; Substo membership is locked here.
-create function public.studio_member_job_action(p_workspace_id uuid, p_actor_brand text, p_clerk_user_id text, p_job_id uuid, p_action text)
+create function public.studio_member_job_action(p_location_id text, p_actor_app text, p_clerk_user_id text, p_job_id uuid, p_action text)
 returns public.studio_jobs language plpgsql security definer set search_path = '' as $$
 declare
-  v_brand text;
+  v_app text;
   v_job public.studio_jobs%rowtype;
 begin
   if p_action is null or p_action not in ('retry','cancel') or p_clerk_user_id is null or pg_catalog.btrim(p_clerk_user_id) = '' then
     raise exception 'Invalid job action' using errcode = '22023';
   end if;
-  select brand into v_brand from public.studio_workspaces where id=p_workspace_id;
-  if v_brand is null or v_brand <> p_actor_brand then raise exception 'Job access denied' using errcode = '42501'; end if;
-  if v_brand = 'substo' then
-    perform 1 from public.studio_workspace_memberships where workspace_id=p_workspace_id and workspace_brand='substo' and clerk_user_id=p_clerk_user_id for share;
+  select app into v_app from public.studio_locations where location_id=p_location_id;
+  if v_app is null or v_app <> p_actor_app then raise exception 'Job access denied' using errcode = '42501'; end if;
+  if v_app = 'substo' then
+    perform 1 from public.studio_location_memberships where location_id=p_location_id and location_app='substo' and clerk_user_id=p_clerk_user_id for share;
     if not found then raise exception 'Job access denied' using errcode = '42501'; end if;
   end if;
-  select * into v_job from public.studio_jobs where id=p_job_id and workspace_id=p_workspace_id for update;
+  select * into v_job from public.studio_jobs where id=p_job_id and location_id=p_location_id for update;
   if not found then raise exception 'Job not found' using errcode = '22023'; end if;
   if p_action = 'retry' and v_job.status = 'failed' then
     update public.studio_jobs set status='queued', attempts=0, run_after=pg_catalog.now(), finished_at=null, updated_at=pg_catalog.now()
       where id=p_job_id returning * into v_job;
-    insert into public.studio_job_events(job_id,workspace_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.workspace_id,0,'requeued',p_clerk_user_id);
+    insert into public.studio_job_events(job_id,location_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.location_id,0,'requeued',p_clerk_user_id);
   elsif p_action = 'cancel' and v_job.status = 'queued' then
     update public.studio_jobs set status='cancelled', finished_at=pg_catalog.now(), updated_at=pg_catalog.now() where id=p_job_id returning * into v_job;
-    insert into public.studio_job_events(job_id,workspace_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.workspace_id,v_job.attempts,'cancelled',p_clerk_user_id);
+    insert into public.studio_job_events(job_id,location_id,attempt,event,actor_clerk_user_id) values(v_job.id,v_job.location_id,v_job.attempts,'cancelled',p_clerk_user_id);
   else
     raise exception 'Job is not in a state that allows this action' using errcode = '40001';
   end if;
@@ -212,18 +212,18 @@ returns void language sql security definer set search_path = '' as $$
   delete from public.studio_worker_heartbeats where seen_at < pg_catalog.now() - interval '7 days';
 $$;
 
-revoke all on function public.studio_enqueue_job(uuid,text,jsonb,text,text,integer) from public,anon,authenticated;
+revoke all on function public.studio_enqueue_job(text,text,jsonb,text,text,integer) from public,anon,authenticated;
 revoke all on function public.studio_claim_jobs(text,integer,integer) from public,anon,authenticated;
 revoke all on function public.studio_extend_job_lease(uuid,text,integer) from public,anon,authenticated;
 revoke all on function public.studio_complete_job(uuid,text,jsonb) from public,anon,authenticated;
 revoke all on function public.studio_fail_job(uuid,text,text,text,boolean,integer) from public,anon,authenticated;
-revoke all on function public.studio_member_job_action(uuid,text,text,uuid,text) from public,anon,authenticated;
+revoke all on function public.studio_member_job_action(text,text,text,uuid,text) from public,anon,authenticated;
 revoke all on function public.studio_worker_heartbeat(text,text,timestamptz) from public,anon,authenticated;
-grant execute on function public.studio_enqueue_job(uuid,text,jsonb,text,text,integer) to service_role;
+grant execute on function public.studio_enqueue_job(text,text,jsonb,text,text,integer) to service_role;
 grant execute on function public.studio_claim_jobs(text,integer,integer) to service_role;
 grant execute on function public.studio_extend_job_lease(uuid,text,integer) to service_role;
 grant execute on function public.studio_complete_job(uuid,text,jsonb) to service_role;
 grant execute on function public.studio_fail_job(uuid,text,text,text,boolean,integer) to service_role;
-grant execute on function public.studio_member_job_action(uuid,text,text,uuid,text) to service_role;
+grant execute on function public.studio_member_job_action(text,text,text,uuid,text) to service_role;
 grant execute on function public.studio_worker_heartbeat(text,text,timestamptz) to service_role;
 commit;

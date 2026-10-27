@@ -1,8 +1,8 @@
 -- Synthetic fixtures only. Exercises reservation/binding authority and atomicity.
 do $$
 declare
-  w uuid := '86000000-0000-4000-8000-000000000001';
-  other_w uuid := '86000000-0000-4000-8000-000000000002';
+  w text := '86000000-0000-4000-8000-000000000001';
+  other_w text := '86000000-0000-4000-8000-000000000002';
   rid uuid := '87000000-0000-4000-8000-000000000001';
   fid uuid := '88000000-0000-4000-8000-000000000001';
   lib text := repeat('a',64);
@@ -24,18 +24,18 @@ begin
     end loop;
   end loop;
   if has_table_privilege('authenticated','public.studio_legacy_media_transfers','SELECT')
-    or has_function_privilege('authenticated','public.studio_bind_legacy_media(uuid,text,uuid,text,bigint)','EXECUTE')
-    or has_function_privilege('anon','public.studio_reserve_legacy_media(uuid,text,text,text,text,jsonb)','EXECUTE')
-    or has_function_privilege('service_role','public.studio_lock_legacy_media_owner(uuid,text)','EXECUTE')
-    or not has_function_privilege('service_role','public.studio_bind_legacy_media(uuid,text,uuid,text,bigint)','EXECUTE') then
+    or has_function_privilege('authenticated','public.studio_bind_legacy_media(text,text,uuid,text,bigint)','EXECUTE')
+    or has_function_privilege('anon','public.studio_reserve_legacy_media(text,text,text,text,text,jsonb)','EXECUTE')
+    or has_function_privilege('service_role','public.studio_lock_legacy_media_owner(text,text)','EXECUTE')
+    or not has_function_privilege('service_role','public.studio_bind_legacy_media(text,text,uuid,text,bigint)','EXECUTE') then
     raise exception 'Unsafe media RPC grants';
   end if;
 
-  perform public.studio_create_substo_workspace(w,'Media fixture','media-owner');
-  perform public.studio_create_substo_workspace(other_w,'Other media fixture','other-media-owner');
-  insert into public.studio_records(workspace_id,id,kind,title,payload,legacy_payload,created_by_clerk_user_id)
+  perform public.studio_create_substo_location(w,'Media fixture','media-owner');
+  perform public.studio_create_substo_location(other_w,'Other media fixture','other-media-owner');
+  insert into public.studio_records(location_id,id,kind,title,payload,legacy_payload,created_by_clerk_user_id)
     values(w,rid,'reference','Source',jsonb_build_object('id',rid),jsonb_build_object('id',rid),'media-owner');
-  insert into public.studio_legacy_files(workspace_id,id,record_id,payload)
+  insert into public.studio_legacy_files(location_id,id,record_id,payload)
     values(w,fid,rid,jsonb_build_object('id',fid,'recordId',rid,'name','own.mov','size',42,'type','video/quicktime','keep',true));
   row_spec := jsonb_build_array(jsonb_build_object('id',fid,'recordId',rid,'sha256',sha,'byteSize',42,'originalFilename','own.mov','contentType','video/quicktime'));
 
@@ -43,7 +43,7 @@ begin
     perform public.studio_reserve_legacy_media(w,'media-owner',lib,med,'studio-media-test',row_spec);
     raise exception 'Reservation without library import succeeded';
   exception when sqlstate '22023' then null; end;
-  insert into public.studio_library_import_runs(workspace_id,source_digest,manifest_signature,counts,media_pending,imported_by_clerk_user_id)
+  insert into public.studio_library_import_runs(location_id,source_digest,manifest_signature,counts,media_pending,imported_by_clerk_user_id)
     values(w,lib,repeat('d',32),'{}'::jsonb,1,'media-owner');
 
   begin
@@ -52,7 +52,7 @@ begin
   exception when sqlstate '42501' then null; end;
   begin
     perform public.studio_reserve_legacy_media(other_w,'other-media-owner',lib,med,'studio-media-test',row_spec);
-    raise exception 'Cross-workspace reservation succeeded';
+    raise exception 'Cross-location reservation succeeded';
   exception when sqlstate '22023' then null; end;
   begin
     perform public.studio_reserve_legacy_media(w,'media-owner',lib,med,'studio-media-test',
@@ -69,7 +69,7 @@ begin
   if key <> w::text||'/legacy-library/'||fid::text||'/'||sha or result->'files'->0->>'status' <> 'pending' then
     raise exception 'Unexpected reservation %', result;
   end if;
-  if (select media_object_id from public.studio_legacy_files where workspace_id=w and id=fid) is not null then
+  if (select media_object_id from public.studio_legacy_files where location_id=w and id=fid) is not null then
     raise exception 'Reservation bound media early';
   end if;
 
@@ -90,15 +90,15 @@ begin
     perform public.studio_bind_legacy_media(w,'other-media-owner',fid,sha,42);
     raise exception 'Non-owner binding succeeded';
   exception when sqlstate '42501' then null; end;
-  if (select status from public.studio_legacy_media_transfers where workspace_id=w and file_id=fid) <> 'pending'
-    or exists(select 1 from public.studio_media_objects where workspace_id=w) then
+  if (select status from public.studio_legacy_media_transfers where location_id=w and file_id=fid) <> 'pending'
+    or exists(select 1 from public.studio_media_objects where location_id=w) then
     raise exception 'Failed binding left partial state';
   end if;
 
   result := public.studio_bind_legacy_media(w,'media-owner',fid,sha,42);
   if result->'replayed' <> 'false'::jsonb
-    or (select media_object_id from public.studio_legacy_files where workspace_id=w and id=fid)::text is distinct from result->>'mediaObjectId'
-    or (select payload->'keep' from public.studio_legacy_files where workspace_id=w and id=fid) <> 'true'::jsonb
+    or (select media_object_id from public.studio_legacy_files where location_id=w and id=fid)::text is distinct from result->>'mediaObjectId'
+    or (select payload->'keep' from public.studio_legacy_files where location_id=w and id=fid) <> 'true'::jsonb
     or not exists(select 1 from public.studio_media_objects where id=(result->>'mediaObjectId')::uuid
       and object_key=key and bucket_id='studio-media-test' and storage_provider='cloudflare_r2' and sha256=sha and byte_size=42 and original_filename='own.mov' and content_type='video/quicktime') then
     raise exception 'Binding did not reconcile %', result;

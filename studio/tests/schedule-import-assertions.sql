@@ -14,9 +14,9 @@ create function pg_temp.schedule_manifest(s jsonb) returns jsonb language sql as
 $$;
 do $$
 declare
- w uuid := '83000000-0000-4000-8000-000000000001';
- other_w uuid := '83000000-0000-4000-8000-000000000002';
- estio_w uuid := '83000000-0000-4000-8000-000000000003';
+ w text := '83000000-0000-4000-8000-000000000001';
+ other_w text := '83000000-0000-4000-8000-000000000002';
+ estio_w text := '83000000-0000-4000-8000-000000000003';
  sid uuid := '84000000-0000-4000-8000-000000000001';
  rid uuid := '85000000-0000-4000-8000-000000000001';
  source jsonb; manifest jsonb; changed jsonb; result jsonb; replay jsonb; raw jsonb;
@@ -31,13 +31,13 @@ begin
      if has_table_privilege(role_name,'public.'||relation,'SELECT') is distinct from (role_name='service_role') then raise exception 'Unsafe schedule import reads'; end if;
    end loop;
  end loop;
- if has_function_privilege('anon','public.studio_import_schedules(uuid,text,jsonb,text)','EXECUTE')
-   or has_function_privilege('authenticated','public.studio_import_schedules(uuid,text,jsonb,text)','EXECUTE')
-   or not has_function_privilege('service_role','public.studio_import_schedules(uuid,text,jsonb,text)','EXECUTE') then raise exception 'Unsafe schedule import RPC grants'; end if;
- perform public.studio_create_substo_workspace(w,'Import schedule fixture','schedule-import-owner');
- perform public.studio_create_substo_workspace(other_w,'Other fixture','other-owner');
- insert into public.studio_workspaces(id,brand,workspace_type,name,estio_location_id)
-   values(estio_w,'estio','estio_location','Estio fixture','schedule-import-location');
+ if has_function_privilege('anon','public.studio_import_schedules(text,text,jsonb,text)','EXECUTE')
+   or has_function_privilege('authenticated','public.studio_import_schedules(text,text,jsonb,text)','EXECUTE')
+   or not has_function_privilege('service_role','public.studio_import_schedules(text,text,jsonb,text)','EXECUTE') then raise exception 'Unsafe schedule import RPC grants'; end if;
+ perform public.studio_create_substo_location(w,'Import schedule fixture','schedule-import-owner');
+ perform public.studio_create_substo_location(other_w,'Other fixture','other-owner');
+ insert into public.studio_locations(location_id,app,name)
+   values(estio_w,'estio','Estio fixture');
  source := jsonb_build_object('version',1,'unknownTop',jsonb_build_object('preserved',true),
    'schedules',jsonb_build_array(jsonb_build_object('id',sid,'presetId','youtube-discovery','query','  exact focus  ',
      'intervalHours',24,'dailyTime','09:00','timeZone','Asia/Nicosia','enabled',true,'autoKnowledgeScan',true,
@@ -50,7 +50,7 @@ begin
  begin perform public.studio_import_schedules(w,manifest->>'sourceDigest',manifest,'other-owner'); raise exception 'Wrong owner accepted'; exception when insufficient_privilege then null; end;
  changed := jsonb_set(manifest,'{schedules,0,draft,query}','"tampered"');
  begin perform public.studio_import_schedules(w,changed->>'sourceDigest',changed,'schedule-import-owner'); raise exception 'Tampered draft accepted'; exception when invalid_parameter_value then null; end;
- if exists(select 1 from public.studio_schedule_import_runs where workspace_id=w) then raise exception 'Failed projection left ledger'; end if;
+ if exists(select 1 from public.studio_schedule_import_runs where location_id=w) then raise exception 'Failed projection left ledger'; end if;
  changed := jsonb_set(manifest,'{counts,runs}','99');
  begin perform public.studio_import_schedules(w,changed->>'sourceDigest',changed,'schedule-import-owner'); raise exception 'False counts accepted'; exception when invalid_parameter_value then null; end;
  begin perform public.studio_import_schedules(w,repeat('0',64),jsonb_set(manifest,'{sourceDigest}',to_jsonb(repeat('0',64))),'schedule-import-owner'); raise exception 'Bad digest accepted'; exception when invalid_parameter_value then null; end;
@@ -58,39 +58,39 @@ begin
  -- Failure after definitions are inserted must roll back drafts, raw rows and ledger.
  changed := pg_temp.schedule_manifest(jsonb_set(source,'{runs,0,scheduleId}',to_jsonb('84000000-0000-4000-8000-000000000099'::text)));
  begin perform public.studio_import_schedules(w,changed->>'sourceDigest',changed,'schedule-import-owner'); raise exception 'Orphan history accepted'; exception when foreign_key_violation then null; end;
- if exists(select 1 from public.studio_schedules where workspace_id=w)
-   or exists(select 1 from public.studio_schedule_legacy_definitions where workspace_id=w)
-   or exists(select 1 from public.studio_schedule_import_runs where workspace_id=w) then raise exception 'Partial schedule import survived'; end if;
+ if exists(select 1 from public.studio_schedules where location_id=w)
+   or exists(select 1 from public.studio_schedule_legacy_definitions where location_id=w)
+   or exists(select 1 from public.studio_schedule_import_runs where location_id=w) then raise exception 'Partial schedule import survived'; end if;
  changed := pg_temp.schedule_manifest(jsonb_set(source,'{runs,0,startedAt}','"2026-02-31T00:00:00Z"'));
  begin perform public.studio_import_schedules(w,changed->>'sourceDigest',changed,'schedule-import-owner'); raise exception 'Invalid timestamp accepted'; exception when invalid_parameter_value then null; end;
 
  result := public.studio_import_schedules(w,manifest->>'sourceDigest',manifest,'schedule-import-owner');
  if result->'counts' is distinct from manifest->'counts' or result->'executionEnabled' is distinct from 'false'::jsonb or result->'replayed' <> 'false'::jsonb
-   or (select payload from public.studio_schedule_legacy_definitions where workspace_id=w and id=sid) is distinct from source->'schedules'->0
-   or (select payload from public.studio_schedule_legacy_runs where workspace_id=w and id=rid) is distinct from source->'runs'->0
-   or (select preview_evidence->'sourceFiles' from public.studio_schedule_import_runs where workspace_id=w) is distinct from manifest->'sourceFiles'
-   or (select source_canonical_json from public.studio_schedule_import_runs where workspace_id=w)::jsonb is distinct from source
-   or (select created_at from public.studio_schedules where workspace_id=w and id=sid) <> '2026-01-01T00:00:00Z'::timestamptz then raise exception 'Schedule fidelity/counts failed'; end if;
+   or (select payload from public.studio_schedule_legacy_definitions where location_id=w and id=sid) is distinct from source->'schedules'->0
+   or (select payload from public.studio_schedule_legacy_runs where location_id=w and id=rid) is distinct from source->'runs'->0
+   or (select preview_evidence->'sourceFiles' from public.studio_schedule_import_runs where location_id=w) is distinct from manifest->'sourceFiles'
+   or (select source_canonical_json from public.studio_schedule_import_runs where location_id=w)::jsonb is distinct from source
+   or (select created_at from public.studio_schedules where location_id=w and id=sid) <> '2026-01-01T00:00:00Z'::timestamptz then raise exception 'Schedule fidelity/counts failed'; end if;
  perform public.studio_save_schedule(w,sid,1,'substo','schedule-import-owner','script-brief','hosted edit',168,'10:00');
  replay := public.studio_import_schedules(w,manifest->>'sourceDigest',manifest,'schedule-import-owner');
  if replay->'replayed' <> 'true'::jsonb or replay->'runId' is distinct from result->'runId'
-   or (select focus from public.studio_schedules where workspace_id=w and id=sid) <> 'hosted edit'
-   or (select version from public.studio_schedules where workspace_id=w and id=sid) <> 2 then raise exception 'Replay overwrote hosted draft'; end if;
+   or (select focus from public.studio_schedules where location_id=w and id=sid) <> 'hosted edit'
+   or (select version from public.studio_schedules where location_id=w and id=sid) <> 2 then raise exception 'Replay overwrote hosted draft'; end if;
  changed := jsonb_set(manifest,'{sourceFiles,0,bytes}','999');
  begin perform public.studio_import_schedules(w,changed->>'sourceDigest',changed,'schedule-import-owner'); raise exception 'Different manifest replay accepted'; exception when unique_violation then null; end;
  changed := pg_temp.schedule_manifest(jsonb_set(source,'{unknownTop,preserved}','false'));
  begin perform public.studio_import_schedules(w,changed->>'sourceDigest',changed,'schedule-import-owner'); raise exception 'New overlapping snapshot overwrote drafts'; exception when unique_violation then null; end;
- if (select count(*) from public.studio_schedule_import_runs where workspace_id=w) <> 1 then raise exception 'Conflict left ledger'; end if;
+ if (select count(*) from public.studio_schedule_import_runs where location_id=w) <> 1 then raise exception 'Conflict left ledger'; end if;
 
- -- Same IDs in another authorized workspace are independent, and cannot be linked across workspaces/imports.
+ -- Same IDs in another authorized location are independent, and cannot be linked across locations/imports.
  perform public.studio_import_schedules(other_w,manifest->>'sourceDigest',manifest,'other-owner');
  begin
-   insert into public.studio_schedule_legacy_runs(workspace_id,id,schedule_id,import_run_id,source_index,payload)
+   insert into public.studio_schedule_legacy_runs(location_id,id,schedule_id,import_run_id,source_index,payload)
      values(w,'85000000-0000-4000-8000-000000000099',sid,
-       (select id from public.studio_schedule_import_runs where workspace_id=other_w),99,source->'runs'->0);
-   raise exception 'Cross-workspace history FK accepted';
+       (select id from public.studio_schedule_import_runs where location_id=other_w),99,source->'runs'->0);
+   raise exception 'Cross-location history FK accepted';
  exception when foreign_key_violation then null; end;
- delete from public.studio_workspace_memberships where workspace_id=w and clerk_user_id='schedule-import-owner';
+ delete from public.studio_location_memberships where location_id=w and clerk_user_id='schedule-import-owner';
  begin perform public.studio_import_schedules(w,manifest->>'sourceDigest',manifest,'schedule-import-owner'); raise exception 'Revoked owner replay accepted'; exception when insufficient_privilege then null; end;
 end;
 $$;

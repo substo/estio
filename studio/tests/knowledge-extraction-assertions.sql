@@ -4,13 +4,13 @@ declare r public.studio_idea_reviews%rowtype; j public.studio_jobs%rowtype; a uu
 begin
  select * into r from public.studio_idea_reviews where id=run_id;
  perform public.studio_claim_jobs('extract-worker',50,60);select * into j from public.studio_jobs where id=r.job_id;
- a:=(public.studio_begin_text_run_attempt(r.workspace_id,r.id,j.id,'extract-worker',j.lease_token)->>'attempt_id')::uuid;
- perform public.studio_finish_text_run_attempt(r.workspace_id,r.id,j.id,'extract-worker',j.lease_token,a,body,1000,1000,'resp_extract_fixture','gpt-6-luna-standard-2026-10-23');
+ a:=(public.studio_begin_text_run_attempt(r.location_id,r.id,j.id,'extract-worker',j.lease_token)->>'attempt_id')::uuid;
+ perform public.studio_finish_text_run_attempt(r.location_id,r.id,j.id,'extract-worker',j.lease_token,a,body,1000,1000,'resp_extract_fixture','gpt-6-luna-standard-2026-10-23');
  perform public.studio_complete_job(j.id,'extract-worker',j.lease_token,'{}');return a;
 end $$;
 do $$
 declare
- w uuid:='bc100000-0000-4000-8000-000000000001';other_w uuid:='bc100000-0000-4000-8000-000000000002';
+ w text:='bc100000-0000-4000-8000-000000000001';other_w text:='bc100000-0000-4000-8000-000000000002';
  source uuid:='bc200000-0000-4000-8000-000000000001';other_source uuid:='bc200000-0000-4000-8000-000000000009';
  topic uuid:='bc600000-0000-4000-8000-000000000001';existing uuid:='bc610000-0000-4000-8000-000000000001';
  sidecar uuid:='bc620000-0000-4000-8000-000000000001';unit_id uuid:='bc630000-0000-4000-8000-000000000001';
@@ -23,19 +23,19 @@ begin
     or has_table_privilege('service_role','public.studio_knowledge_evidence',op) or has_table_privilege('service_role','public.studio_knowledge_sources',op)
     or has_table_privilege('service_role','public.studio_knowledge_source_units',op) then raise exception 'Unsafe extraction direct write';end if;
  end loop;
- if has_function_privilege('authenticated','public.studio_enqueue_knowledge_extraction(uuid,text,text,uuid,uuid,bigint,text,text,integer,integer,text,boolean)','EXECUTE')
-  or has_function_privilege('service_role','public.studio_build_knowledge_snapshot(uuid,uuid,bigint,text,text,integer,integer,text)','EXECUTE') then raise exception 'Unsafe extraction function grants';end if;
- perform public.studio_create_substo_workspace(w,'Extraction fixture','extract-owner');perform public.studio_create_substo_workspace(other_w,'Other extraction fixture','extract-other');
- insert into public.studio_workspace_memberships(workspace_id,workspace_brand,clerk_user_id,role) values(w,'substo','extract-member','member');
+ if has_function_privilege('authenticated','public.studio_enqueue_knowledge_extraction(text,text,text,uuid,uuid,bigint,text,text,integer,integer,text,boolean)','EXECUTE')
+  or has_function_privilege('service_role','public.studio_build_knowledge_snapshot(text,uuid,bigint,text,text,integer,integer,text)','EXECUTE') then raise exception 'Unsafe extraction function grants';end if;
+ perform public.studio_create_substo_location(w,'Extraction fixture','extract-owner');perform public.studio_create_substo_location(other_w,'Other extraction fixture','extract-other');
+ insert into public.studio_location_memberships(location_id,location_app,clerk_user_id,role) values(w,'substo','extract-member','member');
  root_text:=repeat('a',1999)||'🙂'||'B café e'||chr(769)||'. quote words';
- insert into public.studio_records(workspace_id,id,kind,title,payload) values(w,source,'reference','Source',jsonb_build_object('transcript',root_text,'url','https://example.com/source','custom','preserved')),
+ insert into public.studio_records(location_id,id,kind,title,payload) values(w,source,'reference','Source',jsonb_build_object('transcript',root_text,'url','https://example.com/source','custom','preserved')),
   (w,other_source,'reference','Other source','{}');
  insert into public.studio_knowledge_topics values(w,topic,'{"name":"Existing topic","custom":"preserved"}');
  insert into public.studio_knowledge_sources values(w,source,'{"title":"Imported source metadata","custom":"preserved"}',99,17);
- insert into public.studio_knowledge_insights(workspace_id,id,source_id,topic_id,status,statement,payload,version)
+ insert into public.studio_knowledge_insights(location_id,id,source_id,topic_id,status,statement,payload,version)
   values(w,existing,source,topic,'approved','Existing approved statement','{"kind":"claim","custom":"preserved"}',7);
  insert into public.studio_knowledge_reviews values(w,gen_random_uuid(),existing,'{"action":"approve","at":"2026-01-01T00:00:00Z","custom":"preserved"}');
- insert into public.studio_workspace_ai_credentials(workspace_id,provider,ciphertext,iv,auth_tag,key_id,key_hint,set_by_clerk_user_id)
+ insert into public.studio_location_ai_credentials(location_id,provider,ciphertext,iv,auth_tag,key_id,key_hint,set_by_clerk_user_id)
   values(w,'openai','YQ==','AAAAAAAAAAAAAAAA','AAAAAAAAAAAAAAAAAAAAAA==','v1','test','extract-owner');
  perform public.studio_set_ai_budget(w,'substo','extract-owner',1000000);
  begin perform public.studio_enqueue_knowledge_extraction(w,'substo','extract-other',req,source,1,'record_text','transcript',1,1,'Methods',true);
@@ -66,36 +66,36 @@ begin
  if (select usage_row.status from public.studio_ai_usage usage_row join public.studio_ai_attempts x on x.usage_id=usage_row.id where x.id=a)<>'reserved' then raise exception 'Failed output settled usage';end if;
  perform public.studio_finish_text_run_attempt(w,run,j.id,'extract-worker',j.lease_token,a,body,1000,1000,'resp_extract','gpt-6-luna-standard-2026-10-23');
  perform public.studio_complete_job(j.id,'extract-worker',j.lease_token,'{}');
- if (select count(*) from public.studio_knowledge_insights where workspace_id=w)<>1 then raise exception 'Generation applied knowledge automatically';end if;
+ if (select count(*) from public.studio_knowledge_insights where location_id=w)<>1 then raise exception 'Generation applied knowledge automatically';end if;
  begin perform public.studio_apply_knowledge_extraction(w,'substo','extract-owner',run,apply_req,1,'[0]',false);
   raise exception 'Implicit pending application';exception when sqlstate '22023' then null;end;
  begin perform public.studio_apply_knowledge_extraction(other_w,'substo','extract-other',run,apply_req,1,'[0]',true);
   raise exception 'Foreign pending application';exception when sqlstate '22023' then null;end;
  applied:=public.studio_apply_knowledge_extraction(w,'substo','extract-member',run,apply_req,1,'[0]',true);
  if applied#>>'{findings,0,insightId}'<>existing::text or applied#>>'{findings,0,reused}'<>'true'
-  or (select status from public.studio_knowledge_insights where workspace_id=w and id=existing)<>'approved'
-  or (select version from public.studio_knowledge_insights where workspace_id=w and id=existing)<>7
-  or (select topic_id from public.studio_knowledge_insights where workspace_id=w and id=existing)<>topic then raise exception 'Exact match changed existing knowledge';end if;
- if (select count(*) from public.studio_knowledge_reviews where workspace_id=w and insight_id=existing)<>1 then raise exception 'Existing review history changed';end if;
+  or (select status from public.studio_knowledge_insights where location_id=w and id=existing)<>'approved'
+  or (select version from public.studio_knowledge_insights where location_id=w and id=existing)<>7
+  or (select topic_id from public.studio_knowledge_insights where location_id=w and id=existing)<>topic then raise exception 'Exact match changed existing knowledge';end if;
+ if (select count(*) from public.studio_knowledge_reviews where location_id=w and insight_id=existing)<>1 then raise exception 'Existing review history changed';end if;
  if public.studio_apply_knowledge_extraction(w,'substo','extract-member',run,apply_req,1,'[0]',true)<>applied then raise exception 'Application replay changed';end if;
  out2:=public.studio_apply_knowledge_extraction(w,'substo','extract-member',run,gen_random_uuid(),1,'[1]',true);new_insight:=(out2#>>'{findings,0,insightId}')::uuid;
- if (select status from public.studio_knowledge_insights where workspace_id=w and id=new_insight)<>'pending'
-  or (select topic_id from public.studio_knowledge_insights where workspace_id=w and id=new_insight) is not null then raise exception 'New finding approved or assigned a topic';end if;
- select payload into evidence from public.studio_knowledge_evidence where workspace_id=w and insight_id=new_insight;
+ if (select status from public.studio_knowledge_insights where location_id=w and id=new_insight)<>'pending'
+  or (select topic_id from public.studio_knowledge_insights where location_id=w and id=new_insight) is not null then raise exception 'New finding approved or assigned a topic';end if;
+ select payload into evidence from public.studio_knowledge_evidence where location_id=w and insight_id=new_insight;
  if evidence->>'quote'<>'café' or (evidence->>'char_start')::integer<>2002 or (evidence->>'char_end')::integer<>2006 then raise exception 'Inexact Unicode citation %',evidence;end if;
  perform public.studio_review_knowledge_insight(w,new_insight,'approve',1,'substo','extract-owner','Human review');
  perform public.studio_apply_knowledge_extraction(w,'substo','extract-member',run,gen_random_uuid(),1,'[1]',true);
- if (select status from public.studio_knowledge_insights where workspace_id=w and id=new_insight)<>'approved' then raise exception 'Reapplication reset review';end if;
- if (select covered_units from public.studio_knowledge_sources where workspace_id=w and id=source)<>17
-  or (select payload->>'custom' from public.studio_knowledge_sources where workspace_id=w and id=source)<>'preserved'
-  or (select count(*) from public.studio_knowledge_topics where workspace_id=w)<>1
-  or (select payload->>'transcript' from public.studio_records where workspace_id=w and id=source)<>root_text then raise exception 'Application changed source/topic metadata';end if;
- delete from public.studio_workspace_memberships where workspace_id=w and clerk_user_id='extract-member';
+ if (select status from public.studio_knowledge_insights where location_id=w and id=new_insight)<>'approved' then raise exception 'Reapplication reset review';end if;
+ if (select covered_units from public.studio_knowledge_sources where location_id=w and id=source)<>17
+  or (select payload->>'custom' from public.studio_knowledge_sources where location_id=w and id=source)<>'preserved'
+  or (select count(*) from public.studio_knowledge_topics where location_id=w)<>1
+  or (select payload->>'transcript' from public.studio_records where location_id=w and id=source)<>root_text then raise exception 'Application changed source/topic metadata';end if;
+ delete from public.studio_location_memberships where location_id=w and clerk_user_id='extract-member';
  begin perform public.studio_apply_knowledge_extraction(w,'substo','extract-member',run,apply_req,1,'[0]',true);
   raise exception 'Revoked member replayed application';exception when sqlstate '42501' then null;end;
  -- Direct underlying changes without a record version bump are still detected.
  begin
-  update public.studio_records set payload=payload||'{"transcript":"Different source text"}' where workspace_id=w and id=source;
+  update public.studio_records set payload=payload||'{"transcript":"Different source text"}' where location_id=w and id=source;
   if not (public.studio_knowledge_extraction_state(w,'substo','extract-owner',run)->>'stale')::boolean then raise exception 'Content fingerprint ignored';end if;
   perform public.studio_apply_knowledge_extraction(w,'substo','extract-owner',run,gen_random_uuid(),1,'[1]',true);
   raise exception 'Changed source applied';
@@ -109,11 +109,11 @@ begin
  body:=jsonb_build_object('findings',jsonb_build_array(jsonb_build_object('kind','claim','unitId',unit_id,'statement','The speaker asserts a source claim','suggestedTopic','Source topic','quote','Speaker source words')));
  a:=pg_temp.finish_extraction(run,body);
  begin
-  update public.studio_knowledge_source_units set payload=jsonb_set(payload,'{unit,text}','"Changed words"') where workspace_id=w and id=unit_id;
+  update public.studio_knowledge_source_units set payload=jsonb_set(payload,'{unit,text}','"Changed words"') where location_id=w and id=unit_id;
   perform public.studio_apply_knowledge_extraction(w,'substo','extract-owner',run,gen_random_uuid(),1,'[0]',true);
   raise exception 'Changed imported unit applied';exception when sqlstate '40001' then null;end;
  out2:=public.studio_apply_knowledge_extraction(w,'substo','extract-owner',run,gen_random_uuid(),1,'[0]',true);
- select payload into evidence from public.studio_knowledge_evidence where workspace_id=w and insight_id=(out2#>>'{findings,0,insightId}')::uuid;
+ select payload into evidence from public.studio_knowledge_evidence where location_id=w and insight_id=(out2#>>'{findings,0,insightId}')::uuid;
  if evidence->>'unit_id'<>unit_id::text or evidence->>'start_sec'<>'10' or evidence->>'timing_precision'<>'unit' then raise exception 'Imported unit citation lost';end if;
 
  -- Owned upload transcription intake remains compatible and supplies an input.
@@ -129,7 +129,7 @@ begin
  body:=jsonb_build_object('findings',jsonb_build_array(jsonb_build_object('kind','example','unitId','upload_transcript:'||upload::text||':0','statement','The upload contains an example','suggestedTopic','Examples','quote','Own uploaded words')));
  a:=pg_temp.finish_extraction(run,body);
  out2:=public.studio_apply_knowledge_extraction(w,'substo','extract-owner',run,gen_random_uuid(),1,'[0]',true);
- if (select payload->>'input_id' from public.studio_knowledge_evidence where workspace_id=w and insight_id=(out2#>>'{findings,0,insightId}')::uuid)<>upload::text then raise exception 'Upload citation identity lost';end if;
+ if (select payload->>'input_id' from public.studio_knowledge_evidence where location_id=w and insight_id=(out2#>>'{findings,0,insightId}')::uuid)<>upload::text then raise exception 'Upload citation identity lost';end if;
  -- Empty findings are a successful paid outcome, without pending inserts.
  out:=public.studio_enqueue_knowledge_extraction(w,'substo','extract-owner',gen_random_uuid(),source,1,'record_text','transcript',0,1,'',true);run:=(out->>'reviewId')::uuid;
  a:=pg_temp.finish_extraction(run,'{"findings":[]}');

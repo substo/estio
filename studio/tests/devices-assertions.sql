@@ -1,30 +1,30 @@
 -- Synthetic paired devices only. No live credentials or network/provider calls.
 -- Pair through the real browser-approved flow: start -> approve -> first poll issues the token.
-create function pg_temp.pair_device(p_w uuid,p_brand text,p_user text,p_code text,p_token_hash text) returns uuid language plpgsql as $$
+create function pg_temp.pair_device(p_w text,p_app text,p_user text,p_code text,p_token_hash text) returns uuid language plpgsql as $$
 declare r jsonb; v_hash text:=encode(sha256(convert_to(p_code||clock_timestamp()::text,'UTF8')),'hex');
 begin
- r:=public.studio_device_pair_start(p_brand,'Mac '||p_code,'macOS',v_hash,p_code);
- perform public.studio_device_pairing_action(p_w,p_brand,p_user,'approve',p_code,gen_random_uuid());
- r:=public.studio_device_pair_poll(p_brand,(r->>'pairingId')::uuid,v_hash,p_token_hash);
+ r:=public.studio_device_pair_start(p_app,'Mac '||p_code,'macOS',v_hash,p_code);
+ perform public.studio_device_pairing_action(p_w,p_app,p_user,'approve',p_code,gen_random_uuid());
+ r:=public.studio_device_pair_poll(p_app,(r->>'pairingId')::uuid,v_hash,p_token_hash);
  if r->>'status'<>'approved' then raise exception 'Pairing failed %',r; end if;
  return (r->>'deviceId')::uuid;
 end $$;
 
 do $$
 declare
- w uuid:='da000000-0000-4000-8000-000000000001'; w2 uuid:='da000000-0000-4000-8000-000000000002';
+ w text:='da000000-0000-4000-8000-000000000001'; w2 text:='da000000-0000-4000-8000-000000000002';
  d uuid; d2 uuid; j uuid; j2 uuid; lease uuid; oldlease uuid; r jsonb; body jsonb; v_count int;
 begin
- perform public.studio_create_substo_workspace(w,'Mac tests','mac-owner');
- perform public.studio_create_substo_workspace(w2,'Other Mac tests','other-owner');
+ perform public.studio_create_substo_location(w,'Mac tests','mac-owner');
+ perform public.studio_create_substo_location(w2,'Other Mac tests','other-owner');
  if has_table_privilege('authenticated','public.studio_devices','SELECT') or has_column_privilege('service_role','public.studio_devices','token_hash','SELECT')
  or has_table_privilege('service_role','public.studio_device_pairings','SELECT') or has_table_privilege('authenticated','public.studio_device_commands','SELECT')
- or has_function_privilege('service_role','public.studio_claim_device_jobs(uuid,uuid,text,integer,integer)','EXECUTE')
+ or has_function_privilege('service_role','public.studio_claim_device_jobs(uuid,text,text,integer,integer)','EXECUTE')
  or has_function_privilege('anon','public.studio_device_command(text,text,text,jsonb,text)','EXECUTE')
  or has_function_privilege('anon','public.studio_device_pair_start(text,text,text,text,text)','EXECUTE') then raise exception 'Unsafe device privileges'; end if;
  d:=pg_temp.pair_device(w,'substo','mac-owner','AAAABBBB',repeat('a',64));
  d2:=pg_temp.pair_device(w2,'substo','other-owner','AAAACCCC',repeat('b',64));
- if (select brand||created_by||processing_enabled::text||paused::text||config_status from public.studio_devices where id=d)<>'substomac-ownerfalsefalsenone' then raise exception 'Device defaults wrong'; end if;
+ if (select app||created_by||processing_enabled::text||paused::text||config_status from public.studio_devices where id=d)<>'substomac-ownerfalsefalsenone' then raise exception 'Device defaults wrong'; end if;
  j:=(public.studio_manage_device(w,'substo','mac-owner','diagnostic','da000000-0000-4000-8000-000000000003',d,'codex','gpt-5')->>'jobId')::uuid;
  if (public.studio_manage_device(w,'substo','mac-owner','diagnostic','da000000-0000-4000-8000-000000000003',d,'codex','gpt-5')->>'jobId')::uuid<>j then raise exception 'Diagnostic not idempotent'; end if;
  if (select payload from public.studio_jobs where id=j)<>'{"provider":"codex","model":"gpt-5"}' then raise exception 'Selection lost'; end if;
@@ -76,23 +76,23 @@ begin
  end loop;
  begin perform public.studio_manage_device(w2,'substo','other-owner','set_processing',null,d2,null,null,'true'); raise exception 'Revoked device changed'; exception when sqlstate '42501' then null; end;
  -- A previously paired manager who loses their role cannot keep operating.
- update public.studio_workspace_memberships set role='member' where workspace_id=w and clerk_user_id='mac-owner';
+ update public.studio_location_memberships set role='member' where location_id=w and clerk_user_id='mac-owner';
  begin perform public.studio_device_command(repeat('a',64),'substo','heartbeat',body); raise exception 'Former manager still authorized'; exception when sqlstate '42501' then null; end;
- delete from public.studio_workspace_memberships where workspace_id=w and clerk_user_id='mac-owner';
+ delete from public.studio_location_memberships where location_id=w and clerk_user_id='mac-owner';
  begin perform public.studio_device_command(repeat('a',64),'substo','claim','{"workerId":"mac","limit":1,"leaseSeconds":60}'); raise exception 'Removed creator still authorized'; exception when sqlstate '42501' then null; end;
- delete from public.studio_workspaces where id in(w,w2);
+ delete from public.studio_locations where location_id in(w,w2);
 end $$;
 
 -- Pairing lifecycle: one token, once; expired/denied/consumed codes cannot be approved.
 do $$
 declare
- w uuid:='da000000-0000-4000-8000-000000000020'; w2 uuid:='da000000-0000-4000-8000-000000000021'; e uuid:='da000000-0000-4000-8000-000000000022';
+ w text:='da000000-0000-4000-8000-000000000020'; w2 text:='da000000-0000-4000-8000-000000000021'; e text:='da000000-0000-4000-8000-000000000022';
  p uuid; r jsonb; d uuid; req uuid:=gen_random_uuid(); h text:=repeat('1',64);
 begin
- perform public.studio_create_substo_workspace(w,'Pairing Business','pair-owner');
- perform public.studio_create_substo_workspace(w2,'Other Business','pair-other');
- insert into public.studio_workspace_memberships(workspace_id,workspace_brand,clerk_user_id,role) values(w,'substo','pair-member','member');
- insert into public.studio_workspaces(id,brand,workspace_type,name,estio_location_id) values(e,'estio','estio_location','Estio Business','pair-location');
+ perform public.studio_create_substo_location(w,'Pairing Business','pair-owner');
+ perform public.studio_create_substo_location(w2,'Other Business','pair-other');
+ insert into public.studio_location_memberships(location_id,location_app,clerk_user_id,role) values(w,'substo','pair-member','member');
+ insert into public.studio_locations(location_id,app,name) values(e,'estio','Estio Business');
  begin perform public.studio_device_pair_start('tenant','Mac','macOS',repeat('9',64),'ABCDEFGH'); raise exception 'Tenant pairing'; exception when sqlstate '22023' then null; end;
  begin perform public.studio_device_pair_start('substo','Mac','mac$(x)',repeat('9',64),'ABCDEFGH'); raise exception 'Unsafe platform'; exception when sqlstate '23514' then null; end;
  begin perform public.studio_device_pair_start('substo','Mac','macOS',repeat('9',64),'ABCDEFG0'); raise exception 'Ambiguous code'; exception when sqlstate '23514' then null; end;
@@ -105,10 +105,10 @@ begin
  if r->>'name'<>'Studio Mac' or r->>'status'<>'pending' or r->>'platform'<>'macOS' then raise exception 'Lookup %',r; end if;
  begin perform public.studio_device_pairing_action(w,'substo','pair-member','approve','ABCDEFGH',req); raise exception 'Member approved'; exception when sqlstate '42501' then null; end;
  begin perform public.studio_device_pairing_action(w,'estio','pair-owner','approve','ABCDEFGH',req); raise exception 'Cross realm approval'; exception when sqlstate '42501' then null; end;
- begin perform public.studio_device_pairing_action(e,'estio','estio-admin','approve','ABCDEFGH',req); raise exception 'Other brand code approved'; exception when sqlstate 'P0002' then null; end;
+ begin perform public.studio_device_pairing_action(e,'estio','estio-admin','approve','ABCDEFGH',req); raise exception 'Other app code approved'; exception when sqlstate 'P0002' then null; end;
  r:=public.studio_device_pairing_action(w,'substo','pair-owner','approve','ABCDEFGH',req);
  d:=(r->>'deviceId')::uuid;
- if r->>'name'<>'Studio Mac' or (select workspace_id from public.studio_devices where id=d)<>w then raise exception 'Approval did not bind Business'; end if;
+ if r->>'name'<>'Studio Mac' or (select location_id from public.studio_devices where id=d)<>w then raise exception 'Approval did not bind Business'; end if;
  if (public.studio_device_pairing_action(w,'substo','pair-owner','approve','ABCDEFGH',req)->>'deviceId')::uuid<>d then raise exception 'Approval not idempotent'; end if;
  begin perform public.studio_device_pairing_action(w,'substo','pair-owner','approve','ABCDEFGH',gen_random_uuid()); raise exception 'Double approval'; exception when sqlstate 'P0002' then null; end;
  begin perform public.studio_device_pairing_action(w2,'substo','pair-other','approve','ABCDEFGH',req); raise exception 'Other Business approval'; exception when sqlstate 'P0002' then null; end;
@@ -142,21 +142,21 @@ begin
  p:=(public.studio_device_pair_start('estio','Estio Mac','macOS',repeat('a',63)||'0','ESTMACZZ')->>'pairingId')::uuid;
  d:=(public.studio_device_pairing_action(e,'estio','estio-admin','approve','ESTMACZZ',gen_random_uuid())->>'deviceId')::uuid;
  if public.studio_device_pair_poll('estio',p,repeat('a',63)||'0',repeat('c',63)||'0')->>'businessName'<>'Estio Business' then raise exception 'Estio pairing'; end if;
- if public.studio_device_identity(repeat('c',63)||'0','estio')<>jsonb_build_object('workspaceId',e,'approvedBy','estio-admin') then raise exception 'Estio identity'; end if;
+ if public.studio_device_identity(repeat('c',63)||'0','estio')<>jsonb_build_object('locationId',e,'approvedBy','estio-admin') then raise exception 'Estio identity'; end if;
  begin perform public.studio_device_command(repeat('c',63)||'0','estio','heartbeat','{"workerId":"mac","startedAt":"2026-01-01T00:00:00Z"}'); raise exception 'Unchecked Estio device'; exception when sqlstate '42501' then null; end;
  begin perform public.studio_device_command(repeat('c',63)||'0','estio','heartbeat','{"workerId":"mac","startedAt":"2026-01-01T00:00:00Z"}','someone-else'); raise exception 'Wrong Estio approver'; exception when sqlstate '42501' then null; end;
  perform public.studio_device_command(repeat('c',63)||'0','estio','heartbeat','{"workerId":"mac","startedAt":"2026-01-01T00:00:00Z"}','estio-admin');
  if public.studio_device_identity(repeat('c',63)||'0','substo') is not null then raise exception 'Cross realm identity'; end if;
- delete from public.studio_workspaces where id in(w,w2,e);
+ delete from public.studio_locations where location_id in(w,w2,e);
 end $$;
 
 -- Setup: consent, config versions/acks, provider sign-in commands.
 do $$
-declare w uuid:='da000000-0000-4000-8000-000000000030'; d uuid; c uuid; c2 uuid; r jsonb; req uuid:=gen_random_uuid(); t text:=repeat('d',63)||'1';
+declare w text:='da000000-0000-4000-8000-000000000030'; d uuid; c uuid; c2 uuid; r jsonb; req uuid:=gen_random_uuid(); t text:=repeat('d',63)||'1';
  hb jsonb:=jsonb_build_object('workerId','mac','startedAt','2026-01-01T00:00:00Z');
 begin
- perform public.studio_create_substo_workspace(w,'Setup Business','setup-owner');
- insert into public.studio_workspace_memberships(workspace_id,workspace_brand,clerk_user_id,role) values(w,'substo','setup-member','member');
+ perform public.studio_create_substo_location(w,'Setup Business','setup-owner');
+ insert into public.studio_location_memberships(location_id,location_app,clerk_user_id,role) values(w,'substo','setup-member','member');
  d:=pg_temp.pair_device(w,'substo','setup-owner','SETUPMAC',t);
  begin perform public.studio_manage_device(w,'substo','setup-member','set_processing',null,d,null,null,'true'); raise exception 'Member consented'; exception when sqlstate '42501' then null; end;
  begin perform public.studio_manage_device(w,'substo','setup-owner','set_processing',null,d,null,null,'"yes"'); raise exception 'Bad consent'; exception when sqlstate '22023' then null; end;
@@ -199,17 +199,17 @@ begin
  c:=(public.studio_manage_device(w,'substo','setup-owner','provider_login',gen_random_uuid(),d,'codex')->>'commandId')::uuid;
  perform public.studio_manage_device(w,'substo','setup-owner','revoke',null,d);
  if (select status from public.studio_device_commands where id=c)<>'cancelled' then raise exception 'Revoke left command open'; end if;
- delete from public.studio_workspaces where id=w;
+ delete from public.studio_locations where location_id=w;
 end $$;
 
 -- Manual retries must not let a member spend a paired manager's subscription.
 do $$
 declare
- w uuid:='da000000-0000-4000-8000-000000000010';
+ w text:='da000000-0000-4000-8000-000000000010';
  d uuid; j uuid; hosted public.studio_jobs%rowtype; retried public.studio_jobs%rowtype;
 begin
- perform public.studio_create_substo_workspace(w,'Device retry tests','retry-owner');
- insert into public.studio_workspace_memberships(workspace_id,workspace_brand,clerk_user_id,role)
+ perform public.studio_create_substo_location(w,'Device retry tests','retry-owner');
+ insert into public.studio_location_memberships(location_id,location_app,clerk_user_id,role)
  values(w,'substo','retry-member','member'),(w,'substo','retry-admin','admin');
  d:=pg_temp.pair_device(w,'substo','retry-owner','RETRYMAC',repeat('d',64));
  j:=(public.studio_manage_device(w,'substo','retry-owner','diagnostic',gen_random_uuid(),d)->>'jobId')::uuid;
@@ -249,5 +249,5 @@ begin
  end if;
  hosted:=public.studio_member_job_action(w,'substo','retry-member',hosted.id,'cancel');
  if hosted.status<>'cancelled' then raise exception 'Member hosted cancel regressed'; end if;
- delete from public.studio_workspaces where id=w;
+ delete from public.studio_locations where location_id=w;
 end $$;

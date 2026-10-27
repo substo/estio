@@ -44,10 +44,10 @@ rg -q '^ f$' "$studio_logs/profile-delete-race-b.log"
 rg -q '^ f$' "$studio_logs/profile-delete-race-c.log"
 "${studio_psql[@]}" <<'SQL'
 do $$ begin
- if exists(select 1 from public.platform_google_youtube_connections where brand='substo' and clerk_user_id='user_delete_race')
- or exists(select 1 from public.platform_google_youtube_oauth_states where brand='substo' and clerk_user_id='user_delete_race')
- or not exists(select 1 from public.platform_profile_deletions where brand='substo' and clerk_user_id='user_delete_race')
- or (select count(*) from public.platform_profile_deletion_events where brand='substo' and clerk_user_id='user_delete_race')<>1 then raise exception 'OAuth resurrected deleted profile or duplicated deletion event'; end if;
+ if exists(select 1 from public.platform_google_youtube_connections where app='substo' and clerk_user_id='user_delete_race')
+ or exists(select 1 from public.platform_google_youtube_oauth_states where app='substo' and clerk_user_id='user_delete_race')
+ or not exists(select 1 from public.platform_profile_deletions where app='substo' and clerk_user_id='user_delete_race')
+ or (select count(*) from public.platform_profile_deletion_events where app='substo' and clerk_user_id='user_delete_race')<>1 then raise exception 'OAuth resurrected deleted profile or duplicated deletion event'; end if;
 end $$;
 select 'Platform profile deletion/callback concurrency assertions passed' as result;
 SQL

@@ -5,8 +5,8 @@ studio_socket=$1
 studio_logs=$2
 studio_psql=(env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$studio_socket" --port=55439 --username=studio_test --dbname=postgres --set=ON_ERROR_STOP=1)
 "${studio_psql[@]}" <<'SQL' >"$studio_logs/upload-race-setup.log"
-select public.studio_create_substo_workspace('f8100000-0000-4000-8000-000000000001','Upload race','upload-race-owner');
-insert into public.studio_records(workspace_id,id,kind,title,payload) values('f8100000-0000-4000-8000-000000000001','f8200000-0000-4000-8000-000000000001','content','Upload race','{}');
+select public.studio_create_substo_location('f8100000-0000-4000-8000-000000000001','Upload race','upload-race-owner');
+insert into public.studio_records(location_id,id,kind,title,payload) values('f8100000-0000-4000-8000-000000000001','f8200000-0000-4000-8000-000000000001','content','Upload race','{}');
 select public.studio_create_upload('f8100000-0000-4000-8000-000000000001','substo','upload-race-owner','f8300000-0000-4000-8000-000000000001','f8200000-0000-4000-8000-000000000001','a.mp4','video/mp4',100,'studio-media');
 SQL
 "${studio_psql[@]}" <<'SQL' >"$studio_logs/upload-race-a.log" 2>&1 &
@@ -38,8 +38,8 @@ wait "$studio_a" || { cat "$studio_logs/upload-race-a.log"; exit 1; }
 wait "$studio_b" || { cat "$studio_logs/upload-race-b.log"; exit 1; }
 "${studio_psql[@]}" <<'SQL'
 do $$ begin
- if (select count(*) from public.studio_media_objects where workspace_id='f8100000-0000-4000-8000-000000000001')<>1
- or (select count(*) from public.studio_jobs where workspace_id='f8100000-0000-4000-8000-000000000001')<>1
+ if (select count(*) from public.studio_media_objects where location_id='f8100000-0000-4000-8000-000000000001')<>1
+ or (select count(*) from public.studio_jobs where location_id='f8100000-0000-4000-8000-000000000001')<>1
  or (select status from public.studio_uploads where id='f8300000-0000-4000-8000-000000000001')<>'uploaded'
  then raise exception 'Concurrent recovery duplicated work'; end if;
 end $$;

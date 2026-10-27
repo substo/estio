@@ -3,10 +3,10 @@
 begin;
 create table public.studio_idea_reviews (
   id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null references public.studio_workspaces(id) on delete cascade,
+  location_id text not null references public.studio_locations(location_id) on delete cascade,
   request_id uuid not null,
   created_by_clerk_user_id text not null,
-  actor_brand text not null check (actor_brand in ('estio','substo')),
+  actor_app text not null check (actor_app in ('estio','substo')),
   request jsonb not null,
   snapshot jsonb not null check (jsonb_typeof(snapshot)='object' and octet_length(snapshot::text)<=24000),
   prompt_version text not null default 'studio.idea-review.v1',
@@ -16,7 +16,7 @@ create table public.studio_idea_reviews (
   stale_at_completion boolean,
   completed_at timestamptz,
   created_at timestamptz not null default clock_timestamp(),
-  unique(workspace_id,request_id)
+  unique(location_id,request_id)
 );
 alter table public.studio_idea_reviews enable row level security;
 revoke all on public.studio_idea_reviews from public,anon,authenticated,service_role;
@@ -39,7 +39,7 @@ alter table public.studio_ai_attempts add constraint studio_ai_attempt_subject c
     and idea_review_id is not null and model='gpt-6-luna'));
 create unique index studio_ai_attempt_idea_active_idx on public.studio_ai_attempts(idea_review_id)
   where operation='idea_review' and status<>'rejected' and not replacement_authorized;
-create view public.studio_transcription_attempts as select id,workspace_id,upload_id,job_id,lease_token,job_attempt,worker_id,
+create view public.studio_transcription_attempts as select id,location_id,upload_id,job_id,lease_token,job_attempt,worker_id,
   chunk_index,duration_seconds,usage_id,status,created_at,updated_at,review_version,billing_outcome,replacement_authorized
   from public.studio_ai_attempts where operation='transcribe_upload' with local check option;
 revoke all on public.studio_transcription_attempts from public,anon,authenticated,service_role;
@@ -49,43 +49,43 @@ create view public.studio_transcription_reviews as select * from public.studio_a
 revoke all on public.studio_transcription_reviews from public,anon,authenticated,service_role;
 grant select on public.studio_transcription_reviews to service_role;
 
-create function public.studio_enqueue_idea_review(p_workspace_id uuid, p_actor_brand text, p_clerk_user_id text,
+create function public.studio_enqueue_idea_review(p_location_id text, p_actor_app text, p_clerk_user_id text,
   p_request_id uuid, p_selection jsonb, p_focus text, p_confirm_paid boolean)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare prior public.studio_idea_reviews%rowtype; v_request jsonb; v_snapshot jsonb; v_ideas jsonb;
   v_review uuid := gen_random_uuid(); j public.studio_jobs%rowtype; ids uuid[];
 begin
-  perform public.studio_lock_workspace_member(p_workspace_id,p_actor_brand,p_clerk_user_id);
+  perform public.studio_lock_location_member(p_location_id,p_actor_app,p_clerk_user_id);
   if p_request_id is null or p_confirm_paid is distinct from true or p_focus is null or char_length(p_focus)>300
     or p_selection is null or jsonb_typeof(p_selection)<>'array' or jsonb_array_length(p_selection) not between 1 and 5 then
     raise exception 'Select one to five ideas and authorize the review' using errcode='22023'; end if;
-  -- Serialize per-workspace enqueue requests without conflicting with FK locks.
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('idea-review:'||p_workspace_id::text,0));
+  -- Serialize per-location enqueue requests without conflicting with FK locks.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('idea-review:'||p_location_id::text,0));
   select array_agg((x->>'id')::uuid order by x->>'id') into ids from jsonb_array_elements(p_selection) x;
   if (select count(distinct id) from unnest(ids) id) <> jsonb_array_length(p_selection)
     or exists(select 1 from jsonb_array_elements(p_selection) x where x->>'version' is null or (x->>'version') !~ '^[1-9][0-9]{0,14}$') then
     raise exception 'Invalid idea selection' using errcode='22023'; end if;
-  v_request := jsonb_build_object('selection',p_selection,'focus',p_focus,'actor',p_clerk_user_id,'brand',p_actor_brand);
-  select * into prior from public.studio_idea_reviews where workspace_id=p_workspace_id and request_id=p_request_id;
+  v_request := jsonb_build_object('selection',p_selection,'focus',p_focus,'actor',p_clerk_user_id,'app',p_actor_app);
+  select * into prior from public.studio_idea_reviews where location_id=p_location_id and request_id=p_request_id;
   if found then
     if prior.request is distinct from v_request then raise exception 'Review request reused' using errcode='23505'; end if;
     return jsonb_build_object('reviewId',prior.id,'jobId',prior.job_id);
   end if;
-  if (select count(*) from public.studio_jobs where workspace_id=p_workspace_id and kind='studio.idea_review' and status in ('queued','running'))>=5 then
+  if (select count(*) from public.studio_jobs where location_id=p_location_id and kind='studio.idea_review' and status in ('queued','running'))>=5 then
     raise exception 'Too many active idea reviews' using errcode='40001'; end if;
   -- All selected records + their linked sources are locked in UUID order.
   -- Link edits increment/lock their source record version, so stale selection
   -- versions fail below rather than mixing snapshots across an edit.
-  perform 1 from public.studio_records r where r.workspace_id=p_workspace_id and (r.id=any(ids) or r.id in
-    (select target_id from public.studio_record_links where workspace_id=p_workspace_id and source_id=any(ids))) order by r.id for share;
+  perform 1 from public.studio_records r where r.location_id=p_location_id and (r.id=any(ids) or r.id in
+    (select target_id from public.studio_record_links where location_id=p_location_id and source_id=any(ids))) order by r.id for share;
   if exists(select 1 from jsonb_array_elements(p_selection) x where not exists(select 1 from public.studio_records r
-    where r.workspace_id=p_workspace_id and r.id=(x->>'id')::uuid and r.version=(x->>'version')::bigint
+    where r.location_id=p_location_id and r.id=(x->>'id')::uuid and r.version=(x->>'version')::bigint
       and r.kind='content' and not r.archived and r.payload->>'stage'='idea')) then
     raise exception 'An idea changed or is unavailable; reload' using errcode='40001'; end if;
-  if exists(select 1 from public.studio_record_links where workspace_id=p_workspace_id and source_id=any(ids) group by source_id having count(*)>3) then
+  if exists(select 1 from public.studio_record_links where location_id=p_location_id and source_id=any(ids) group by source_id having count(*)>3) then
     raise exception 'Select ideas with at most three linked records for this bounded review' using errcode='22023'; end if;
-  if exists(select 1 from public.studio_record_links l join public.studio_records s on s.workspace_id=l.workspace_id and s.id=l.target_id
-    where l.workspace_id=p_workspace_id and l.source_id=any(ids) and char_length(s.source_url)>2000) then
+  if exists(select 1 from public.studio_record_links l join public.studio_records s on s.location_id=l.location_id and s.id=l.target_id
+    where l.location_id=p_location_id and l.source_id=any(ids) and char_length(s.source_url)>2000) then
     raise exception 'A linked source URL exceeds the review bound' using errcode='22023'; end if;
   select jsonb_agg(jsonb_build_object('id',r.id,'version',r.version,'title',left(r.title,180),
     'summary',left(coalesce(r.summary,''),700),'notes',left(coalesce(r.payload->>'notes',''),1000),
@@ -93,52 +93,52 @@ begin
     'sources',coalesce((select jsonb_agg(jsonb_build_object('id',s.id,'version',s.version,'title',left(s.title,180),
       'url',s.source_url,'excerpt',left(coalesce(nullif(s.payload->>'transcript',''),nullif(s.payload->>'notes',''),s.summary,''),600),
       'excerpted',char_length(s.title)>180 or char_length(coalesce(nullif(s.payload->>'transcript',''),nullif(s.payload->>'notes',''),s.summary,''))>600) order by s.id)
-      from public.studio_record_links l join public.studio_records s on s.workspace_id=l.workspace_id and s.id=l.target_id
-      where l.workspace_id=p_workspace_id and l.source_id=r.id),'[]'::jsonb)) order by r.id) into v_ideas
-    from public.studio_records r where r.workspace_id=p_workspace_id and r.id=any(ids);
+      from public.studio_record_links l join public.studio_records s on s.location_id=l.location_id and s.id=l.target_id
+      where l.location_id=p_location_id and l.source_id=r.id),'[]'::jsonb)) order by r.id) into v_ideas
+    from public.studio_records r where r.location_id=p_location_id and r.id=any(ids);
   v_snapshot := jsonb_build_object('focus',p_focus,'ideas',v_ideas);
   if octet_length(v_snapshot::text)>24000 then raise exception 'Selected research excerpts exceed review size; select fewer ideas' using errcode='22023'; end if;
-  j := public.studio_enqueue_job(p_workspace_id,'studio.idea_review',jsonb_build_object('reviewId',v_review),'idea-review:'||p_request_id::text,p_clerk_user_id,5);
-  insert into public.studio_idea_reviews(id,workspace_id,request_id,created_by_clerk_user_id,actor_brand,request,snapshot,job_id)
-    values(v_review,p_workspace_id,p_request_id,p_clerk_user_id,p_actor_brand,v_request,v_snapshot,j.id);
+  j := public.studio_enqueue_job(p_location_id,'studio.idea_review',jsonb_build_object('reviewId',v_review),'idea-review:'||p_request_id::text,p_clerk_user_id,5);
+  insert into public.studio_idea_reviews(id,location_id,request_id,created_by_clerk_user_id,actor_app,request,snapshot,job_id)
+    values(v_review,p_location_id,p_request_id,p_clerk_user_id,p_actor_app,v_request,v_snapshot,j.id);
   return jsonb_build_object('reviewId',v_review,'jobId',j.id);
 end; $$;
 
-create function public.studio_lock_idea_review_lease(p_workspace_id uuid,p_review_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid)
+create function public.studio_lock_idea_review_lease(p_location_id text,p_review_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid)
 returns public.studio_jobs language plpgsql security definer set search_path='' as $$
 declare j public.studio_jobs%rowtype;
 begin
   select * into j from public.studio_jobs where id=p_job_id for update;
-  if j.id is null or j.workspace_id<>p_workspace_id or j.kind<>'studio.idea_review' or j.payload->>'reviewId' is distinct from p_review_id::text
+  if j.id is null or j.location_id<>p_location_id or j.kind<>'studio.idea_review' or j.payload->>'reviewId' is distinct from p_review_id::text
     or j.status<>'running' or j.lease_owner is distinct from p_worker_id or j.lease_token is distinct from p_lease_token
     or j.lease_expires_at<=clock_timestamp() then raise exception 'Current idea-review lease required' using errcode='40001'; end if;
-  if not exists(select 1 from public.studio_idea_reviews where id=p_review_id and workspace_id=p_workspace_id and job_id=p_job_id) then
+  if not exists(select 1 from public.studio_idea_reviews where id=p_review_id and location_id=p_location_id and job_id=p_job_id) then
     raise exception 'Review job mismatch' using errcode='22023'; end if;
   return j;
 end; $$;
 
-create function public.studio_begin_idea_review_attempt(p_workspace_id uuid,p_review_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid)
+create function public.studio_begin_idea_review_attempt(p_location_id text,p_review_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid)
 returns jsonb language plpgsql security definer set search_path='' as $$
 declare j public.studio_jobs%rowtype; a uuid; u uuid; billing text;
 begin
-  j := public.studio_lock_idea_review_lease(p_workspace_id,p_review_id,p_job_id,p_worker_id,p_lease_token);
+  j := public.studio_lock_idea_review_lease(p_location_id,p_review_id,p_job_id,p_worker_id,p_lease_token);
   if exists(select 1 from public.studio_idea_reviews where id=p_review_id and result is not null) then return '{"outcome":"saved"}'; end if;
   select billing_outcome into billing from public.studio_ai_attempts where idea_review_id=p_review_id and status<>'rejected' and not replacement_authorized;
   if found then return jsonb_build_object('outcome',case when billing is null then 'uncertain' else 'reconciled' end); end if;
-  u := public.studio_reserve_ai_spend(p_workspace_id,'openai','idea_review',10000);
+  u := public.studio_reserve_ai_spend(p_location_id,'openai','idea_review',10000);
   if u is null then return '{"outcome":"budget_exhausted"}'; end if;
-  insert into public.studio_ai_attempts(workspace_id,job_id,lease_token,job_attempt,worker_id,usage_id,status,operation,idea_review_id,model)
-    values(p_workspace_id,p_job_id,p_lease_token,j.attempts,p_worker_id,u,'started','idea_review',p_review_id,'gpt-6-luna') returning id into a;
+  insert into public.studio_ai_attempts(location_id,job_id,lease_token,job_attempt,worker_id,usage_id,status,operation,idea_review_id,model)
+    values(p_location_id,p_job_id,p_lease_token,j.attempts,p_worker_id,u,'started','idea_review',p_review_id,'gpt-6-luna') returning id into a;
   return jsonb_build_object('outcome','started','attempt_id',a);
 end; $$;
 
-create function public.studio_finish_idea_review_attempt(p_workspace_id uuid,p_review_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid,
+create function public.studio_finish_idea_review_attempt(p_location_id text,p_review_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid,
   p_attempt_id uuid,p_result jsonb,p_input_tokens bigint,p_output_tokens bigint,p_response_id text,p_rate_version text)
 returns boolean language plpgsql security definer set search_path='' as $$
 declare a public.studio_ai_attempts%rowtype; snapshot jsonb; score jsonb; source jsonb; v_stale boolean;
 begin
-  perform public.studio_lock_idea_review_lease(p_workspace_id,p_review_id,p_job_id,p_worker_id,p_lease_token);
-  select * into a from public.studio_ai_attempts where id=p_attempt_id and idea_review_id=p_review_id and workspace_id=p_workspace_id
+  perform public.studio_lock_idea_review_lease(p_location_id,p_review_id,p_job_id,p_worker_id,p_lease_token);
+  select * into a from public.studio_ai_attempts where id=p_attempt_id and idea_review_id=p_review_id and location_id=p_location_id
     and job_id=p_job_id and lease_token=p_lease_token for update;
   if a.id is null or a.status not in ('started','succeeded') then raise exception 'Attempt cannot finish' using errcode='40001'; end if;
   if a.status='succeeded' then return true; end if;
@@ -163,13 +163,13 @@ begin
     end loop;
   end loop;
   -- Preserve paid results even when content changed; never write back into ideas.
-  perform 1 from public.studio_records r where r.workspace_id=p_workspace_id and r.id in
+  perform 1 from public.studio_records r where r.location_id=p_location_id and r.id in
     (select (i->>'id')::uuid from jsonb_array_elements(snapshot->'ideas') i union
      select (s->>'id')::uuid from jsonb_array_elements(snapshot->'ideas') i,jsonb_array_elements(i->'sources') s) order by r.id for share;
   select exists(select 1 from (select i from jsonb_array_elements(snapshot->'ideas') i union all
     select s from jsonb_array_elements(snapshot->'ideas') i,jsonb_array_elements(i->'sources') s) x where not exists
-    (select 1 from public.studio_records r where r.workspace_id=p_workspace_id and r.id=(x.i->>'id')::uuid and r.version=(x.i->>'version')::bigint)) into v_stale;
-  perform public.studio_settle_ai_spend(p_workspace_id,a.usage_id,ceil((p_input_tokens::numeric+5*p_output_tokens)/10)::bigint,
+    (select 1 from public.studio_records r where r.location_id=p_location_id and r.id=(x.i->>'id')::uuid and r.version=(x.i->>'version')::bigint)) into v_stale;
+  perform public.studio_settle_ai_spend(p_location_id,a.usage_id,ceil((p_input_tokens::numeric+5*p_output_tokens)/10)::bigint,
     a.model,p_input_tokens,p_output_tokens,null);
   update public.studio_idea_reviews set result=p_result,stale_at_completion=v_stale,completed_at=clock_timestamp() where id=p_review_id;
   update public.studio_ai_attempts set status='succeeded',provider_response_id=p_response_id,rate_version=p_rate_version,updated_at=clock_timestamp() where id=a.id;
@@ -178,21 +178,21 @@ end; $$;
 
 -- Closing a provider call is shared by all hosted paid jobs. Transcript wrappers
 -- remain available, but all newer jobs use this lease-fenced operation.
-create function public.studio_close_ai_attempt(p_workspace_id uuid,p_job_id uuid,p_worker_id text,p_lease_token uuid,p_attempt_id uuid,p_rejected boolean)
+create function public.studio_close_ai_attempt(p_location_id text,p_job_id uuid,p_worker_id text,p_lease_token uuid,p_attempt_id uuid,p_rejected boolean)
 returns void language plpgsql security definer set search_path='' as $$
 declare j public.studio_jobs%rowtype; a public.studio_ai_attempts%rowtype;
 begin
   select * into j from public.studio_jobs where id=p_job_id for update;
-  if j.id is null or j.workspace_id<>p_workspace_id or j.status<>'running' or j.lease_owner is distinct from p_worker_id
+  if j.id is null or j.location_id<>p_location_id or j.status<>'running' or j.lease_owner is distinct from p_worker_id
     or j.lease_token is distinct from p_lease_token or j.lease_expires_at<=clock_timestamp() then raise exception 'Current paid-job lease required' using errcode='40001'; end if;
-  select * into a from public.studio_ai_attempts where id=p_attempt_id and workspace_id=p_workspace_id and job_id=p_job_id and lease_token=p_lease_token for update;
+  select * into a from public.studio_ai_attempts where id=p_attempt_id and location_id=p_location_id and job_id=p_job_id and lease_token=p_lease_token for update;
   if a.id is null then raise exception 'Attempt missing' using errcode='22023'; end if;
   if a.status<>'started' then return; end if;
-  if coalesce(p_rejected,false) then perform public.studio_release_ai_spend(p_workspace_id,a.usage_id); end if;
+  if coalesce(p_rejected,false) then perform public.studio_release_ai_spend(p_location_id,a.usage_id); end if;
   update public.studio_ai_attempts set status=case when coalesce(p_rejected,false) then 'rejected' else 'uncertain' end,updated_at=clock_timestamp() where id=a.id;
 end; $$;
 
-create function public.studio_review_ai_attempt(p_workspace_id uuid, p_actor_brand text, p_clerk_user_id text,
+create function public.studio_review_ai_attempt(p_location_id text, p_actor_app text, p_clerk_user_id text,
   p_attempt_id uuid, p_request_id uuid, p_expected_version bigint, p_action text, p_evidence text, p_cost_micros bigint, p_confirm_paid boolean)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -216,19 +216,19 @@ begin
   end if;
   -- Member helper locks the membership through this transaction; role changes
   -- and revocation cannot race review. Estio location ADMIN is checked by app.
-  perform public.studio_lock_workspace_member(p_workspace_id,p_actor_brand,p_clerk_user_id);
-  if p_actor_brand='substo' and not exists(select 1 from public.studio_workspace_memberships
-    where workspace_id=p_workspace_id and clerk_user_id=p_clerk_user_id and role in ('owner','admin')) then
+  perform public.studio_lock_location_member(p_location_id,p_actor_app,p_clerk_user_id);
+  if p_actor_app='substo' and not exists(select 1 from public.studio_location_memberships
+    where location_id=p_location_id and clerk_user_id=p_clerk_user_id and role in ('owner','admin')) then
     raise exception 'AI manager required' using errcode='42501';
   end if;
   v_request := pg_catalog.jsonb_build_object('attempt',p_attempt_id,'version',p_expected_version,'action',p_action,
-    'evidence',v_evidence,'cost',p_cost_micros,'confirm',p_confirm_paid,'brand',p_actor_brand,'actor',p_clerk_user_id);
+    'evidence',v_evidence,'cost',p_cost_micros,'confirm',p_confirm_paid,'app',p_actor_app,'actor',p_clerk_user_id);
   -- Lock in the same order as worker writes and reclaim: job, then attempt.
-  select job_id into v_job_id from public.studio_ai_attempts where id=p_attempt_id and workspace_id=p_workspace_id;
+  select job_id into v_job_id from public.studio_ai_attempts where id=p_attempt_id and location_id=p_location_id;
   if not found then raise exception 'Attempt not found' using errcode='22023'; end if;
-  select * into j from public.studio_jobs where id=v_job_id and workspace_id=p_workspace_id for update;
-  select * into a from public.studio_ai_attempts where id=p_attempt_id and workspace_id=p_workspace_id for update;
-  select * into prior from public.studio_ai_attempt_reviews where workspace_id=p_workspace_id and request_id=p_request_id;
+  select * into j from public.studio_jobs where id=v_job_id and location_id=p_location_id for update;
+  select * into a from public.studio_ai_attempts where id=p_attempt_id and location_id=p_location_id for update;
+  select * into prior from public.studio_ai_attempt_reviews where location_id=p_location_id and request_id=p_request_id;
   if found then
     if prior.request is distinct from v_request then raise exception 'Review request already used' using errcode='23505'; end if;
     return prior.result;
@@ -255,32 +255,32 @@ begin
     update public.studio_jobs set status='failed',lease_owner=null,lease_expires_at=null,
       last_error_code='ai_outcome_uncertain',last_error_message='AI processing outcome requires review.',
       finished_at=pg_catalog.clock_timestamp(),updated_at=pg_catalog.clock_timestamp() where id=j.id;
-    insert into public.studio_job_events(job_id,workspace_id,attempt,event,worker_id,error_code)
-      values(j.id,p_workspace_id,j.attempts,'lease_expired',j.lease_owner,'worker_lease_expired'),
-        (j.id,p_workspace_id,j.attempts,'failed',null,'ai_outcome_uncertain');
+    insert into public.studio_job_events(job_id,location_id,attempt,event,worker_id,error_code)
+      values(j.id,p_location_id,j.attempts,'lease_expired',j.lease_owner,'worker_lease_expired'),
+        (j.id,p_location_id,j.attempts,'failed',null,'ai_outcome_uncertain');
   end if;
   if p_action='authorize_replacement' then
     update public.studio_ai_attempts set status='uncertain',replacement_authorized=true,
       review_version=review_version+1,updated_at=pg_catalog.clock_timestamp() where id=a.id;
     update public.studio_jobs set status='queued',attempts=0,lease_owner=null,lease_expires_at=null,run_after=pg_catalog.clock_timestamp(),
       finished_at=null,last_error_code=null,last_error_message=null,updated_at=pg_catalog.clock_timestamp() where id=j.id;
-    insert into public.studio_job_events(job_id,workspace_id,attempt,event,actor_clerk_user_id)
-      values(j.id,p_workspace_id,0,'requeued',p_clerk_user_id);
+    insert into public.studio_job_events(job_id,location_id,attempt,event,actor_clerk_user_id)
+      values(j.id,p_location_id,0,'requeued',p_clerk_user_id);
   else
-    if not exists(select 1 from public.studio_ai_usage where id=a.usage_id and workspace_id=p_workspace_id and status='reserved') then
+    if not exists(select 1 from public.studio_ai_usage where id=a.usage_id and location_id=p_location_id and status='reserved') then
       raise exception 'Reservation no longer available' using errcode='40001'; end if;
     if p_action='no_charge' then
-      perform public.studio_release_ai_spend(p_workspace_id,a.usage_id);
+      perform public.studio_release_ai_spend(p_location_id,a.usage_id);
     else
-      perform public.studio_settle_ai_spend(p_workspace_id,a.usage_id,p_cost_micros,a.model,null,null,a.duration_seconds);
+      perform public.studio_settle_ai_spend(p_location_id,a.usage_id,p_cost_micros,a.model,null,null,a.duration_seconds);
     end if;
     update public.studio_ai_attempts set status='uncertain',billing_outcome=p_action,
       review_version=review_version+1,updated_at=pg_catalog.clock_timestamp() where id=a.id;
   end if;
   v_result := pg_catalog.jsonb_build_object('reviewId',v_review,'version',a.review_version+1,'action',p_action,'jobId',j.id);
-  insert into public.studio_ai_attempt_reviews(id,workspace_id,attempt_id,request_id,actor_brand,actor_clerk_user_id,
+  insert into public.studio_ai_attempt_reviews(id,location_id,attempt_id,request_id,actor_app,actor_clerk_user_id,
     action,evidence,cost_micros,previous_version,version,request,result)
-    values(v_review,p_workspace_id,a.id,p_request_id,p_actor_brand,p_clerk_user_id,p_action,v_evidence,p_cost_micros,a.review_version,a.review_version+1,v_request,v_result);
+    values(v_review,p_location_id,a.id,p_request_id,p_actor_app,p_clerk_user_id,p_action,v_evidence,p_cost_micros,a.review_version,a.review_version+1,v_request,v_result);
   return v_result;
 end;
 $$;
@@ -303,32 +303,32 @@ end;
 $$;
 create or replace function public.studio_recover_transcription_attempts()
 returns integer language sql security definer set search_path='' as $$ select public.studio_recover_ai_attempts(); $$;
-create or replace function public.studio_review_transcription_attempt(p_workspace_id uuid,p_actor_brand text,p_clerk_user_id text,
+create or replace function public.studio_review_transcription_attempt(p_location_id text,p_actor_app text,p_clerk_user_id text,
   p_attempt_id uuid,p_request_id uuid,p_expected_version bigint,p_action text,p_evidence text,p_cost_micros bigint,p_confirm_paid boolean)
 returns jsonb language sql security definer set search_path='' as $$
-  select public.studio_review_ai_attempt(p_workspace_id,p_actor_brand,p_clerk_user_id,p_attempt_id,p_request_id,p_expected_version,p_action,p_evidence,p_cost_micros,p_confirm_paid);
+  select public.studio_review_ai_attempt(p_location_id,p_actor_app,p_clerk_user_id,p_attempt_id,p_request_id,p_expected_version,p_action,p_evidence,p_cost_micros,p_confirm_paid);
 $$;
-revoke all on function public.studio_lock_idea_review_lease(uuid,uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
+revoke all on function public.studio_lock_idea_review_lease(text,uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
 revoke all on function public.studio_recover_ai_attempts() from public,anon,authenticated,service_role;
-revoke all on function public.studio_enqueue_idea_review(uuid,text,text,uuid,jsonb,text,boolean) from public,anon,authenticated;
-revoke all on function public.studio_begin_idea_review_attempt(uuid,uuid,uuid,text,uuid) from public,anon,authenticated;
-revoke all on function public.studio_finish_idea_review_attempt(uuid,uuid,uuid,text,uuid,uuid,jsonb,bigint,bigint,text,text) from public,anon,authenticated;
-revoke all on function public.studio_close_ai_attempt(uuid,uuid,text,uuid,uuid,boolean) from public,anon,authenticated;
-revoke all on function public.studio_review_ai_attempt(uuid,text,text,uuid,uuid,bigint,text,text,bigint,boolean) from public,anon,authenticated;
-grant execute on function public.studio_enqueue_idea_review(uuid,text,text,uuid,jsonb,text,boolean) to service_role;
-grant execute on function public.studio_begin_idea_review_attempt(uuid,uuid,uuid,text,uuid) to service_role;
-grant execute on function public.studio_finish_idea_review_attempt(uuid,uuid,uuid,text,uuid,uuid,jsonb,bigint,bigint,text,text) to service_role;
-grant execute on function public.studio_close_ai_attempt(uuid,uuid,text,uuid,uuid,boolean) to service_role;
-grant execute on function public.studio_review_ai_attempt(uuid,text,text,uuid,uuid,bigint,text,text,bigint,boolean) to service_role;
+revoke all on function public.studio_enqueue_idea_review(text,text,text,uuid,jsonb,text,boolean) from public,anon,authenticated;
+revoke all on function public.studio_begin_idea_review_attempt(text,uuid,uuid,text,uuid) from public,anon,authenticated;
+revoke all on function public.studio_finish_idea_review_attempt(text,uuid,uuid,text,uuid,uuid,jsonb,bigint,bigint,text,text) from public,anon,authenticated;
+revoke all on function public.studio_close_ai_attempt(text,uuid,text,uuid,uuid,boolean) from public,anon,authenticated;
+revoke all on function public.studio_review_ai_attempt(text,text,text,uuid,uuid,bigint,text,text,bigint,boolean) from public,anon,authenticated;
+grant execute on function public.studio_enqueue_idea_review(text,text,text,uuid,jsonb,text,boolean) to service_role;
+grant execute on function public.studio_begin_idea_review_attempt(text,uuid,uuid,text,uuid) to service_role;
+grant execute on function public.studio_finish_idea_review_attempt(text,uuid,uuid,text,uuid,uuid,jsonb,bigint,bigint,text,text) to service_role;
+grant execute on function public.studio_close_ai_attempt(text,uuid,text,uuid,uuid,boolean) to service_role;
+grant execute on function public.studio_review_ai_attempt(text,text,text,uuid,uuid,bigint,text,text,bigint,boolean) to service_role;
 -- Legacy upload-specific wrapper delegates paid close mechanics to the shared API.
-create or replace function public.studio_close_transcription_attempt(p_workspace_id uuid,p_upload_id uuid,p_job_id uuid,
+create or replace function public.studio_close_transcription_attempt(p_location_id text,p_upload_id uuid,p_job_id uuid,
   p_worker_id text,p_lease_token uuid,p_attempt_id uuid,p_rejected boolean)
 returns void language plpgsql security definer set search_path='' as $$
 begin
-  perform public.studio_lock_transcription_lease(p_workspace_id,p_upload_id,p_job_id,p_worker_id,p_lease_token);
+  perform public.studio_lock_transcription_lease(p_location_id,p_upload_id,p_job_id,p_worker_id,p_lease_token);
   if not exists(select 1 from public.studio_transcription_attempts where id=p_attempt_id and upload_id=p_upload_id
-    and workspace_id=p_workspace_id and job_id=p_job_id and lease_token=p_lease_token) then
+    and location_id=p_location_id and job_id=p_job_id and lease_token=p_lease_token) then
     raise exception 'Upload attempt mismatch' using errcode='22023'; end if;
-  perform public.studio_close_ai_attempt(p_workspace_id,p_job_id,p_worker_id,p_lease_token,p_attempt_id,p_rejected);
+  perform public.studio_close_ai_attempt(p_location_id,p_job_id,p_worker_id,p_lease_token,p_attempt_id,p_rejected);
 end; $$;
 commit;

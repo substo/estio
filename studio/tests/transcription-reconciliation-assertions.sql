@@ -1,8 +1,8 @@
 -- Synthetic manager evidence only. No real provider billing assertions.
 do $$
 declare
-  w uuid := 'd1000000-0000-4000-8000-000000000001';
-  other_w uuid := 'd1000000-0000-4000-8000-000000000002';
+  w text := 'd1000000-0000-4000-8000-000000000001';
+  other_w text := 'd1000000-0000-4000-8000-000000000002';
   r uuid := 'd2000000-0000-4000-8000-000000000001';
   up uuid := 'd3000000-0000-4000-8000-000000000001';
   request_id uuid := 'd4000000-0000-4000-8000-000000000001';
@@ -15,15 +15,15 @@ begin
     if has_table_privilege('service_role','public.studio_transcription_reviews',op) then raise exception 'Mutable review log'; end if;
   end loop;
   if has_table_privilege('authenticated','public.studio_transcription_reviews','SELECT')
-    or has_function_privilege('authenticated','public.studio_review_transcription_attempt(uuid,text,text,uuid,uuid,bigint,text,text,bigint,boolean)','EXECUTE')
-    or not has_function_privilege('service_role','public.studio_review_transcription_attempt(uuid,text,text,uuid,uuid,bigint,text,text,bigint,boolean)','EXECUTE') then raise exception 'Unsafe review grants'; end if;
+    or has_function_privilege('authenticated','public.studio_review_transcription_attempt(text,text,text,uuid,uuid,bigint,text,text,bigint,boolean)','EXECUTE')
+    or not has_function_privilege('service_role','public.studio_review_transcription_attempt(text,text,text,uuid,uuid,bigint,text,text,bigint,boolean)','EXECUTE') then raise exception 'Unsafe review grants'; end if;
 
-  perform public.studio_create_substo_workspace(w,'Reconciliation fixture','review-owner');
-  perform public.studio_create_substo_workspace(other_w,'Other review fixture','review-other');
-  insert into public.studio_workspace_memberships(workspace_id,workspace_brand,clerk_user_id,role)
+  perform public.studio_create_substo_location(w,'Reconciliation fixture','review-owner');
+  perform public.studio_create_substo_location(other_w,'Other review fixture','review-other');
+  insert into public.studio_location_memberships(location_id,location_app,clerk_user_id,role)
     values(w,'substo','review-member','member'),(w,'substo','review-admin','admin');
-  insert into public.studio_records(workspace_id,id,kind,title,payload) values(w,r,'content','Audio','{}');
-  insert into public.studio_workspace_ai_credentials(workspace_id,provider,ciphertext,iv,auth_tag,key_id,key_hint,set_by_clerk_user_id)
+  insert into public.studio_records(location_id,id,kind,title,payload) values(w,r,'content','Audio','{}');
+  insert into public.studio_location_ai_credentials(location_id,provider,ciphertext,iv,auth_tag,key_id,key_hint,set_by_clerk_user_id)
     values(w,'openai','YQ==','AAAAAAAAAAAAAAAA','AAAAAAAAAAAAAAAAAAAAAA==','v1','test','review-owner');
   perform public.studio_set_ai_budget(w,'substo','review-owner',1000000);
   perform public.studio_create_upload(w,'substo','review-owner',up,r,'test.ogg','audio/ogg',100,'studio-media');
@@ -42,15 +42,15 @@ begin
   begin perform public.studio_review_transcription_attempt(w,'estio','review-owner',a,request_id,1,'no_charge',evidence,0,false);
     raise exception 'Wrong realm reviewed'; exception when sqlstate '42501' then null; end;
   begin perform public.studio_review_transcription_attempt(other_w,'substo','review-other',a,request_id,1,'no_charge',evidence,0,false);
-    raise exception 'Foreign workspace reviewed'; exception when sqlstate '22023' then null; end;
-  delete from public.studio_workspace_memberships where workspace_id=w and clerk_user_id='review-admin';
+    raise exception 'Foreign location reviewed'; exception when sqlstate '22023' then null; end;
+  delete from public.studio_location_memberships where location_id=w and clerk_user_id='review-admin';
   begin perform public.studio_review_transcription_attempt(w,'substo','review-admin',a,request_id,1,'no_charge',evidence,0,false);
     raise exception 'Revoked manager reviewed'; exception when sqlstate '42501' then null; end;
   begin perform public.studio_review_transcription_attempt(w,'substo','review-owner',a,request_id,1,'no_charge','timeout',0,false);
     raise exception 'No evidence accepted'; exception when sqlstate '22023' then null; end;
   begin perform public.studio_review_transcription_attempt(w,'substo','review-owner',a,request_id,1,'authorize_replacement',evidence,null,true);
     raise exception 'Unreconciled replacement authorized'; exception when sqlstate '40001' then null; end;
-  if exists(select 1 from public.studio_transcription_reviews where workspace_id=w) or (select status from public.studio_ai_usage where id=old_usage) <> 'reserved' then raise exception 'Denied review changed state'; end if;
+  if exists(select 1 from public.studio_transcription_reviews where location_id=w) or (select status from public.studio_ai_usage where id=old_usage) <> 'reserved' then raise exception 'Denied review changed state'; end if;
 
   v := public.studio_review_transcription_attempt(w,'substo','review-owner',a,request_id,1,'no_charge',evidence,0,false);
   if (select status from public.studio_ai_usage where id=old_usage) <> 'released'
@@ -58,7 +58,7 @@ begin
     or (select status from public.studio_jobs where id=j.id) <> 'failed' then raise exception 'No-charge review incomplete'; end if;
   -- Lost response replay is the exact same event, even with its old version.
   replay := public.studio_review_transcription_attempt(w,'substo','review-owner',a,request_id,1,'no_charge',evidence,0,false);
-  if v <> replay or (select count(*) from public.studio_transcription_reviews where workspace_id=w) <> 1 then raise exception 'Review replay changed state'; end if;
+  if v <> replay or (select count(*) from public.studio_transcription_reviews where location_id=w) <> 1 then raise exception 'Review replay changed state'; end if;
   begin perform public.studio_review_transcription_attempt(w,'substo','review-owner',a,request_id,1,'billed',evidence,100,false);
     raise exception 'Request ID reused'; exception when unique_violation then null; end;
   begin perform public.studio_review_transcription_attempt(w,'substo','review-owner',a,gen_random_uuid(),1,'authorize_replacement',evidence,null,true);
@@ -103,9 +103,9 @@ begin
   if public.studio_begin_transcription_attempt(w,up,j.id,'review-worker',j.lease_token,0,600)->>'outcome' <> 'saved' then raise exception 'Successful chunk rebilled'; end if;
   a2 := (public.studio_begin_transcription_attempt(w,up,j.id,'review-worker',j.lease_token,1,10)->>'attempt_id')::uuid;
   perform public.studio_finish_transcription_attempt(w,up,j.id,'review-worker',j.lease_token,a2,'last','[]');
-  if (select sum(cost_micros) from public.studio_ai_usage where workspace_id=w) <> 62800 then raise exception 'Original and replacement charges not retained'; end if;
+  if (select sum(cost_micros) from public.studio_ai_usage where location_id=w) <> 62800 then raise exception 'Original and replacement charges not retained'; end if;
   if (public.studio_finish_upload_transcript(w,up,j.id,'review-worker',j.lease_token,'whisper-1','en',610)).text <> 'first last' then raise exception 'Recovery failed to produce transcript'; end if;
-  if (select count(*) from public.studio_transcription_reviews where workspace_id=w) <> 4 then raise exception 'Missing audit history'; end if;
+  if (select count(*) from public.studio_transcription_reviews where location_id=w) <> 4 then raise exception 'Missing audit history'; end if;
 end;
 $$;
 select 'Studio transcription reconciliation assertions passed' as result;

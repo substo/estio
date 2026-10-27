@@ -1,7 +1,7 @@
 -- Synthetic data only; final schema assertions after historical upgrade checks.
 do $$
 declare
-  w uuid := 'c1000000-0000-4000-8000-000000000001';
+  w text := 'c1000000-0000-4000-8000-000000000001';
   r uuid := 'c2000000-0000-4000-8000-000000000001';
   up uuid := 'c3000000-0000-4000-8000-000000000001';
   up2 uuid := 'c3000000-0000-4000-8000-000000000002';
@@ -17,17 +17,17 @@ begin
   if to_regprocedure('public.studio_complete_job(uuid,text,jsonb)') is not null
     or to_regprocedure('public.studio_extend_job_lease(uuid,text,integer)') is not null
     or to_regprocedure('public.studio_fail_job(uuid,text,text,text,boolean,integer)') is not null then raise exception 'Unfenced job overload'; end if;
-  if has_function_privilege('service_role','public.studio_save_transcript_chunk(uuid,uuid,integer,numeric,numeric,text,text,jsonb)','EXECUTE')
-    or has_function_privilege('service_role','public.studio_save_transcript(uuid,uuid,text,text,numeric)','EXECUTE')
-    or has_function_privilege('service_role','public.studio_release_ai_spend(uuid,uuid)','EXECUTE')
-    or has_function_privilege('service_role','public.studio_settle_ai_spend(uuid,uuid,bigint,text,bigint,bigint,numeric)','EXECUTE')
-    or has_function_privilege('service_role','public.studio_reserve_ai_spend(uuid,text,text,bigint)','EXECUTE')
-    or has_function_privilege('authenticated','public.studio_begin_transcription_attempt(uuid,uuid,uuid,text,uuid,integer,numeric)','EXECUTE')
-    or has_function_privilege('service_role','public.studio_lock_transcription_lease(uuid,uuid,uuid,text,uuid)','EXECUTE') then raise exception 'Unfenced spend/transcript or unsafe RPC grant'; end if;
+  if has_function_privilege('service_role','public.studio_save_transcript_chunk(text,uuid,integer,numeric,numeric,text,text,jsonb)','EXECUTE')
+    or has_function_privilege('service_role','public.studio_save_transcript(text,uuid,text,text,numeric)','EXECUTE')
+    or has_function_privilege('service_role','public.studio_release_ai_spend(text,uuid)','EXECUTE')
+    or has_function_privilege('service_role','public.studio_settle_ai_spend(text,uuid,bigint,text,bigint,bigint,numeric)','EXECUTE')
+    or has_function_privilege('service_role','public.studio_reserve_ai_spend(text,text,text,bigint)','EXECUTE')
+    or has_function_privilege('authenticated','public.studio_begin_transcription_attempt(text,uuid,uuid,text,uuid,integer,numeric)','EXECUTE')
+    or has_function_privilege('service_role','public.studio_lock_transcription_lease(text,uuid,uuid,text,uuid)','EXECUTE') then raise exception 'Unfenced spend/transcript or unsafe RPC grant'; end if;
 
-  perform public.studio_create_substo_workspace(w,'Reliability fixture','reliability-owner');
-  insert into public.studio_records(workspace_id,id,kind,title,payload) values(w,r,'content','Audio','{}');
-  insert into public.studio_workspace_ai_credentials(workspace_id,provider,ciphertext,iv,auth_tag,key_id,key_hint,set_by_clerk_user_id)
+  perform public.studio_create_substo_location(w,'Reliability fixture','reliability-owner');
+  insert into public.studio_records(location_id,id,kind,title,payload) values(w,r,'content','Audio','{}');
+  insert into public.studio_location_ai_credentials(location_id,provider,ciphertext,iv,auth_tag,key_id,key_hint,set_by_clerk_user_id)
     values(w,'openai','YQ==','AAAAAAAAAAAAAAAA','AAAAAAAAAAAAAAAAAAAAAA==','v1','test','reliability-owner');
   perform public.studio_set_ai_budget(w,'substo','reliability-owner',1000000);
   perform public.studio_create_upload(w,'substo','reliability-owner',up,r,'test.ogg','audio/ogg',100,'studio-media');
@@ -36,12 +36,12 @@ begin
   select * into j from public.studio_jobs where id=u.transcription_job_id;
   if j.lease_token is null then raise exception 'Claim has no generation'; end if;
 
-  -- Cross-workspace/upload and wrong-generation writes cannot create a hold.
+  -- Cross-location/upload and wrong-generation writes cannot create a hold.
   begin perform public.studio_begin_transcription_attempt('a1000000-0000-4000-8000-000000000001',up,j.id,'reliable-worker',j.lease_token,0,600);
-    raise exception 'Foreign workspace accepted'; exception when sqlstate '40001' then null; end;
+    raise exception 'Foreign location accepted'; exception when sqlstate '40001' then null; end;
   begin perform public.studio_begin_transcription_attempt(w,up,j.id,'reliable-worker',gen_random_uuid(),0,600);
     raise exception 'Wrong generation accepted'; exception when sqlstate '40001' then null; end;
-  if exists(select 1 from public.studio_ai_usage where workspace_id=w) then raise exception 'Failed fence left a hold'; end if;
+  if exists(select 1 from public.studio_ai_usage where location_id=w) then raise exception 'Failed fence left a hold'; end if;
 
   a := public.studio_begin_transcription_attempt(w,up,j.id,'reliable-worker',j.lease_token,0,600);
   aid := (a->>'attempt_id')::uuid;

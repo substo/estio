@@ -13,17 +13,17 @@ revoke all on public.studio_knowledge_insights, public.studio_knowledge_reviews 
 grant select on public.studio_knowledge_insights, public.studio_knowledge_reviews to service_role;
 
 create function public.studio_review_knowledge_insight(
-  p_workspace_id uuid,
+  p_location_id text,
   p_insight_id uuid,
   p_action text,
   p_expected_version bigint,
-  p_actor_brand text,
+  p_actor_app text,
   p_clerk_user_id text,
   p_reason text default null
 ) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  v_brand text;
+  v_app text;
   v_insight public.studio_knowledge_insights%rowtype;
   v_next_status text;
   v_review_id uuid;
@@ -31,38 +31,38 @@ declare
   v_at_iso text;
   v_reason text;
 begin
-  if p_workspace_id is null or p_insight_id is null
+  if p_location_id is null or p_insight_id is null
     or p_action is null or p_action not in ('approve','reject','reopen')
     or p_expected_version is null or p_expected_version < 1
-    or p_actor_brand is null or p_actor_brand not in ('estio','substo')
+    or p_actor_app is null or p_actor_app not in ('estio','substo')
     or p_clerk_user_id is null or pg_catalog.btrim(p_clerk_user_id) = ''
     or p_reason is not null and pg_catalog.char_length(p_reason) > 2000 then
     raise exception 'Invalid knowledge review request' using errcode = '22023';
   end if;
 
-  select brand into v_brand from public.studio_workspaces where id = p_workspace_id;
-  if v_brand is null or v_brand <> p_actor_brand then
-    raise exception 'Knowledge reviewer has no workspace access' using errcode = '42501';
+  select app into v_app from public.studio_locations where location_id = p_location_id;
+  if v_app is null or v_app <> p_actor_app then
+    raise exception 'Knowledge reviewer has no location access' using errcode = '42501';
   end if;
   -- Estio's location/team authority lives in its separate Business database.
   -- The trusted server must check it (and reject impersonated writes) before
   -- this service-role RPC. Substo memberships can be checked again here.
-  if v_brand = 'substo' then
+  if v_app = 'substo' then
     -- Hold the membership through the decision; a concurrent revoke must wait
     -- for this transaction instead of committing between authorization and audit.
-    perform 1 from public.studio_workspace_memberships
-      where workspace_id = p_workspace_id and workspace_brand = 'substo'
+    perform 1 from public.studio_location_memberships
+      where location_id = p_location_id and location_app = 'substo'
         and clerk_user_id = p_clerk_user_id
       for share;
     if not found then
-      raise exception 'Knowledge reviewer has no workspace membership' using errcode = '42501';
+      raise exception 'Knowledge reviewer has no location membership' using errcode = '42501';
     end if;
   end if;
 
   select * into v_insight from public.studio_knowledge_insights
-  where workspace_id = p_workspace_id and id = p_insight_id for update;
+  where location_id = p_location_id and id = p_insight_id for update;
   if not found then
-    raise exception 'Knowledge insight was not found in workspace' using errcode = 'P0002';
+    raise exception 'Knowledge insight was not found in location' using errcode = 'P0002';
   end if;
   if v_insight.version <> p_expected_version then
     raise exception 'Knowledge insight changed since it was loaded' using errcode = '40001';
@@ -85,23 +85,23 @@ begin
 
   update public.studio_knowledge_insights
     set status = v_next_status, version = version + 1
-    where workspace_id = p_workspace_id and id = p_insight_id;
-  insert into public.studio_knowledge_reviews(workspace_id,id,insight_id,payload)
-    values(p_workspace_id,v_review_id,p_insight_id,pg_catalog.jsonb_build_object(
+    where location_id = p_location_id and id = p_insight_id;
+  insert into public.studio_knowledge_reviews(location_id,id,insight_id,payload)
+    values(p_location_id,v_review_id,p_insight_id,pg_catalog.jsonb_build_object(
       'id',v_review_id,
       'insight_id',p_insight_id,
       'action',p_action,
       'previous_status',v_insight.status,
       'new_status',v_next_status,
       'at',v_at_iso,
-      'actor_brand',p_actor_brand,
+      'actor_app',p_actor_app,
       'actor_clerk_user_id',p_clerk_user_id,
       'version',v_insight.version + 1,
       'origin','hosted',
       'reason',v_reason
     ));
   return pg_catalog.jsonb_build_object(
-    'workspaceId',p_workspace_id,
+    'locationId',p_location_id,
     'insightId',p_insight_id,
     'reviewId',v_review_id,
     'previousStatus',v_insight.status,
@@ -111,8 +111,8 @@ begin
   );
 end;
 $$;
-revoke all on function public.studio_review_knowledge_insight(uuid,uuid,text,bigint,text,text,text)
+revoke all on function public.studio_review_knowledge_insight(text,uuid,text,bigint,text,text,text)
   from public,anon,authenticated;
-grant execute on function public.studio_review_knowledge_insight(uuid,uuid,text,bigint,text,text,text)
+grant execute on function public.studio_review_knowledge_insight(text,uuid,text,bigint,text,text,text)
   to service_role;
 commit;

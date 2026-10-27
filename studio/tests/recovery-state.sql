@@ -20,8 +20,8 @@ begin
   'policies',(select coalesce(jsonb_agg(to_jsonb(p) order by schemaname,tablename,policyname),'[]') from pg_policies p where schemaname in ('public','storage')),
   'media',(select coalesce(jsonb_agg(jsonb_build_object('bucket',bucket_id,'key',object_key,'byteSize',byte_size,'sha256',sha256) order by bucket_id,object_key),'[]') from public.studio_media_objects),
   'credentials',(select coalesce(jsonb_agg(probe order by probe::text collate "C"),'[]') from (
-    select jsonb_build_object('scope','workspace','workspaceId',workspace_id,'cipher',jsonb_build_object('ciphertext',ciphertext,'iv',iv,'authTag',auth_tag,'keyId',key_id)) probe from public.studio_workspace_ai_credentials
-    union all select jsonb_build_object('scope','profile','brand',brand,'userId',clerk_user_id,'cipher',refresh_cipher) from public.platform_google_youtube_connections
+    select jsonb_build_object('scope','location','locationId',location_id,'cipher',jsonb_build_object('ciphertext',ciphertext,'iv',iv,'authTag',auth_tag,'keyId',key_id)) probe from public.studio_location_ai_credentials
+    union all select jsonb_build_object('scope','profile','app',app,'userId',clerk_user_id,'cipher',refresh_cipher) from public.platform_google_youtube_connections
   ) c));
 end $$;
 select pg_temp.recovery_state();

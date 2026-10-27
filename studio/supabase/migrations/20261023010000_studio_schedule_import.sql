@@ -1,7 +1,7 @@
 -- Inactive schedule draft import with immutable legacy definitions/history.
 begin;
 create table public.studio_schedule_import_runs (
-  workspace_id uuid not null references public.studio_workspaces(id) on delete cascade,
+  location_id text not null references public.studio_locations(location_id) on delete cascade,
   id uuid not null default gen_random_uuid(),
   source_digest text not null check (source_digest ~ '^[0-9a-f]{64}$'),
   manifest_signature text not null check (manifest_signature ~ '^[0-9a-f]{64}$'),
@@ -10,33 +10,33 @@ create table public.studio_schedule_import_runs (
   counts jsonb not null check (jsonb_typeof(counts) = 'object'),
   imported_by_clerk_user_id text not null,
   created_at timestamptz not null default now(),
-  primary key (workspace_id,id), unique (workspace_id,source_digest)
+  primary key (location_id,id), unique (location_id,source_digest)
 );
 create table public.studio_schedule_legacy_definitions (
-  workspace_id uuid not null,
+  location_id text not null,
   id uuid not null,
   import_run_id uuid not null,
   source_index integer not null check (source_index >= 0),
   payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-  primary key (workspace_id,id),
-  unique (workspace_id,import_run_id,source_index),
-  foreign key (workspace_id,id) references public.studio_schedules(workspace_id,id) on delete cascade,
-  foreign key (workspace_id,import_run_id) references public.studio_schedule_import_runs(workspace_id,id) on delete cascade,
-  unique (workspace_id,id,import_run_id)
+  primary key (location_id,id),
+  unique (location_id,import_run_id,source_index),
+  foreign key (location_id,id) references public.studio_schedules(location_id,id) on delete cascade,
+  foreign key (location_id,import_run_id) references public.studio_schedule_import_runs(location_id,id) on delete cascade,
+  unique (location_id,id,import_run_id)
 );
 create table public.studio_schedule_legacy_runs (
-  workspace_id uuid not null,
+  location_id text not null,
   id uuid not null,
   schedule_id uuid not null,
   import_run_id uuid not null,
   source_index integer not null check (source_index >= 0),
   payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-  primary key (workspace_id,id),
-  unique (workspace_id,import_run_id,source_index),
-  foreign key (workspace_id,schedule_id,import_run_id)
-    references public.studio_schedule_legacy_definitions(workspace_id,id,import_run_id) on delete cascade
+  primary key (location_id,id),
+  unique (location_id,import_run_id,source_index),
+  foreign key (location_id,schedule_id,import_run_id)
+    references public.studio_schedule_legacy_definitions(location_id,id,import_run_id) on delete cascade
 );
-create index studio_schedule_legacy_runs_schedule on public.studio_schedule_legacy_runs(workspace_id,schedule_id,source_index);
+create index studio_schedule_legacy_runs_schedule on public.studio_schedule_legacy_runs(location_id,schedule_id,source_index);
 alter table public.studio_schedule_import_runs enable row level security;
 alter table public.studio_schedule_legacy_definitions enable row level security;
 alter table public.studio_schedule_legacy_runs enable row level security;
@@ -59,10 +59,10 @@ end;
 $$;
 revoke all on function public.studio_schedule_import_timestamp_valid(jsonb) from public,anon,authenticated,service_role;
 
-create function public.studio_import_schedules(p_workspace_id uuid,p_source_digest text,p_manifest jsonb,p_owner_clerk_user_id text)
+create function public.studio_import_schedules(p_location_id text,p_source_digest text,p_manifest jsonb,p_owner_clerk_user_id text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
-  v_workspace public.studio_workspaces%rowtype;
+  v_location public.studio_locations%rowtype;
   v_import public.studio_schedule_import_runs%rowtype;
   v_snapshot jsonb;
   v_text text;
@@ -73,7 +73,7 @@ declare
   v_counts jsonb;
   v_replayed boolean := false;
 begin
-  if p_workspace_id is null or p_source_digest is null or p_source_digest !~ '^[0-9a-f]{64}$'
+  if p_location_id is null or p_source_digest is null or p_source_digest !~ '^[0-9a-f]{64}$'
     or p_owner_clerk_user_id is null or btrim(p_owner_clerk_user_id) = ''
     or jsonb_typeof(p_manifest) is distinct from 'object'
     or p_manifest->>'schema' is distinct from 'studio.legacy-schedules.v1'
@@ -124,16 +124,16 @@ begin
   end if;
 
   -- Serialize imports and hold exact owner membership through the transaction.
-  select * into v_workspace from public.studio_workspaces where id=p_workspace_id for update;
-  if not found or v_workspace.brand <> 'substo' or v_workspace.workspace_type <> 'substo_standalone' then
-    raise exception 'Import requires a standalone Substo workspace' using errcode = '42501';
+  select * into v_location from public.studio_locations where location_id=p_location_id for update;
+  if not found or v_location.app <> 'substo' then
+    raise exception 'Import requires a standalone Substo location' using errcode = '42501';
   end if;
-  perform 1 from public.studio_workspace_memberships where workspace_id=p_workspace_id
-    and workspace_brand='substo' and clerk_user_id=p_owner_clerk_user_id and role='owner' for share;
-  if not found then raise exception 'Import requires exact workspace owner' using errcode = '42501'; end if;
+  perform 1 from public.studio_location_memberships where location_id=p_location_id
+    and location_app='substo' and clerk_user_id=p_owner_clerk_user_id and role='owner' for share;
+  if not found then raise exception 'Import requires exact location owner' using errcode = '42501'; end if;
 
   v_signature := encode(sha256(convert_to(p_manifest::text,'UTF8')),'hex');
-  select * into v_import from public.studio_schedule_import_runs where workspace_id=p_workspace_id and source_digest=p_source_digest;
+  select * into v_import from public.studio_schedule_import_runs where location_id=p_location_id and source_digest=p_source_digest;
   if found then
     if v_import.manifest_signature <> v_signature then
       raise exception 'Source digest belongs to a different manifest' using errcode = '23505';
@@ -146,8 +146,8 @@ begin
       'inFlightRuns',(select count(*) from jsonb_array_elements(v_snapshot->'runs') r where r->>'status' in ('running','queued')))
       into v_counts;
     if p_manifest->'counts' is distinct from v_counts then raise exception 'Schedule counts mismatch' using errcode = '22023'; end if;
-    insert into public.studio_schedule_import_runs(workspace_id,source_digest,manifest_signature,source_canonical_json,preview_evidence,counts,imported_by_clerk_user_id)
-      values(p_workspace_id,p_source_digest,v_signature,v_text,jsonb_build_object('sourceFiles',p_manifest->'sourceFiles','issues',p_manifest->'issues','snapshotCheckedUnchanged',true),v_counts,p_owner_clerk_user_id) returning * into v_import;
+    insert into public.studio_schedule_import_runs(location_id,source_digest,manifest_signature,source_canonical_json,preview_evidence,counts,imported_by_clerk_user_id)
+      values(p_location_id,p_source_digest,v_signature,v_text,jsonb_build_object('sourceFiles',p_manifest->'sourceFiles','issues',p_manifest->'issues','snapshotCheckedUnchanged',true),v_counts,p_owner_clerk_user_id) returning * into v_import;
 
     for v_entry in select value,ordinality from jsonb_array_elements(v_snapshot->'schedules') with ordinality loop
       v_row := v_entry.value;
@@ -174,11 +174,11 @@ begin
       if p_manifest->'schedules'->(v_entry.ordinality::integer-1) is distinct from v_expected then
         raise exception 'Schedule projection differs from source' using errcode = '22023';
       end if;
-      insert into public.studio_schedules(workspace_id,id,preset_id,focus,interval_hours,daily_time,created_at,updated_at,updated_by)
-        values(p_workspace_id,(v_row->>'id')::uuid,v_row->>'presetId',v_row->>'query',(v_row->>'intervalHours')::integer,v_row->>'dailyTime',
+      insert into public.studio_schedules(location_id,id,preset_id,focus,interval_hours,daily_time,created_at,updated_at,updated_by)
+        values(p_location_id,(v_row->>'id')::uuid,v_row->>'presetId',v_row->>'query',(v_row->>'intervalHours')::integer,v_row->>'dailyTime',
           (v_row->>'createdAt')::timestamptz,(v_row->>'updatedAt')::timestamptz,p_owner_clerk_user_id);
-      insert into public.studio_schedule_legacy_definitions(workspace_id,id,import_run_id,source_index,payload)
-        values(p_workspace_id,(v_row->>'id')::uuid,v_import.id,v_entry.ordinality-1,v_row);
+      insert into public.studio_schedule_legacy_definitions(location_id,id,import_run_id,source_index,payload)
+        values(p_location_id,(v_row->>'id')::uuid,v_import.id,v_entry.ordinality-1,v_row);
     end loop;
     for v_entry in select value,ordinality from jsonb_array_elements(v_snapshot->'runs') with ordinality loop
       v_row := v_entry.value;
@@ -201,18 +201,18 @@ begin
       if p_manifest->'runs'->(v_entry.ordinality::integer-1) is distinct from v_expected then
         raise exception 'Run projection differs from source' using errcode = '22023';
       end if;
-      insert into public.studio_schedule_legacy_runs(workspace_id,id,schedule_id,import_run_id,source_index,payload)
-        values(p_workspace_id,(v_row->>'id')::uuid,(v_row->>'scheduleId')::uuid,v_import.id,v_entry.ordinality-1,v_row);
+      insert into public.studio_schedule_legacy_runs(location_id,id,schedule_id,import_run_id,source_index,payload)
+        values(p_location_id,(v_row->>'id')::uuid,(v_row->>'scheduleId')::uuid,v_import.id,v_entry.ordinality-1,v_row);
     end loop;
-    if (select count(*) from public.studio_schedule_legacy_definitions where workspace_id=p_workspace_id and import_run_id=v_import.id) <> (v_counts->>'schedules')::integer
-      or (select count(*) from public.studio_schedule_legacy_runs where workspace_id=p_workspace_id and import_run_id=v_import.id) <> (v_counts->>'runs')::integer then
+    if (select count(*) from public.studio_schedule_legacy_definitions where location_id=p_location_id and import_run_id=v_import.id) <> (v_counts->>'schedules')::integer
+      or (select count(*) from public.studio_schedule_legacy_runs where location_id=p_location_id and import_run_id=v_import.id) <> (v_counts->>'runs')::integer then
       raise exception 'Stored schedule counts mismatch' using errcode = '22023';
     end if;
   end if;
-  return jsonb_build_object('runId',v_import.id,'workspaceId',p_workspace_id,'sourceDigest',p_source_digest,
+  return jsonb_build_object('runId',v_import.id,'locationId',p_location_id,'sourceDigest',p_source_digest,
     'counts',v_import.counts,'replayed',v_replayed,'executionEnabled',false);
 end;
 $$;
-revoke all on function public.studio_import_schedules(uuid,text,jsonb,text) from public,anon,authenticated;
-grant execute on function public.studio_import_schedules(uuid,text,jsonb,text) to service_role;
+revoke all on function public.studio_import_schedules(text,text,jsonb,text) from public,anon,authenticated;
+grant execute on function public.studio_import_schedules(text,text,jsonb,text) to service_role;
 commit;

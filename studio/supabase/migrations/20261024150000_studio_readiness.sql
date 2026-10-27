@@ -1,4 +1,4 @@
--- Private operational readiness; no workspace payloads, credentials, provider calls or queue mutations.
+-- Private operational readiness; no location payloads, credentials, provider calls or queue mutations.
 begin;
 alter table public.studio_worker_heartbeats
  add column instance_id text,
@@ -42,12 +42,12 @@ returns void language sql security definer set search_path='' as $$
  delete from public.studio_worker_heartbeats where seen_at<pg_catalog.clock_timestamp()-interval '7 days';
 $$;
 
--- Bound output without returning any profile/workspace IDs, signed URLs, ciphertext or queue payload.
+-- Bound output without returning any profile/location IDs, signed URLs, ciphertext or queue payload.
 create function public.studio_readiness_snapshot()
 returns jsonb language sql stable security definer set search_path='' as $$
  select pg_catalog.jsonb_build_object('schema',27,'protocol',1,'checkedAt',pg_catalog.statement_timestamp(),
   'keyIds',coalesce((select jsonb_agg(k) from (
-   select key_id k from public.studio_workspace_ai_credentials union
+   select key_id k from public.studio_location_ai_credentials union
    select refresh_cipher->>'keyId' from public.platform_google_youtube_connections
   ) keys),'[]'::jsonb),
   'queue',pg_catalog.jsonb_build_object(

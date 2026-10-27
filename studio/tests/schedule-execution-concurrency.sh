@@ -5,9 +5,9 @@ studio_socket=$1
 studio_logs=$2
 studio_psql=(env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$studio_socket" --port=55439 --username=studio_test --dbname=postgres --set=ON_ERROR_STOP=1 --set=VERBOSITY=verbose)
 "${studio_psql[@]}" <<'SQL' >"$studio_logs/schedule-race-setup.log"
-select public.studio_create_substo_workspace('af100000-0000-4000-8000-000000000001','Schedule race','schedule-race-owner');
+select public.studio_create_substo_location('af100000-0000-4000-8000-000000000001','Schedule race','schedule-race-owner');
 select public.studio_save_schedule('af100000-0000-4000-8000-000000000001','af300000-0000-4000-8000-000000000001',0,'substo','schedule-race-owner','idea-review','Race',24,'09:00');
-insert into public.studio_records(workspace_id,id,kind,title,payload) values('af100000-0000-4000-8000-000000000001','af200000-0000-4000-8000-000000000001','content','Race idea','{"stage":"idea"}');
+insert into public.studio_records(location_id,id,kind,title,payload) values('af100000-0000-4000-8000-000000000001','af200000-0000-4000-8000-000000000001','content','Race idea','{"stage":"idea"}');
 SQL
 "${studio_psql[@]}" <<'SQL' >"$studio_logs/schedule-race-a.log" 2>&1 &
 begin;
@@ -46,9 +46,9 @@ rg -q '40001' "$studio_logs/schedule-race-c.log"
 diff <(rg '^ \{"' "$studio_logs/schedule-race-a.log") <(rg '^ \{"' "$studio_logs/schedule-race-b.log")
 "${studio_psql[@]}" <<'SQL'
 do $$ begin
- if (select count(*) from public.studio_schedule_executions where workspace_id='af100000-0000-4000-8000-000000000001')<>1
- or (select count(*) from public.studio_jobs where workspace_id='af100000-0000-4000-8000-000000000001')<>1
- or (select count(*) from public.studio_idea_reviews where workspace_id='af100000-0000-4000-8000-000000000001')<>1 then
+ if (select count(*) from public.studio_schedule_executions where location_id='af100000-0000-4000-8000-000000000001')<>1
+ or (select count(*) from public.studio_jobs where location_id='af100000-0000-4000-8000-000000000001')<>1
+ or (select count(*) from public.studio_idea_reviews where location_id='af100000-0000-4000-8000-000000000001')<>1 then
  raise exception 'Concurrent schedule commands duplicated work'; end if;
 end $$;
 select 'Studio schedule execution concurrency assertions passed' as result;

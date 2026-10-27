@@ -5,10 +5,10 @@ studio_socket=$1
 studio_logs=$2
 studio_psql=(env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$studio_socket" --port=55439 --username=studio_test --dbname=postgres --set=ON_ERROR_STOP=1 --set=VERBOSITY=verbose)
 "${studio_psql[@]}" <<'SQL' >"$studio_logs/knowledge-edit-race-setup.log"
-select public.studio_create_substo_workspace('d2100000-0000-4000-8000-000000000001','Knowledge race','knowledge-race-owner');
-insert into public.studio_records(workspace_id,id,kind,title,payload) select 'd2100000-0000-4000-8000-000000000001',('d2200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'reference','Race source '||n,'{}' from generate_series(1,3) n;
-insert into public.studio_knowledge_sources(workspace_id,id,payload,total_units,covered_units) select 'd2100000-0000-4000-8000-000000000001',('d2200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'{}',0,0 from generate_series(1,3) n;
-insert into public.studio_knowledge_insights(workspace_id,id,source_id,status,statement,payload) select 'd2100000-0000-4000-8000-000000000001',('d2300000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,('d2200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'pending','Original statement '||n,'{"kind":"claim","legacy":"preserved"}' from generate_series(1,3) n;
+select public.studio_create_substo_location('d2100000-0000-4000-8000-000000000001','Knowledge race','knowledge-race-owner');
+insert into public.studio_records(location_id,id,kind,title,payload) select 'd2100000-0000-4000-8000-000000000001',('d2200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'reference','Race source '||n,'{}' from generate_series(1,3) n;
+insert into public.studio_knowledge_sources(location_id,id,payload,total_units,covered_units) select 'd2100000-0000-4000-8000-000000000001',('d2200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'{}',0,0 from generate_series(1,3) n;
+insert into public.studio_knowledge_insights(location_id,id,source_id,status,statement,payload) select 'd2100000-0000-4000-8000-000000000001',('d2300000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,('d2200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'pending','Original statement '||n,'{"kind":"claim","legacy":"preserved"}' from generate_series(1,3) n;
 SQL
 "${studio_psql[@]}" <<'SQL' >"$studio_logs/knowledge-topic-race-a.log" 2>&1 &
 begin;
@@ -67,14 +67,14 @@ if wait "$studio_b"; then echo 'Stale approval overwrote the committed human edi
 rg -q '40001' "$studio_logs/knowledge-edit-race-b.log"
 "${studio_psql[@]}" <<'SQL'
 do $$ begin
- if (select count(*) from public.studio_knowledge_topics where workspace_id='d2100000-0000-4000-8000-000000000001')<>1
- or (select count(distinct topic_id) from public.studio_knowledge_insights where workspace_id='d2100000-0000-4000-8000-000000000001' and status='approved')<>1
- or (select count(*) from public.studio_knowledge_insights where workspace_id='d2100000-0000-4000-8000-000000000001' and status='approved')<>2
- or (select count(*) from public.studio_knowledge_topic_names where workspace_id='d2100000-0000-4000-8000-000000000001')<>1
- or (select statement from public.studio_knowledge_insights where workspace_id='d2100000-0000-4000-8000-000000000001' and id='d2300000-0000-4000-8000-000000000003')<>'Committed human correction'
- or (select status from public.studio_knowledge_insights where workspace_id='d2100000-0000-4000-8000-000000000001' and id='d2300000-0000-4000-8000-000000000003')<>'pending'
- or (select count(*) from public.studio_knowledge_commands where workspace_id='d2100000-0000-4000-8000-000000000001')<>3
- or (select count(*) from public.studio_knowledge_reviews where workspace_id='d2100000-0000-4000-8000-000000000001')<>3 then raise exception 'Knowledge concurrency duplicated topics, lost edit or appended false audit'; end if;
+ if (select count(*) from public.studio_knowledge_topics where location_id='d2100000-0000-4000-8000-000000000001')<>1
+ or (select count(distinct topic_id) from public.studio_knowledge_insights where location_id='d2100000-0000-4000-8000-000000000001' and status='approved')<>1
+ or (select count(*) from public.studio_knowledge_insights where location_id='d2100000-0000-4000-8000-000000000001' and status='approved')<>2
+ or (select count(*) from public.studio_knowledge_topic_names where location_id='d2100000-0000-4000-8000-000000000001')<>1
+ or (select statement from public.studio_knowledge_insights where location_id='d2100000-0000-4000-8000-000000000001' and id='d2300000-0000-4000-8000-000000000003')<>'Committed human correction'
+ or (select status from public.studio_knowledge_insights where location_id='d2100000-0000-4000-8000-000000000001' and id='d2300000-0000-4000-8000-000000000003')<>'pending'
+ or (select count(*) from public.studio_knowledge_commands where location_id='d2100000-0000-4000-8000-000000000001')<>3
+ or (select count(*) from public.studio_knowledge_reviews where location_id='d2100000-0000-4000-8000-000000000001')<>3 then raise exception 'Knowledge concurrency duplicated topics, lost edit or appended false audit'; end if;
 end $$;
 select 'Studio knowledge topic/edit concurrency assertions passed' as result;
 SQL

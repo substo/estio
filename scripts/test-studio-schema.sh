@@ -71,7 +71,9 @@ env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$studio_tes
   --file=studio/tests/youtube-run-now-assertions.sql \
   --file=studio/supabase/migrations/20261026010000_studio_mac_devices.sql \
   --file=studio/supabase/migrations/20261026020000_studio_device_setup.sql \
-  --file=studio/tests/devices-assertions.sql
+  --file=studio/tests/devices-assertions.sql \
+  --file=studio/supabase/migrations/20261027000000_studio_location_key.sql \
+  --file=studio/tests/location-key-assertions.sql
 bash studio/tests/devices-concurrency.sh "$studio_test_dir/socket" "$studio_test_dir"
 bash studio/tests/transcription-reconciliation-concurrency.sh "$studio_test_dir/socket" "$studio_test_dir"
 bash studio/tests/script-brief-concurrency.sh "$studio_test_dir/socket" "$studio_test_dir"

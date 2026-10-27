@@ -1,8 +1,8 @@
 -- Synthetic fixtures only. Queue claim/lease/retry semantics and authority.
 do $$
 declare
-  w uuid := '90000000-0000-4000-8000-000000000001';
-  other_w uuid := '90000000-0000-4000-8000-000000000002';
+  w text := '90000000-0000-4000-8000-000000000001';
+  other_w text := '90000000-0000-4000-8000-000000000002';
   j public.studio_jobs%rowtype; j2 public.studio_jobs%rowtype;
   claimed int; outcome text; t text; op text;
 begin
@@ -13,10 +13,10 @@ begin
     if has_table_privilege('authenticated','public.'||t,'SELECT') then raise exception 'Client reads %', t; end if;
   end loop;
   if has_function_privilege('authenticated','public.studio_claim_jobs(text,integer,integer)','EXECUTE')
-    or has_function_privilege('anon','public.studio_enqueue_job(uuid,text,jsonb,text,text,integer)','EXECUTE') then raise exception 'Unsafe job RPC grants'; end if;
+    or has_function_privilege('anon','public.studio_enqueue_job(text,text,jsonb,text,text,integer)','EXECUTE') then raise exception 'Unsafe job RPC grants'; end if;
 
-  perform public.studio_create_substo_workspace(w,'Jobs fixture','jobs-owner');
-  perform public.studio_create_substo_workspace(other_w,'Other jobs','jobs-other');
+  perform public.studio_create_substo_location(w,'Jobs fixture','jobs-owner');
+  perform public.studio_create_substo_location(other_w,'Other jobs','jobs-other');
 
   j := public.studio_enqueue_job(w,'studio.diagnostic','{"n":1}','diag:1','jobs-owner',2);
   if public.studio_enqueue_job(w,'studio.diagnostic','{"n":1}','diag:1','jobs-owner',2) <> j then raise exception 'Enqueue not idempotent'; end if;
@@ -51,10 +51,10 @@ begin
     raise exception 'Unexpected events %', (select array_agg(event order by id) from public.studio_job_events where job_id=j.id);
   end if;
 
-  -- Members retry failed jobs in their own workspace only.
+  -- Members retry failed jobs in their own location only.
   begin perform public.studio_member_job_action(w,'substo','jobs-other',j.id,'retry'); raise exception 'Non-member retried';
   exception when sqlstate '42501' then null; end;
-  begin perform public.studio_member_job_action(other_w,'substo','jobs-other',j.id,'retry'); raise exception 'Cross-workspace retry';
+  begin perform public.studio_member_job_action(other_w,'substo','jobs-other',j.id,'retry'); raise exception 'Cross-location retry';
   exception when sqlstate '22023' then null; end;
   j := public.studio_member_job_action(w,'substo','jobs-owner',j.id,'retry');
   if j.status <> 'queued' or j.attempts <> 0 or j.finished_at is not null then raise exception 'Retry did not requeue'; end if;

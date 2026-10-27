@@ -1,8 +1,8 @@
 do $$
 declare
-  a uuid := '40000000-0000-0000-0000-000000000001';
-  b uuid := '40000000-0000-0000-0000-000000000002';
-  e uuid := '40000000-0000-0000-0000-000000000003';
+  a text := '40000000-0000-0000-0000-000000000001';
+  b text := '40000000-0000-0000-0000-000000000002';
+  e text := '40000000-0000-0000-0000-000000000003';
   r uuid := '50000000-0000-0000-0000-000000000001';
   c uuid := '50000000-0000-0000-0000-000000000002';
   t uuid := '50000000-0000-0000-0000-000000000003';
@@ -15,14 +15,14 @@ declare
   result jsonb;
   initial_run text;
 begin
-  if has_function_privilege('anon','public.studio_import_library(uuid,text,jsonb,text)','EXECUTE')
+  if has_function_privilege('anon','public.studio_import_library(text,text,jsonb,text)','EXECUTE')
     or has_table_privilege('authenticated','public.studio_library_import_runs','SELECT') then
     raise exception 'Client can access import surface';
   end if;
-  perform public.studio_create_substo_workspace(a,'Import A','import-owner-a');
-  perform public.studio_create_substo_workspace(b,'Import B','import-owner-b');
-  insert into public.studio_workspaces(id,brand,workspace_type,name,estio_location_id)
-    values(e,'estio','estio_location','Import Estio','import-location');
+  perform public.studio_create_substo_location(a,'Import A','import-owner-a');
+  perform public.studio_create_substo_location(b,'Import B','import-owner-b');
+  insert into public.studio_locations(location_id,app,name)
+    values(e,'estio','Import Estio');
   snapshot := pg_catalog.jsonb_build_object(
     'schema','studio.legacy-library.v1','mode','dry-run','valid',true,'mediaReady',true,
     'records',pg_catalog.jsonb_build_array(
@@ -48,27 +48,27 @@ begin
   exception when insufficient_privilege then null; end;
   begin
     perform public.studio_import_library(e,snapshot->>'sourceDigest',snapshot,'import-owner-a');
-    raise exception 'Standalone importer accepted Estio workspace';
+    raise exception 'Standalone importer accepted Estio location';
   exception when insufficient_privilege then null; end;
 
   result := public.studio_import_library(a,snapshot->>'sourceDigest',snapshot,'import-owner-a');
   initial_run := result->>'runId';
   if result->'counts' <> snapshot->'counts' or result->'replayed' <> 'false'::jsonb
     or (result->>'mediaPending')::int <> 1 then raise exception 'Initial result did not reconcile'; end if;
-  if (select count(*) from public.studio_records where workspace_id=a) <> 3
-    or (select count(*) from public.studio_record_links where workspace_id=a) <> 2
-    or (select count(*) from public.studio_legacy_files where workspace_id=a and media_object_id is null) <> 1 then
+  if (select count(*) from public.studio_records where location_id=a) <> 3
+    or (select count(*) from public.studio_record_links where location_id=a) <> 2
+    or (select count(*) from public.studio_legacy_files where location_id=a and media_object_id is null) <> 1 then
     raise exception 'Imported rows did not reconcile';
   end if;
-  if (select payload <> legacy_payload from public.studio_records where workspace_id=a and id=r) then
+  if (select payload <> legacy_payload from public.studio_records where location_id=a and id=r) then
     raise exception 'Legacy payload was changed';
   end if;
   perform public.studio_save_record(a,r,'reference','Hosted edit','{"notes":"New reviewed note"}',1,'import-owner-a');
   result := public.studio_import_library(a,snapshot->>'sourceDigest',snapshot,'import-owner-a');
   if result->>'runId' <> initial_run or result->'replayed' <> 'true'::jsonb
-    or (select version from public.studio_records where workspace_id=a and id=r) <> 2
-    or (select title from public.studio_records where workspace_id=a and id=r) <> 'Hosted edit'
-    or (select legacy_payload->>'transcript' from public.studio_records where workspace_id=a and id=r) <> E'Words\nexactly' then
+    or (select version from public.studio_records where location_id=a and id=r) <> 2
+    or (select title from public.studio_records where location_id=a and id=r) <> 'Hosted edit'
+    or (select legacy_payload->>'transcript' from public.studio_records where location_id=a and id=r) <> E'Words\nexactly' then
     raise exception 'Identical snapshot retry overwrote hosted edits or original evidence';
   end if;
 
@@ -105,19 +105,19 @@ begin
     perform public.studio_import_library(a,changed->>'sourceDigest',changed,'import-owner-a');
     raise exception 'Different snapshot overwrote an existing record';
   exception when unique_violation then null; end;
-  if exists(select 1 from public.studio_records where workspace_id=a and id=n)
-    or exists(select 1 from public.studio_library_import_runs where workspace_id=a and source_digest=changed->>'sourceDigest') then
+  if exists(select 1 from public.studio_records where location_id=a and id=n)
+    or exists(select 1 from public.studio_library_import_runs where location_id=a and source_digest=changed->>'sourceDigest') then
     raise exception 'Conflict did not roll back the entire snapshot';
   end if;
 
-  -- The same legacy IDs are valid in another workspace and cannot change A.
+  -- The same legacy IDs are valid in another location and cannot change A.
   result := public.studio_import_library(b,snapshot->>'sourceDigest',snapshot,'import-owner-b');
-  if result->>'runId'=initial_run or (select title from public.studio_records where workspace_id=b and id=r) <> 'Source'
-    or (select title from public.studio_records where workspace_id=a and id=r) <> 'Hosted edit' then
-    raise exception 'Composite workspace identity was lost';
+  if result->>'runId'=initial_run or (select title from public.studio_records where location_id=b and id=r) <> 'Source'
+    or (select title from public.studio_records where location_id=a and id=r) <> 'Hosted edit' then
+    raise exception 'Composite location identity was lost';
   end if;
 
-  -- An existing target in a workspace is insufficient: links must be in this snapshot.
+  -- An existing target in a location is insufficient: links must be in this snapshot.
   changed := pg_catalog.jsonb_build_object('schema','studio.legacy-library.v1','sourceDigest',repeat('c',64),
     'mode','dry-run','valid',true,'mediaReady',true,'files','[]'::jsonb,
     'records',pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('id',n,'kind','reference','title','Dangling link',
@@ -127,7 +127,7 @@ begin
     perform public.studio_import_library(b,repeat('c',64),changed,'import-owner-b');
     raise exception 'Snapshot linked an outside record';
   exception when invalid_parameter_value then null; end;
-  if exists(select 1 from public.studio_records where workspace_id=b and id=n) then
+  if exists(select 1 from public.studio_records where location_id=b and id=n) then
     raise exception 'Invalid link left a partial import';
   end if;
   changed := pg_catalog.jsonb_set(changed,'{records,0,linkedIds}','[]'::jsonb);
@@ -137,8 +137,8 @@ begin
     perform public.studio_import_library(b,repeat('c',64),changed,'import-owner-b');
     raise exception 'Incorrect declared counts were accepted';
   exception when invalid_parameter_value then null; end;
-  if exists(select 1 from public.studio_records where workspace_id=b and id=n)
-    or exists(select 1 from public.studio_library_import_runs where workspace_id=b and source_digest=repeat('c',64)) then
+  if exists(select 1 from public.studio_records where location_id=b and id=n)
+    or exists(select 1 from public.studio_library_import_runs where location_id=b and source_digest=repeat('c',64)) then
     raise exception 'Count mismatch left a partial import or ledger';
   end if;
 end;

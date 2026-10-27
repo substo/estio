@@ -1,9 +1,9 @@
 -- Shared Studio records. Legacy JSON is retained without flattening citations,
--- transcript text, provenance, or unknown fields. Apply after workspace core.
+-- transcript text, provenance, or unknown fields. Apply after location core.
 begin;
 
 create table public.studio_records (
-  workspace_id uuid not null references public.studio_workspaces(id) on delete cascade,
+  location_id text not null references public.studio_locations(location_id) on delete cascade,
   id uuid not null default gen_random_uuid(),
   kind text not null check (kind in ('reference', 'channel', 'content')),
   title text not null check (btrim(title) <> ''),
@@ -18,32 +18,32 @@ create table public.studio_records (
   created_by_clerk_user_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (workspace_id, id)
+  primary key (location_id, id)
 );
 
-create index studio_records_workspace_library_idx on public.studio_records(workspace_id, kind, archived, updated_at desc, id);
+create index studio_records_location_library_idx on public.studio_records(location_id, kind, archived, updated_at desc, id);
 
 create table public.studio_record_links (
-  workspace_id uuid not null,
+  location_id text not null,
   source_id uuid not null,
   target_id uuid not null,
-  primary key (workspace_id, source_id, target_id),
+  primary key (location_id, source_id, target_id),
   check (source_id <> target_id),
-  foreign key (workspace_id, source_id) references public.studio_records(workspace_id,id) on delete cascade,
-  foreign key (workspace_id, target_id) references public.studio_records(workspace_id,id) on delete restrict
+  foreign key (location_id, source_id) references public.studio_records(location_id,id) on delete cascade,
+  foreign key (location_id, target_id) references public.studio_records(location_id,id) on delete restrict
 );
 
 -- Local attachment paths remain pending until bytes are reconciled and uploaded.
 -- They never become downloadable URLs merely because metadata was imported.
 create table public.studio_legacy_files (
-  workspace_id uuid not null,
+  location_id text not null,
   id uuid not null,
   record_id uuid not null,
   payload jsonb not null check (jsonb_typeof(payload) = 'object'),
   media_object_id uuid,
-  primary key (workspace_id,id),
-  foreign key (workspace_id,record_id) references public.studio_records(workspace_id,id) on delete cascade,
-  foreign key (media_object_id,workspace_id) references public.studio_media_objects(id,workspace_id) on delete restrict
+  primary key (location_id,id),
+  foreign key (location_id,record_id) references public.studio_records(location_id,id) on delete cascade,
+  foreign key (media_object_id,location_id) references public.studio_media_objects(id,location_id) on delete restrict
 );
 
 alter table public.studio_records enable row level security;
@@ -55,13 +55,13 @@ grant all on public.studio_records, public.studio_record_links, public.studio_le
 -- Creates are retry-safe for the same ID/body/actor. Updates require the version
 -- displayed by the editor, so an old tab cannot silently overwrite new work.
 create function public.studio_save_record(
-  p_workspace_id uuid, p_record_id uuid, p_kind text, p_title text,
+  p_location_id text, p_record_id uuid, p_kind text, p_title text,
   p_payload_patch jsonb, p_expected_version bigint, p_clerk_user_id text
 ) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare v_record public.studio_records%rowtype;
 begin
-  if p_workspace_id is null or p_record_id is null or p_kind is null or p_kind not in ('reference','channel','content')
+  if p_location_id is null or p_record_id is null or p_kind is null or p_kind not in ('reference','channel','content')
     or p_title is null or pg_catalog.btrim(p_title) = '' or pg_catalog.length(p_title) > 180
     or p_payload_patch is null or pg_catalog.jsonb_typeof(p_payload_patch) <> 'object'
     or p_expected_version is null or p_expected_version < 0
@@ -70,10 +70,10 @@ begin
   end if;
 
   if p_expected_version = 0 then
-    insert into public.studio_records(workspace_id,id,kind,title,payload,created_by_clerk_user_id)
-    values(p_workspace_id,p_record_id,p_kind,pg_catalog.btrim(p_title),p_payload_patch,p_clerk_user_id)
-    on conflict (workspace_id,id) do nothing;
-    select * into v_record from public.studio_records where workspace_id=p_workspace_id and id=p_record_id for update;
+    insert into public.studio_records(location_id,id,kind,title,payload,created_by_clerk_user_id)
+    values(p_location_id,p_record_id,p_kind,pg_catalog.btrim(p_title),p_payload_patch,p_clerk_user_id)
+    on conflict (location_id,id) do nothing;
+    select * into v_record from public.studio_records where location_id=p_location_id and id=p_record_id for update;
     if v_record.kind <> p_kind or v_record.title <> pg_catalog.btrim(p_title)
       or v_record.payload <> p_payload_patch or v_record.created_by_clerk_user_id is distinct from p_clerk_user_id then
       raise exception 'Record already exists' using errcode = '23505';
@@ -81,13 +81,13 @@ begin
   else
     update public.studio_records set title=pg_catalog.btrim(p_title), payload=payload || p_payload_patch,
       version=version+1, updated_at=pg_catalog.now()
-    where workspace_id=p_workspace_id and id=p_record_id and kind=p_kind and version=p_expected_version
+    where location_id=p_location_id and id=p_record_id and kind=p_kind and version=p_expected_version
     returning * into v_record;
     if not found then raise exception 'Record changed; reload before saving' using errcode = '40001'; end if;
   end if;
   return pg_catalog.to_jsonb(v_record);
 end;
 $$;
-revoke all on function public.studio_save_record(uuid,uuid,text,text,jsonb,bigint,text) from public,anon,authenticated;
-grant execute on function public.studio_save_record(uuid,uuid,text,text,jsonb,bigint,text) to service_role;
+revoke all on function public.studio_save_record(text,uuid,text,text,jsonb,bigint,text) from public,anon,authenticated;
+grant execute on function public.studio_save_record(text,uuid,text,text,jsonb,bigint,text) to service_role;
 commit;
