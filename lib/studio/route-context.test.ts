@@ -88,8 +88,8 @@ test("storage access follows the active Location in both realms, never a second 
       "@/lib/auth/host-brand": { getHostBrandConfig: () => ({}), resolveHostBrand: () => realm },
       "@/lib/auth/impersonation": {}, "./access-policy": { isStudioLocationAllowedForSession: () => true },
       "./supabase-service": { getEstioStudioWorkspaceById: async () => workspace, getSubstoStudioWorkspace: async () => workspace },
-      "@/lib/brands/brand-service": { resolveBrandWorkspaceAccess: async () => { mirrorCalls++; return { brand: { id: "location-a", name: "Canonical location" }, studioRole: "admin" }; } },
-      "@/lib/brands/substo-brands": { substoBrandDeps: () => ({}) },
+      "@/lib/locations/location-service": { resolveLocationWorkspaceAccess: async () => { mirrorCalls++; return { location: { id: "location-a", name: "Canonical location" }, studioRole: "admin" }; } },
+      "@/lib/locations/substo-locations": { substoLocationDeps: () => ({}) },
     });
     const result = await api.getStudioWorkspaceAccess(storageId);
     if (matches) { assert.equal(result.workspace.name, "Canonical location"); assert.equal(result.brand, realm); }

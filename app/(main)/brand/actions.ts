@@ -2,68 +2,68 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { parseBrandRole } from "@/lib/brands/brand-policy";
+import { parseLocationRole } from "@/lib/locations/location-policy";
 import {
   changeMemberRole,
-  inviteToBrand,
+  inviteToLocation,
   removeMember,
-  renameBrand,
-  revokeBrandInvitation,
+  renameLocation,
+  revokeLocationInvitation,
   type TeamResult,
-} from "@/lib/brands/brand-service";
-import { getSubstoBrandActor, substoBrandDeps, substoSignUpUrl } from "@/lib/brands/substo-brands";
+} from "@/lib/locations/location-service";
+import { getSubstoLocationActor, substoLocationDeps, substoSignUpUrl } from "@/lib/locations/substo-locations";
 
-export type BrandFormState = { error?: string; message?: string };
+export type LocationFormState = { error?: string; message?: string };
 
-const toState = (result: TeamResult): BrandFormState => (result.ok ? { message: result.message } : { error: result.error });
+const toState = (result: TeamResult): LocationFormState => (result.ok ? { message: result.message } : { error: result.error });
 
 /** Bind to the rendered tenant and recheck current membership/role on every submission. */
 async function requireActor(formData: FormData) {
   const locationId = formData.get("locationId");
   if (typeof locationId !== "string" || !locationId) redirect("/studio/select?error=access");
-  const actor = await getSubstoBrandActor(locationId);
+  const actor = await getSubstoLocationActor(locationId);
   if (!actor) redirect("/studio/select?choose=1");
   return actor;
 }
 
-export async function inviteBrandMemberAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
+export async function inviteLocationMemberAction(_previous: LocationFormState, formData: FormData): Promise<LocationFormState> {
   const actor = await requireActor(formData);
-  const role = parseBrandRole(formData.get("role"));
+  const role = parseLocationRole(formData.get("role"));
   if (!role) return { error: "Choose a role." };
   const signUpUrl = await substoSignUpUrl();
   if (!signUpUrl) return { error: "The sign-up address could not be resolved." };
-  const result = await inviteToBrand(substoBrandDeps(), actor, { email: formData.get("email"), role, signUpUrl });
+  const result = await inviteToLocation(substoLocationDeps(), actor, { email: formData.get("email"), role, signUpUrl });
   revalidatePath("/brand/team");
   return toState(result);
 }
 
-export async function revokeBrandInvitationAction(formData: FormData) {
+export async function revokeLocationInvitationAction(formData: FormData) {
   const actor = await requireActor(formData);
-  await revokeBrandInvitation(substoBrandDeps(), actor, String(formData.get("invitationId") || ""));
+  await revokeLocationInvitation(substoLocationDeps(), actor, String(formData.get("invitationId") || ""));
   revalidatePath("/brand/team");
 }
 
-export async function changeBrandMemberRoleAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
+export async function changeLocationMemberRoleAction(_previous: LocationFormState, formData: FormData): Promise<LocationFormState> {
   const actor = await requireActor(formData);
-  const role = parseBrandRole(formData.get("role"));
+  const role = parseLocationRole(formData.get("role"));
   if (!role) return { error: "Choose a role." };
-  const result = await changeMemberRole(substoBrandDeps(), actor, String(formData.get("userId") || ""), role);
+  const result = await changeMemberRole(substoLocationDeps(), actor, String(formData.get("userId") || ""), role);
   revalidatePath("/brand/team");
   return toState(result);
 }
 
-export async function removeBrandMemberAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
+export async function removeLocationMemberAction(_previous: LocationFormState, formData: FormData): Promise<LocationFormState> {
   const actor = await requireActor(formData);
   const targetUserId = String(formData.get("userId") || "");
-  const result = await removeMember(substoBrandDeps(), actor, targetUserId);
+  const result = await removeMember(substoLocationDeps(), actor, targetUserId);
   if (result.ok && targetUserId === actor.userId) redirect("/studio/select?choose=1");
   revalidatePath("/brand/team");
   return toState(result);
 }
 
-export async function renameBrandAction(_previous: BrandFormState, formData: FormData): Promise<BrandFormState> {
+export async function renameLocationAction(_previous: LocationFormState, formData: FormData): Promise<LocationFormState> {
   const actor = await requireActor(formData);
-  const result = await renameBrand(substoBrandDeps(), actor, formData.get("name"));
+  const result = await renameLocation(substoLocationDeps(), actor, formData.get("name"));
   revalidatePath("/brand", "layout");
   revalidatePath("/studio", "layout");
   return toState(result);

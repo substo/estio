@@ -35,7 +35,7 @@ model Location {
   // Set only on the brand created automatically at a user's first Substo
   // sign-in, so that creation happens at most once per user.
   autoCreatedForUserId          String?                        @unique
-  brandInvitations              BrandInvitation[]
+  locationInvitations           LocationInvitation[]
   companies                     Company[]
   contacts                      Contact[]
   properties                    Property[]
@@ -154,7 +154,7 @@ model Location {
 
 /// Invitation to join one brand in one app. A row per (brand, email) cycles
 /// between statuses; acceptance requires a verified email in the same realm.
-model BrandInvitation {
+model LocationInvitation {
   id                String                @id @default(cuid())
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
@@ -163,11 +163,11 @@ model BrandInvitation {
   authRealm         AuthRealm
   email             String // normalized: trimmed, lower case
   role              UserRole              @default(MEMBER)
-  status            BrandInvitationStatus @default(PENDING)
+  status            LocationInvitationStatus @default(PENDING)
   invitedById       String?
-  invitedBy         User?                 @relation("BrandInvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedBy         User?                 @relation("LocationInvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
   acceptedById      String?
-  acceptedBy        User?                 @relation("BrandInvitationAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+  acceptedBy        User?                 @relation("LocationInvitationAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
   acceptedAt        DateTime?
   revokedAt         DateTime?
   clerkInvitationId String?
@@ -176,7 +176,7 @@ model BrandInvitation {
   @@index([authRealm, email, status])
 }
 
-enum BrandInvitationStatus {
+enum LocationInvitationStatus {
   PENDING
   ACCEPTED
   REVOKED
@@ -289,8 +289,8 @@ model User {
   locationSessionActivities    LocationSessionActivity[]
   impersonationsStarted        ImpersonationAudit[] @relation("ImpersonationActor")
   impersonationsReceived       ImpersonationAudit[] @relation("ImpersonationTarget")
-  brandInvitationsSent         BrandInvitation[]    @relation("BrandInvitationInvitedBy")
-  brandInvitationsAccepted     BrandInvitation[]    @relation("BrandInvitationAcceptedBy")
+  locationInvitationsSent      LocationInvitation[] @relation("LocationInvitationInvitedBy")
+  locationInvitationsAccepted  LocationInvitation[] @relation("LocationInvitationAcceptedBy")
   taskReminderJobs             TaskReminderJob[]
   taskReminderPreference       UserTaskReminderPreference?
   settingsAuditLogs            SettingsAuditLog[]          @relation("SettingsAuditActor")

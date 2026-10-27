@@ -31,6 +31,7 @@ task_expand_sql="$task_repo_root/prisma/migrations/20261024160000_user_auth_real
 task_brands_sql="$task_repo_root/prisma/migrations/20261024170000_substo_brands/migration.sql"
 task_websites_sql="$task_repo_root/prisma/migrations/20261025010000_substo_public_sites_expand/migration.sql"
 task_contract_sql="$task_repo_root/prisma/migrations/20261024180000_user_auth_realm_contract/migration.sql"
+task_location_names_sql="$task_repo_root/prisma/migrations/20261027010000_location_invitation_rename/migration.sql"
 
 cleanup() {
     if [[ -f "$task_pg_data/postmaster.pid" ]]; then
@@ -117,7 +118,7 @@ expect_equal "implicit membership table maps A to Location and B to User" \
     "$(sql -c "SELECT string_agg(a.attname || '->' || c.confrelid::regclass::text, ',' ORDER BY a.attname) FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1] WHERE c.conrelid = '\"_LocationToUser\"'::regclass AND c.contype = 'f'")" \
     'A->"Location",B->"User"'
 sql -f "$task_brands_sql"
-sed -e '/^  substoSiteSlug /d' -e '/^  substoSitePublished /d' -e '/^  substoSiteConfig /d' -e '/^model User {/,/^}/ s/^\(  email[[:space:]]*String\)$/\1 @unique/' prisma/schema.prisma >"$task_pg_root/before-contract.prisma"
+sed -e '/^  substoSiteSlug /d' -e '/^  substoSitePublished /d' -e '/^  substoSiteConfig /d' -e '/^model User {/,/^}/ s/^\(  email[[:space:]]*String\)$/\1 @unique/' -e "s/LocationInvitation/BrandInvitation/g" prisma/schema.prisma >"$task_pg_root/before-contract.prisma"
 if cmp -s prisma/schema.prisma "$task_pg_root/before-contract.prisma"; then fail "could not derive the pre-contract schema"; fi
 expect_no_drift "database matches the schema before the contract step" "$task_pg_root/before-contract.prisma"
 expect_equal "legacy brand backfilled as estio" "$(sql -c "SELECT \"authRealm\" FROM \"Location\" WHERE id = 'estio-brand'")" "estio"
@@ -157,6 +158,10 @@ sql -f "$task_contract_sql"
 sql -c "DROP TABLE _prisma_migrations"
 expect_equal "global email index dropped" "$(sql -c "SELECT count(*) FROM pg_indexes WHERE tablename = 'User' AND indexname = 'User_email_key'")" "0"
 sql -f "$task_websites_sql"
+sql -f "$task_location_names_sql"
+expect_equal "invitation rows kept by the rename" "$(sql -c "SELECT string_agg(id, ',' ORDER BY id) FROM \"LocationInvitation\"")" "inv-1"
+expect_rejected "renamed invitation table still enforces the app" \
+    "UPDATE \"LocationInvitation\" SET \"acceptedById\" = 'legacy-1', status = 'ACCEPTED' WHERE id = 'inv-1'" "different apps"
 expect_no_drift "database matches prisma/schema.prisma after the website expand step" "prisma/schema.prisma"
 sql -c "$(new_user substo-shared shared@example.com "'user_substo_1'" substo)"
 expect_equal "same email exists once per realm" "$(sql -c "SELECT string_agg(\"authRealm\"::text || ':' || id, ',' ORDER BY \"authRealm\") FROM \"User\" WHERE email = 'shared@example.com'")" "estio:legacy-1,substo:substo-shared"
@@ -167,6 +172,6 @@ expect_unique_violation "Clerk ID stays globally unique after contract" \
 expect_equal "estio row untouched by substo writes" "$(sql -c "SELECT \"clerkId\" FROM \"User\" WHERE id = 'legacy-1'")" "user_estio_1"
 
 echo "# 5. Brand service against the migrated database"
-BRANDS_TEST_DATABASE_URL="$task_database_url" npx tsx --test --test-concurrency=1 lib/brands/brand-service.db.test.ts lib/substo-sites/service.db.test.ts
+LOCATIONS_TEST_DATABASE_URL="$task_database_url" npx tsx --test --test-concurrency=1 lib/locations/location-service.db.test.ts lib/substo-sites/service.db.test.ts
 
 echo "# All user auth realm migration checks passed"

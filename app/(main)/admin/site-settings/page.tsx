@@ -1,6 +1,6 @@
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getEditorWebsiteConfig } from "@/lib/website/editor-config";
-import { getSubstoBrandActor } from "@/lib/brands/substo-brands";
+import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import db from "@/lib/db";
@@ -20,10 +20,10 @@ export default async function SiteSettingsPage() {
     }
 
     if (await getRequestAuthRealm() === "substo") {
-        const actor = await getSubstoBrandActor();
+        const actor = await getSubstoLocationActor();
         if (!actor || actor.role !== "ADMIN") notFound();
         const config = await getEditorWebsiteConfig(locationId);
-        return <div className="p-6 max-w-4xl space-y-6"><div><h1 className="text-2xl font-bold tracking-tight">Public Website Settings</h1><p className="text-muted-foreground">Configure how your website looks to the public.</p></div><Link href="/admin/content/website" className="underline">Website address and publishing</Link><div className="border rounded-lg p-6 bg-card"><SiteSettingsForm initialData={config} locationId={locationId} locationName={actor.brandName} locationTimeZone="" settingsVersion={0} realEstateEnabled={false} /></div></div>;
+        return <div className="p-6 max-w-4xl space-y-6"><div><h1 className="text-2xl font-bold tracking-tight">Public Website Settings</h1><p className="text-muted-foreground">Configure how your website looks to the public.</p></div><Link href="/admin/content/website" className="underline">Website address and publishing</Link><div className="border rounded-lg p-6 bg-card"><SiteSettingsForm initialData={config} locationId={locationId} locationName={actor.locationName} locationTimeZone="" settingsVersion={0} realEstateEnabled={false} /></div></div>;
     }
 
     // Fetch existing config + location details + new settings document

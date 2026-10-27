@@ -19,11 +19,11 @@ function actions(options: { app?: string; access?: any; resolution?: any } = {})
       ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/" },
       validateActiveLocationSelection: async (id: string) => { checks.push(id); return options.resolution ?? { status: "authorized", user: { clerkId: "substo-user" }, location: { id: "brand-b", authRealm: "substo" } }; },
     },
-    "@/lib/studio/access": { getStudioWorkspaceAccess: async (id: string) => { assert.equal(id, workspace); return options.access === undefined ? { brand: "substo", brandId: "brand-b" } : options.access; } },
+    "@/lib/studio/access": { getStudioWorkspaceAccess: async (id: string) => { assert.equal(id, workspace); return options.access === undefined ? { brand: "substo", locationId: "brand-b" } : options.access; } },
     "@/lib/auth/host-brand": { getHostBrandConfig: () => ({}), resolveHostBrand: () => options.app ?? "substo" },
     "@/lib/studio/supabase-service": {},
-    "@/lib/brands/brand-service": { ensureBrandWorkspace: async (_deps: unknown, brand: any, clerkId: string) => { assert.equal(brand.authRealm, "substo"); assert.equal(clerkId, "substo-user"); return workspace; } },
-    "@/lib/brands/substo-brands": { substoBrandDeps: () => ({}) },
+    "@/lib/locations/location-service": { ensureLocationWorkspace: async (_deps: unknown, brand: any, clerkId: string) => { assert.equal(brand.authRealm, "substo"); assert.equal(clerkId, "substo-user"); return workspace; } },
+    "@/lib/locations/substo-locations": { substoLocationDeps: () => ({}) },
   };
   deps["./request-realm"] = deps["@/lib/auth/request-realm"];
   deps["./active-location"] = deps["@/lib/auth/active-location"];
@@ -63,12 +63,12 @@ test("CRM → Studio validates the posted brand and opens only its workspace", a
   const api = actions();
   const form = new FormData();
   form.set("brandId", "brand-b");
-  await assert.rejects(api.openSubstoBrandStudioAction(form), new RegExp(`REDIRECT:/studio`));
+  await assert.rejects(api.openSubstoLocationStudioAction(form), new RegExp(`REDIRECT:/studio`));
   assert.deepEqual(api.checks, ["brand-b"]);
   assert.equal(api.writes[0][1], "brand-b");
   const revoked = actions({ resolution: { status: "no_access", location: null } });
   form.set("brandId", "estio-brand");
-  await assert.rejects(revoked.openSubstoBrandStudioAction(form), /REDIRECT:\/studio\/select\?error=access/);
+  await assert.rejects(revoked.openSubstoLocationStudioAction(form), /REDIRECT:\/studio\/select\?error=access/);
   assert.equal(revoked.writes.length, 0);
 });
 

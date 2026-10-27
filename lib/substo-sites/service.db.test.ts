@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { getPublishedWebsite, getWebsitePage, getWebsitePost, listWebsitePages, listWebsitePosts, saveWebsiteSettings, saveWebsiteDesign } from "./service";
-const url = process.env.BRANDS_TEST_DATABASE_URL;
+const url = process.env.LOCATIONS_TEST_DATABASE_URL;
 if (!url || !["127.0.0.1", "localhost"].includes(new URL(url).hostname) || new URL(url).pathname !== "/estio_user_auth_realm_test") throw new Error("Use bash scripts/test-user-auth-realm-db.sh with its disposable local database");
 const db = new PrismaClient({ datasourceUrl: url });
 after(() => db.$disconnect());

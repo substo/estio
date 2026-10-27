@@ -44,14 +44,14 @@ export async function saveWebsiteSettings(db: SiteDatabase, actor: WebsiteActor,
   if (actor.role !== "ADMIN") return { error: "Only brand admins can manage the website." };
   const slug = siteSlug(input.slug);
   if (!slug) return { error: "Use 3–63 lowercase letters, numbers or single hyphens for the address." };
-  const brand = await db.location.findFirst({ where: {
+  const location = await db.location.findFirst({ where: {
     id: actor.locationId, authRealm: "substo", users: { some: { id: actor.userId, authRealm: "substo" } },
     userRoles: { some: { userId: actor.userId, role: "ADMIN" } },
   }, select: { name: true } });
-  if (!brand) return { error: "Brand admin access is required." };
+  if (!location) return { error: "Brand admin access is required." };
   const existing = await db.siteConfig.findUnique({ where: { locationId: actor.locationId }, select: { substoSiteSlug: true } });
   if (existing?.substoSiteSlug && existing.substoSiteSlug !== slug && !input.confirmAddressChange) return { error: "Confirm the address change. Existing links will stop working." };
-  const settings = websiteSettings(input.settings, brand.name || "Our brand");
+  const settings = websiteSettings(input.settings, location.name || "Our brand");
   try {
     const data = { substoSiteSlug: slug, substoSitePublished: input.published, substoSiteConfig: settings };
     await db.siteConfig.upsert({ where: { locationId: actor.locationId }, create: { locationId: actor.locationId, ...data }, update: data });
@@ -64,11 +64,11 @@ export async function saveWebsiteSettings(db: SiteDatabase, actor: WebsiteActor,
 
 /** Edition adapter for the shared theme form. Authority and allowed write fields are checked here. */
 export async function saveWebsiteDesign(db: SiteDatabase, actor: WebsiteActor, form: FormData) {
-  const brand = actor.role === "ADMIN" ? await db.location.findFirst({ where: {
+  const location = actor.role === "ADMIN" ? await db.location.findFirst({ where: {
     id: actor.locationId, authRealm: "substo", users: { some: { id: actor.userId, authRealm: "substo" } },
     userRoles: { some: { userId: actor.userId, role: "ADMIN" } },
   }, select: { id: true } }) : null;
-  if (!brand || form.get("locationId") !== actor.locationId) return { message: "Brand admin access is required." };
+  if (!location || form.get("locationId") !== actor.locationId) return { message: "Brand admin access is required." };
   const text = (key: string, max = 2000) => String(form.get(key) || "").trim().slice(0, max);
   const color = (key: string, fallback: string) => /^#[\da-f]{6}$/i.test(text(key)) ? text(key) : fallback;
   const image = (key: string) => safeImageUrl(text(key)) || "";

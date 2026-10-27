@@ -6,9 +6,9 @@ import { getStudioShellData } from "../_components/studio-shell-data";
 import { ensureEstioStudioWorkspace } from "@/lib/studio/supabase-service";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
-import { ensureBrandWorkspace } from "@/lib/brands/brand-service";
-import { prepareCurrentSubstoUser, substoBrandDeps } from "@/lib/brands/substo-brands";
-import { openEstioStudioLocation, openSubstoBrandStudioAction } from "../actions";
+import { ensureLocationWorkspace } from "@/lib/locations/location-service";
+import { prepareCurrentSubstoUser, substoLocationDeps } from "@/lib/locations/substo-locations";
+import { openEstioStudioLocation, openSubstoLocationStudioAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +31,12 @@ async function StudioWorkspaceSelector({
       return <SubstoSetupError />;
     }
     if (!prepared) return <SubstoSetupError reason="verified-email" />;
-    const { brands } = prepared;
+    const { locations } = prepared;
 
     const active = await resolveActiveLocation();
     // The validated active tenant, including a sole membership, wins on ordinary entry.
     if (active.location && !params.choose && !params.error) {
-      const workspaceId = await ensureBrandWorkspace(substoBrandDeps(), active.location, userId);
+      const workspaceId = await ensureLocationWorkspace(substoLocationDeps(), active.location, userId);
       redirect(`/studio`);
     }
 
@@ -48,10 +48,10 @@ async function StudioWorkspaceSelector({
         </header>
 
         {params.error === "access" ? <p className="text-sm text-destructive">You no longer have access to that brand.</p> : null}
-        {brands.length > 0 ? (
+        {locations.length > 0 ? (
           <section className="grid gap-3 sm:grid-cols-2" aria-label="Your brands">
-            {brands.map((item) => (
-              <form key={item.id} action={openSubstoBrandStudioAction}>
+            {locations.map((item) => (
+              <form key={item.id} action={openSubstoLocationStudioAction}>
                 <input type="hidden" name="brandId" value={item.id} />
                 <button type="submit" className="w-full rounded-xl border bg-card p-5 text-left transition hover:border-primary/50 hover:bg-accent/40">
                   <span className="block font-medium">{item.name}</span>

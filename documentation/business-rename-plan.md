@@ -14,9 +14,9 @@ What changes:
 | Old | New |
 | --- | --- |
 | Prisma `BrandInvitation`, enum `BrandInvitationStatus`, relations `BrandInvitation*` | `LocationInvitation`, `LocationInvitationStatus`, `LocationInvitation*` (one migration: `ALTER TABLE/TYPE … RENAME`, index and constraint renames) |
-| `lib/brands/*` (`brand-service`, `brand-policy`, `substo-brands`) | `lib/locations/*` (`location-service`, `location-policy`, `substo-locations`) |
+| `lib/brands/*` (`brand-service`, `brand-policy`, `substo-brands`) | `lib/locations/*` (`location-service`, `location-policy`, `substo-locations`, next to the existing `market-context`) |
 | `BrandRole`, `BrandActor`, `BrandDeps`, `BrandMembership`, `inviteToBrand`, `renameBrand`, `listUserBrands`, `getBrandRole`, `createAutoBrandIfNeeded`, `getSubstoBrandActor`, … | `LocationRole`, `LocationActor`, `LocationDeps`, `LocationMembership`, `inviteToLocation`, `renameLocation`, `listUserLocations`, `getLocationRole`, `createAutoLocationIfNeeded`, `getSubstoLocationActor`, … |
-| Clerk `publicMetadata.brandInvitationId` | `locationInvitationId` is written; the old key is still read while old invitations may be pending (30 days) |
+| Clerk invitation `publicMetadata` `{ source: "brand_invite", brandInvitationId }` | `{ source: "location_invite", locationInvitationId }` (write-only; nothing reads it) |
 
 Accept: `prisma migrate diff` from migrations to the schema is empty; the typecheck, focused tests, `scripts/test-user-auth-realm-db.sh` and the build pass; Team and invite pages work on both hosts.
 

@@ -111,19 +111,19 @@ test("Substo brand pages are allowed and protected; lookalike paths stay blocked
 
 test("Substo Studio access comes from the brand team, never from Studio membership alone", () => {
   const access = read("lib/studio/access.ts");
-  assert.match(access, /resolveBrandWorkspaceAccess\(substoBrandDeps\(\), workspaceId, state\.userId\)/);
+  assert.match(access, /resolveLocationWorkspaceAccess\(substoLocationDeps\(\), workspaceId, state\.userId\)/);
   const service = read("lib/studio/supabase-service.ts");
   assert.doesNotMatch(service, /getSubstoStudioWorkspaceForUser|createSubstoStudioInvitation|acceptSubstoStudioInvitation/);
   const actions = read("app/(main)/studio/actions.ts");
   assert.doesNotMatch(actions, /Invite|invitation/i);
-  assert.match(actions, /substoStudioDestination\(brandId\)/);
-  assert.match(read("lib/auth/product-navigation.ts"), /validateActiveLocationSelection\(brandId\)/);
+  assert.match(actions, /substoStudioDestination\(locationId\)/);
+  assert.match(read("lib/auth/product-navigation.ts"), /validateActiveLocationSelection\(locationId\)/);
   assert.doesNotMatch(read("app/(main)/studio/invite/[token]/page.tsx"), /accept|getSubstoStudioInvitation/i);
   assert.equal(fs.existsSync("app/(main)/studio/_components/studio-invite-form.tsx"), false);
 });
 
 test("Substo invitations use Substo's own Clerk application, and Estio platform tools see Estio brands only", () => {
-  const substo = read("lib/brands/substo-brands.ts");
+  const substo = read("lib/locations/substo-locations.ts");
   assert.match(substo, /getClerkBrandKeys\("substo"\)/);
   assert.match(substo, /createClerkClient\(\{ secretKey: keys\.secretKey/);
   const options = read("lib/auth/platform-location-options.ts");

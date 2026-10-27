@@ -239,7 +239,7 @@ test("shared header widgets work from Studio pages on Substo against the tenant 
   assert.match(fs.readFileSync("lib/studio/route-context.ts", "utf8"), /const context = await resolveTenantContext\(\);/);
   for (const page of ["app/(main)/brand/team/page.tsx", "app/(main)/brand/settings/page.tsx"]) {
     const source = fs.readFileSync(page, "utf8");
-    assert.match(source, /getSubstoBrandActor\(\);/);
+    assert.match(source, /getSubstoLocationActor\(\);/);
     assert.doesNotMatch(source, /searchParams/);
   }
 });

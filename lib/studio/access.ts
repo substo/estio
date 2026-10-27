@@ -15,8 +15,8 @@ import {
   type StudioWorkspace,
   type SubstoStudioWorkspace,
 } from "./supabase-service";
-import { resolveBrandWorkspaceAccess } from "@/lib/brands/brand-service";
-import { substoBrandDeps } from "@/lib/brands/substo-brands";
+import { resolveLocationWorkspaceAccess } from "@/lib/locations/location-service";
+import { substoLocationDeps } from "@/lib/locations/substo-locations";
 
 type AuthState = Awaited<ReturnType<typeof auth>>;
 
@@ -37,8 +37,8 @@ export type StudioWorkspaceAccess = {
   userId: string;
   workspace: SubstoStudioWorkspace;
   role: SubstoStudioWorkspace["role"];
-  /** The brand (Prisma Location) this workspace belongs to. */
-  brandId: string;
+  /** The Location this workspace belongs to. */
+  locationId: string;
 };
 
 async function requestBrand() {
@@ -82,15 +82,15 @@ export async function getStudioWorkspaceAccess(workspaceId: string): Promise<Stu
 
   if (brand === "substo") {
     if (active.location.studioWorkspaceId !== workspaceId) return null;
-    // The brand team decides; the Studio membership row is re-synced to it
+    // The Location team decides; the Studio membership row is re-synced to it
     // (added, re-roled or removed) so Studio's SQL checks agree.
-    const brandAccess = await resolveBrandWorkspaceAccess(substoBrandDeps(), workspaceId, state.userId);
-    if (!brandAccess || brandAccess.brand.id !== active.location.id) return null;
-    const selection = await validateActiveLocationSelection(brandAccess.brand.id);
+    const locationAccess = await resolveLocationWorkspaceAccess(substoLocationDeps(), workspaceId, state.userId);
+    if (!locationAccess || locationAccess.location.id !== active.location.id) return null;
+    const selection = await validateActiveLocationSelection(locationAccess.location.id);
     if (selection.status !== "authorized") return null;
     const workspace = await getSubstoStudioWorkspace(workspaceId);
     return workspace
-      ? { brand, userId: state.userId, workspace: { ...workspace, name: brandAccess.brand.name?.trim() || "Untitled brand", role: brandAccess.studioRole }, role: brandAccess.studioRole, brandId: brandAccess.brand.id }
+      ? { brand, userId: state.userId, workspace: { ...workspace, name: locationAccess.location.name?.trim() || "Untitled brand", role: locationAccess.studioRole }, role: locationAccess.studioRole, locationId: locationAccess.location.id }
       : null;
   }
 

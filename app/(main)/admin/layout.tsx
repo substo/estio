@@ -16,7 +16,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const realm = await getRequestAuthRealm();
   if (realm === "substo") {
     // Direct CRM entry also performs first-sign-in/invitation setup.
-    const { prepareCurrentSubstoUser } = await import("@/lib/brands/substo-brands");
+    const { prepareCurrentSubstoUser } = await import("@/lib/locations/substo-locations");
     await prepareCurrentSubstoUser();
   }
   const resolution = await resolveActiveLocation();

@@ -3,7 +3,7 @@
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
-import { getSubstoBrandActor } from "@/lib/brands/substo-brands";
+import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { saveWebsiteDesign } from "@/lib/substo-sites/service";
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
@@ -44,7 +44,7 @@ export async function updateSiteSettings(
 ): Promise<SiteSettingsState> {
     await assertCrmActionAllowed("site-settings/actions.ts", "updateSiteSettings");
     if (await getRequestAuthRealm() === "substo") {
-        const actor = await getSubstoBrandActor();
+        const actor = await getSubstoLocationActor();
         if (!actor) return { message: "Brand admin access is required." };
         const result = await saveWebsiteDesign(db, actor, formData);
         revalidatePath("/admin/site-settings");

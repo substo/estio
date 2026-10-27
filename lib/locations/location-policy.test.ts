@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  brandRoleForLegacyStudioRole,
+  locationRoleForLegacyStudioRole,
   checkTeamChange,
-  defaultBrandName,
-  normalizeBrandName,
+  defaultLocationName,
+  normalizeLocationName,
   normalizeInviteEmail,
   primaryVerifiedEmail,
-  studioRoleForBrandRole,
+  studioRoleForLocationRole,
   verifiedEmails,
-} from "./brand-policy";
+} from "./location-policy";
 
 test("default and edited brand names", () => {
-  assert.equal(defaultBrandName({ firstName: " Ada ", email: "ada@example.com" }), "Ada's brand");
-  assert.equal(defaultBrandName({ firstName: null, email: "studio.team@example.com" }), "studio.team's brand");
-  assert.equal(defaultBrandName({}), "My brand");
-  assert.equal(normalizeBrandName("  My   channel "), "My channel");
-  assert.equal(normalizeBrandName(""), null);
-  assert.equal(normalizeBrandName("x".repeat(101)), null);
-  assert.equal(normalizeBrandName(42), null);
+  assert.equal(defaultLocationName({ firstName: " Ada ", email: "ada@example.com" }), "Ada's brand");
+  assert.equal(defaultLocationName({ firstName: null, email: "studio.team@example.com" }), "studio.team's brand");
+  assert.equal(defaultLocationName({}), "My brand");
+  assert.equal(normalizeLocationName("  My   channel "), "My channel");
+  assert.equal(normalizeLocationName(""), null);
+  assert.equal(normalizeLocationName("x".repeat(101)), null);
+  assert.equal(normalizeLocationName(42), null);
 });
 
 test("invitation emails are normalized and validated", () => {
@@ -41,12 +41,12 @@ test("only verified emails count, primary first", () => {
 });
 
 test("Studio roles mirror brand roles", () => {
-  assert.equal(studioRoleForBrandRole("ADMIN", null), "admin");
-  assert.equal(studioRoleForBrandRole("ADMIN", "owner"), "owner");
-  assert.equal(studioRoleForBrandRole("MEMBER", "owner"), "member");
-  assert.equal(brandRoleForLegacyStudioRole("owner"), "ADMIN");
-  assert.equal(brandRoleForLegacyStudioRole("admin"), "ADMIN");
-  assert.equal(brandRoleForLegacyStudioRole("member"), "MEMBER");
+  assert.equal(studioRoleForLocationRole("ADMIN", null), "admin");
+  assert.equal(studioRoleForLocationRole("ADMIN", "owner"), "owner");
+  assert.equal(studioRoleForLocationRole("MEMBER", "owner"), "member");
+  assert.equal(locationRoleForLegacyStudioRole("owner"), "ADMIN");
+  assert.equal(locationRoleForLegacyStudioRole("admin"), "ADMIN");
+  assert.equal(locationRoleForLegacyStudioRole("member"), "MEMBER");
 });
 
 test("team changes need an admin and never remove the last admin", () => {

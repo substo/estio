@@ -17,9 +17,9 @@ import {
   substoStudioWorkspaceExists,
   upsertSubstoMembership,
 } from "@/lib/studio/supabase-service";
-import { prepareSubstoSignIn, type BrandActor, type BrandDeps, type ClerkIdentity, type StudioBrandPort, type SubstoClerkPort } from "./brand-service";
+import { prepareSubstoSignIn, type LocationActor, type LocationDeps, type ClerkIdentity, type StudioLocationPort, type SubstoClerkPort } from "./location-service";
 
-const studio: StudioBrandPort = {
+const studio: StudioLocationPort = {
   listMemberWorkspaces: async (clerkUserId) => (await listSubstoStudioWorkspaces(clerkUserId)).map((workspace) => ({ id: workspace.id, name: workspace.name, role: workspace.role })),
   listWorkspaceMembers: listSubstoWorkspaceMembers,
   workspaceExists: substoStudioWorkspaceExists,
@@ -56,10 +56,10 @@ function substoClerk(): SubstoClerkPort {
       const result = await client.users.getUserList({ emailAddress: [email], limit: 2 });
       return result.data.length === 1 ? toClerkIdentity(result.data[0]) : null;
     },
-    createInvitation: async ({ email, redirectUrl, brandInvitationId }) => {
+    createInvitation: async ({ email, redirectUrl, locationInvitationId }) => {
       const invitation = await client.invitations.createInvitation({
         emailAddress: email, redirectUrl, notify: true, ignoreExisting: true,
-        publicMetadata: { source: "brand_invite", brandInvitationId },
+        publicMetadata: { source: "location_invite", locationInvitationId },
       });
       return { id: invitation.id };
     },
@@ -67,23 +67,23 @@ function substoClerk(): SubstoClerkPort {
   };
 }
 
-export function substoBrandDeps(): BrandDeps {
+export function substoLocationDeps(): LocationDeps {
   return { db, studio, clerk: substoClerk() };
 }
 
 /**
  * Run at every Substo entry: links the Business user, claims invitations,
- * adopts pre-brand Studio workspaces, and creates the first brand if needed.
+ * adopts pre-Location Studio workspaces, and creates the first location if needed.
  */
 export async function prepareCurrentSubstoUser() {
   if (await getRequestAuthRealm() !== "substo") return null;
   const user = await currentUser();
   if (!user) return null;
-  return prepareSubstoSignIn(substoBrandDeps(), toClerkIdentity(user));
+  return prepareSubstoSignIn(substoLocationDeps(), toClerkIdentity(user));
 }
 
-/** The signed-in user acting on their active Substo brand. */
-export async function getSubstoBrandActor(locationId?: string): Promise<(BrandActor & { brandName: string; clerkUserId: string; studioWorkspaceId: string | null }) | null> {
+/** The signed-in user acting on their active Substo location. */
+export async function getSubstoLocationActor(locationId?: string): Promise<(LocationActor & { locationName: string; clerkUserId: string; studioWorkspaceId: string | null }) | null> {
   if (await getRequestAuthRealm() !== "substo") return null;
   const resolution = locationId === undefined ? await resolveActiveLocation() : await validateActiveLocationSelection(locationId);
   if (resolution.status !== "authorized" || !resolution.user || !resolution.location || !resolution.role) return null;
@@ -92,7 +92,7 @@ export async function getSubstoBrandActor(locationId?: string): Promise<(BrandAc
     clerkUserId: resolution.user.clerkId,
     locationId: resolution.location.id,
     role: resolution.role,
-    brandName: resolution.location.name || "Untitled brand",
+    locationName: resolution.location.name || "Untitled brand",
     studioWorkspaceId: resolution.location.studioWorkspaceId,
   };
 }

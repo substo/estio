@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { PrismaClient } from "@prisma/client";
-import type { StudioMemberRole } from "./brand-policy";
+import type { StudioMemberRole } from "./location-policy";
 import {
   changeMemberRole,
-  ensureBrandWorkspace,
-  inviteToBrand,
-  listUserBrands,
+  ensureLocationWorkspace,
+  inviteToLocation,
+  listUserLocations,
   prepareSubstoSignIn,
   removeMember,
-  resolveBrandWorkspaceAccess,
-  type BrandDeps,
+  resolveLocationWorkspaceAccess,
+  type LocationDeps,
   type ClerkIdentity,
-  type StudioBrandPort,
+  type StudioLocationPort,
   type SubstoClerkPort,
-} from "./brand-service";
+} from "./location-service";
 
 // Runs only from scripts/test-user-auth-realm-db.sh against its disposable cluster.
-const databaseUrl = process.env.BRANDS_TEST_DATABASE_URL;
-if (!databaseUrl) throw new Error("BRANDS_TEST_DATABASE_URL is required; use bash scripts/test-user-auth-realm-db.sh");
+const databaseUrl = process.env.LOCATIONS_TEST_DATABASE_URL;
+if (!databaseUrl) throw new Error("LOCATIONS_TEST_DATABASE_URL is required; use bash scripts/test-user-auth-realm-db.sh");
 const parsed = new URL(databaseUrl);
 if (!["127.0.0.1", "localhost"].includes(parsed.hostname) || parsed.pathname !== "/estio_user_auth_realm_test") {
   throw new Error("Brand database tests only run against the disposable estio_user_auth_realm_test database");
@@ -46,7 +46,7 @@ function identity(email: string, options: { verified?: boolean; firstName?: stri
 
 function fakeStudio() {
   const workspaces = new Map<string, { name: string; members: Map<string, StudioMemberRole> }>();
-  const port: StudioBrandPort = {
+  const port: StudioLocationPort = {
     listMemberWorkspaces: async (clerkUserId) => [...workspaces].flatMap(([id, ws]) => ws.members.has(clerkUserId) ? [{ id, name: ws.name, role: ws.members.get(clerkUserId)! }] : []),
     listWorkspaceMembers: async (id) => [...(workspaces.get(id)?.members ?? [])].map(([clerkUserId, role]) => ({ clerkUserId, role })),
     workspaceExists: async (id) => workspaces.has(id),
@@ -60,17 +60,17 @@ function fakeStudio() {
 }
 
 function fakeClerk(accounts: ClerkIdentity[] = []) {
-  const invitations: Array<{ id: string; email: string; brandInvitationId: string; revoked: boolean }> = [];
+  const invitations: Array<{ id: string; email: string; locationInvitationId: string; revoked: boolean }> = [];
   const port: SubstoClerkPort = {
     getUser: async (id) => accounts.find((account) => account.id === id) ?? null,
     findUserByEmail: async (email) => accounts.find((account) => account.emailAddresses.some((entry) => entry.emailAddress === email)) ?? null,
-    createInvitation: async ({ email, brandInvitationId }) => { const id = unique("inv"); invitations.push({ id, email, brandInvitationId, revoked: false }); return { id }; },
+    createInvitation: async ({ email, locationInvitationId }) => { const id = unique("inv"); invitations.push({ id, email, locationInvitationId, revoked: false }); return { id }; },
     revokeInvitation: async (id) => { const found = invitations.find((invitation) => invitation.id === id); if (found) found.revoked = true; },
   };
   return { accounts, invitations, port };
 }
 
-function deps(studio = fakeStudio(), clerk = fakeClerk()): BrandDeps & { fakes: { studio: ReturnType<typeof fakeStudio>; clerk: ReturnType<typeof fakeClerk> } } {
+function deps(studio = fakeStudio(), clerk = fakeClerk()): LocationDeps & { fakes: { studio: ReturnType<typeof fakeStudio>; clerk: ReturnType<typeof fakeClerk> } } {
   return { db, studio: studio.port, clerk: clerk.port, fakes: { studio, clerk } };
 }
 
@@ -85,30 +85,30 @@ test("first Substo sign-in creates exactly one brand, even when requests race", 
   const [one, two] = await Promise.all([prepareSubstoSignIn(context, person), prepareSubstoSignIn(context, person)]);
   const again = await prepareSubstoSignIn(context, person);
   for (const result of [one, two, again]) {
-    assert.equal(result?.brands.length, 1);
-    assert.equal(result?.brands[0].role, "ADMIN");
-    assert.equal(result?.brands[0].name, "Ada's brand");
+    assert.equal(result?.locations.length, 1);
+    assert.equal(result?.locations[0].role, "ADMIN");
+    assert.equal(result?.locations[0].name, "Ada's brand");
   }
   assert.equal(await db.location.count({ where: { autoCreatedForUserId: one!.user.id } }), 1);
-  const brand = await db.location.findUniqueOrThrow({ where: { id: one!.brands[0].id } });
-  assert.equal(brand.authRealm, "substo");
+  const location = await db.location.findUniqueOrThrow({ where: { id: one!.locations[0].id } });
+  assert.equal(location.authRealm, "substo");
 });
 
 test("an Estio user with the same email keeps their own user and brands", async () => {
   const email = `${unique("shared")}@example.com`;
   const estioUser = await db.user.create({ data: { email, clerkId: unique("user_estio"), authRealm: "estio" } });
-  const estioBrand = await db.location.create({ data: { name: "Estio agency", users: { connect: { id: estioUser.id } } } });
-  await db.userLocationRole.create({ data: { userId: estioUser.id, locationId: estioBrand.id, role: "ADMIN" } });
+  const estioLocation = await db.location.create({ data: { name: "Estio agency", users: { connect: { id: estioUser.id } } } });
+  await db.userLocationRole.create({ data: { userId: estioUser.id, locationId: estioLocation.id, role: "ADMIN" } });
 
   const result = await prepareSubstoSignIn(deps(), identity(email));
   assert.ok(result);
   assert.notEqual(result.user.id, estioUser.id);
   assert.equal(result.user.authRealm, "substo");
-  assert.ok(result.brands.every((brand) => brand.id !== estioBrand.id));
+  assert.ok(result.locations.every((location) => location.id !== estioLocation.id));
   const estio = await db.user.findUniqueOrThrow({ where: { id: estioUser.id }, include: { locations: true } });
-  assert.deepEqual(estio.locations.map((location) => location.id), [estioBrand.id]);
+  assert.deepEqual(estio.locations.map((location) => location.id), [estioLocation.id]);
   await assert.rejects(
-    db.location.update({ where: { id: estioBrand.id }, data: { users: { connect: { id: result.user.id } } } }),
+    db.location.update({ where: { id: estioLocation.id }, data: { users: { connect: { id: result.user.id } } } }),
     /different apps/,
   );
 });
@@ -116,76 +116,76 @@ test("an Estio user with the same email keeps their own user and brands", async 
 test("an invitation is claimed by the invited verified email, once, without an extra brand", async () => {
   const context = deps();
   const admin = await prepareSubstoSignIn(context, identity(`${unique("admin")}@example.com`));
-  const brandId = admin!.brands[0].id;
+  const locationId = admin!.locations[0].id;
   const email = `${unique("invitee")}@example.com`;
-  const sent = await inviteToBrand(context, await actorFor(admin!.user.id, brandId), { email: email.toUpperCase(), role: "MEMBER", signUpUrl: "https://substo.example/sign-up" });
+  const sent = await inviteToLocation(context, await actorFor(admin!.user.id, locationId), { email: email.toUpperCase(), role: "MEMBER", signUpUrl: "https://substo.example/sign-up" });
   assert.equal(sent.ok, true);
   assert.equal(context.fakes.clerk.invitations.length, 1);
-  assert.equal((await db.brandInvitation.findFirstOrThrow({ where: { locationId: brandId } })).status, "PENDING");
+  assert.equal((await db.locationInvitation.findFirstOrThrow({ where: { locationId: locationId } })).status, "PENDING");
 
   const unverified = await prepareSubstoSignIn(context, identity(email, { verified: false }));
   assert.equal(unverified, null);
 
   const invitee = identity(email);
   const joined = await prepareSubstoSignIn(context, invitee);
-  assert.deepEqual(joined!.brands.map((brand) => [brand.id, brand.role]), [[brandId, "MEMBER"]]);
+  assert.deepEqual(joined!.locations.map((location) => [location.id, location.role]), [[locationId, "MEMBER"]]);
   const again = await prepareSubstoSignIn(context, invitee);
-  assert.equal(again!.brands.length, 1);
-  assert.equal((await db.brandInvitation.findFirstOrThrow({ where: { locationId: brandId } })).status, "ACCEPTED");
+  assert.equal(again!.locations.length, 1);
+  assert.equal((await db.locationInvitation.findFirstOrThrow({ where: { locationId: locationId } })).status, "ACCEPTED");
 });
 
 test("inviting an existing Substo account adds it immediately", async () => {
   const existing = identity(`${unique("existing")}@example.com`);
   const context = deps(fakeStudio(), fakeClerk([existing]));
   const admin = await prepareSubstoSignIn(context, identity(`${unique("admin")}@example.com`));
-  const brandId = admin!.brands[0].id;
-  const result = await inviteToBrand(context, await actorFor(admin!.user.id, brandId), { email: existing.emailAddresses[0].emailAddress, role: "ADMIN", signUpUrl: "https://substo.example/sign-up" });
+  const locationId = admin!.locations[0].id;
+  const result = await inviteToLocation(context, await actorFor(admin!.user.id, locationId), { email: existing.emailAddresses[0].emailAddress, role: "ADMIN", signUpUrl: "https://substo.example/sign-up" });
   assert.equal(result.ok, true);
   assert.equal(context.fakes.clerk.invitations.length, 0);
   const user = await db.user.findUniqueOrThrow({ where: { authRealm_clerkId: { authRealm: "substo", clerkId: existing.id } } });
-  assert.deepEqual((await listUserBrands(db, user.id)).map((brand) => [brand.id, brand.role]), [[brandId, "ADMIN"]]);
+  assert.deepEqual((await listUserLocations(db, user.id)).map((location) => [location.id, location.role]), [[locationId, "ADMIN"]]);
 });
 
 test("Studio access follows the brand team, and removal revokes Studio first", async () => {
   const context = deps();
   const admin = identity(`${unique("admin")}@example.com`);
   const prepared = await prepareSubstoSignIn(context, admin);
-  const brand = prepared!.brands[0];
-  const workspaceId = await ensureBrandWorkspace(context, brand, admin.id);
-  assert.equal(await ensureBrandWorkspace(context, brand, admin.id), workspaceId);
+  const location = prepared!.locations[0];
+  const workspaceId = await ensureLocationWorkspace(context, location, admin.id);
+  assert.equal(await ensureLocationWorkspace(context, location, admin.id), workspaceId);
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.get(admin.id), "owner");
 
   const member = identity(`${unique("member")}@example.com`);
-  await inviteToBrand(context, await actorFor(prepared!.user.id, brand.id), { email: member.emailAddresses[0].emailAddress, role: "MEMBER", signUpUrl: "https://substo.example/sign-up" });
+  await inviteToLocation(context, await actorFor(prepared!.user.id, location.id), { email: member.emailAddresses[0].emailAddress, role: "MEMBER", signUpUrl: "https://substo.example/sign-up" });
   const memberUser = (await prepareSubstoSignIn(context, member))!.user;
 
-  const access = await resolveBrandWorkspaceAccess(context, workspaceId, member.id);
+  const access = await resolveLocationWorkspaceAccess(context, workspaceId, member.id);
   assert.equal(access?.studioRole, "member");
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.get(member.id), "member");
 
-  const promoted = await changeMemberRole(context, await actorFor(prepared!.user.id, brand.id), memberUser.id, "ADMIN");
+  const promoted = await changeMemberRole(context, await actorFor(prepared!.user.id, location.id), memberUser.id, "ADMIN");
   assert.equal(promoted.ok, true);
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.get(member.id), "admin");
 
-  const removed = await removeMember(context, await actorFor(prepared!.user.id, brand.id), memberUser.id);
+  const removed = await removeMember(context, await actorFor(prepared!.user.id, location.id), memberUser.id);
   assert.equal(removed.ok, true);
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.has(member.id), false);
-  assert.equal(await resolveBrandWorkspaceAccess(context, workspaceId, member.id), null);
+  assert.equal(await resolveLocationWorkspaceAccess(context, workspaceId, member.id), null);
 
   // A stale Studio row (e.g. a failed earlier sync) is removed on the next access check.
   context.fakes.studio.workspaces.get(workspaceId)!.members.set(member.id, "admin");
-  assert.equal(await resolveBrandWorkspaceAccess(context, workspaceId, member.id), null);
+  assert.equal(await resolveLocationWorkspaceAccess(context, workspaceId, member.id), null);
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.has(member.id), false);
 
-  // Signing in again neither re-adds them nor creates a new brand for them.
+  // Signing in again neither re-adds them nor creates a new location for them.
   const back = await prepareSubstoSignIn(context, member);
-  assert.equal(back!.brands.length, 0);
+  assert.equal(back!.locations.length, 0);
 });
 
 test("a brand always keeps an admin", async () => {
   const context = deps();
   const prepared = await prepareSubstoSignIn(context, identity(`${unique("solo")}@example.com`));
-  const actor = await actorFor(prepared!.user.id, prepared!.brands[0].id);
+  const actor = await actorFor(prepared!.user.id, prepared!.locations[0].id);
   assert.deepEqual(await changeMemberRole(context, actor, prepared!.user.id, "MEMBER"), { ok: false, error: "A brand needs at least one admin." });
   assert.deepEqual(await removeMember(context, actor, prepared!.user.id), { ok: false, error: "A brand needs at least one admin." });
 });
@@ -193,12 +193,12 @@ test("a brand always keeps an admin", async () => {
 test("members cannot manage the team", async () => {
   const context = deps();
   const admin = await prepareSubstoSignIn(context, identity(`${unique("admin")}@example.com`));
-  const brandId = admin!.brands[0].id;
+  const locationId = admin!.locations[0].id;
   const member = identity(`${unique("member")}@example.com`);
-  await inviteToBrand(context, await actorFor(admin!.user.id, brandId), { email: member.emailAddresses[0].emailAddress, role: "MEMBER", signUpUrl: "https://substo.example/sign-up" });
+  await inviteToLocation(context, await actorFor(admin!.user.id, locationId), { email: member.emailAddresses[0].emailAddress, role: "MEMBER", signUpUrl: "https://substo.example/sign-up" });
   const memberUser = (await prepareSubstoSignIn(context, member))!.user;
-  const memberActor = await actorFor(memberUser.id, brandId);
-  assert.equal((await inviteToBrand(context, memberActor, { email: "x@example.com", role: "ADMIN", signUpUrl: "https://substo.example/sign-up" })).ok, false);
+  const memberActor = await actorFor(memberUser.id, locationId);
+  assert.equal((await inviteToLocation(context, memberActor, { email: "x@example.com", role: "ADMIN", signUpUrl: "https://substo.example/sign-up" })).ok, false);
   assert.equal((await changeMemberRole(context, memberActor, admin!.user.id, "MEMBER")).ok, false);
   assert.equal((await removeMember(context, memberActor, admin!.user.id)).ok, false);
 });
@@ -212,27 +212,27 @@ test("pre-brand Studio workspaces are adopted once with their members", async ()
   const context = deps(studio, fakeClerk([owner, member]));
 
   const prepared = await prepareSubstoSignIn(context, owner);
-  assert.deepEqual(prepared!.brands.map((brand) => [brand.name, brand.role, brand.studioWorkspaceId]), [["Legacy channel", "ADMIN", workspaceId]]);
-  const memberBrands = await prepareSubstoSignIn(context, member);
-  assert.deepEqual(memberBrands!.brands.map((brand) => [brand.studioWorkspaceId, brand.role]), [[workspaceId, "MEMBER"]]);
+  assert.deepEqual(prepared!.locations.map((location) => [location.name, location.role, location.studioWorkspaceId]), [["Legacy channel", "ADMIN", workspaceId]]);
+  const memberLocations = await prepareSubstoSignIn(context, member);
+  assert.deepEqual(memberLocations!.locations.map((location) => [location.studioWorkspaceId, location.role]), [[workspaceId, "MEMBER"]]);
   assert.equal(await db.location.count({ where: { studioWorkspaceId: workspaceId } }), 1);
 
-  // After adoption the brand team decides: a removed member is not re-imported.
-  const memberUser = memberBrands!.user;
-  await removeMember(context, await actorFor(prepared!.user.id, prepared!.brands[0].id), memberUser.id);
+  // After adoption the location team decides: a removed member is not re-imported.
+  const memberUser = memberLocations!.user;
+  await removeMember(context, await actorFor(prepared!.user.id, prepared!.locations[0].id), memberUser.id);
   studio.workspaces.get(workspaceId)!.members.set(member.id, "member");
   const after = await prepareSubstoSignIn(context, member);
-  assert.ok(after!.brands.every((brand) => brand.studioWorkspaceId !== workspaceId));
+  assert.ok(after!.locations.every((location) => location.studioWorkspaceId !== workspaceId));
 });
 
 test("Estio brands are never resolved as Substo Studio workspaces", async () => {
   const context = deps();
   const estioUser = await db.user.create({ data: { email: `${unique("estio")}@example.com`, clerkId: unique("user_estio"), authRealm: "estio" } });
   const workspaceId = crypto.randomUUID();
-  const estioBrand = await db.location.create({ data: { name: "Estio", studioWorkspaceId: workspaceId, users: { connect: { id: estioUser.id } } } });
-  await db.userLocationRole.create({ data: { userId: estioUser.id, locationId: estioBrand.id, role: "ADMIN" } });
+  const estioLocation = await db.location.create({ data: { name: "Estio", studioWorkspaceId: workspaceId, users: { connect: { id: estioUser.id } } } });
+  await db.userLocationRole.create({ data: { userId: estioUser.id, locationId: estioLocation.id, role: "ADMIN" } });
   context.fakes.studio.workspaces.set(workspaceId, { name: "Estio", members: new Map() });
-  assert.equal(await resolveBrandWorkspaceAccess(context, workspaceId, estioUser.clerkId!), null);
+  assert.equal(await resolveLocationWorkspaceAccess(context, workspaceId, estioUser.clerkId!), null);
   assert.equal(context.fakes.studio.workspaces.get(workspaceId)?.members.size, 0);
 });
 
