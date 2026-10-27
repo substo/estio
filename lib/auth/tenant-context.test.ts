@@ -87,6 +87,7 @@ test("Studio shell loads the same platform location choices as CRM without repla
         "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ app: "estio", workspaceId, resolution: { location: { id: "tenant-b" }, role, availableLocations: available } }) },
         "@/lib/auth/impersonation": {},
         "@/components/app-shell/app-shell-data": shellData,
+        "@/lib/auth/active-location": {}, "@/lib/auth/request-realm": {}, "@/lib/studio/rest": { isStudioProviderUnavailable: () => false },
       });
       const result = await api.getStudioShellData({ workspaceId });
       assert.equal(result.activeLocationId, "tenant-b");
@@ -112,4 +113,25 @@ test("platform login accepts only the two known product destinations", async () 
     assert.equal(response.status, 200);
   }
   assert.deepEqual(products, ["studio", "crm", "crm"]);
+});
+
+test("a restricted Studio database keeps the Studio shell from the CRM Location alone", async () => {
+  const restricted = Object.assign(new Error("restricted"), { restricted: true });
+  for (const app of ["estio", "substo"]) {
+    const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
+      "server-only": {}, "@clerk/nextjs/server": { auth: async () => ({ actor: null }) }, "@/lib/auth/impersonation": {},
+      "@/lib/auth/tenant-context": { resolveTenantContext: async () => { throw restricted; } },
+      "@/lib/auth/active-location": { resolveActiveLocation: async () => ({ status: "authorized", location: { id: "crm-location" }, availableLocations: [] }) },
+      "@/lib/auth/request-realm": { getRequestAuthRealm: async () => app },
+      "@/lib/studio/rest": { isStudioProviderUnavailable: (error: unknown) => error === restricted },
+      "@/components/app-shell/app-shell-data": { getAppShellData: async (input: any) => ({ app: input.app, activeLocationId: input.resolution.location.id, workspaceId: input.workspaceId }) },
+    });
+    assert.deepEqual(await api.getStudioShellData(), { app, activeLocationId: "crm-location", workspaceId: null });
+  }
+  const other = load("app/(main)/studio/_components/studio-shell-data.ts", {
+    "server-only": {}, "@clerk/nextjs/server": {}, "@/lib/auth/impersonation": {}, "@/lib/auth/active-location": {}, "@/lib/auth/request-realm": {},
+    "@/lib/auth/tenant-context": { resolveTenantContext: async () => { throw new Error("schema"); } },
+    "@/lib/studio/rest": { isStudioProviderUnavailable: () => false }, "@/components/app-shell/app-shell-data": {},
+  });
+  await assert.rejects(other.getStudioShellData(), /schema/);
 });

@@ -366,9 +366,10 @@ export async function renameLocation(deps: LocationDeps, actor: LocationActor, r
   const name = normalizeLocationName(rawName);
   if (!name) return { ok: false, error: "Enter a name up to 100 characters." };
   const location = await deps.db.location.update({ where: { id: actor.locationId }, data: { name }, select: { studioWorkspaceId: true } });
-  if (location.studioWorkspaceId && await deps.studio.workspaceExists(location.studioWorkspaceId)) {
-    await deps.studio.renameWorkspace(location.studioWorkspaceId, name).catch(() => undefined);
-  }
+  const workspaceId = location.studioWorkspaceId;
+  // The Studio copy of the name is cosmetic; the rename never waits for or fails on Studio.
+  if (workspaceId) await deps.studio.workspaceExists(workspaceId)
+    .then((exists) => exists ? deps.studio.renameWorkspace(workspaceId, name) : undefined).catch(() => undefined);
   return { ok: true, message: "Brand renamed." };
 }
 

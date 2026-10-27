@@ -17,10 +17,13 @@ import {
   substoStudioWorkspaceExists,
   upsertSubstoMembership,
 } from "@/lib/studio/supabase-service";
+import { unlessStudioUnavailable } from "@/lib/studio/rest";
 import { prepareSubstoSignIn, type LocationActor, type LocationDeps, type ClerkIdentity, type StudioLocationPort, type SubstoClerkPort } from "./location-service";
 
 const studio: StudioLocationPort = {
-  listMemberWorkspaces: async (clerkUserId) => (await listSubstoStudioWorkspaces(clerkUserId)).map((workspace) => ({ id: workspace.id, name: workspace.name, role: workspace.role })),
+  // Adopting pre-Location workspaces is retried at every entry, so a restricted Studio
+  // database only postpones it and never blocks CRM sign-in.
+  listMemberWorkspaces: async (clerkUserId) => ((await unlessStudioUnavailable(() => listSubstoStudioWorkspaces(clerkUserId))) ?? []).map((workspace) => ({ id: workspace.id, name: workspace.name, role: workspace.role })),
   listWorkspaceMembers: listSubstoWorkspaceMembers,
   workspaceExists: substoStudioWorkspaceExists,
   createWorkspace: async (workspaceId, name, creator) => { await createSubstoStudioWorkspace(name.slice(0, 100), creator, workspaceId); },

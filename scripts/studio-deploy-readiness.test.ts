@@ -17,7 +17,7 @@ async function scenario(mode: string, withPrior = true) {
   await writeFile(path.join(target, "node_modules/.bin/tsx"), script(`
    const mode=process.argv.at(-1);log({command:mode,cwd:process.cwd(),instance:process.env.STUDIO_WORKER_INSTANCE,startedAfter:process.env.STUDIO_WORKER_STARTED_AFTER});
    if(mode==='--mode=required')process.exit(process.env.STUDIO_TEST_MODE==='dormant'?2:0);
-   if(mode==='--mode=dependencies')process.exit(process.env.STUDIO_TEST_MODE==='dependencies_fail'?1:0);
+   if(mode==='--mode=dependencies')process.exit(process.env.STUDIO_TEST_MODE==='dependencies_fail'?1:process.env.STUDIO_TEST_MODE==='provider_restricted'?3:0);
    process.exit(process.env.STUDIO_TEST_MODE==='worker_fail'?1:0);
   `), { mode: 0o755 });
   await writeFile(path.join(bin, "pm2"), script(`
@@ -36,6 +36,12 @@ test("dormant and dependency-failed preflight never touch PM2", async () => {
  for (const mode of ["dormant", "dependencies_fail"]) {
   const r = await scenario(mode); assert.equal(r.status, mode === "dormant" ? 0 : 1); assert.ok(r.calls.every(c => c.command !== "pm2"));
  }
+});
+test("provider restriction deploys degraded: worker starts to wait, no worker gate, no restore", async () => {
+ const r = await scenario("provider_restricted"); assert.equal(r.status, 0);
+ assert.equal(r.calls.filter(c => c.command === "--mode=worker").length, 0);
+ const starts = r.calls.filter(c => c.command === "pm2" && c.args[0] === "start"); assert.equal(starts.length, 1);
+ assert.ok(starts[0].args.includes(r.target));
 });
 test("PM2 online alone cannot pass; wrong/unconfirmed worker restores prior release and returns failure", async () => {
  const r = await scenario("worker_fail"); assert.equal(r.status, 1);

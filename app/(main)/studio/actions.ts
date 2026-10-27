@@ -2,27 +2,22 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { substoCrmDestination, substoStudioDestination } from "@/lib/auth/product-navigation";
+import { studioDestination, substoCrmDestination, substoStudioDestination } from "@/lib/auth/product-navigation";
 import { ACTIVE_LOCATION_COOKIE, ACTIVE_LOCATION_COOKIE_OPTIONS } from "@/lib/auth/active-location";
-import { getEstioStudioLocationAccess, getStudioWorkspaceAccess } from "@/lib/studio/access";
+import { getStudioWorkspaceAccess } from "@/lib/studio/access";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
-import { ensureEstioStudioWorkspace } from "@/lib/studio/supabase-service";
 
 async function getRequestBrand() {
   return resolveHostBrand((await headers()).get("host"), getHostBrandConfig());
 }
 
 export async function openEstioStudioLocation(formData: FormData) {
+  if (await getRequestBrand() !== "estio") redirect("/studio/select?error=access");
   const locationId = String(formData.get("locationId") || "").trim();
-  const access = await getEstioStudioLocationAccess(locationId);
-  if (!access) redirect("/studio/select?error=access");
-
-  (await cookies()).set(ACTIVE_LOCATION_COOKIE, access.location.id, ACTIVE_LOCATION_COOKIE_OPTIONS);
-  const workspace = await ensureEstioStudioWorkspace({
-    id: access.location.id,
-    name: access.location.name,
-  });
-  redirect(`/studio`);
+  const destination = await studioDestination(locationId);
+  if (!destination) redirect("/studio/select?error=access");
+  (await cookies()).set(ACTIVE_LOCATION_COOKIE, destination.locationId, ACTIVE_LOCATION_COOKIE_OPTIONS);
+  redirect(destination.path);
 }
 
 export async function openEstioStudioBusinessAction(workspaceId: string) {

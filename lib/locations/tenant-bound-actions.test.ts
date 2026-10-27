@@ -11,6 +11,7 @@ function actions(allowed = true) {
     "@/lib/locations/location-policy": {},
     "@/lib/locations/substo-locations": { getSubstoLocationActor: async (id: string) => { selections.push(id); return allowed ? { userId: "actor", locationId: id, role: "ADMIN" } : null; }, substoLocationDeps: () => ({}), substoSignUpUrl: () => "https://substo.com/sign-up" },
     "@/lib/locations/location-service": {},
+    "@/lib/studio/rest": { isStudioProviderUnavailable: () => false },
   };
   for (const name of ["inviteToLocation", "changeMemberRole", "removeMember", "renameLocation", "revokeLocationInvitation"]) {
     deps["@/lib/locations/location-service"][name] = async (_deps: unknown, actor: { locationId: string }) => { writes.push(actor.locationId); return { ok: true }; };

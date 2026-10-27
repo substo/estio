@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveWorkspaceTenant } from "@/lib/auth/tenant-context";
 import { ACTIVE_LOCATION_COOKIE, ACTIVE_LOCATION_COOKIE_OPTIONS } from "@/lib/auth/active-location";
 import { cleanStudioLegacyPath } from "@/lib/studio/route-policy";
+import { isStudioProviderUnavailable } from "@/lib/studio/rest";
 
 /** Compatibility only. Authorize the old storage key before selecting its real Location. */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ workspaceId: string; path?: string[] }> }) {
@@ -11,7 +12,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { workspaceId, path } = await params;
   const destination = cleanStudioLegacyPath(path);
   if (!destination) return new NextResponse("Not Found", { status: 404 });
-  const resolution = await resolveWorkspaceTenant(workspaceId);
+  let resolution;
+  try { resolution = await resolveWorkspaceTenant(workspaceId); }
+  catch (error) {
+    // The old key cannot be checked while Studio's database is restricted; select nothing.
+    if (!isStudioProviderUnavailable(error)) throw error;
+    return NextResponse.redirect(new URL("/studio", origin), { status: 303, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!resolution?.location) return new NextResponse("Not Found", { status: 404 });
   const target = new URL(destination, origin);
   target.search = request.nextUrl.search;

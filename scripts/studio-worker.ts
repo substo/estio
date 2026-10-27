@@ -16,6 +16,7 @@ import { runStudioWorker } from "../lib/studio/worker/runner";
 
 // Hosted Studio worker: a pm2 process beside Next.js on Hetzner, so Studio jobs
 // run whether or not anyone's Mac is on. Environment comes from the deploy's .env.
+const PROVIDER_RETRY_MS = 10 * 60_000;
 const log = (event: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), service: "studio-worker", ...event }));
 
 async function main() {
@@ -31,7 +32,18 @@ async function main() {
     return;
   }
   const release = await readStudioRelease();
-  const readiness = await runtimeStudioReadiness("dependencies");
+  let readiness = await runtimeStudioReadiness("dependencies");
+  // A restricted/paused provider is not a crash: wait quietly (no pm2 restart loop,
+  // one small probe per interval) and start working once the project is reachable.
+  while (readiness.ready && readiness.degraded && !controller.signal.aborted) {
+    log({ event: "studio_provider_restricted_waiting", retryInMs: PROVIDER_RETRY_MS });
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, PROVIDER_RETRY_MS);
+      controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+    if (!controller.signal.aborted) readiness = await runtimeStudioReadiness("dependencies");
+  }
+  if (controller.signal.aborted) return;
   if (!readiness.ready || !release) {
     log({ event: "dependencies_not_ready", checks: readiness.checks, releaseAvailable: Boolean(release) });
     throw new Error("studio_dependencies_not_ready");

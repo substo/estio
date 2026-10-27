@@ -4,6 +4,7 @@ import { validateActiveLocationSelection } from "./active-location";
 import { getStudioWorkspaceAccess } from "@/lib/studio/access";
 import { ensureLocationWorkspace } from "@/lib/locations/location-service";
 import { substoLocationDeps } from "@/lib/locations/substo-locations";
+import { isStudioProviderUnavailable, unlessStudioUnavailable } from "@/lib/studio/rest";
 
 export type ProductDestination = { locationId: string; path: string };
 
@@ -21,7 +22,8 @@ export async function substoStudioDestination(locationId: string): Promise<Produ
   if (await getRequestAuthRealm() !== "substo") return null;
   const resolution = await validateActiveLocationSelection(locationId);
   if (resolution.status !== "authorized" || resolution.location?.authRealm !== "substo" || resolution.location.id !== locationId || !resolution.user) return null;
-  const workspaceId = await ensureLocationWorkspace(substoLocationDeps(), resolution.location, resolution.user.clerkId);
+  const location = resolution.location, clerkUserId = resolution.user.clerkId;
+  await unlessStudioUnavailable(() => ensureLocationWorkspace(substoLocationDeps(), location, clerkUserId));
   return { locationId: resolution.location.id, path: `/studio` };
 }
 
@@ -31,9 +33,17 @@ export async function studioDestination(locationId: string): Promise<ProductDest
   if (realm === "substo") return substoStudioDestination(locationId);
   if (realm !== "estio") return null;
   const { getEstioStudioLocationAccess } = await import("@/lib/studio/access");
-  const access = await getEstioStudioLocationAccess(locationId);
+  let access;
+  try { access = await getEstioStudioLocationAccess(locationId); }
+  catch (error) {
+    // Studio's database is restricted: authorize from the CRM alone; Studio shows its unavailable state.
+    if (!isStudioProviderUnavailable(error)) throw error;
+    const resolution = await validateActiveLocationSelection(locationId);
+    return resolution.status === "authorized" && resolution.location ? { locationId: resolution.location.id, path: "/studio" } : null;
+  }
   if (!access) return null;
+  const location = access.location;
   const { ensureEstioStudioWorkspace } = await import("@/lib/studio/supabase-service");
-  const workspace = await ensureEstioStudioWorkspace(access.location);
+  await unlessStudioUnavailable(() => ensureEstioStudioWorkspace(location));
   return { locationId: access.location.id, path: `/studio` };
 }

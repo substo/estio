@@ -1,5 +1,5 @@
 import { StudioCommandError } from "./command-error";
-import { StudioRestError } from "./rest-client";
+import { isStudioProviderUnavailable, StudioRestError, STUDIO_UNAVAILABLE_MESSAGE, studioUnavailableResponse } from "./rest-client";
 export const deviceJson = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 /** Heartbeats carry a whitelisted report of up to 16 KiB plus the envelope. */
 export const DEVICE_BODY_LIMIT = 32768;
@@ -16,6 +16,7 @@ export async function readDeviceJson(request: Request): Promise<unknown> {
 /** Never include RPC messages, request bodies or tokens in responses/logs. */
 export function deviceError(error: unknown) {
   if (error instanceof StudioCommandError) return deviceJson({ ok: false, error: error.message }, error.status);
+  if (isStudioProviderUnavailable(error)) return studioUnavailableResponse({ ok: false, error: STUDIO_UNAVAILABLE_MESSAGE });
   if (error instanceof StudioRestError) {
     if (error.code === "42501") return deviceJson({ ok: false, error: "Access denied." }, 403);
     if (error.code === "P0002") return deviceJson({ ok: false, error: "This pairing code was not found, has expired or was already used. Start pairing again on the computer." }, 404);

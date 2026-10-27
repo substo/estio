@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getProfileYoutubeSummary } from "@/lib/google/profile-youtube";
+import { isStudioProviderUnavailable } from "@/lib/studio/rest";
+import { StudioUnavailable } from "@/app/(main)/studio/_components/studio-unavailable";
 export const dynamic = "force-dynamic";
 export default async function ProfileConnectionsPage({ searchParams }: { searchParams: Promise<{ youtube?: string }> }) {
-  const result = await getProfileYoutubeSummary(); if (!result) notFound();
+  let result: Awaited<ReturnType<typeof getProfileYoutubeSummary>>;
+  // Profile connections are stored in Studio's database.
+  try { result = await getProfileYoutubeSummary(); }
+  catch (error) { if (isStudioProviderUnavailable(error)) return <StudioUnavailable />; throw error; }
+  if (!result) notFound();
   const status = (await searchParams).youtube;
   return <main className="mx-auto max-w-3xl space-y-6 p-6 md:p-10">
     <Link href="/studio" className="text-sm text-primary hover:underline">Back to workspaces</Link>

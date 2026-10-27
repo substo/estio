@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { checkStudioReadiness, hasReadyWorker, readReadinessSnapshot, STUDIO_WORKER_HANDLERS, studioReadinessRequired, type ReadinessSnapshot } from "./readiness";
 import { checkStudioMediaTools } from "./readiness-runtime";
+import { StudioRestError } from "./rest-client";
 const env = { NODE_ENV: "test", STUDIO_SUPABASE_URL: "https://studio.example", STUDIO_SUPABASE_SERVICE_ROLE_KEY: "synthetic-role",
  STUDIO_R2_ENDPOINT: "https://r2.example", STUDIO_R2_ACCESS_KEY_ID: "synthetic-access", STUDIO_R2_SECRET_ACCESS_KEY: "synthetic-secret", STUDIO_R2_BUCKET_NAME: "studio-media",
  STUDIO_SECRETS_KEY: Buffer.alloc(32, 1).toString("base64") } as const;
@@ -54,4 +55,26 @@ test("a prior PM2 process report cannot qualify after automatic restart under th
  assert.equal((await checkStudioReadiness({ ...d, startedAfter: Date.parse("2026-10-24T11:00:01Z") })).ready, false);
  assert.equal((await checkStudioReadiness({ ...d, startedAfter: undefined })).ready, false);
  assert.equal(hasReadyWorker(snapshot(), "release-a", "instance-a", Date.parse("2026-10-24T10:59:59Z")), true);
+});
+test("an explicit provider restriction deploys degraded; every other database failure still blocks", async () => {
+ const restricted = async () => { throw new StudioRestError(402, undefined, true); };
+ for (const mode of ["dependencies", "worker"] as const) {
+  const result = await checkStudioReadiness({ ...deps(), mode, snapshot: restricted });
+  assert.equal(result.ready, true); assert.equal(result.degraded, "studio_provider_restricted");
+  assert.ok(!result.checks.some(c => c.name === "database_schema" || c.name === "worker"));
+ }
+ // The degraded path never hides media, tool or configuration failures.
+ assert.equal((await checkStudioReadiness({ ...deps(), snapshot: restricted, media: async () => { throw new Error("r2"); } })).ready, false);
+ assert.equal((await checkStudioReadiness({ ...deps(), snapshot: restricted, env: { ...env, STUDIO_SECRETS_KEY: "" } })).ready, false);
+ const blocking = [
+  async () => { throw new StudioRestError(402); },
+  async () => { throw new StudioRestError(503); },
+  async () => { throw new StudioRestError(500, "PGRST"); },
+  async () => ({ ...snapshot(), schema: 26 }),
+  () => new Promise(() => {}),
+ ];
+ for (const probe of blocking) {
+  const result = await checkStudioReadiness({ ...deps(), mode: "dependencies", snapshot: probe, timeoutMs: 50 });
+  assert.equal(result.ready, false); assert.equal(result.degraded, undefined);
+ }
 });

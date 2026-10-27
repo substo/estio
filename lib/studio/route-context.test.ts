@@ -5,6 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 import { NextRequest, NextResponse } from "next/server";
 import { cleanStudioLegacyPath } from "./route-policy";
+import * as restClient from "./rest-client";
 
 function load(file: string, deps: Record<string, any>) {
   const module = { exports: {} as any };
@@ -16,6 +17,7 @@ function context(status = "authorized", storage: string | null = "storage-a") {
   return load("lib/studio/route-context.ts", {
     "server-only": {}, "next/navigation": { redirect: (path: string) => { throw new Error(`REDIRECT:${path}`); } },
     "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ resolution: { status, location: status === "authorized" ? { id: "location-a" } : null }, workspaceId: storage }) },
+    "./rest-client": restClient,
   });
 }
 function request(tenant?: string, method = "POST") {
@@ -59,6 +61,7 @@ test("both old app links authorize their Location before clean redirect; revoked
       "next/server": { NextResponse }, "@/lib/studio/route-policy": { cleanStudioLegacyPath },
       "@/lib/auth/tenant-context": { resolveWorkspaceTenant: async (id: string) => { assert.equal(id, workspaceId); calls++; return allowed ? { location: { id: "location-b" } } : null; } },
       "@/lib/auth/active-location": { ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/", sameSite: "lax" } },
+      "@/lib/studio/rest": { isStudioProviderUnavailable: restClient.isStudioProviderUnavailable },
     });
     const response = await api.GET(new NextRequest(`http://localhost:3002/studio/workspace/${workspaceId}/library?page=2`, { headers: { host } }), { params: Promise.resolve({ workspaceId, path: ["library"] }) });
     assert.equal(response.status, allowed ? 303 : 404); assert.equal(response.cookies.get("active_location_id")?.value, allowed ? "location-b" : undefined);
@@ -95,4 +98,12 @@ test("storage access follows the active Location in both realms, never a second 
     if (matches) { assert.equal(result.workspace.name, "Canonical location"); assert.equal(result.brand, realm); }
     else { assert.equal(result, null); assert.equal(mirrorCalls, 0); }
   }
+});
+
+test("Studio API routes answer a restricted provider with one 503 + Retry-After, and rethrow anything else", async () => {
+  const api = context();
+  const unavailable = await api.withStudioRoute(async () => { throw new restClient.StudioRestError(402, undefined, true); })(request("location-a"), { params: Promise.resolve({}) });
+  assert.equal(unavailable.status, 503); assert.equal(unavailable.headers.get("Retry-After"), "120");
+  assert.match((await unavailable.json()).error, /temporarily unavailable/);
+  await assert.rejects(api.withStudioRoute(async () => { throw new restClient.StudioRestError(402); })(request("location-a"), { params: Promise.resolve({}) }), restClient.StudioRestError);
 });

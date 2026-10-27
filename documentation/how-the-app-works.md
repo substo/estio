@@ -66,7 +66,9 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 - **What was worth it:** separate logins on one shared database. It is done, and doesn't need more work.
 - **Keep docs short.** Long progress logs hid the current state. Update this page when a rule changes, and keep a one-line entry in the progress log.
 
-## Status (2026-10-26)
+## Status (2026-10-27)
+
+**Studio paused: Supabase egress quota; re-key parked on wip/studio-location-rekey.** While the provider restricts the project, Studio shows "Studio is temporarily unavailable" inside the shell, and its APIs return 503. The CRM, sign-in and deploys keep working (readiness reports `degraded`). Resume notes and egress suspects: `business-rename-plan.md`.
 
 **Working on both apps:**
 - separate sign-in;
@@ -78,7 +80,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 - Studio's library, pipeline, knowledge, uploads and transcription.
 
 **Next:**
-1. Key Studio by `location_id` and remove the workspace; rename `brand` to Location or app names in the backend (staged).
+1. Key Studio by `location_id` and remove the workspace; rename `brand` to Location or app names in the backend (staged). Stage A is done; Stage B is parked until Supabase is reachable.
 2. **First Studio workflow: onboarding chat**, planned in `onboarding-chat-plan.md`. A guided AI chat with web browsing, built on the existing assistant pieces. It asks about the person and the Location, connects their socials, and saves a Location persona that Studio uses for content.
 3. **Scheduled runs**, once the user has connected YouTube at `/account/connections`. No credentials were imported from the old local app.
 

@@ -1,12 +1,22 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
+import { resolveActiveLocation } from "@/lib/auth/active-location";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
 import { getAppShellData } from "@/components/app-shell/app-shell-data";
+import { isStudioProviderUnavailable } from "@/lib/studio/rest";
 
 /** The explicit workspace wins over last-used cookies throughout the shell. */
 export async function getStudioShellData(input: { workspaceId?: string; locationId?: string } = {}) {
-  const context = await resolveTenantContext(input);
+  let context: Awaited<ReturnType<typeof resolveTenantContext>>;
+  try { context = await resolveTenantContext(input); }
+  catch (error) {
+    // Studio's database is restricted: keep the shell (header, Location, CRM switch) from the CRM alone.
+    if (!isStudioProviderUnavailable(error)) throw error;
+    const app = await getRequestAuthRealm();
+    context = app === "estio" || app === "substo" ? { app, resolution: await resolveActiveLocation(), workspaceId: null } : null;
+  }
   if (!context) return null;
   const { app, resolution, workspaceId } = context;
   const state = await auth();

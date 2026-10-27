@@ -1,4 +1,4 @@
-import { StudioRestError } from "./rest-client";
+import { isStudioProviderUnavailable, StudioRestError, studioUnavailableResponse } from "./rest-client";
 import { StudioCommandError } from "./command-error";
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 /** Shared same-origin, bounded, retry-aware HTTP boundary for paid commands. */
@@ -21,6 +21,7 @@ export async function studioCommandResponse<T>(request: Request, deps: {
     return json(await deps.execute(deps.parse(body)));
   } catch (error) {
     if (error instanceof StudioCommandError) return json({ error: error.message }, error.status);
+    if (isStudioProviderUnavailable(error)) return studioUnavailableResponse();
     if (error instanceof StudioRestError && ["40001", "23505"].includes(error.code ?? "")) return json({ error: "This review or job changed. Reload before continuing." }, 409);
     if (error instanceof StudioRestError && error.code === "42501") return json({ error: "Location access is required." }, 403);
     if (error instanceof StudioRestError && ["22023", "22P02", "23514"].includes(error.code ?? "")) return json({ error: "The input exceeds this workflow's bounds or is unavailable. Reload and choose supported inputs or a smaller range." }, 400);

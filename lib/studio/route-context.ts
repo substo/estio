@@ -1,6 +1,7 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
+import { isStudioProviderUnavailable, studioUnavailableResponse } from "./rest-client";
 
 export class StudioTenantContextError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
@@ -28,6 +29,7 @@ export function withStudioRoute<T, R extends Request>(handler: (request: R, cont
     try { return await handler(request, context); }
     catch (error) {
       if (error instanceof StudioTenantContextError) return Response.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "no-store" } });
+      if (isStudioProviderUnavailable(error)) return studioUnavailableResponse();
       throw error;
     }
   };

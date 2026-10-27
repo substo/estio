@@ -1,5 +1,6 @@
 import { hasStudioSupabaseConfig } from "./config";
 import { readStudioR2Config } from "./media-r2";
+import { isStudioProviderUnavailable } from "./rest-client";
 import { decryptStudioSecret, encryptStudioSecret, hasStudioSecretKeyId, hasStudioSecretsKey } from "./secrets";
 export const STUDIO_WORKER_HANDLERS = ["studio.diagnostic", "studio.transcribe_upload", "studio.idea_review", "studio.script_brief", "studio.knowledge_extract", "studio.youtube_discovery"];
 export const STUDIO_SCHEMA_VERSION = 27;
@@ -9,7 +10,12 @@ export interface ReadinessSnapshot {
   schema: number; protocol: number; checkedAt: string; keyIds: string[]; workers: WorkerReport[];
   queue: { due: number; oldestDueAt: string | null; expiredLeases: number; uncertainAttempts: number };
 }
-export interface ReadinessResult { required: boolean; ready: boolean; checks: Array<{ name: string; ok: boolean }>; queue?: ReadinessSnapshot["queue"] }
+/**
+ * `degraded` is set only when the Studio database provider explicitly restricted or paused
+ * the project. Studio then shows its unavailable state while the rest of the app deploys;
+ * schema, timeout, configuration and encryption failures still make `ready` false.
+ */
+export interface ReadinessResult { required: boolean; ready: boolean; degraded?: "studio_provider_restricted"; checks: Array<{ name: string; ok: boolean }>; queue?: ReadinessSnapshot["queue"] }
 export function studioReadinessRequired(env: NodeJS.ProcessEnv = process.env) {
   // Dormant R2/key provisioning alone does not activate Studio for existing Business releases.
   return Boolean(env.STUDIO_READINESS_REQUIRED?.trim() || env.SUBSTO_APP_HOSTS?.trim() || env.STUDIO_SUPABASE_URL?.trim() || env.STUDIO_SUPABASE_SERVICE_ROLE_KEY?.trim());
@@ -64,7 +70,8 @@ export async function checkStudioReadiness(input: {
     bounded(() => input.snapshot(controller.signal).then(readReadinessSnapshot)),
     bounded(() => input.media(controller.signal)), bounded(() => input.tools(controller.signal)),
   ]);
-  check("database_schema", probes[0].status === "fulfilled");
+  if (probes[0].status === "rejected" && isStudioProviderUnavailable(probes[0].reason)) result.degraded = "studio_provider_restricted";
+  else check("database_schema", probes[0].status === "fulfilled");
   check("media_bucket", probes[1].status === "fulfilled");
   check("media_tools_and_disk", probes[2].status === "fulfilled");
   const snapshot = probes[0].status === "fulfilled" ? probes[0].value as ReadinessSnapshot : null;
@@ -75,7 +82,8 @@ export async function checkStudioReadiness(input: {
   if (input.mode === "worker") {
     check("expected_release", typeof input.release === "string" && input.release.length > 0 && input.release.length <= 100);
     check("process_start", !input.instanceId || (Number.isFinite(input.startedAfter) && input.startedAfter! > 0));
-    check("worker", Boolean(snapshot && input.release && hasReadyWorker(snapshot, input.release, input.instanceId, input.startedAfter)));
+    // A restricted provider also rejects worker heartbeats, so no worker can be confirmed.
+    if (!result.degraded) check("worker", Boolean(snapshot && input.release && hasReadyWorker(snapshot, input.release, input.instanceId, input.startedAfter)));
   }
   return result;
 }
