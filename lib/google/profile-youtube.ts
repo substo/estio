@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { getPlatformProfile, type PlatformProfile } from "@/lib/platform/profile";
 import { queryPath, studioRest } from "@/lib/studio/rest";
@@ -16,7 +17,7 @@ export async function getProfileYoutubeSummary() {
 export const profileYoutubeAccess = (profile: PlatformProfile) => readProfileYoutubeAccess(studioRest, profile);
 export async function profileOAuthRpc(profile: PlatformProfile, action: "begin" | "consume" | "commit", stateHash: string, sessionHash: string, refresh?: { refreshToken: string; scopes: string[] }) {
   const client = youtubeClientConfig();
-  return studioRest<boolean>("rpc/platform_youtube_oauth", { method: "POST", body: JSON.stringify({ p_action: action,
+  return studioDb.call<boolean>("platform_youtube_oauth", { p_action: action,
     p_app: profile.brand, p_user: profile.userId, p_session_hash: sessionHash, p_state_hash: stateHash,
-    ...(refresh && client ? { p_cipher: encryptStudioSecret(refresh.refreshToken, youtubeProfileContext(profile.brand, profile.userId, "refresh")), p_client_id: client.clientId, p_scopes: refresh.scopes } : {}) }) });
+    ...(refresh && client ? { p_cipher: encryptStudioSecret(refresh.refreshToken, youtubeProfileContext(profile.brand, profile.userId, "refresh")), p_client_id: client.clientId, p_scopes: refresh.scopes } : {}) });
 }

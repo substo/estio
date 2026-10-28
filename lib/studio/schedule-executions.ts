@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import { enableStudioYoutubeSchedule, runStudioYoutubeScheduleNow } from "./youtube-schedules";
 import "server-only";
 import { getStudioAccess } from "./access";
@@ -7,11 +8,9 @@ import type { readScheduleRunCommand, readScheduleCommand } from "./schedule-exe
 
 export async function runStudioScheduleNow(locationId: string, command: ReturnType<typeof readScheduleRunCommand>) {
   const access = await requireOwnStudioCommandLocation(locationId);
-  return studioRest<{ executionId: string; reviewId: string; jobId: string; workflow: "idea_review" | "script_brief" }>("rpc/studio_run_schedule_now", {
-    method: "POST", body: JSON.stringify({ p_location_id: access.locationId, p_actor_app: access.app,
+  return studioDb.call<{ executionId: string; reviewId: string; jobId: string; workflow: "idea_review" | "script_brief" }>("studio_run_schedule_now", { p_location_id: access.locationId, p_actor_app: access.app,
       p_clerk_user_id: access.userId, p_schedule_id: command.scheduleId, p_expected_version: command.version,
-      p_request_id: command.requestId, p_selection: command.ideas, p_confirm_paid: command.confirmPaid }),
-  });
+      p_request_id: command.requestId, p_selection: command.ideas, p_confirm_paid: command.confirmPaid });
 }
 
 export async function executeStudioScheduleCommand(locationId: string, command: ReturnType<typeof readScheduleCommand>) {
@@ -20,12 +19,10 @@ export async function executeStudioScheduleCommand(locationId: string, command: 
   }
   if (command.action === "run_now") return runStudioScheduleNow(locationId, command);
   const access = await requireOwnStudioCommandLocation(locationId);
-  return studioRest<{ enabled: boolean; stateVersion: number; nextRunAt: string | null }>("rpc/studio_set_schedule_recurring", {
-    method: "POST", body: JSON.stringify({ p_location_id: access.locationId, p_actor_app: access.app,
+  return studioDb.call<{ enabled: boolean; stateVersion: number; nextRunAt: string | null }>("studio_set_schedule_recurring", { p_location_id: access.locationId, p_actor_app: access.app,
       p_clerk_user_id: access.userId, p_schedule_id: command.scheduleId, p_expected_version: command.version,
       p_state_version: command.stateVersion, p_request_id: command.requestId, p_action: command.action,
-      p_selection: command.ideas, p_confirm_paid: command.confirmRecurringPaid }),
-  });
+      p_selection: command.ideas, p_confirm_paid: command.confirmRecurringPaid });
 }
 export interface StudioScheduleRecurring {
   version: number; enabled: boolean; authorized_by: string; next_run_at: string | null; last_outcome: string | null;

@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
@@ -24,10 +25,10 @@ export async function executeStudioUploadCommand(locationId: string, command: Up
   let upload: RecoverableUpload | null;
   if (command.action === "start") {
     const request = command.input;
-    upload = await studioRest<RecoverableUpload>("rpc/studio_create_upload", { method: "POST", body: JSON.stringify({
+    upload = await studioDb.call<RecoverableUpload>("studio_create_upload", {
       p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_upload_id: command.uploadId,
       p_record_id: request.recordId, p_original_filename: request.filename, p_content_type: request.contentType,
-      p_byte_size: request.byteSize, p_bucket_id: store.bucket }) });
+      p_byte_size: request.byteSize, p_bucket_id: store.bucket });
   } else {
     [upload] = await studioRest<RecoverableUpload[]>(queryPath("studio_uploads", {
       select: "id,record_id,object_key,byte_size,bucket_id,content_type,original_filename,status,created_by_clerk_user_id,expires_at",
@@ -36,9 +37,9 @@ export async function executeStudioUploadCommand(locationId: string, command: Up
   }
   return recoverUpload(upload ?? null, { userId: access.userId, recordId }, {
     bucket: store.bucket, head: key => store.headObject(key), sign: input => store.presignUpload(input),
-    complete: (uploadId, observedSize) => studioRest("rpc/studio_complete_upload", { method: "POST", body: JSON.stringify({
+    complete: (uploadId, observedSize) => studioDb.call("studio_complete_upload", {
       p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId,
-      p_upload_id: uploadId, p_observed_size: observedSize }) }),
+      p_upload_id: uploadId, p_observed_size: observedSize }),
   });
 }
 

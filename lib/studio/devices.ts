@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { canManageStudioAi } from "./ai-settings-policy";
@@ -91,17 +92,17 @@ export async function executeStudioDeviceManagement(locationId: string, command:
   if (!canManageStudioAi(access)) throw new StudioCommandError("A Business admin is required.", 403);
   const actor = { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId };
   if (command.action === "approve_pairing" || command.action === "deny_pairing" || command.action === "lookup_pairing") {
-    const result = await studioRest<Record<string, unknown>>("rpc/studio_device_pairing_action", { method: "POST", body: JSON.stringify({
-      ...actor, p_action: PAIRING_ACTIONS[command.action], p_user_code: command.userCode, p_request_id: "requestId" in command ? command.requestId : null }) });
+    const result = await studioDb.call<Record<string, unknown>>("studio_device_pairing_action", {
+      ...actor, p_action: PAIRING_ACTIONS[command.action], p_user_code: command.userCode, p_request_id: "requestId" in command ? command.requestId : null });
     return command.action === "deny_pairing" ? { status: "denied" } : result;
   }
   const c = command as Partial<Record<string, unknown>> & DeviceManagementCommand;
   const value = command.action === "set_processing" ? command.enabled : command.action === "set_paused" ? command.paused
     : command.action === "save_config" ? command.config : null;
-  return studioRest<Record<string, unknown>>("rpc/studio_manage_device", { method: "POST", body: JSON.stringify({
+  return studioDb.call<Record<string, unknown>>("studio_manage_device", {
     ...actor, p_action: command.action, p_request_id: c.requestId ?? null, p_device_id: c.deviceId ?? null,
     p_provider: c.provider ?? null, p_model: c.model ?? null, p_value: value,
-    p_expected_version: command.action === "save_config" ? command.expectedVersion : null, p_command_id: c.commandId ?? null }) });
+    p_expected_version: command.action === "save_config" ? command.expectedVersion : null, p_command_id: c.commandId ?? null });
 }
 
 /** Estio Business ADMIN lives in Estio's database, so it is re-checked here on every device request. */
@@ -128,8 +129,8 @@ export async function startStudioDevicePairing(brand: "estio" | "substo", origin
   for (let attempt = 0; ; attempt++) {
     const userCode = generatePairingCode();
     try {
-      const result = await studioRest<{ pairingId: string; userCode: string; expiresAt: string }>("rpc/studio_device_pair_start", { method: "POST", body: JSON.stringify({
-        p_app: brand, p_name: input.name, p_platform: input.platform, p_device_code_hash: hashStudioDeviceToken(deviceCode), p_user_code: userCode }) });
+      const result = await studioDb.call<{ pairingId: string; userCode: string; expiresAt: string }>("studio_device_pair_start", {
+        p_app: brand, p_name: input.name, p_platform: input.platform, p_device_code_hash: hashStudioDeviceToken(deviceCode), p_user_code: userCode });
       const display = formatPairingCode(result.userCode);
       return { pairingId: result.pairingId, deviceCode, userCode: display, verificationUrl: `${origin}/studio/settings/computer?code=${display}`,
         expiresAt: result.expiresAt, intervalSeconds: PAIRING_POLL_SECONDS };
@@ -145,7 +146,6 @@ export async function startStudioDevicePairing(brand: "estio" | "substo", origin
  */
 export async function pollStudioDevicePairing(brand: "estio" | "substo", input: { pairingId: string; deviceCode: string }) {
   const token = `studio_device_${randomBytes(32).toString("base64url")}`;
-  const result = await studioRest<{ status: "pending" | "approved" | "denied" | "expired" | "consumed"; deviceId?: string; businessName?: string }>("rpc/studio_device_pair_poll", {
-    method: "POST", body: JSON.stringify({ p_app: brand, p_pairing_id: input.pairingId, p_device_code_hash: hashStudioDeviceToken(input.deviceCode), p_token_hash: hashStudioDeviceToken(token) }) });
+  const result = await studioDb.call<{ status: "pending" | "approved" | "denied" | "expired" | "consumed"; deviceId?: string; businessName?: string }>("studio_device_pair_poll", { p_app: brand, p_pairing_id: input.pairingId, p_device_code_hash: hashStudioDeviceToken(input.deviceCode), p_token_hash: hashStudioDeviceToken(token) });
   return result.status === "approved" ? { status: "approved" as const, token, deviceId: result.deviceId, businessName: result.businessName } : { status: result.status };
 }

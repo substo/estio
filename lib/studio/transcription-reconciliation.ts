@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { getPlatformProfile } from "../platform/profile";
 import { getStudioAccess } from "./access";
@@ -14,10 +15,10 @@ async function requireManager(locationId: string) {
 
 export async function reviewStudioTranscription(locationId: string, command: ReconciliationCommand) {
   const access = await requireManager(locationId);
-  return studioRest("rpc/studio_review_ai_attempt", { method: "POST", body: JSON.stringify({
+  return studioDb.call("studio_review_ai_attempt", {
     p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId,
     p_attempt_id: command.attemptId, p_request_id: command.requestId, p_expected_version: command.expectedVersion,
-    p_action: command.action, p_evidence: command.evidence, p_cost_micros: command.costMicros, p_confirm_paid: command.confirmPaid }) });
+    p_action: command.action, p_evidence: command.evidence, p_cost_micros: command.costMicros, p_confirm_paid: command.confirmPaid });
 }
 
 export interface ReviewedTranscriptionAttempt {

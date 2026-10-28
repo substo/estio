@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import { sameYoutubePrincipal } from "./youtube-consumer-policy";
 import "server-only";
 import { getPlatformProfile } from "@/lib/platform/profile";
@@ -32,7 +33,7 @@ export async function browseStudioYoutube(locationId: string, input: unknown) {
     const approved = await studioRest<ApprovedYoutubeChannel[]>(queryPath("studio_youtube_channels", { select: "channel_id,label", location_id: `eq.${access.locationId}`, channel_id: `eq.${request.channelId}`, limit: "1" }));
     if (!approved.length) throw new YoutubeError("channel_not_approved", "A manager must approve this channel for the workspace first.");
   }
-  const slot = await studioRest<boolean>("rpc/studio_youtube_request_slot", { method: "POST", body: JSON.stringify({ p_location: access.locationId, p_app: access.app, p_user: access.userId }) });
+  const slot = await studioDb.call<boolean>("studio_youtube_request_slot", { p_location: access.locationId, p_app: access.app, p_user: access.userId });
   if (!slot) throw new YoutubeError("discovery_daily_limit", "This workspace reached its daily discovery limit. Try tomorrow.");
   const personal = request.mode === "subscriptions" || request.mode === "subscription";
   const key = process.env.YOUTUBE_DATA_API_KEY?.trim();
@@ -73,8 +74,8 @@ export async function saveStudioYoutubeLink(locationId: string, input: { ticket?
   if (typeof input.title !== "string" || !input.title.trim() || input.title.trim().length > 180) throw new YoutubeError("invalid_title", "Enter your own research title, up to 180 characters.");
   const selection = openYoutubeSelection(input.ticket, { locationId: access.locationId, brand: profile.brand, userId: profile.userId });
   if (!selection) throw new YoutubeError("invalid_selection", "This selection expired or belongs to another profile. Run discovery again.");
-  return studioRest<string>("rpc/studio_save_youtube_bookmark", { method: "POST", body: JSON.stringify({ p_location: access.locationId, p_app: access.app, p_user: access.userId,
-    p_record: selection.recordId, p_video: selection.videoId, p_title: input.title.trim(), p_provenance: selection.provenance }) });
+  return studioDb.call<string>("studio_save_youtube_bookmark", { p_location: access.locationId, p_app: access.app, p_user: access.userId,
+    p_record: selection.recordId, p_video: selection.videoId, p_title: input.title.trim(), p_provenance: selection.provenance });
 }
 export async function manageStudioYoutubeChannel(locationId: string, input: { channelId?: unknown; label?: unknown; remove?: unknown }) {
   const { access, profile } = await context(locationId, true);
@@ -83,14 +84,14 @@ export async function manageStudioYoutubeChannel(locationId: string, input: { ch
   let channelId = input.channelId;
   if (input.remove) { if (!channelIdPattern.test(channelId)) throw new YoutubeError("invalid_channel", "Choose an approved channel."); }
   else {
-    const slot = await studioRest<boolean>("rpc/studio_youtube_request_slot", { method: "POST", body: JSON.stringify({ p_location: access.locationId, p_app: access.app, p_user: access.userId }) });
+    const slot = await studioDb.call<boolean>("studio_youtube_request_slot", { p_location: access.locationId, p_app: access.app, p_user: access.userId });
     if (!slot) throw new YoutubeError("discovery_daily_limit", "This workspace reached its daily discovery limit. Try tomorrow.");
     const key = process.env.YOUTUBE_DATA_API_KEY?.trim();
     const auth = key ? { apiKey: key } : { accessToken: (await profileYoutubeAccess(profile)).token };
     try { channelId = await createYoutubeApi(auth).resolveChannel(channelId); }
     catch (error) { if (error instanceof YoutubeError) throw error; throw new YoutubeError("invalid_channel", "Enter a YouTube channel URL or @handle."); }
   }
-  await studioRest("rpc/studio_youtube_channel", { method: "POST", body: JSON.stringify({ p_location: access.locationId, p_app: access.app, p_user: access.userId,
-    p_channel: channelId, p_label: input.remove ? "" : (input.label as string).trim(), p_remove: input.remove }) });
+  await studioDb.call("studio_youtube_channel", { p_location: access.locationId, p_app: access.app, p_user: access.userId,
+    p_channel: channelId, p_label: input.remove ? "" : (input.label as string).trim(), p_remove: input.remove });
   return channelId;
 }

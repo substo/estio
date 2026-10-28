@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess, type StudioAccess } from "./access";
@@ -64,15 +65,15 @@ export async function studioJobAction(locationId: string, jobId: string, action:
     if (!jobs[0]) throw new Error("Job not found.");
     if (!canRetryStudioJob(access, jobs[0])) throw new Error("A Business admin and an active paired Mac are required to retry this job.");
   }
-  return studioRest("rpc/studio_member_job_action", { method: "POST", body: JSON.stringify({
-    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_job_id: jobId, p_action: action }) });
+  return studioDb.call("studio_member_job_action", {
+    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_job_id: jobId, p_action: action });
 }
 
 /** Queue a no-cost worker check; repeated clicks within a minute reuse one job. */
 export async function enqueueStudioWorkerCheck(locationId: string) {
   const access = await requireMember(locationId);
   const minute = Math.floor(Date.now() / 60_000);
-  return studioRest("rpc/studio_enqueue_job", { method: "POST", body: JSON.stringify({
+  return studioDb.call("studio_enqueue_job", {
     p_location_id: access.locationId, p_kind: "studio.diagnostic", p_payload: {}, p_idempotency_key: `diagnostic:${access.userId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100)}:${minute}`,
-    p_created_by: access.userId, p_max_attempts: 3 }) });
+    p_created_by: access.userId, p_max_attempts: 3 });
 }

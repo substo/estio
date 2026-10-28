@@ -1,3 +1,4 @@
+import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { getPlatformProfile } from "../platform/profile";
@@ -21,7 +22,7 @@ async function verifyYoutubeScheduleSource(locationId: string, command: YoutubeS
   if (command.source === "subscription") {
     const grant = await profileYoutubeAccess(profile);
     if (grant.version !== connection.version) throw new StudioCommandError("Your connection changed. Reload.", 409);
-    const slot = await studioRest<boolean>("rpc/studio_youtube_request_slot", { method: "POST", body: JSON.stringify({ p_location: access.locationId, p_app: access.app, p_user: access.userId }) });
+    const slot = await studioDb.call<boolean>("studio_youtube_request_slot", { p_location: access.locationId, p_app: access.app, p_user: access.userId });
     if (!slot) throw new StudioCommandError("Daily discovery limit reached. Try tomorrow.");
     const subscribed = await createYoutubeApi({ accessToken: grant.token }).subscriptions("", command.channelId);
     if (!subscribed.channels.some(channel => channel.id === command.channelId)) throw new StudioCommandError("Choose a channel subscribed by this connected profile.");
@@ -30,17 +31,17 @@ async function verifyYoutubeScheduleSource(locationId: string, command: YoutubeS
 }
 export async function enableStudioYoutubeSchedule(locationId: string, command: YoutubeScheduleCommand) {
   const { access, connection } = await verifyYoutubeScheduleSource(locationId, command);
-  return studioRest("rpc/studio_enable_youtube_schedule", { method: "POST", body: JSON.stringify({ p_location: access.locationId, p_app: access.app,
+  return studioDb.call("studio_enable_youtube_schedule", { p_location: access.locationId, p_app: access.app,
     p_user: access.userId, p_schedule: command.scheduleId, p_version: command.version, p_state_version: command.stateVersion,
     p_request: command.requestId, p_connection_version: connection.version, p_source: command.source, p_channel: command.channelId,
-    p_title: command.titlePrefix, p_confirm_share: command.confirmShare }) });
+    p_title: command.titlePrefix, p_confirm_share: command.confirmShare });
 }
 export async function runStudioYoutubeScheduleNow(locationId: string, command: YoutubeScheduleCommand) {
   const { access, connection } = await verifyYoutubeScheduleSource(locationId, command);
-  return studioRest<{ executionId: string; discoveryRunId: string; jobId: string; workflow: "youtube_discovery" }>("rpc/studio_run_youtube_schedule_now", { method: "POST", body: JSON.stringify({
+  return studioDb.call<{ executionId: string; discoveryRunId: string; jobId: string; workflow: "youtube_discovery" }>("studio_run_youtube_schedule_now", {
     p_location: access.locationId, p_app: access.app, p_user: access.userId, p_schedule: command.scheduleId, p_version: command.version,
     p_request: command.requestId, p_connection_version: connection.version, p_source: command.source, p_channel: command.channelId,
-    p_title: command.titlePrefix, p_confirm_share: command.confirmShare }) });
+    p_title: command.titlePrefix, p_confirm_share: command.confirmShare });
 }
 export async function getStudioYoutubeScheduleSettings(locationId: string) {
   const access = await getStudioAccess(locationId); const profile = await getPlatformProfile();

@@ -1,4 +1,4 @@
-import { requestStudioRest, type StudioRestConfig } from "../rest-client";
+import type { StudioDb } from "../db";
 
 export interface StudioJob {
   id: string; location_id: string; kind: string; payload: Record<string, unknown>;
@@ -14,10 +14,9 @@ export interface StudioQueue {
   heartbeat(workerId: string, release: string | null, startedAt: Date, report?: StudioWorkerReport): Promise<void>;
 }
 
-/** Service-role queue client. Workspace authority was checked when the job was enqueued. */
-export function createRestStudioQueue(config: StudioRestConfig, fetcher: typeof fetch = fetch): StudioQueue {
-  const rpc = <T>(name: string, body: Record<string, unknown>) => requestStudioRest<T>(config, `rpc/${name}`, {
-    method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) }, fetcher);
+/** Queue mutations use the same CRM pool and transactional SQL lease fences. */
+export function createDbStudioQueue(db: StudioDb): StudioQueue {
+  const rpc = <T>(name: string, body: Record<string, unknown>) => db.call<T>(name, body);
   return {
     claim: (workerId, limit, leaseSeconds) => rpc<StudioJob[]>("studio_claim_jobs", { p_worker_id: workerId, p_limit: limit, p_lease_seconds: leaseSeconds }),
     extend: (jobId, workerId, leaseSeconds, leaseToken) => rpc<boolean>("studio_extend_job_lease", { p_job_id: jobId, p_worker_id: workerId, p_lease_seconds: leaseSeconds, p_lease_token: leaseToken }),
