@@ -725,3 +725,8 @@ Live build/health/dependencies and empty due/expired/uncertain queue rechecked. 
   attach (CDP focus timeout/native window unavailable). Preview resize requested
   390x844 but measured 1280px; mobile acceptance remains unverified. Library,
   Content, Knowledge and Discovery returned signed 200; Schedules requires fix above.
+- Full new-workflow SQL execution now covers synthetic credential/budget, enqueue,
+  claim, reserve, finish, exact 110-micro-USD settlement and release, all rolled back.
+  It caught the missing `studio_ai_attempt_subject` workflow extension before live
+  migration; the pending migration now extends that constraint too. Passed against
+  disposable PG17 after the fix. Third build stopped before upload for this SQL fix.

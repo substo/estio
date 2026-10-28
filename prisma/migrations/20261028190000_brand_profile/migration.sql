@@ -1,5 +1,8 @@
 BEGIN;
 
+ALTER TABLE studio.studio_ai_attempts DROP CONSTRAINT studio_ai_attempt_subject;
+ALTER TABLE studio.studio_ai_attempts ADD CONSTRAINT studio_ai_attempt_subject CHECK ((((operation = 'transcribe_upload'::text) AND (upload_id IS NOT NULL) AND (chunk_index IS NOT NULL) AND (duration_seconds IS NOT NULL) AND (idea_review_id IS NULL) AND (model = 'whisper-1'::text)) OR ((operation = ANY (ARRAY['idea_review'::text, 'script_brief'::text, 'knowledge_extract'::text, 'brand_profile'::text])) AND (upload_id IS NULL) AND (chunk_index IS NULL) AND (duration_seconds IS NULL) AND (idea_review_id IS NOT NULL) AND (model = 'gpt-6-luna'::text))));
+
 ALTER TABLE studio.studio_idea_reviews DROP CONSTRAINT studio_idea_reviews_workflow_check;
 
 ALTER TABLE studio.studio_idea_reviews ADD CONSTRAINT studio_idea_reviews_workflow_check CHECK(workflow in ('idea_review','script_brief','knowledge_extract','brand_profile'));
