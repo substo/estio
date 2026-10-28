@@ -709,3 +709,19 @@ Live build/health/dependencies and empty due/expired/uncertain queue rechecked. 
   zero while its lease remained pending. Completion still needs verification.
 - First production build was deliberately stopped before upload/schema/traffic
   mutation to include that discovered companion fix. Retry remains authorized.
+- Full Mac no-provider diagnostic subsequently succeeded after lease expiry:
+  job `d9b5e1da-1195-4b40-92ad-bcc8d27f9a98`, companion `start --once`, claimed 1,
+  `job_succeeded`; clean once-mode shutdown. No CLI generation or provider commands.
+- Deeper parity read found live Schedules returning 500/SQLSTATE 42883: UUID
+  schedule IDs were bound as text in its active lookup. Fixed with typed UUID
+  parameters. Disposable PostgreSQL reproduced old failure and passed the shared
+  corrected query; runnable regression `scripts/test-studio-schedule-clone.ts`.
+  The second build was stopped before upload/traffic changes for this fix.
+- Synthetic UI render passed questions, editable profile and member read-only
+  controls. Synthetic existing-settings persistence/readback and SiteConfig mirror
+  passed in the disposable restore, rolled back. Brand workflow SQL also proved
+  missing key/budget denial before an attempt. All original schema suites pass PG17.
+- Browser limitations: preview snapshots timeout twice; Chrome fallback cannot
+  attach (CDP focus timeout/native window unavailable). Preview resize requested
+  390x844 but measured 1280px; mobile acceptance remains unverified. Library,
+  Content, Knowledge and Discovery returned signed 200; Schedules requires fix above.

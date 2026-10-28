@@ -1,3 +1,4 @@
+import { activeSchedulesQuery } from "./schedule-queries";
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
@@ -24,9 +25,7 @@ export async function listStudioSchedules(locationId: string, page: number) {
     from studio.studio_schedules where location_id=${access.locationId}
     order by created_at desc,id asc limit 21 offset ${page * 20}`);
   const visible = schedules.slice(0, 20);
-  const active = visible.length ? await studioDb.rows<{ schedule_id: string }>(Prisma.sql`
-    select schedule_id from studio.studio_schedule_recurring where location_id=${access.locationId}
-    and schedule_id in (${Prisma.join(visible.map(s => s.id))}) and enabled=true limit 20`) : [];
+  const active = visible.length ? await studioDb.rows<{ schedule_id: string }>(activeSchedulesQuery(access.locationId, visible.map(s => s.id))) : [];
   const activeIds = new Set(active.map(row => row.schedule_id));
   return { access, schedules: visible.map(s => ({ ...s, active: activeIds.has(s.id) })), hasMore: schedules.length > 20 };
 }

@@ -242,6 +242,7 @@ export async function updateAiSettings(
                 autoReprocessCampaignBlocks: autoReprocessCampaignCandidates,
             },
             brandVoice: formData.get("brandVoice") as string,
+            brandProfile: (existingPayload as any)?.brandProfile,
             outreachConfig: {
                 enabled: formData.get("outreachEnabled") === "on",
                 visionIdPrompt: formData.get("visionIdPrompt") as string,
