@@ -1,3 +1,4 @@
+import { recordPropertyImportUsage } from "@/lib/ai/import-usage";
 import { puppeteerService } from './puppeteer-service';
 import { Page } from 'puppeteer';
 import fs from 'fs';
@@ -6,7 +7,7 @@ import path from 'path';
 import { extractPropertyDataWithAI, AIPropertyData } from '@/app/(main)/admin/properties/import/ai-property-extraction';
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 
-export async function scrapeNotionProperty(url: string, aiModel?: string): Promise<AIPropertyData> {
+export async function scrapeNotionProperty(url: string, aiModel?: string, locationId?: string): Promise<AIPropertyData> {
     // Use existing Puppeteer service instance
     console.log("Initializing Puppeteer Service...");
     await puppeteerService.init();
@@ -249,7 +250,7 @@ export async function scrapeNotionProperty(url: string, aiModel?: string): Promi
         console.log("Calling Gemini Vision API...");
         const aiResult = await extractPropertyDataWithAI(
             mainPageContent, // Use PRESERVED content
-            undefined,
+            locationId,
             aiModel,
             result.images, // Use NEW images
             mainPageTitle, // Use PRESERVED title
@@ -365,7 +366,8 @@ export async function resolveGoogleMapsLocation(query: string): Promise<{ mapUrl
     }
 }
 
-export async function scrapeAddressFromMaps(mapUrl: string, apiKey: string, model: string = DEFAULT_MODEL): Promise<{ addressLine1?: string, city?: string, postalCode?: string, country?: string, shortLink?: string }> {
+export async function scrapeAddressFromMaps(mapUrl: string, apiKey: string, model: string = DEFAULT_MODEL, locationId?: string): Promise<{ addressLine1?: string, city?: string, postalCode?: string, country?: string, shortLink?: string }> {
+    if (!locationId) throw new Error('A Location is required for paid map extraction.');
     // 1. Convert URL to Browser-Friendly Format
     const targetUrl = convertMapUrl(mapUrl);
     console.log(`[MAP_SCRAPE] Starting scraping for URL: ${targetUrl} (Original: ${mapUrl})`);
@@ -476,6 +478,9 @@ export async function scrapeAddressFromMaps(mapUrl: string, apiKey: string, mode
         }
 
         const data = await response.json();
+        await recordPropertyImportUsage({ locationId, stage: 'map_extract', provider: 'google_gemini', model,
+            inputTokens: data.usageMetadata?.promptTokenCount,
+            outputTokens: data.usageMetadata ? (data.usageMetadata.candidatesTokenCount || 0) + (data.usageMetadata.thoughtsTokenCount || 0) : undefined });
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!text) return {};

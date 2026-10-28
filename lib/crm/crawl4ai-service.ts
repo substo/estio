@@ -1,3 +1,4 @@
+import { recordPropertyImportUsage } from "@/lib/ai/import-usage";
 import { execFile } from 'child_process';
 import util from 'util';
 import path from 'path';
@@ -51,8 +52,10 @@ export async function scrapePropertyWithCrawl4AI(
     apiKey: string,
     modelName: string = DEFAULT_MODEL,
     userHints?: string,
-    interactionSelector?: string | null
+    interactionSelector?: string | null,
+    locationId?: string
 ): Promise<AIPropertyData> {
+    if (!locationId) throw new Error('A Location is required for paid import extraction.');
     console.log('[Crawl4AI] Scraping ' + url + '...');
 
     // 1. Crawl
@@ -135,6 +138,9 @@ ${userHints}
     let text = "";
     try {
         const result = await model.generateContent(prompt);
+        const usage = result.response.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number } | undefined;
+        await recordPropertyImportUsage({ locationId, stage: 'crawl_extract', provider: 'google_gemini', model: modelName,
+            inputTokens: usage?.promptTokenCount, outputTokens: usage ? (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0) : undefined });
         console.log("[Crawl4AI] Gemini response received.");
         text = result.response.text();
         console.log(`[Crawl4AI] Response text length: ${text.length}`);

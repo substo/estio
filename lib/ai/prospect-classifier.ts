@@ -1,3 +1,4 @@
+import { securelyRecordAiUsage } from "./usage-metering";
 import { callLLMWithMetadata } from './llm';
 import { getModelForTask } from './model-router';
 import db from '@/lib/db';
@@ -299,6 +300,7 @@ export async function shouldRunProspectClassification(
  * Uses multi-signal analysis via Gemini Flash for cost efficiency.
  */
 export async function classifyProspect(input: ClassificationInput): Promise<ClassificationResult> {
+    if (!input.locationId) throw new Error('A Location is required for paid prospect classification.');
     const model = getModelForTask('prospect_classification');
 
     const signals: string[] = [];
@@ -345,6 +347,9 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
             locationId: input.locationId,
         });
 
+        await securelyRecordAiUsage({ locationId: input.locationId, userId: null, resourceType: 'prospect', featureArea: 'prospect_classification', action: 'classify',
+            provider: aiResult.provider, model: aiResult.model, inputTokens: aiResult.usage.promptTokens,
+            outputTokens: aiResult.usage.completionTokens + aiResult.usage.thoughtsTokens, fundingScope: aiResult.fundingScope, executionMode: 'background' });
         if (aiResult.text) {
             const parsed = JSON.parse(aiResult.text);
             const typedSellerType = normalizeProspectSellerType(parsed.sellerType);

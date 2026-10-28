@@ -1,3 +1,4 @@
+import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from '@/lib/ai/llm';
 import { getModelForTask } from '@/lib/ai/model-router';
 import type { RawListing } from './listing-scraper';
@@ -378,7 +379,13 @@ Rules:
                     systemPrompt,
                     JSON.stringify(payload),
                     { jsonMode: true, temperature: 0.1, maxOutputTokens: 220, locationId: options.locationId }
-                ),
+                ).then(async result => {
+                    // Record even if the caller's timeout already elapsed or business JSON is invalid.
+                    await securelyRecordAiUsage({ locationId: options.locationId!, userId: null, resourceType: 'listing', featureArea: 'listing_relevance', action: 'classify',
+                        provider: result.provider, model: result.model, inputTokens: result.usage.promptTokens,
+                        outputTokens: result.usage.completionTokens + result.usage.thoughtsTokens, fundingScope: result.fundingScope, executionMode: 'background' });
+                    return result;
+                }),
                 15_000,
             );
 

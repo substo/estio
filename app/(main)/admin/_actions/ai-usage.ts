@@ -110,6 +110,7 @@ export async function getPropertyAiUsageSummary(propertyId: string): Promise<AiU
 }
 
 export interface LocationAiUsageSummary {
+    unpricedCalls?: number;
     quickAssist?: { monthCost: number; todayCost: number; calls: number; unavailableCalls: number; subscriptionCalls: number };
     totalCalls: number;
     totalTokens: number;
@@ -195,6 +196,7 @@ async function getAiUsageSummary(
         }
     }
 
+    const unpricedCalls = await db.aiUsage.count({ where: { ...usageScope, recordedAt: { gte: startOfMonth, lt: endOfMonth }, metadata: { path: ['costStatus'], equals: 'unavailable' } } });
     const quickAssist = { monthCost: 0, todayCost: 0, calls: 0, unavailableCalls: 0, subscriptionCalls: 0 };
     for (const r of quickAssistRows) {
         const cost = r.estimatedCostUsd || 0;
@@ -242,6 +244,7 @@ async function getAiUsageSummary(
         totalTokens,
         totalEstimatedCostUsd: totalCost,
         quickAssist,
+        unpricedCalls,
         todayCalls: todayAgg._count.id,
         todayTokens: todayAgg._sum.totalTokens || 0,
         todayEstimatedCostUsd: todayAgg._sum.estimatedCostUsd || 0,

@@ -743,3 +743,24 @@ Live build/health/dependencies and empty due/expired/uncertain queue rechecked. 
   compatibility route. All 33 tenant/security tests pass. Live profile API reads
   200; missing/mismatched tenant commands 409; missing paid consent 400; no job,
   provider request or production profile fixture was created by these checks.
+- Adapter-fix owned deployment succeeded from `69507bd0`, build
+  `ejlUPJITDd3GESSj4GEWy`; migrate-only reported no pending migration, readiness,
+  soak and required services passed. Signed Substo onboarding renders eight
+  questions, YouTube status and key/budget message; paid confirmation disabled
+  without key/budget. No production profile or paid request submitted.
+- Usage coverage trace found existing import text/vision/map/crawler, smart replies,
+  prospect classification and listing relevance paths writing no shared AiUsage
+  record (some only wrote counters/AgentExecution). Added existing-ledger recording
+  before business parsing; preserved coordinator-metered skill aggregation to avoid
+  duplicates, and thread the canonical Location through import helper calls.
+  Missing usage stays explicitly unavailable; header warns rather than implying free.
+  No guessed historical backfill. These corrections await the final runtime deploy.
+- Metering validation: 16 funding/attribution/boundary/classifier tests plus seven
+  mocked provider/import policy tests pass; affected compiler 14 files zero
+  diagnostics. Initial standalone tests needed an inert localhost fixture datasource
+  for Prisma module initialization; no connection/provider was used. SDK optional
+  reasoning-token shape and existing importWarnings metadata typing corrected.
+- Header dates use UTC settlement/recording time. Studio cap accounting retains
+  its reservation-month ledger semantics; a hold spanning midnight/month-end is
+  not treated as spend by the header. Infrastructure/provider invoices were not
+  reconciled, and unrecorded historical charges are not reconstructed from guesses.

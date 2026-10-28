@@ -146,7 +146,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
             const apiKey = context.siteConfig?.googleAiApiKey;
 
             if (notionUrl.includes("notion.site")) {
-                notionData = await scrapeNotionProperty(notionUrl, aiModel);
+                notionData = await scrapeNotionProperty(notionUrl, aiModel, context.access.locationId);
             } else {
                 if (!apiKey) throw new Error("No AI API Key found for Crawl4AI scraping.");
 
@@ -182,7 +182,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
 
                 // Use Crawl4AI for Altia and all other generic sites
                 yield { type: 'status', step: 'SCRAPING', message: `Crawling site with Crawl4AI (Python)...` };
-                notionData = await scrapePropertyWithCrawl4AI(notionUrl, apiKey, aiModel, effectiveHints, interactionSelector);
+                notionData = await scrapePropertyWithCrawl4AI(notionUrl, apiKey, aiModel, effectiveHints, interactionSelector, context.access.locationId);
 
                 if (appliedRuleTexts.length > 0) {
                     notionData.appliedRules = appliedRuleTexts;
@@ -214,7 +214,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
 
                 if (apiKey) {
                     const { scrapeAddressFromMaps } = await import("@/lib/crm/notion-scraper");
-                    const mapAddress = await scrapeAddressFromMaps(notionData.mapUrl, apiKey, aiModel);
+                    const mapAddress = await scrapeAddressFromMaps(notionData.mapUrl, apiKey, aiModel, context.access.locationId);
 
                     if (mapAddress.addressLine1 || mapAddress.city) {
                         // Merge results

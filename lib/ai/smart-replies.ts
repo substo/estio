@@ -1,3 +1,4 @@
+import { securelyRecordAiUsage } from "./usage-metering";
 import db from "@/lib/db";
 import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conversations/timeline-events";
 import { DEFAULT_MODEL, calculateRunCost } from "@/lib/ai/pricing";
@@ -102,6 +103,10 @@ export async function generateSmartReplies(conversationId: string) {
             jsonMode: true,
             locationId: conversation.locationId,
         });
+        await securelyRecordAiUsage({ locationId: conversation.locationId, userId: null, resourceType: 'conversation', resourceId: conversationId,
+            featureArea: 'smart_replies', action: 'generate', provider: result.provider, model: result.model,
+            inputTokens: result.usage.promptTokens, outputTokens: result.usage.completionTokens + result.usage.thoughtsTokens,
+            fundingScope: result.fundingScope, executionMode: 'background' });
         console.log("[Smart Reply] AI response received.");
         const text = result.text.replace(/```json/g, '').replace(/```/g, '').trim();
         console.log(`[Smart Reply] Raw AI Output: ${text}`);

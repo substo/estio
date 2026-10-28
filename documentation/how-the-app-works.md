@@ -68,7 +68,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 
 ## Status (2026-10-28)
 
-**Studio merged and live.** Web, worker, cron and companion APIs use the CRM database's `studio` schema. Database failures block readiness. The old source is frozen for recovery, not a runtime dependency. Signed Estio acceptance and an online Mac reconnect remain outstanding. See `studio-merge-cutover.md` for evidence and `unified-database-recovery.md` for backup scope.
+**Studio merged and live.** Web, worker, cron and companion APIs use the CRM database's `studio` schema. Database failures block readiness. The old source is frozen for recovery, not a runtime dependency. Signed Estio acceptance remains outstanding. Existing Mac pairing reconnected and completed a no-provider diagnostic; the once-mode companion then shut down cleanly. See `studio-merge-cutover.md` for evidence and `unified-database-recovery.md` for backup scope.
 
 **Working on both apps:**
 - separate sign-in;
@@ -81,7 +81,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 
 **Next:**
 1. Finish signed Estio and Mac acceptance; retain the recovery mapping until the fallback window ends.
-2. **First Studio workflow: onboarding chat**, planned in `onboarding-chat-plan.md`. A guided AI chat with web browsing, built on the existing assistant pieces. It asks about the person and the Location, connects their socials, and saves a Location persona that Studio uses for content.
+2. **First Studio workflow: guided onboarding**, implemented from `onboarding-chat-plan.md`. Fixed questions and bounded public URL look-up are free; drafting uses the existing Studio OpenAI key, cap and durable paid-job ledger after confirmation. Admins review/save a Location profile in existing AI settings; it also renders the shared CRM brandVoice. Members read the saved profile. Existing YouTube connection and social-link paths are reused. Signed Substo no-spend smoke passed; signed Estio, mobile and real paid-provider acceptance remain pending. Free-form chat, web search and additional OAuth connectors remain future work.
 3. **Scheduled runs**, once the user has connected YouTube at `/account/connections`. No credentials were imported from the old local app.
 
 **Later, decided:**

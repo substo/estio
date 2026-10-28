@@ -1,5 +1,7 @@
 "use server";
 
+import { recordPropertyImportUsage } from "@/lib/ai/import-usage";
+
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from "@/lib/db";
@@ -17,6 +19,7 @@ import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 // --- INTERFACES ---
 
 export interface AIPropertyData {
+    importWarnings?: string[];
     // Details
     title: string;
     description: string;
@@ -509,6 +512,9 @@ async function callAiJSON(locationId: string, apiKey: string, model: string, pro
                 temperature: 0.1,
                 locationId,
             });
+            await recordPropertyImportUsage({ locationId, stage, provider: result.provider, model: result.model,
+                inputTokens: result.usage.promptTokens, outputTokens: result.usage.completionTokens + result.usage.thoughtsTokens,
+                fundingScope: result.fundingScope, executionMode: result.executionMode });
             console.log(`[AI][${stage}] <<< RECEIVED RESPONSE:`);
             console.log(result.text);
             console.log(`[AI][${stage}] ----------------------`);
@@ -544,6 +550,9 @@ async function callAiJSON(locationId: string, apiKey: string, model: string, pro
         }
 
         const data = await response.json();
+        await recordPropertyImportUsage({ locationId, stage, provider: 'google_gemini', model: visionModel,
+            inputTokens: data.usageMetadata?.promptTokenCount,
+            outputTokens: data.usageMetadata ? (data.usageMetadata.candidatesTokenCount || 0) + (data.usageMetadata.thoughtsTokenCount || 0) : undefined });
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!text) {

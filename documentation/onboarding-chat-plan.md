@@ -1,6 +1,6 @@
 # Brand onboarding chat: plan
 
-Status: plan only, written 2026-10-26. Nothing below is built yet. Read `how-the-app-works.md` first. Rule 1 applies: build once, share it.
+Status: guided v1 implemented 2026-10-28. Shared Location profile, fixed questions, public-page look-up, existing YouTube connections, durable paid draft/review, save and resume are built. Signed Substo no-spend smoke and disposable persistence/ledger checks passed; signed Estio, real paid-provider and mobile acceptance remain pending. See `studio-implementation-progress.md` for deployed-build evidence. Phase 2 remains unbuilt. Read `how-the-app-works.md` first. Rule 1 applies: build once, share it.
 
 ## 1. Goal
 

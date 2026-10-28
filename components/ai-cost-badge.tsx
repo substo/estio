@@ -171,7 +171,7 @@ export function AICostBadge() {
                         {formatCost(combinedThisMonthCost)}
                     </span>
                 </div>
-                {!!unifiedUsage.quickAssist?.unavailableCalls && <span className="text-[10px] text-amber-700" title="Some Live Assist costs are unavailable and excluded from totals">+ unpriced</span>}
+                {!!(unifiedUsage.unpricedCalls || unifiedUsage.quickAssist?.unavailableCalls) && <span className="text-[10px] text-amber-700" title="Some API costs are unavailable and excluded from totals">+ unpriced</span>}
             </button>
 
             {/* Detailed Usage Modal */}
