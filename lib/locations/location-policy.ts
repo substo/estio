@@ -5,7 +5,6 @@
  */
 
 export type LocationRole = "ADMIN" | "MEMBER";
-export type StudioMemberRole = "owner" | "admin" | "member";
 
 export const LOCATION_NAME_MAX_LENGTH = 100;
 
@@ -51,20 +50,6 @@ export function primaryVerifiedEmail(user: { primaryEmailAddressId: string | nul
   const primary = user.emailAddresses.find((entry) => entry.id === user.primaryEmailAddressId);
   if (primary?.verification?.status === "verified") return primary.emailAddress.trim().toLowerCase();
   return verifiedEmails(user)[0] ?? null;
-}
-
-/**
- * Studio role mirrored from the location role. An existing Studio owner stays
- * owner while they remain a location admin; Studio has no separate team.
- */
-export function studioRoleForLocationRole(role: LocationRole, current: StudioMemberRole | null): StudioMemberRole {
-  if (role === "ADMIN") return current === "owner" ? "owner" : "admin";
-  return "member";
-}
-
-/** Location role for a member of a pre-Location Substo Studio workspace being adopted. */
-export function locationRoleForLegacyStudioRole(role: StudioMemberRole): LocationRole {
-  return role === "member" ? "MEMBER" : "ADMIN";
 }
 
 export type TeamChangeCheck = { ok: true } | { ok: false; error: string };

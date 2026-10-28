@@ -37,7 +37,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const shell = await getAppShellData({
     app: realm,
     resolution,
-    workspaceId: null,
+    studioLocationId: null,
     impersonation: impersonation ? {
       targetName: impersonation.targetName,
       targetEmail: impersonation.targetEmail,

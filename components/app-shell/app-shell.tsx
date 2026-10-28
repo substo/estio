@@ -22,11 +22,11 @@ import type { AppShellData } from "./types"
  * switching product never changes the header.
  */
 export function AppShell({ product, children, ...shell }: AppShellData & { product: ProductKey; children: ReactNode }) {
-  const { app, activeLocationId, workspaceId } = shell
+  const { app, activeLocationId, studioLocationId } = shell
   const [collapsed, setCollapsed] = useSidebarCollapsed()
   const layoutPolicy = useResolvedAdminLayoutPolicy()
   const { appSurface } = layoutPolicy
-  const productConfig = productShellConfig(app, product, { locationId: activeLocationId, workspaceId })
+  const productConfig = productShellConfig(app, product, { locationId: activeLocationId, studioLocationId })
 
   return (
     <CrmRealmProvider value={app}>

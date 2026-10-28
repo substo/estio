@@ -1,25 +1,20 @@
-import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type UserRole } from "@prisma/client";
 import { realmClerkIdWhere, type AuthRealm } from "../auth/auth-realm";
 import { ensureRealmUser, type RealmUserStore } from "../auth/realm-user-link";
 import {
-  locationRoleForLegacyStudioRole,
   checkTeamChange,
   defaultLocationName,
   normalizeLocationName,
   normalizeInviteEmail,
   primaryVerifiedEmail,
-  studioRoleForLocationRole,
   verifiedEmails,
   type LocationRole,
-  type StudioMemberRole,
 } from "./location-policy";
 
 /**
- * Locations (Prisma `Location`) on Substo: sign-in preparation, Studio workspace
- * attachment and team changes. The location team is the only source of truth;
- * Studio membership rows are a mirror kept in step so that Studio's SQL
- * checks keep enforcing access. Dependencies are injected for tests.
+ * Locations (Prisma `Location`) on Substo: sign-in preparation and team changes.
+ * The location team is the only source of truth for CRM and Studio access: Studio
+ * reads it from the same database (`UserLocationRole`). Dependencies are injected for tests.
  */
 
 const REALM: AuthRealm = "substo";
@@ -32,20 +27,6 @@ export type ClerkIdentity = {
   emailAddresses: Array<{ id: string; emailAddress: string; verification?: { status?: string | null } | null }>;
 };
 
-/** Substo Studio database operations used by locations. */
-export interface StudioLocationPort {
-  /** Pre-location Substo workspaces this Clerk user is a member of. */
-  listMemberWorkspaces(clerkUserId: string): Promise<Array<{ id: string; name: string; role: StudioMemberRole }>>;
-  listWorkspaceMembers(workspaceId: string): Promise<Array<{ clerkUserId: string; role: StudioMemberRole }>>;
-  workspaceExists(workspaceId: string): Promise<boolean>;
-  /** Idempotent: creates the workspace with the creator as owner. */
-  createWorkspace(workspaceId: string, name: string, creatorClerkUserId: string): Promise<void>;
-  renameWorkspace(workspaceId: string, name: string): Promise<void>;
-  getMembership(workspaceId: string, clerkUserId: string): Promise<StudioMemberRole | null>;
-  upsertMembership(workspaceId: string, clerkUserId: string, role: StudioMemberRole): Promise<void>;
-  deleteMembership(workspaceId: string, clerkUserId: string): Promise<void>;
-}
-
 /** Substo's Clerk application (never Estio's). */
 export interface SubstoClerkPort {
   getUser(clerkUserId: string): Promise<ClerkIdentity | null>;
@@ -54,11 +35,11 @@ export interface SubstoClerkPort {
   revokeInvitation(invitationId: string): Promise<void>;
 }
 
-export type LocationDeps = { db: PrismaClient; studio: StudioLocationPort; clerk: SubstoClerkPort };
+export type LocationDeps = { db: PrismaClient; clerk: SubstoClerkPort };
 
 type Tx = Prisma.TransactionClient;
 
-export type LocationMembership = { id: string; name: string; role: LocationRole; studioWorkspaceId: string | null };
+export type LocationMembership = { id: string; name: string; role: LocationRole };
 
 function userStore(db: PrismaClient | Tx): RealmUserStore {
   return {
@@ -107,14 +88,14 @@ export async function listUserLocations(db: PrismaClient, userId: string): Promi
   const user = await db.user.findFirst({
     where: { id: userId, authRealm: REALM },
     select: {
-      locations: { where: { authRealm: REALM }, select: { id: true, name: true, studioWorkspaceId: true } },
+      locations: { where: { authRealm: REALM }, select: { id: true, name: true } },
       locationRoles: { where: { location: { authRealm: REALM } }, select: { locationId: true, role: true } },
     },
   });
   if (!user) return [];
   return user.locations.flatMap((location) => {
     const roles = user.locationRoles.filter((role) => role.locationId === location.id);
-    return roles.length === 1 ? [{ id: location.id, name: location.name || "Untitled brand", role: roles[0].role, studioWorkspaceId: location.studioWorkspaceId }] : [];
+    return roles.length === 1 ? [{ id: location.id, name: location.name || "Untitled brand", role: roles[0].role }] : [];
   }).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
@@ -141,40 +122,6 @@ export async function claimPendingInvitations(db: PrismaClient, userId: string, 
 }
 
 /**
- * Turn pre-Location Substo Studio workspaces into locations. The first member to
- * sign in adopts a workspace: one location is created for it and all its current
- * Studio members are imported once. Afterwards the location team alone decides.
- */
-export async function adoptLegacyWorkspaces(deps: LocationDeps, clerkUserId: string): Promise<number> {
-  const workspaces = await deps.studio.listMemberWorkspaces(clerkUserId);
-  let adopted = 0;
-  for (const workspace of workspaces) {
-    if (await deps.db.location.findUnique({ where: { studioWorkspaceId: workspace.id }, select: { id: true } })) continue;
-    const members = await deps.studio.listWorkspaceMembers(workspace.id);
-    const resolved: Array<{ userId: string; role: LocationRole }> = [];
-    for (const member of members) {
-      const identity = await deps.clerk.getUser(member.clerkUserId);
-      const user = identity ? await ensureSubstoUser(deps.db, identity) : null;
-      if (user) resolved.push({ userId: user.id, role: locationRoleForLegacyStudioRole(member.role) });
-    }
-    if (!resolved.some((member) => member.role === "ADMIN")) continue;
-    try {
-      await deps.db.$transaction(async (tx) => {
-        const location = await tx.location.create({
-          data: { authRealm: REALM, name: workspace.name, studioWorkspaceId: workspace.id },
-          select: { id: true },
-        });
-        for (const member of resolved) await joinLocation(tx, { userId: member.userId, locationId: location.id, role: member.role });
-      });
-      adopted += 1;
-    } catch (error) {
-      if (!isUniqueViolation(error)) throw error; // adopted concurrently by another member
-    }
-  }
-  return adopted;
-}
-
-/**
  * Create the user's location at their first sign-in. It happens at most once per
  * user, and not when an invitation is waiting for or was accepted by them.
  */
@@ -197,38 +144,14 @@ export async function createAutoLocationIfNeeded(db: PrismaClient, user: { id: s
   }
 }
 
-/** Everything that happens when a user arrives on Substo: user, invitations, adoption, auto location. */
+/** Everything that happens when a user arrives on Substo: user, invitations, auto location. */
 export async function prepareSubstoSignIn(deps: LocationDeps, identity: ClerkIdentity) {
   const user = await ensureSubstoUser(deps.db, identity);
   if (!user) return null;
   const emails = verifiedEmails(identity);
   await claimPendingInvitations(deps.db, user.id, emails);
-  await adoptLegacyWorkspaces(deps, identity.id);
   await createAutoLocationIfNeeded(deps.db, user, emails);
   return { user, locations: await listUserLocations(deps.db, user.id) };
-}
-
-/** Attach (once) and return the Studio workspace of a Substo location. */
-export async function ensureLocationWorkspace(deps: LocationDeps, location: { id: string; name: string | null }, actorClerkUserId: string): Promise<string> {
-  const current = await deps.db.location.findFirst({ where: { id: location.id, authRealm: REALM }, select: { studioWorkspaceId: true } });
-  if (!current) throw new Error("Brand not found.");
-  let workspaceId = current.studioWorkspaceId;
-  if (!workspaceId) {
-    const candidate = randomUUID();
-    const reserved = await deps.db.location.updateMany({ where: { id: location.id, studioWorkspaceId: null }, data: { studioWorkspaceId: candidate } });
-    workspaceId = reserved.count === 1
-      ? candidate
-      : (await deps.db.location.findUniqueOrThrow({ where: { id: location.id }, select: { studioWorkspaceId: true } })).studioWorkspaceId;
-    if (!workspaceId) throw new Error("Studio workspace could not be reserved.");
-  }
-  if (!(await deps.studio.workspaceExists(workspaceId))) {
-    try {
-      await deps.studio.createWorkspace(workspaceId, location.name?.trim() || "Studio", actorClerkUserId);
-    } catch (error) {
-      if (!(await deps.studio.workspaceExists(workspaceId))) throw error; // created concurrently otherwise
-    }
-  }
-  return workspaceId;
 }
 
 /** Location role of a Substo user in one location, or null when they are not a member. */
@@ -241,27 +164,6 @@ export async function getLocationRole(db: PrismaClient, clerkUserId: string, loc
     },
   });
   return user?.locations.length === 1 && user.locationRoles.length === 1 ? user.locationRoles[0].role : null;
-}
-
-/** Make the Studio membership mirror the location role (or remove it). Returns the Studio role. */
-export async function syncStudioMembership(studio: StudioLocationPort, workspaceId: string, clerkUserId: string, role: LocationRole | null): Promise<StudioMemberRole | null> {
-  const current = await studio.getMembership(workspaceId, clerkUserId);
-  if (!role) {
-    if (current) await studio.deleteMembership(workspaceId, clerkUserId);
-    return null;
-  }
-  const desired = studioRoleForLocationRole(role, current);
-  if (desired !== current) await studio.upsertMembership(workspaceId, clerkUserId, desired);
-  return desired;
-}
-
-/** Resolve Studio access to a Substo location workspace from the location team. */
-export async function resolveLocationWorkspaceAccess(deps: LocationDeps, workspaceId: string, clerkUserId: string) {
-  const location = await deps.db.location.findFirst({ where: { studioWorkspaceId: workspaceId, authRealm: REALM }, select: { id: true, name: true } });
-  if (!location) return null;
-  const locationRole = await getLocationRole(deps.db, clerkUserId, location.id);
-  const studioRole = await syncStudioMembership(deps.studio, workspaceId, clerkUserId, locationRole);
-  return locationRole && studioRole ? { location, locationRole, studioRole } : null;
 }
 
 export type TeamResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -333,16 +235,11 @@ export async function revokeLocationInvitation(deps: LocationDeps, actor: Locati
   return { ok: true, message: "Invitation revoked." };
 }
 
-/** Studio is updated first, so a failure leaves the location team (the source of truth) unchanged. */
 export async function changeMemberRole(deps: LocationDeps, actor: LocationActor, targetUserId: string, role: LocationRole): Promise<TeamResult> {
   const target = await memberOf(deps.db, actor.locationId, targetUserId);
   if (!target) return { ok: false, error: "Team member not found." };
   const check = checkTeamChange({ actorRole: actor.role, targetCurrentRole: target.role, change: { kind: "role", role }, adminCount: await adminCount(deps.db, actor.locationId) });
   if (!check.ok) return check;
-  const workspaceId = (await deps.db.location.findUnique({ where: { id: actor.locationId }, select: { studioWorkspaceId: true } }))?.studioWorkspaceId;
-  if (workspaceId && target.clerkId && await deps.studio.workspaceExists(workspaceId)) {
-    await syncStudioMembership(deps.studio, workspaceId, target.clerkId, role);
-  }
   await deps.db.userLocationRole.update({ where: { userId_locationId: { userId: target.id, locationId: actor.locationId } }, data: { role: role as UserRole } });
   return { ok: true, message: "Role updated." };
 }
@@ -352,8 +249,6 @@ export async function removeMember(deps: LocationDeps, actor: LocationActor, tar
   if (!target) return { ok: false, error: "Team member not found." };
   const check = checkTeamChange({ actorRole: target.id === actor.userId ? "ADMIN" : actor.role, targetCurrentRole: target.role, change: { kind: "remove" }, adminCount: await adminCount(deps.db, actor.locationId) });
   if (!check.ok) return check;
-  const workspaceId = (await deps.db.location.findUnique({ where: { id: actor.locationId }, select: { studioWorkspaceId: true } }))?.studioWorkspaceId;
-  if (workspaceId && target.clerkId) await syncStudioMembership(deps.studio, workspaceId, target.clerkId, null);
   await deps.db.$transaction(async (tx) => {
     await tx.userLocationRole.deleteMany({ where: { userId: target.id, locationId: actor.locationId } });
     await tx.location.update({ where: { id: actor.locationId }, data: { users: { disconnect: { id: target.id } } } });
@@ -365,11 +260,7 @@ export async function renameLocation(deps: LocationDeps, actor: LocationActor, r
   if (actor.role !== "ADMIN") return { ok: false, error: "Only brand admins can rename the brand." };
   const name = normalizeLocationName(rawName);
   if (!name) return { ok: false, error: "Enter a name up to 100 characters." };
-  const location = await deps.db.location.update({ where: { id: actor.locationId }, data: { name }, select: { studioWorkspaceId: true } });
-  const workspaceId = location.studioWorkspaceId;
-  // The Studio copy of the name is cosmetic; the rename never waits for or fails on Studio.
-  if (workspaceId) await deps.studio.workspaceExists(workspaceId)
-    .then((exists) => exists ? deps.studio.renameWorkspace(workspaceId, name) : undefined).catch(() => undefined);
+  await deps.db.location.update({ where: { id: actor.locationId }, data: { name }, select: { id: true } });
   return { ok: true, message: "Brand renamed." };
 }
 

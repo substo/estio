@@ -26,8 +26,8 @@ export type ProductShellConfig = {
 }
 
 /** Sidebar menu for Studio, in the same groups and style as the CRM menu. */
-export function studioNavGroups(app: ShellApp, workspaceId: string | null, locationId: string | null = null): AdminNavGroup[] {
-  const base = workspaceId ? `/studio` : null
+export function studioNavGroups(app: ShellApp, studioLocationId: string | null, locationId: string | null = null): AdminNavGroup[] {
+  const base = studioLocationId ? `/studio` : null
   const groups: AdminNavGroup[] = []
   if (base) {
     groups.push({
@@ -67,7 +67,7 @@ export function studioNavGroups(app: ShellApp, workspaceId: string | null, locat
 export function productShellConfig(
   app: ShellApp,
   product: ProductKey,
-  { locationId, workspaceId }: { locationId: string | null; workspaceId: string | null }
+  { locationId, studioLocationId }: { locationId: string | null; studioLocationId: string | null }
 ): ProductShellConfig {
   if (product === "crm") {
     return {
@@ -82,8 +82,8 @@ export function productShellConfig(
     }
   }
   return {
-    homeHref: workspaceId ? "/studio" : "/studio/select?choose=1",
-    navGroups: studioNavGroups(app, workspaceId, locationId),
+    homeHref: studioLocationId ? "/studio" : "/studio/select?choose=1",
+    navGroups: studioNavGroups(app, studioLocationId, locationId),
     targets: {
       crm: locationId ? { formAction: "/api/studio/tenant-switch", fields: { product: "crm", locationId } } : { href: "/admin", document: true },
       studio: { href: "/studio" },

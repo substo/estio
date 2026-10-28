@@ -22,21 +22,21 @@ async function main() {
   await writeFile(path.join(root, "fixture-escrow.json"), JSON.stringify(keys), { mode: 0o600 });
   const ai = encryptStudioSecret("sk-synthetic-recovery-only", aiCredentialContext(w, "openai"), keys);
   const previous = keys.STUDIO_SECRETS_PREVIOUS_KEYS.split(":")[1];
-  const grants = ["estio", "substo"].map(brand => ({ brand, cipher: encryptStudioSecret(`synthetic-${brand}-refresh`, youtubeProfileContext(brand, user, "refresh"), { STUDIO_SECRETS_KEY_ID: "previous", STUDIO_SECRETS_KEY: previous }) }));
+  const grants = ["estio", "substo"].map(app => ({ app, cipher: encryptStudioSecret(`synthetic-${app}-refresh`, youtubeProfileContext(app, user, "refresh"), { STUDIO_SECRETS_KEY_ID: "previous", STUDIO_SECRETS_KEY: previous }) }));
   const media = Buffer.from("synthetic private recovery media\n"); const sha256 = digest(media);
   await writeFile(path.join(root, "fixture-r2-source", sha256), media, { mode: 0o600 });
   await cp(path.join(root, "fixture-r2-source", sha256), path.join(bundle, "media", sha256));
   const sql = `
-select public.studio_create_substo_workspace('${w}','Recovery fixture','${user}');
-insert into public.studio_records(workspace_id,id,kind,title,payload) values('${w}','${r}','content','Private recovery fixture','{"stage":"idea","script":"Preserve exact human text"}');
+select public.studio_create_substo_location('${w}','Recovery fixture','${user}');
+insert into public.studio_records(location_id,id,kind,title,payload) values('${w}','${r}','content','Private recovery fixture','{"stage":"idea","script":"Preserve exact human text"}');
 select public.studio_set_ai_credential('${w}','substo','${user}','openai',${literal(ai.ciphertext)},${literal(ai.iv)},${literal(ai.authTag)},'current','test');
 select public.studio_set_ai_budget('${w}','substo','${user}',1000000);
-${grants.map(g => `insert into public.platform_google_youtube_connections(brand,clerk_user_id,client_id,refresh_cipher,granted_scopes) values('${g.brand}','${user}','fixture-client',${literal(JSON.stringify(g.cipher))}::jsonb,array['https://www.googleapis.com/auth/youtube.readonly']);`).join("\n")}
+${grants.map(g => `insert into public.platform_google_youtube_connections(app,clerk_user_id,client_id,refresh_cipher,granted_scopes) values('${g.app}','${user}','fixture-client',${literal(JSON.stringify(g.cipher))}::jsonb,array['https://www.googleapis.com/auth/youtube.readonly']);`).join("\n")}
 select public.studio_create_upload('${w}','substo','${user}','${up}','${r}','fixture.ogg','audio/ogg',${media.length},'${bucket}');
 select public.studio_complete_upload('${w}','substo','${user}','${up}',${media.length});
 do $$ declare j public.studio_jobs; a jsonb; begin
  perform public.studio_claim_jobs('recovery-fixture-worker',1,120);
- select * into j from public.studio_jobs where workspace_id='${w}' and kind='studio.transcribe_upload';
+ select * into j from public.studio_jobs where location_id='${w}' and kind='studio.transcribe_upload';
  a:=public.studio_begin_transcription_attempt('${w}','${up}',j.id,'recovery-fixture-worker',j.lease_token,0,60);
  perform public.studio_close_transcription_attempt('${w}','${up}',j.id,'recovery-fixture-worker',j.lease_token,(a->>'attempt_id')::uuid,false);
  perform public.studio_fail_job(j.id,'recovery-fixture-worker',j.lease_token,'transcription_outcome_uncertain','Synthetic uncertain provider outcome',false,null);

@@ -17,5 +17,5 @@ export type AppShellData = {
   /** Location-wide AI spend is admin-only; known up front so its header slot never pops in or out. */
   canViewAiUsage: boolean
   /** Private Studio storage key for the active tenant (never a selection input). */
-  workspaceId: string | null
+  studioLocationId: string | null
 }

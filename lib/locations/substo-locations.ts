@@ -7,31 +7,7 @@ import { resolveActiveLocation, validateActiveLocationSelection } from "@/lib/au
 import { getClerkBrandKeys } from "@/lib/auth/clerk-runtime";
 import { getHostOrigin } from "@/lib/auth/host-brand";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
-import {
-  createSubstoStudioWorkspace,
-  deleteSubstoMembership,
-  getSubstoMembershipRole,
-  listSubstoStudioWorkspaces,
-  listSubstoWorkspaceMembers,
-  renameSubstoStudioWorkspace,
-  substoStudioWorkspaceExists,
-  upsertSubstoMembership,
-} from "@/lib/studio/supabase-service";
-import { unlessStudioUnavailable } from "@/lib/studio/rest";
-import { prepareSubstoSignIn, type LocationActor, type LocationDeps, type ClerkIdentity, type StudioLocationPort, type SubstoClerkPort } from "./location-service";
-
-const studio: StudioLocationPort = {
-  // Adopting pre-Location workspaces is retried at every entry, so a restricted Studio
-  // database only postpones it and never blocks CRM sign-in.
-  listMemberWorkspaces: async (clerkUserId) => ((await unlessStudioUnavailable(() => listSubstoStudioWorkspaces(clerkUserId))) ?? []).map((workspace) => ({ id: workspace.id, name: workspace.name, role: workspace.role })),
-  listWorkspaceMembers: listSubstoWorkspaceMembers,
-  workspaceExists: substoStudioWorkspaceExists,
-  createWorkspace: async (workspaceId, name, creator) => { await createSubstoStudioWorkspace(name.slice(0, 100), creator, workspaceId); },
-  renameWorkspace: renameSubstoStudioWorkspace,
-  getMembership: getSubstoMembershipRole,
-  upsertMembership: upsertSubstoMembership,
-  deleteMembership: deleteSubstoMembership,
-};
+import { prepareSubstoSignIn, type LocationActor, type LocationDeps, type ClerkIdentity, type SubstoClerkPort } from "./location-service";
 
 export function toClerkIdentity(user: User): ClerkIdentity {
   return {
@@ -71,12 +47,12 @@ function substoClerk(): SubstoClerkPort {
 }
 
 export function substoLocationDeps(): LocationDeps {
-  return { db, studio, clerk: substoClerk() };
+  return { db, clerk: substoClerk() };
 }
 
 /**
  * Run at every Substo entry: links the Business user, claims invitations,
- * adopts pre-Location Studio workspaces, and creates the first location if needed.
+ * and creates the first location if needed.
  */
 export async function prepareCurrentSubstoUser() {
   if (await getRequestAuthRealm() !== "substo") return null;
@@ -105,7 +81,7 @@ export async function prepareCurrentSubstoUserOnEntry() {
 }
 
 /** The signed-in user acting on their active Substo location. */
-export async function getSubstoLocationActor(locationId?: string): Promise<(LocationActor & { locationName: string; clerkUserId: string; studioWorkspaceId: string | null }) | null> {
+export async function getSubstoLocationActor(locationId?: string): Promise<(LocationActor & { locationName: string; clerkUserId: string }) | null> {
   if (await getRequestAuthRealm() !== "substo") return null;
   const resolution = locationId === undefined ? await resolveActiveLocation() : await validateActiveLocationSelection(locationId);
   if (resolution.status !== "authorized" || !resolution.user || !resolution.location || !resolution.role) return null;
@@ -115,7 +91,6 @@ export async function getSubstoLocationActor(locationId?: string): Promise<(Loca
     locationId: resolution.location.id,
     role: resolution.role,
     locationName: resolution.location.name || "Untitled brand",
-    studioWorkspaceId: resolution.location.studioWorkspaceId,
   };
 }
 

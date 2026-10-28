@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   }
   const form = await request.formData();
   const product = form.get("product");
-  const id = form.get(product === "crm" ? "workspaceId" : "brandId");
+  const id = form.get(product === "crm" ? "locationId" : "brandId");
   if (!["crm", "studio"].includes(String(product)) || typeof id !== "string" || !id || id.length > 255) return new NextResponse("Invalid product selection", { status: 400 });
   const { userId } = await auth();
   if (!userId) {

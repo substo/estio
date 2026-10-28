@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  locationRoleForLegacyStudioRole,
   checkTeamChange,
   defaultLocationName,
   normalizeLocationName,
   normalizeInviteEmail,
   primaryVerifiedEmail,
-  studioRoleForLocationRole,
   verifiedEmails,
 } from "./location-policy";
 
@@ -38,15 +36,6 @@ test("only verified emails count, primary first", () => {
   assert.deepEqual(verifiedEmails(user), ["old@example.com"]);
   assert.equal(primaryVerifiedEmail(user), "old@example.com");
   assert.equal(primaryVerifiedEmail({ primaryEmailAddressId: "a", emailAddresses: [{ id: "a", emailAddress: "x@example.com", verification: null }] }), null);
-});
-
-test("Studio roles mirror brand roles", () => {
-  assert.equal(studioRoleForLocationRole("ADMIN", null), "admin");
-  assert.equal(studioRoleForLocationRole("ADMIN", "owner"), "owner");
-  assert.equal(studioRoleForLocationRole("MEMBER", "owner"), "member");
-  assert.equal(locationRoleForLegacyStudioRole("owner"), "ADMIN");
-  assert.equal(locationRoleForLegacyStudioRole("admin"), "ADMIN");
-  assert.equal(locationRoleForLegacyStudioRole("member"), "MEMBER");
 });
 
 test("team changes need an admin and never remove the last admin", () => {
