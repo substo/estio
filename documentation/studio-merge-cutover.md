@@ -168,3 +168,39 @@ retain their original workspace schema names.
 - Acceptance limitations: Estio redirects to sign-in in the available browser profile. Substo connected-computer page returns 200, retains pairing/setup, but Martin Mac is **Offline**, last seen October 26; no live reconnect/CLI acceptance claimed. No paid check was run.
 - **Stage 3 compatibility decision:** retain nullable unique `Location.studioWorkspaceId` during the fallback window. No runtime consumer remains; `scripts/studio-merge/rehearse-copy.py` still reads it for old-source mapping. Verified backups/copy evidence capture that mapping. Dropping it would reduce recovery compatibility without improving live behavior. Removal is deferred to its own migration after the fallback window and recovery-tool adaptation; it is explicitly **not removed** in this cutover. Runtime REST/mirror/provider-degraded mode removal is live.
 - Private retry log: `/Users/martingreen/Backups/estio-2026-10-28/cutover-preflight/retry-deploy.log`; focused tests `/tmp/studio-retry-tests.log`. Existing frozen/copy/server evidence paths above remain authoritative.
+
+## Bounded postmerge audit (2026-10-28, 18:01–18:10 UTC)
+
+- Recovery checkout and both remote release heads matched `06c914b8`; clean before
+  edits. Public build remains `_BvLHCZSx3pI5UYHm5b1o`, health OK. No active deploy
+  found; four required PM2 apps online with zero restarts. Read-only server
+  dependency readiness passed every check; due/expired/uncertain jobs all zero.
+- Reviewed request access and SQL authority view: active Location + app realm +
+  canonical UserLocationRole remain the authority; runtime/worker/cron paths
+  inspected have no old REST credential dependency. Disposable PostgreSQL 17
+  schema/SQL/concurrency suites and 4 database-adapter tests passed. Initial run
+  used default PostgreSQL 14 and rejected PostgreSQL 17's MAINTAIN privilege;
+  rerunning with the already installed PG17 tools passed without changing SQL.
+- Recovery omission corrected: Location archives now explicitly declare Studio
+  excluded. Added read-only full-database backup helper, archive schema/decode/
+  checksum checks and operator recovery documentation. No recurring schedule or
+  production dump run; no restore drill claimed. Helper failure/overwrite tests
+  and 22 focused policy/access/gate/backoff/readiness tests passed. No full app
+  build: edits concern operator tooling, archive metadata and docs only. No
+  deployment/restart needed for this operator-only correction.
+- T3 browser: Estio still redirects to sign-in. Signed Substo connected-computer
+  page loaded; Martin Mac remains Offline, last seen Oct 26 21:56. Snapshot timed
+  out; read-only page evaluation confirmed status. No pairing reset, CLI/provider
+  call, paid check, invite or send performed. User-assisted acceptance: sign in
+  to Estio and verify its Studio Location isolation/core pages; start the existing
+  paired companion on Martin Mac, then verify reconnect and no-cost diagnostic.
+- Existing frozen source, compatibility mapping, dumps and copy evidence unchanged.
+
+Next Studio slices, in order: (1) close those acceptance checks and perform a
+private disposable restore drill using the unified recovery procedure; agree backup
+cadence/retention, (2) implement onboarding plan's shared hardened public-page fetch
+helper before chat/UI work, (3) Location profile schema/service with admin and
+cross-realm tests, then the planned guided onboarding, (4) page-by-page parity
+check of Library/Content/Knowledge/Discovery/Schedules including empty/error and
+member states, (5) shared usage/header accuracy across CRM + Studio, using existing
+ledgers and SQL aggregation. These product slices are deferred, not cutover blockers.

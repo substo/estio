@@ -212,6 +212,7 @@ export function remapEmbeddedIds(value: unknown, allIds: Map<string, string>): u
 
 export function archiveExclusions(): string[] {
   return [
+    "Studio schema (content, knowledge, jobs, devices, platform connections and usage); use a full unified database backup for recovery",
     "Location identity and integration credentials",
     "users, memberships, roles and authentication identities",
     "site configuration, domains and secrets",

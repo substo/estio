@@ -34,13 +34,13 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 6. **One shell, one header** (`components/app-shell/`). From left to right: the Location name, or a selector if there are several; Live Assist (Estio only); the bell; usage; the profile; the theme. The app logo is in the sidebar. Team and General live under Settings.
 7. **Substo CRM is default-deny.** Property-only modules (listings, imports, prospecting, viewings, print designer, match campaigns) are blocked on the server. Unfinished modules show as *Setup pending*.
 8. **No GoHighLevel** on either app. The app is clean and self-hosted.
-9. **Everything live while developing.** Both apps are public for testing, and unfinished parts are allowed. Every committed change gets deployed, so the live app shows what works. There are no real users yet, so no backups for now.
+9. **Everything live while developing.** Both apps are public for testing, and unfinished parts are allowed. Every committed change gets deployed, so the live app shows what works. Retain the verified cutover backups and frozen source; use the unified database recovery procedure before risky changes.
 10. **All paid usage counts.** Every paid API call, AI or not, from CRM or Studio, is recorded against the Location. The header shows one daily and monthly total per Location. This is built up over time.
 
 ## Data and hosting
 
 - **CRM database** (Prisma/Postgres): accounts, Locations, teams, and all CRM data for both apps.
-- **Studio target:** the same CRM database/pool, in schema `studio`, with Location foreign keys and canonical same-realm team authority. The old Studio Supabase project remains the frozen fallback after cutover; the local readiness round does not activate production. Both projects remain Free; R2 keys are preserved.
+- **Studio target:** the same CRM database/pool, in schema `studio`, with Location foreign keys and canonical same-realm team authority. The old Studio Supabase project remains the frozen fallback after cutover; production cutover completed on October 28. Both projects remain Free; R2 keys are preserved.
 - **Media** is in Cloudflare R2.
 - **Hosting:** Hetzner + Caddy + Cloudflare. Deploy only with `deploy-local-build.sh`, which ships the **local working tree** and runs `prisma migrate deploy` first. Never Vercel.
 - **`release/studio-go-live` is the deployed branch.** Keep it equal to what's live. Never deploy from an older branch or a checkout with stale changes.
@@ -66,9 +66,9 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 - **What was worth it:** separate logins on one shared database. It is done, and doesn't need more work.
 - **Keep docs short.** Long progress logs hid the current state. Update this page when a rule changes, and keep a one-line entry in the progress log.
 
-## Status (2026-10-27)
+## Status (2026-10-28)
 
-**Studio paused: Supabase egress quota; re-key parked on wip/studio-location-rekey.** While the provider restricts the project, Studio shows "Studio is temporarily unavailable" inside the shell, and its APIs return 503. The CRM, sign-in and deploys keep working (readiness reports `degraded`). Resume notes and egress suspects: `business-rename-plan.md`.
+**Studio merged and live.** Web, worker, cron and companion APIs use the CRM database's `studio` schema. Database failures block readiness. The old source is frozen for recovery, not a runtime dependency. Signed Estio acceptance and an online Mac reconnect remain outstanding. See `studio-merge-cutover.md` for evidence and `unified-database-recovery.md` for backup scope.
 
 **Working on both apps:**
 - separate sign-in;
@@ -80,7 +80,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 - Studio's library, pipeline, knowledge, uploads and transcription.
 
 **Next:**
-1. Key Studio by `location_id` and remove the workspace; rename `brand` to Location or app names in the backend (staged). Stage A is done; Stage B is parked until Supabase is reachable.
+1. Finish signed Estio and Mac acceptance; retain the recovery mapping until the fallback window ends.
 2. **First Studio workflow: onboarding chat**, planned in `onboarding-chat-plan.md`. A guided AI chat with web browsing, built on the existing assistant pieces. It asks about the person and the Location, connects their socials, and saves a Location persona that Studio uses for content.
 3. **Scheduled runs**, once the user has connected YouTube at `/account/connections`. No credentials were imported from the old local app.
 

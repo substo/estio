@@ -663,3 +663,7 @@ Production build `Ps5n63m_D1BbjBKFYejcG` from `22207719` passed; frozen source a
 ## Studio database merge production cutover completed (2026-10-28)
 
 Explicitly authorized retry deployed clean `853d6de0`, production build `_BvLHCZSx3pI5UYHm5b1o`, to blue via owned migrate-only script (exit 0, no rollback). Retained verified copy/receipt reused; 83 migration checksums matched, no pending migrations, source still frozen. Fresh worker/dependencies and public soak passed. Substo library/content/knowledge/jobs, CRM/Studio switching and legacy image load passed. Matching median library 1669→1018 ms; switch 2426→1638 ms. Counts and all 471 legacy keys preserved. Estio login and offline Mac prevent full acceptance there. Compatibility field intentionally retained during fallback; not falsely marked removed. Exact evidence, backup paths and rollback rules: `studio-merge-cutover.md`.
+
+## Postmerge operational audit (2026-10-28)
+
+Live build/health/dependencies and empty due/expired/uncertain queue rechecked. Unified backup helper now checks both schemas and fully decodes archives; Location export explicitly excludes Studio. Stale paused-state docs corrected. Focused 23 tests and PG17 schema/concurrency/4 adapter tests pass. Operator/docs-only changes, no deploy or production data mutation. Estio sign-in and offline Mac still bound acceptance; prioritized Studio follow-ups in `studio-merge-cutover.md`.

@@ -64,3 +64,9 @@ Included data covers properties, contacts, companies, projects, content, convers
 The destination keeps its own Location row, users, roles, site configuration, domains, credentials and provider connections. Queues, scheduled work, sync state, analytics, audit records, AI runtime data and external integration identifiers are not restored. URLs stored on business records are preserved, but this database archive does not download the referenced Supabase Storage, Cloudflare Images, R2 or other binary objects.
 
 The importer generates new record IDs, remaps foreign keys and strips nullable globally unique external IDs. It currently targets another Location in the same database, which allows shared User references to remain valid.
+
+## Studio after the database merge
+
+This selected CRM export excludes the entire `studio` schema. Import leaves Studio
+in place; it does not clone its content or reconnect its credentials. For unified
+disaster recovery use [the full database procedure](unified-database-recovery.md).
