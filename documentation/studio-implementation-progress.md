@@ -701,3 +701,11 @@ Live build/health/dependencies and empty due/expired/uncertain queue rechecked. 
   object changes or subscription changes. Fresh preflight: 83 production migration
   checksums match; database 209,259,667 bytes; 56 old-source freeze triggers enabled;
   no concurrent deployment found. Original recovery points retained.
+- Reconnect execution found/fixed a real remaining merge defect: companion claim
+  parsing required UUID `location_id` and rejected canonical CUID Locations. Added
+  a regression preserving UUID job/lease validation. Authenticated existing-pairing
+  heartbeat succeeded; signed web showed Martin Mac Online. A no-provider Mac check
+  was queued. First once-run failed at old claim parsing; corrected retry claimed
+  zero while its lease remained pending. Completion still needs verification.
+- First production build was deliberately stopped before upload/schema/traffic
+  mutation to include that discovered companion fix. Retry remains authorized.

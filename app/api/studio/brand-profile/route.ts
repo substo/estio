@@ -14,7 +14,7 @@ import { saveBrandProfile, getBrandProfile } from '@/lib/brand-profile/service';
 import { fetchPublicPage } from '@/lib/web/fetch-public-page';
 const commandSchema = z.discriminatedUnion('action', [
     z.object({ action: z.literal('lookup'), url: z.string().url().max(2048) }),
-    z.object({ action: z.literal('save'), input: brandProfileInputSchema }),
+    z.object({ action: z.literal('save'), input: brandProfileInputSchema.refine(value => Boolean(value.profile.summary.trim()), 'Add a summary before saving') }),
     z.object({ action: z.literal('enqueue'), requestId: z.string().uuid(), confirmPaid: z.literal(true), input: brandProfileInputSchema,
         excerpts: z.array(z.object({ url: z.string().url(), title: z.string().max(500), text: z.string().max(3000) })).max(3) }),
 ]);
