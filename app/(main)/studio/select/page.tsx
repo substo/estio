@@ -3,12 +3,9 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell/app-shell";
 import { getStudioShellData } from "../_components/studio-shell-data";
-import { ensureEstioStudioWorkspace } from "@/lib/studio/supabase-service";
-import { unlessStudioUnavailable } from "@/lib/studio/rest";
 import { resolveActiveLocation } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
-import { ensureLocationWorkspace } from "@/lib/locations/location-service";
-import { prepareCurrentSubstoUser, substoLocationDeps } from "@/lib/locations/substo-locations";
+import { prepareCurrentSubstoUser } from "@/lib/locations/substo-locations";
 import { openEstioStudioLocation, openSubstoLocationStudioAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -37,9 +34,6 @@ async function StudioWorkspaceSelector({
     const active = await resolveActiveLocation();
     // The validated active tenant, including a sole membership, wins on ordinary entry.
     if (active.location && !params.choose && !params.error) {
-      const location = active.location;
-      // A restricted Studio database skips provisioning; /studio then shows its unavailable state.
-      await unlessStudioUnavailable(() => ensureLocationWorkspace(substoLocationDeps(), location, userId));
       redirect(`/studio`);
     }
 
@@ -77,8 +71,6 @@ async function StudioWorkspaceSelector({
   const resolution = await resolveActiveLocation();
   if (resolution.status === "unauthenticated") redirect("/sign-in?redirect_url=%2Fstudio");
   if (resolution.location && !params.choose && !params.error) {
-    const location = resolution.location;
-    await unlessStudioUnavailable(() => ensureEstioStudioWorkspace(location));
     redirect(`/studio`);
   }
   const { actor } = await auth();

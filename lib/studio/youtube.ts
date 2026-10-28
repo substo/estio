@@ -13,7 +13,7 @@ import { queryPath, studioRest } from "./rest";
 export interface ApprovedYoutubeChannel { channel_id: string; label: string; }
 async function context(locationId: string, manager = false) {
   const profile = await getPlatformProfile(); const access = await getStudioAccess(locationId);
-  if (!profile || !access || !sameYoutubePrincipal(profile, access) || (manager && !canManageStudioAi(access)))
+  if (!profile || !access || !sameYoutubePrincipal(profile, { brand: access.app, userId: access.userId }) || (manager && !canManageStudioAi(access)))
     throw new YoutubeError("access_denied", "Use your own authorized account. Channel approvals require a workspace manager.");
   return { profile, access };
 }

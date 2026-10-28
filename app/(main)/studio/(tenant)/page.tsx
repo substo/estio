@@ -16,7 +16,6 @@ export default async function StudioWorkspacePage({
   if (!userId) redirect("/sign-in?redirect_url=%2Fstudio");
   const access = await getStudioAccess(locationId);
   if (!access) notFound();
-  const { workspace } = access;
 
   if (access.app === "substo") {
     return (
@@ -24,7 +23,7 @@ export default async function StudioWorkspacePage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-muted-foreground">Studio</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">{workspace.name}</h1>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight">{access.locationName}</h1>
           </div>
         </div>
         <section className="rounded-xl border bg-card p-6">
@@ -52,7 +51,7 @@ export default async function StudioWorkspacePage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">Estio Studio</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{workspace.name}</h1>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{access.locationName}</h1>
         </div>
 
       </div>
