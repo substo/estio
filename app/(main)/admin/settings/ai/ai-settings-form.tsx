@@ -1363,6 +1363,7 @@ function BrandVoiceResearchSection({
                 <div className="grid gap-2">
                     <div className="flex items-center justify-between">
                         <Label htmlFor="brandVoice">Brand Voice Instructions</Label>
+                        <a href="/studio/brand-profile" className="block text-sm underline">Manage the shared brand profile in Studio</a>
                         <Button
                             type="button"
                             variant="outline"

@@ -667,3 +667,37 @@ Explicitly authorized retry deployed clean `853d6de0`, production build `_BvLHCZ
 ## Postmerge operational audit (2026-10-28)
 
 Live build/health/dependencies and empty due/expired/uncertain queue rechecked. Unified backup helper now checks both schemas and fully decodes archives; Location export explicitly excludes Studio. Stale paused-state docs corrected. Focused 23 tests and PG17 schema/concurrency/4 adapter tests pass. Operator/docs-only changes, no deploy or production data mutation. Estio sign-in and offline Mac still bound acceptance; prioritized Studio follow-ups in `studio-merge-cutover.md`.
+
+## Five-recommendation implementation (2026-10-28; deployment pending)
+
+- Fresh read-only unified dump decoded/checksummed privately; two socket-only PG17
+  application restores produced identical 184-table counts/digests. Schema 29,
+  83 completed migrations, zero unvalidated FKs, five canonical authority rows,
+  471 preserved legacy media objects and 471 links. No clone worker/provider ran.
+  Runnable drill/evidence scope: `unified-database-recovery.md`.
+- Shared header now combines CRM usage and settled Studio charges with UTC bounded
+  calendar periods; reservations/releases excluded, Location filtering and admin
+  visibility retained. Failed refresh clears stale amounts and offers retry.
+  Synthetic disposable SQL test proves settlement/release, tenant isolation and
+  day/month/year boundaries; all fixture writes rolled back.
+- Added Location profile schema/service in existing settings, with own-session admin
+  policy, active-Location restriction, version conflict handling, atomic brandVoice
+  and SiteConfig mirror. Guided onboarding uses the existing paid text-run ledger,
+  bounded shared hardened fetch helper, explicit paid confirmation, editable review,
+  existing social-link save action and YouTube connections. Answers resume locally;
+  enqueued snapshots/results resume from the server. Members read saved profiles.
+  Added profile navigation and setup card in both apps; CRM editor links to profile.
+  The existing CRM voice editor remains available pending the plan's product decision.
+- Idea/script snapshots include bounded shared brandVoice, with new prompt versions;
+  existing review rows stay immutable and applying older script briefs remains allowed.
+  Operator migration tested only against disposable restore so far.
+- Fixed remaining account-connections workspace wording. Existing shell tests pass;
+  desktop/mobile interactive parity and signed Estio/Mac acceptance remain unverified.
+- Validation so far: 65 focused tests; disposable profile SQL confirmation/authority/
+  idempotency/result checks; usage integration fixture; affected compiler 32 files,
+  zero diagnostics. Full repository tsc has pre-existing tmp/other errors; first
+  attempt exhausted default heap, second used 8 GB. No full-build/deploy pass claimed.
+- No paid requests, real invites/messages, source unfreeze, mapping retirement, R2
+  object changes or subscription changes. Fresh preflight: 83 production migration
+  checksums match; database 209,259,667 bytes; 56 old-source freeze triggers enabled;
+  no concurrent deployment found. Original recovery points retained.

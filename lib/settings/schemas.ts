@@ -1,3 +1,4 @@
+import { brandProfileSchema } from "@/lib/brand-profile/schema";
 import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
 import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
@@ -114,6 +115,7 @@ const aiSchema = z.object({
     defaultReplyLanguage: defaultReplyLanguageSchema,
     precisionRemoveEnabled: z.boolean().default(false),
     brandVoice: nullableTrimmedString,
+    brandProfile: brandProfileSchema.nullable().optional(),
     outreachConfig: z.object({
         enabled: z.boolean().default(false),
         visionIdPrompt: nullableTrimmedString,

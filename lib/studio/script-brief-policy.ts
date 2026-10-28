@@ -1,6 +1,6 @@
 import { StudioCommandError } from "./command-error";
 import { readIdeaReviewRequest, type IdeaSnapshot } from "./idea-review-policy";
-export const SCRIPT_BRIEF_PROMPT = "studio.script-brief.v1";
+export const SCRIPT_BRIEF_PROMPT = "studio.script-brief.v2";
 export const SCRIPT_BRIEF_MAX_OUTPUT = 6000;
 export interface ScriptBriefResult {
   audiencePromise: string; angle: string; hook: string; outline: string[];

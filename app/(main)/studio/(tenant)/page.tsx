@@ -1,3 +1,4 @@
+import { getBrandProfile } from "@/lib/brand-profile/service";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
@@ -17,9 +18,13 @@ export default async function StudioWorkspacePage({
   const access = await getStudioAccess(locationId);
   if (!access) notFound();
 
+  const profile = await getBrandProfile(locationId);
+  const onboarding = !profile ? <section className="rounded-xl border bg-card p-6"><h2 className="text-lg font-medium">Set up your brand</h2><Link className="text-primary underline" href="/studio/onboarding">Build your brand profile</Link></section> : null;
+
   if (access.app === "substo") {
     return (
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
+        {onboarding}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-muted-foreground">Studio</p>
@@ -48,6 +53,7 @@ export default async function StudioWorkspacePage({
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
+        {onboarding}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">Estio Studio</p>

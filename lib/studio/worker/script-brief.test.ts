@@ -38,7 +38,7 @@ test("script generation commits only an advisory result and lost outcomes cannot
     let generated=0,saved=false,started=false;const calls:Array<{p:string;body:any}>=[];const controller=new AbortController();
     const deps:ScriptBriefDeps={
       db: fixtureDb(async <T>(p:string,init?:RequestInit)=>{
-        if(p.startsWith("studio_idea_reviews"))return [{snapshot,result:saved?brief:null,model:"gpt-6-luna",prompt_version:"studio.script-brief.v1",workflow:"script_brief"}] as T;
+        if(p.startsWith("studio_idea_reviews"))return [{snapshot,result:saved?brief:null,model:"gpt-6-luna",prompt_version:"studio.script-brief.v2",workflow:"script_brief"}] as T;
         if(p.startsWith("studio_location_ai_credentials"))return [{}] as T;
         const body=JSON.parse(String(init?.body));calls.push({p,body});
         if(p.endsWith("studio_begin_text_run_attempt")){if(started)return {outcome:"uncertain"} as T;started=true;return {outcome:"started",attempt_id:"attempt"} as T;}

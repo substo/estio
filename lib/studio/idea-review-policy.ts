@@ -1,7 +1,7 @@
 import { StudioCommandError } from "./command-error";
 
 export const IDEA_REVIEW_MODEL = "gpt-6-luna";
-export const IDEA_REVIEW_PROMPT = "studio.idea-review.v1";
+export const IDEA_REVIEW_PROMPT = "studio.idea-review.v2";
 export const IDEA_REVIEW_RESERVE_MICROS = 10_000;
 export const IDEA_REVIEW_MAX_OUTPUT = 3000;
 export interface IdeaSnapshot { focus: string; ideas: Array<{ id: string; version: number; title: string; summary: string; notes: string;

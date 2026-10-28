@@ -56,17 +56,20 @@ interface AIUsage {
 export function AICostBadge() {
     const [usage, setUsage] = useState<AIUsage | null>(null);
     const [unifiedUsage, setUnifiedUsage] = useState<LocationAiUsageSummary | null>(null);
+    const [loadFailed, setLoadFailed] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     const fetchUsage = useCallback(async () => {
         try {
+            setLoadFailed(false);
             const unified = await getLocationAiUsageSummary().catch((e) => {
                 console.error("[AICostBadge] Failed to fetch AI usage:", e);
+                setLoadFailed(true);
                 return null;
             });
             setUsage(null);
-            if (unified) setUnifiedUsage(unified);
+            setUnifiedUsage(unified);
         } finally {
             setIsLoading(false);
         }
@@ -109,7 +112,7 @@ export function AICostBadge() {
     // Location-wide cost information is admin-only. The server action returns
     // null for members, so do not render a misleading zero-cost badge.
     if (!unifiedUsage) {
-        return null;
+        return loadFailed ? <button type="button" onClick={fetchUsage} className="text-xs text-muted-foreground" title="Usage could not be loaded. Click to retry.">Usage unavailable · Retry</button> : null;
     }
 
     // Always show badge, even with zero usage

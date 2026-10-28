@@ -135,8 +135,9 @@ export class SettingsService {
         scopeType: SettingsScope;
         scopeId: string;
         domain: SettingsDomain;
+        tx?: TxClient;
     }): Promise<{ payload: T; version: number; schemaVersion: number } | null> {
-        const doc = await db.settingsDocument.findUnique({
+        const doc = await (input.tx ?? db).settingsDocument.findUnique({
             where: {
                 scopeType_scopeId_domain: {
                     scopeType: input.scopeType,

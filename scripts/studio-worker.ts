@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { createBrandProfileHandler } from "../lib/studio/worker/brand-profile";
 import { createYoutubeDiscoveryHandler, productionYoutubeDiscoveryDeps } from "../lib/studio/worker/youtube-discovery";
 import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -44,6 +45,7 @@ async function main() {
   const db = createStudioDb(prisma);
   const queue = createDbStudioQueue(db);
   const handlers = { ...studioJobHandlers };
+  handlers["studio.brand_profile"] = createBrandProfileHandler(db);
   handlers["studio.idea_review"] = createIdeaReviewHandler(productionIdeaReviewDeps(db));
   handlers["studio.script_brief"] = createScriptBriefHandler(productionScriptBriefDeps(db));
   handlers["studio.knowledge_extract"] = createKnowledgeExtractionHandler(productionKnowledgeExtractionDeps(db));

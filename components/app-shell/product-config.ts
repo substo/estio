@@ -33,6 +33,7 @@ export function studioNavGroups(app: ShellApp, studioLocationId: string | null, 
     groups.push({
       items: [
         { href: base, label: "Overview", icon: LayoutDashboard, activePath: (pathname) => pathname === base },
+        { href: `${base}/brand-profile`, label: "Brand profile", icon: Sparkles, activePath: (pathname) => pathname.startsWith(`${base}/brand-profile`) || pathname.startsWith(`${base}/onboarding`) },
         { href: `${base}/library`, label: "Library", icon: Library, activePath: (pathname) => pathname.startsWith(`${base}/library`) || pathname.startsWith(`${base}/records`) },
         { href: `${base}/content`, label: "Content", icon: Clapperboard, activePath: (pathname) => pathname.startsWith(`${base}/content`) },
         { href: `${base}/knowledge`, label: "Knowledge", icon: BookOpenText, activePath: (pathname) => pathname.startsWith(`${base}/knowledge`) },

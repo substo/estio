@@ -1,7 +1,7 @@
 import type { IdeaSnapshot } from "../idea-review-policy";
 import { StudioJobError, StudioProviderRejectedError } from "./handlers";
 export interface TextRunSpec<T, S = IdeaSnapshot> {
-  workflow: "idea_review" | "script_brief" | "knowledge_extract"; model: string; promptVersion: string; instructions: string;
+  workflow: "idea_review" | "script_brief" | "knowledge_extract" | "brand_profile"; model: string; promptVersion: string; instructions: string;
   maxOutputTokens: number; schema: Record<string, unknown>; validate(value: unknown, snapshot: S): T;
 }
 export interface TextProviderResult<T> { result: T; providerResponseId: string; inputTokens: number; outputTokens: number; costMicros: number; rateVersion: string; }

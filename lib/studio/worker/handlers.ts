@@ -20,4 +20,4 @@ export type StudioJobHandler = (job: StudioJob, context: StudioJobContext) => Pr
 const diagnostic: StudioJobHandler = async (_job, context) => ({ ok: true, workerId: context.workerId, checkedAt: new Date().toISOString() });
 
 export const studioJobHandlers: Record<string, StudioJobHandler> = { "studio.diagnostic": diagnostic };
-export const studioJobKindLabels: Record<string, string> = { "studio.youtube_discovery": "YouTube discovery", "studio.knowledge_extract": "Knowledge extraction", "studio.script_brief": "Script brief", "studio.idea_review": "Idea review", "studio.diagnostic": "Worker check", "studio.transcribe_upload": "Transcribe upload" };
+export const studioJobKindLabels: Record<string, string> = { "studio.brand_profile": "Brand profile", "studio.youtube_discovery": "YouTube discovery", "studio.knowledge_extract": "Knowledge extraction", "studio.script_brief": "Script brief", "studio.idea_review": "Idea review", "studio.diagnostic": "Worker check", "studio.transcribe_upload": "Transcribe upload" };

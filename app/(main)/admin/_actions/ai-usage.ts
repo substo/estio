@@ -3,6 +3,8 @@
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from "@/lib/db";
+import { studioUsageQuery } from "@/lib/ai/studio-usage-query";
+import { usagePeriodStarts } from "@/lib/ai/usage-periods";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 import {
@@ -148,14 +150,13 @@ async function getAiUsageSummary(
 
     // Aggregate for the current calendar month
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const { startOfMonth, startOfToday, endOfMonth, endOfToday } = usagePeriodStarts(now);
 
     // Totals are grouped in the database: the badge is on every page, and reading
     // every row of the month to add it up here cost the most database egress.
     const [todayAgg, allTimeAgg, groups, quickAssistRows] = await Promise.all([
         db.aiUsage.aggregate({
-            where: { ...usageScope, recordedAt: { gte: startOfToday } },
+            where: { ...usageScope, recordedAt: { gte: startOfToday, lt: endOfToday } },
             _count: { id: true },
             _sum: { totalTokens: true, estimatedCostUsd: true }
         }),
@@ -166,15 +167,33 @@ async function getAiUsageSummary(
         }),
         db.aiUsage.groupBy({
             by: ["featureArea", "action", "provider", "model"],
-            where: { ...usageScope, recordedAt: { gte: startOfMonth } },
+            where: { ...usageScope, recordedAt: { gte: startOfMonth, lt: endOfMonth } },
             _count: { _all: true },
             _sum: { totalTokens: true, estimatedCostUsd: true },
         }),
         db.aiUsage.findMany({
-            where: { ...usageScope, recordedAt: { gte: startOfMonth }, resourceType: "viewing_session" },
+            where: { ...usageScope, recordedAt: { gte: startOfMonth, lt: endOfMonth }, resourceType: "viewing_session" },
             select: { metadata: true, recordedAt: true, provider: true, estimatedCostUsd: true },
         }),
     ]);
+
+    // Studio has a durable separate ledger. Only settled charges count; holds
+    // and released reservations are not spend. Personal attribution is unavailable
+    // in that ledger, so never add location totals to a personal usage response.
+    if (!userId) {
+        const studio = await db.$queryRaw<Array<{ operation: string; provider: string; model: string; calls: bigint; tokens: bigint; cost: number; today_calls: bigint; today_tokens: bigint; today_cost: number; month_calls: bigint; month_tokens: bigint; month_cost: number }>>(studioUsageQuery(resolvedLocationId, now));
+        for (const row of studio) {
+            todayAgg._count.id += Number(row.today_calls);
+            todayAgg._sum.totalTokens = (todayAgg._sum.totalTokens || 0) + Number(row.today_tokens);
+            todayAgg._sum.estimatedCostUsd = (todayAgg._sum.estimatedCostUsd || 0) + Number(row.today_cost);
+            allTimeAgg._count.id += Number(row.calls);
+            allTimeAgg._sum.totalTokens = (allTimeAgg._sum.totalTokens || 0) + Number(row.tokens);
+            allTimeAgg._sum.estimatedCostUsd = (allTimeAgg._sum.estimatedCostUsd || 0) + Number(row.cost);
+            if (Number(row.month_calls)) groups.push({ featureArea: 'studio', action: row.operation, provider: row.provider, model: row.model,
+                _count: { _all: Number(row.month_calls) },
+                _sum: { totalTokens: Number(row.month_tokens), estimatedCostUsd: Number(row.month_cost) } } as typeof groups[number]);
+        }
+    }
 
     const quickAssist = { monthCost: 0, todayCost: 0, calls: 0, unavailableCalls: 0, subscriptionCalls: 0 };
     for (const r of quickAssistRows) {

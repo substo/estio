@@ -12,12 +12,12 @@ export default async function ProfileConnectionsPage({ searchParams }: { searchP
   if (!result) notFound();
   const status = (await searchParams).youtube;
   return <main className="mx-auto max-w-3xl space-y-6 p-6 md:p-10">
-    <Link href="/studio" className="text-sm text-primary hover:underline">Back to workspaces</Link>
+    <Link href="/studio" className="text-sm text-primary hover:underline">Back to Studio</Link>
     <h1 className="text-3xl font-semibold">My profile connections</h1>
     <p className="text-muted-foreground">Connections belong to your {result.profile.brand === "estio" ? "Estio" : "Substo"} profile. Each app keeps its own sign-in identity and grants.</p>
     <section className="space-y-4 rounded-xl border bg-card p-6">
       <h2 className="text-xl font-medium">Google · YouTube read access</h2>
-      <p className="text-sm">Your subscriptions are private to your profile. Studio can use this connection when you choose to discover research. Saving a public video to a workspace explicitly shares that research link and its discovery source with members.</p>
+      <p className="text-sm">Your subscriptions are private to your profile. Studio can use this connection when you choose to discover research. Saving a public video to a business explicitly shares that research link and its discovery source with members.</p>
       {result.connectedAt ? <p className="text-sm">Connected {result.connectedAt}</p> : <p className="text-sm">Not connected.</p>}
       {status === "connected" || status === "removed" ? <p role="status" className="text-sm">{status === "connected" ? "YouTube connected to your profile." : "Saved YouTube access removed from this profile."}</p>
         : status ? <p role="alert" className="text-sm text-destructive">Could not connect. Check server configuration and consent, then try again from your own account.</p> : null}

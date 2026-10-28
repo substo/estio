@@ -62,7 +62,7 @@ function fixture(options: { outcome?: string; lostCommit?: boolean; failCommit?:
   const controller=new AbortController();
   const deps: IdeaReviewDeps={
     db: fixtureDb(async <T>(p: string,init?: RequestInit) => {
-      if(p.startsWith("studio_idea_reviews")) return [{snapshot,result:saved?result:null,model:IDEA_REVIEW_MODEL,prompt_version:"studio.idea-review.v1",workflow:"idea_review"}] as T;
+      if(p.startsWith("studio_idea_reviews")) return [{snapshot,result:saved?result:null,model:IDEA_REVIEW_MODEL,prompt_version:"studio.idea-review.v2",workflow:"idea_review"}] as T;
       if(p.startsWith("studio_location_ai_credentials")) return (options.missingKey?[]:[{}]) as T;
       const body=JSON.parse(String(init?.body)); calls.push({name:p,body});
       if(p.endsWith("studio_begin_text_run_attempt")) { if(state) return {outcome:state} as T; state="uncertain"; return {outcome:"started",attempt_id:"a"} as T; }
