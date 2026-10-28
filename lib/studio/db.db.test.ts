@@ -51,3 +51,10 @@ test("reads return JSON rows in order, and one row or null", async () => {
   assert.equal((await db.one<{ id: string }>(Prisma.sql`select id from studio.studio_records where location_id = ${location}`))?.id, record);
   assert.equal(await db.one(Prisma.sql`select id from studio.studio_records where location_id = ${"elsewhere"}`), null);
 });
+
+test('one preserves existing LIMIT/OFFSET and aggregate reads without appending conflicting SQL', async () => {
+  assert.deepEqual(await db.one(Prisma.sql`select n from generate_series(1,3) n order by n desc limit 1`), { n: 3 });
+  assert.deepEqual(await db.one(Prisma.sql`select n from generate_series(1,3) n order by n limit 1 offset 1`), { n: 2 });
+  assert.deepEqual(await db.one(Prisma.sql`select count(*)::int total from generate_series(1,3)`), { total: 3 });
+  assert.equal(await db.one(Prisma.sql`select 1 n where false limit 1`), null);
+});

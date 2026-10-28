@@ -115,8 +115,7 @@ export function createStudioDb(client: PrismaClient): StudioDb {
     },
     async one<T>(query: Prisma.Sql) {
       assertStudioMergeReady();
-      const rows = await run<T[]>(Prisma.sql`select coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) as v from (${query} limit 1) q`);
-      return rows[0] ?? null;
+      return (await run<T>(Prisma.sql`select to_jsonb(q) as v from (${query}) q limit 1`)) ?? null;
     },
   };
 }

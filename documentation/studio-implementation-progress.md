@@ -730,3 +730,16 @@ Live build/health/dependencies and empty due/expired/uncertain queue rechecked. 
   It caught the missing `studio_ai_attempt_subject` workflow extension before live
   migration; the pending migration now extends that constraint too. Passed against
   disposable PG17 after the fix. Third build stopped before upload for this SQL fix.
+- First complete owned deployment succeeded from `ff8d2019`, production build
+  `IKbKx14azHgL4R_BZ3pu4`, migrate-only, migration 20261028190000_brand_profile
+  applied; GREEN:3002, 20-second soak and all required services/readiness passed.
+  No rollback. Signed Library/Content/Knowledge/Discovery/Schedules all 200.
+- Live onboarding smoke found shared adapter `one()` appended a duplicate LIMIT
+  when callers already supplied one (SQLSTATE 42601). Fixed in the shared adapter
+  by limiting its outer query. All PG17 schema suites and five adapter tests pass,
+  including existing LIMIT/OFFSET, aggregates and empty rows; affected compiler
+  three files zero diagnostics. Runtime fix requires the next owned deployment.
+- Refreshed premerge route test fixtures to canonical Location/StudioDb/current
+  compatibility route. All 33 tenant/security tests pass. Live profile API reads
+  200; missing/mismatched tenant commands 409; missing paid consent 400; no job,
+  provider request or production profile fixture was created by these checks.

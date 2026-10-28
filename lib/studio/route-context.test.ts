@@ -16,10 +16,10 @@ function load(file: string, deps: Record<string, any>) {
   vm.runInNewContext(code, { module, exports: module.exports, Request, Response, URL, require: (name: string) => { if (name === "react" && !(name in deps)) return passthroughReact; assert.ok(name in deps, name); return deps[name]; } });
   return module.exports;
 }
-function context(status = "authorized", storage: string | null = "storage-a") {
+function context(status = "authorized", storage: string | null = "location-a") {
   return load("lib/studio/route-context.ts", {
     "server-only": {}, "next/navigation": { redirect: (path: string) => { throw new Error(`REDIRECT:${path}`); } },
-    "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ resolution: { status, location: status === "authorized" ? { id: "location-a" } : null }, locationId: storage }) },
+    "@/lib/auth/tenant-context": { resolveTenantContext: async () => status !== "authorized" ? null : ({ resolution: { status, location: status === "authorized" ? { id: "location-a" } : null }, locationId: storage }) },
     "./rest-client": restClient,
   });
 }
@@ -29,8 +29,8 @@ function request(tenant?: string, method = "POST") {
 test("clean route params use active Location mapping, never posted URL storage identity", async () => {
   const api = context();
   const value = await api.studioRouteParams(Promise.resolve({ recordId: "record", locationId: "foreign-storage" }));
-  assert.equal(value.locationId, "storage-a"); assert.equal(value.recordId, "record");
-  const get = await api.studioRouteParams(Promise.resolve({}), request(undefined, "GET")); assert.equal(get.locationId, "storage-a");
+  assert.equal(value.locationId, "location-a"); assert.equal(value.recordId, "record");
+  const get = await api.studioRouteParams(Promise.resolve({}), request(undefined, "GET")); assert.equal(get.locationId, "location-a");
 });
 test("commands reject stale or absent rendered Location identity before any execution", async () => {
   const api = context(); let executions = 0;
@@ -44,7 +44,7 @@ test("commands reject stale or absent rendered Location identity before any exec
   const accepted = await handler(request("location-a"), { params: Promise.resolve({}) }); assert.equal(accepted.status, 200); assert.equal(executions, 1);
 });
 test("no-access and missing storage fail closed; pages return to the existing tenant chooser", async () => {
-  for (const [status, storage, code] of [["no_access", "storage-a", 403], ["selection_required", null, 403], ["authorized", null, 409]] as const) {
+  for (const [status, storage, code] of [["no_access", "storage-a", 403], ["selection_required", null, 403], ["authorized", null, 403]] as const) {
     const api = context(status, storage);
     await assert.rejects(api.studioRouteParams(Promise.resolve({}), request("location-a")), (error: any) => error.status === code);
     await assert.rejects(api.studioRouteParams(Promise.resolve({})), /REDIRECT:\/studio\/select/);
@@ -55,21 +55,18 @@ test("legacy resource paths cannot become open redirects or route escapes", () =
   assert.equal(cleanStudioLegacyPath(["library", "record-a"]), "/studio/library/record-a");
   for (const path of [["select"], ["workspace"], ["https://foreign.invalid"], ["library", ".."], ["library", "a/b"], ["library", "a\\b"]]) assert.equal(cleanStudioLegacyPath(path), null);
 });
-test("both old app links authorize their Location before clean redirect; revoked access changes no cookie", async () => {
-  const locationId = "11111111-1111-4111-8111-111111111111";
-  for (const host of ["estio.co", "substo.com"]) for (const allowed of [true, false]) {
-    let calls = 0;
-    const api = load("app/(main)/studio/workspace/[locationId]/[[...path]]/route.ts", {
+test("legacy IDs select nothing and compatibility redirects never change the Location cookie", async () => {
+  for (const host of ["estio.co", "substo.com"]) {
+    const api = load("app/(main)/studio/workspace/[legacyId]/[[...path]]/route.ts", {
       "@/lib/auth/host-brand": { getHostOrigin: (requestHost: string) => requestHost === host ? `https://${host}` : null },
       "next/server": { NextResponse }, "@/lib/studio/route-policy": { cleanStudioLegacyPath },
-      "@/lib/auth/tenant-context": { resolveWorkspaceTenant: async (id: string) => { assert.equal(id, locationId); calls++; return allowed ? { location: { id: "location-b" } } : null; } },
-      "@/lib/auth/active-location": { ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/", sameSite: "lax" } },
-      "@/lib/studio/rest": { isStudioProviderUnavailable: restClient.isStudioProviderUnavailable },
     });
-    const response = await api.GET(new NextRequest(`http://localhost:3002/studio/workspace/${locationId}/library?page=2`, { headers: { host } }), { params: Promise.resolve({ locationId, path: ["library"] }) });
-    assert.equal(response.status, allowed ? 303 : 404); assert.equal(response.cookies.get("active_location_id")?.value, allowed ? "location-b" : undefined);
-    if (allowed) { const destination = new URL(response.headers.get("location")); assert.equal(destination.host, host); assert.equal(destination.pathname, "/studio/library"); assert.equal(destination.search, "?page=2"); }
-    const post = await api.POST(); assert.equal(post.status, 409); assert.equal(calls, 1);
+    for (const legacyId of ["old-workspace", "revoked-location", "unrelated-account"]) {
+      const response = await api.GET(new NextRequest(`http://localhost:3002/studio/workspace/${legacyId}/library?page=2`, { headers: { host } }), { params: Promise.resolve({ legacyId, path: ["library"] }) });
+      assert.equal(response.status, 303); assert.equal(response.cookies.get("active_location_id"), undefined);
+      const destination = new URL(response.headers.get("location")); assert.equal(destination.host, host); assert.equal(destination.pathname, "/studio/library"); assert.equal(destination.search, "?page=2");
+    }
+    const post = await api.POST(); assert.equal(post.status, 409);
   }
 });
 test("generated Studio links never expose the legacy workspace prefix", () => {
@@ -77,29 +74,23 @@ test("generated Studio links never expose the legacy workspace prefix", () => {
   for (const file of files) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /\/studio\/workspace\/\$\{/ , file);
 });
 
-test("storage access follows the active Location in both realms, never a second selected workspace", async () => {
-  const storageId = "11111111-1111-4111-8111-111111111111";
+test("storage access follows the active canonical Location and realm without a membership mirror", async () => {
   for (const realm of ["estio", "substo"]) for (const matches of [true, false]) {
-    let mirrorCalls = 0;
-    const location = { id: matches ? "location-a" : "location-b", authRealm: realm, name: "Canonical location", studioWorkspaceId: matches ? storageId : "another-storage" };
-    const workspace = { id: storageId, estio_location_id: "location-a", name: "Old storage label" };
+    const location = { id: matches ? "location-a" : "location-b", authRealm: realm, name: "Canonical location" };
     const api = load("lib/studio/access.ts", {
-      "server-only": {}, "../platform/profile-lifecycle": { isPlatformProfileDeleted: async () => false }, "./rest": { studioRest: () => {} },
+      "server-only": {}, "../platform/profile-lifecycle": { isPlatformProfileDeleted: async () => false }, "./studio-db": { studioDb: {} },
       "@clerk/nextjs/server": { auth: async () => ({ userId: "person", actor: null }) },
       "next/headers": { headers: async () => ({ get: () => realm }) },
       "@/lib/auth/active-location": {
-        resolveActiveLocation: async () => ({ status: "authorized", location }),
+        resolveActiveLocation: async () => ({ status: "authorized", location, role: "ADMIN" }),
         validateActiveLocationSelection: async () => ({ status: "authorized", user: {}, role: "ADMIN", location }),
       },
       "@/lib/auth/host-brand": { getHostBrandConfig: () => ({}), resolveHostBrand: () => realm },
       "@/lib/auth/impersonation": {}, "./access-policy": { isStudioLocationAllowedForSession: () => true },
-      "./supabase-service": { getEstioStudioWorkspaceById: async () => workspace, getSubstoStudioWorkspace: async () => workspace },
-      "@/lib/locations/location-service": { resolveLocationWorkspaceAccess: async () => { mirrorCalls++; return { location: { id: "location-a", name: "Canonical location" }, studioRole: "admin" }; } },
-      "@/lib/locations/substo-locations": { substoLocationDeps: () => ({}) },
     });
-    const result = await api.getStudioAccess(storageId);
-    if (matches) { assert.equal(result.locationName, "Canonical location"); assert.equal(result.brand, realm); }
-    else { assert.equal(result, null); assert.equal(mirrorCalls, 0); }
+    const result = await api.getStudioAccess("location-a");
+    if (matches) { assert.equal(result.locationName, "Canonical location"); assert.equal(result.app, realm); assert.equal(result.locationId, "location-a"); }
+    else assert.equal(result, null);
   }
 });
 
