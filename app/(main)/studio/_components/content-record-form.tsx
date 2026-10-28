@@ -4,8 +4,8 @@ import { useActionState, useState } from "react";
 import { CONTENT_LEVELS, CONTENT_STAGES } from "@/lib/studio/content-policy";
 import { saveContentAction } from "../(tenant)/content/actions";
 
-export function ContentRecordForm({ workspaceId, recordId, version, title = "", payload = {} }: {
-  workspaceId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
+export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {} }: {
+  locationId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
     ["title", "summary", "notes", "script"].map((field) => [field, field === "title" ? title : typeof payload[field] === "string" ? payload[field] as string : ""]),
@@ -15,7 +15,7 @@ export function ContentRecordForm({ workspaceId, recordId, version, title = "", 
   const [pillar, setPillar] = useState(payload.pillar == null ? "" : String(payload.pillar));
   const [approved, setApproved] = useState(payload.approved === true);
   const [archived, setArchived] = useState(payload.archived === true);
-  const [state, action, pending] = useActionState(saveContentAction.bind(null, workspaceId, recordId, version), {});
+  const [state, action, pending] = useActionState(saveContentAction.bind(null, locationId, recordId, version), {});
   const inputClass = "mt-1 w-full rounded-md border bg-background p-3 text-sm";
   return (
     <form action={action} className="space-y-5 rounded-xl border bg-card p-6">

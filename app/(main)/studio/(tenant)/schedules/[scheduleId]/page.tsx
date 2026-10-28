@@ -16,27 +16,27 @@ export default async function ScheduleHistoryPage({ params, searchParams }: {
   params: Promise<{ scheduleId: string }>;
   searchParams: Promise<{ page?: string | string[]; hostedPage?: string | string[] }>;
 }) {
-  const { workspaceId, scheduleId } = await studioRouteParams(params);
+  const { locationId, scheduleId } = await studioRouteParams(params);
   const query = await searchParams;
   const page = scheduleHistoryPage(query.page);
   const hostedPage = scheduleHistoryPage(query.hostedPage);
-  const result = await getStudioScheduleHistory(workspaceId, scheduleId, page);
+  const result = await getStudioScheduleHistory(locationId, scheduleId, page);
   if (!result) notFound();
   const root = `/studio/schedules`;
   const detail = `${root}/${result.schedule.id}`;
-  const hosted = await getStudioScheduleExecutionData(workspaceId, scheduleId, hostedPage);
+  const hosted = await getStudioScheduleExecutionData(locationId, scheduleId, hostedPage);
   const canRun = !(await auth()).actor;
   const active = !!hosted?.recurring?.enabled;
-  const youtubeSettings = canRun && result.schedule.preset_id === "youtube-discovery" ? await getStudioYoutubeScheduleSettings(workspaceId) : null;
+  const youtubeSettings = canRun && result.schedule.preset_id === "youtube-discovery" ? await getStudioYoutubeScheduleSettings(locationId) : null;
   return <main className="mx-auto max-w-5xl space-y-6 p-6 md:p-10">
     <Link href={root} className="text-sm text-primary hover:underline">Back to schedules</Link>
     <h1 className="text-3xl font-semibold">Schedule and history</h1>
-    <p className="text-muted-foreground">{result.access.workspace.name} · {schedulePresets[result.schedule.preset_id]}</p>
+    <p className="text-muted-foreground">{result.access.locationName} · {schedulePresets[result.schedule.preset_id]}</p>
     <section className="space-y-3 rounded-xl border bg-card p-5" aria-label="Active">
       <h2 className="text-xl font-medium">Active: {active ? "On" : "Off"} · {scheduleFrequency(result.schedule)}</h2>
       <p className="text-sm">{active ? (hosted?.recurring?.next_run_at ? `Next run ${hosted.recurring.next_run_at}` : "No run is due yet.") : "Off: nothing runs automatically. Use Run now below, then turn it on when it works."} · Last outcome: {hosted?.recurring?.last_outcome ?? "never turned on"}</p>
       <p className="text-sm text-muted-foreground">Change the frequency in the <Link href={root} className="text-primary hover:underline">schedule draft</Link>; saving the draft turns the schedule off. Daily times use Asia/Nicosia; on a clock change, a missing time rolls forward and a repeated time uses its later occurrence. Every 7 days counts 168 hours after a run. Missed times produce at most one run.</p>
-      {canRun && active ? <SchedulePauseForm key={hosted!.recurring!.version} workspaceId={workspaceId} scheduleId={scheduleId} version={Number(result.schedule.version)} stateVersion={Number(hosted!.recurring!.version)} /> : null}
+      {canRun && active ? <SchedulePauseForm key={hosted!.recurring!.version} locationId={locationId} scheduleId={scheduleId} version={Number(result.schedule.version)} stateVersion={Number(hosted!.recurring!.version)} /> : null}
       {hosted?.recurring ? <><p className="text-sm">Last turned on by {hosted.recurring.authorized_by}</p><details><summary className="cursor-pointer text-sm">Pinned input snapshot</summary><pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(hosted.recurring.snapshot, null, 2)}</pre></details></> : null}
       {hosted?.ticks.length ? <details><summary className="cursor-pointer text-sm">Recent due-run outcomes</summary><ul className="space-y-1 text-sm">{hosted.ticks.map(tick => <li key={`${tick.due_at}:${tick.created_at}`}>Due {tick.due_at} · {tick.outcome} · checked {tick.created_at}</li>)}</ul></details> : null}
     </section>
@@ -45,8 +45,8 @@ export default async function ScheduleHistoryPage({ params, searchParams }: {
       <p className="whitespace-pre-wrap">{result.schedule.focus || "No focus saved."}</p>
       <p className="text-sm text-muted-foreground">Updated {result.schedule.updated_at}</p>
     </section>
-    {hosted && canRun && result.schedule.preset_id !== "youtube-discovery" ? <ScheduleRunNowForm key={`${scheduleId}:${result.schedule.version}:${hosted.recurring?.version ?? 0}`} workspaceId={workspaceId} scheduleId={scheduleId} version={Number(result.schedule.version)} stateVersion={Number(hosted.recurring?.version ?? 0)} isScript={result.schedule.preset_id === "script-brief"} ideas={hosted.ideas} active={active} /> : null}
-    {youtubeSettings ? <YoutubeScheduleForm key={`${scheduleId}:${result.schedule.version}:${hosted?.recurring?.version ?? 0}`} workspaceId={workspaceId} scheduleId={scheduleId} version={Number(result.schedule.version)} stateVersion={Number(hosted?.recurring?.version ?? 0)} settings={youtubeSettings} active={active} /> : null}
+    {hosted && canRun && result.schedule.preset_id !== "youtube-discovery" ? <ScheduleRunNowForm key={`${scheduleId}:${result.schedule.version}:${hosted.recurring?.version ?? 0}`} locationId={locationId} scheduleId={scheduleId} version={Number(result.schedule.version)} stateVersion={Number(hosted.recurring?.version ?? 0)} isScript={result.schedule.preset_id === "script-brief"} ideas={hosted.ideas} active={active} /> : null}
+    {youtubeSettings ? <YoutubeScheduleForm key={`${scheduleId}:${result.schedule.version}:${hosted?.recurring?.version ?? 0}`} locationId={locationId} scheduleId={scheduleId} version={Number(result.schedule.version)} stateVersion={Number(hosted?.recurring?.version ?? 0)} settings={youtubeSettings} active={active} /> : null}
     {!canRun ? <p>Return to your own account to run a workflow.</p> : null}
     <section className="space-y-4" aria-label="Hosted run history">
       <h2 className="text-xl font-medium">Runs</h2>
@@ -83,7 +83,7 @@ export default async function ScheduleHistoryPage({ params, searchParams }: {
           {result.hasMore ? <Link href={`${detail}?page=${page + 1}`}>More runs</Link> : null}
         </nav>
       </section>
-      <ImportProvenance workspaceId={result.access.workspace.id} imported={result.imported} />
+      <ImportProvenance locationId={result.access.locationId} imported={result.imported} />
     </> : null}
   </main>;
 }

@@ -4,8 +4,8 @@ import { getStudioScheduleImportSnapshot } from "@/lib/studio/schedule-history";
 
 export const dynamic = "force-dynamic";
 async function GETHandler(_request: Request, { params }: { params: Promise<{ importId: string }> }) {
-  const { workspaceId, importId } = await studioRouteParams(params, _request);
-  const result = await getStudioScheduleImportSnapshot(workspaceId, importId);
+  const { locationId, importId } = await studioRouteParams(params, _request);
+  const result = await getStudioScheduleImportSnapshot(locationId, importId);
   return scheduleImportDownloadResponse(result);
 }
 

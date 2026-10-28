@@ -3,8 +3,8 @@
 import { useActionState, useState } from "react";
 import { saveLibraryAction } from "../(tenant)/library/actions";
 
-export function LibraryRecordForm({ workspaceId, recordId, version, kind = "reference", title = "", payload = {} }: {
-  workspaceId: string; recordId: string; version: number;
+export function LibraryRecordForm({ locationId, recordId, version, kind = "reference", title = "", payload = {} }: {
+  locationId: string; recordId: string; version: number;
   kind?: "reference" | "channel"; title?: string; payload?: Record<string, unknown>;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
@@ -13,7 +13,7 @@ export function LibraryRecordForm({ workspaceId, recordId, version, kind = "refe
   const [recordKind, setRecordKind] = useState(kind);
   const [approved, setApproved] = useState(payload.approved === true);
   const [archived, setArchived] = useState(payload.archived === true);
-  const [state, action, pending] = useActionState(saveLibraryAction.bind(null, workspaceId, recordId, version), {});
+  const [state, action, pending] = useActionState(saveLibraryAction.bind(null, locationId, recordId, version), {});
   const inputClass = "mt-1 w-full rounded-md border bg-background p-3 text-sm";
   return (
     <form action={action} className="space-y-5 rounded-xl border bg-card p-6">

@@ -7,7 +7,7 @@ import { RefreshIdeaReview } from "../../idea-reviews/start-form";
 import { ScriptBriefApplyForm } from "../apply-form";
 export const dynamic = "force-dynamic";
 export default async function ScriptBriefPage({ params }: { params: Promise<{ reviewId: string }> }) {
-  const { workspaceId,reviewId }=await studioRouteParams(params); const data=await getStudioScriptBrief(workspaceId,reviewId); if(!data)notFound();
+  const { locationId,reviewId }=await studioRouteParams(params); const data=await getStudioScriptBrief(locationId,reviewId); if(!data)notFound();
   const {review,job,stale,application}=data;const brief=review.result;const idea=review.snapshot.ideas[0];
   return <main className="mx-auto max-w-4xl space-y-6 p-6 md:p-10"><header className="space-y-2">
     <Link href={`/studio/content/script-briefs`} className="text-sm text-primary hover:underline">Script briefs</Link>
@@ -23,8 +23,8 @@ export default async function ScriptBriefPage({ params }: { params: Promise<{ re
       <section className="space-y-3"><h2 className="text-xl font-medium">Claims and saved sources</h2>{brief.claims.map((c,i)=><article key={i} className="space-y-1 rounded-lg border p-4 text-sm"><p>{c.claim}</p><p className="font-medium">{c.verificationNeeded?"Verification required":"Source cited — still review its support"}</p><p className="text-muted-foreground">{c.sourceIds.length?c.sourceIds.map(id=>review.snapshot.ideas[0].sources.find(s=>s.id===id)?.title??id).join("; "):"No supporting source supplied"}</p></article>)}</section>
       <section className="space-y-2"><h2 className="text-xl font-medium">Verification gaps</h2><ul className="list-disc space-y-2 pl-5">{brief.verificationGaps.map((gap,i)=><li key={i}>{gap}</li>)}</ul></section>
       <section className="space-y-3"><h2 className="text-xl font-medium">First script draft</h2><pre className="whitespace-pre-wrap break-words rounded-xl border p-5 font-sans text-sm">{brief.script}</pre></section>
-      {!stale&&!application?<ScriptBriefApplyForm workspaceId={workspaceId} reviewId={reviewId} expectedVersion={Number(idea.version)}/>:null}
+      {!stale&&!application?<ScriptBriefApplyForm locationId={locationId} reviewId={reviewId} expectedVersion={Number(idea.version)}/>:null}
     </>:null}
-    <TextRunProvenance workspaceId={workspaceId} snapshot={review.snapshot}/>
+    <TextRunProvenance locationId={locationId} snapshot={review.snapshot}/>
   </main>;
 }

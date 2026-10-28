@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { reconciliationCostMicros, type ReconciliationCommand } from "@/lib/studio/transcription-reconciliation-policy";
 
-export function TranscriptionReviewForm({ workspaceId, attemptId, version, billingReviewed }: {
-  workspaceId: string; attemptId: string; version: number; billingReviewed: boolean;
+export function TranscriptionReviewForm({ locationId, attemptId, version, billingReviewed }: {
+  locationId: string; attemptId: string; version: number; billingReviewed: boolean;
 }) {
   const tenantHeaders = useStudioTenantHeaders();
   const router = useRouter();

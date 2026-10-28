@@ -12,18 +12,18 @@ export default async function StudioContentPage({ params, searchParams }: {
   params: Promise<{  }>;
   searchParams: Promise<{ archived?: string | string[]; q?: string | string[]; stage?: string | string[] }>;
 }) {
-  const { workspaceId } = await studioRouteParams(params);
+  const { locationId } = await studioRouteParams(params);
   const query = await searchParams;
   const filters = readContentFilters(query);
   const { search, showArchived, stage: selectedStage } = filters;
-  const result = await listStudioContent(workspaceId, showArchived);
+  const result = await listStudioContent(locationId, showArchived);
   if (!result) notFound();
   const records = filterContentSummaries(result.records, filters);
   const stages = selectedStage === "all" ? [...CONTENT_STAGES, "unclassified"] as const : [selectedStage];
   const root = `/studio`;
   return (
     <main className="mx-auto max-w-6xl space-y-8 p-6 md:p-10">
-      <header className="space-y-2"><nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.workspace.name}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">Content pipeline</h1><p className="text-muted-foreground">Develop ideas, write scripts, and move each piece through production to review.</p></header>
+      <header className="space-y-2"><nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">Content pipeline</h1><p className="text-muted-foreground">Develop ideas, write scripts, and move each piece through production to review.</p></header>
       <Link href={`${root}/content/idea-reviews`} className="inline-block text-sm text-primary hover:underline">Review saved ideas with AI</Link>
       <Link href={`${root}/content/script-briefs`} className="ml-4 inline-block text-sm text-primary hover:underline">Recent script briefs</Link>
       <form key={JSON.stringify(filters)} method="get" className="flex flex-wrap items-end gap-4 rounded-lg border p-4" aria-label="Content pipeline filters">
@@ -51,7 +51,7 @@ export default async function StudioContentPage({ params, searchParams }: {
           </section>;
         })}
       </div>
-      <details open={result.records.length === 0} className="max-w-4xl space-y-4"><summary className="cursor-pointer text-xl font-medium">Add an idea or content piece</summary><ContentRecordForm workspaceId={workspaceId} recordId={randomUUID()} version={0} /></details>
+      <details open={result.records.length === 0} className="max-w-4xl space-y-4"><summary className="cursor-pointer text-xl font-medium">Add an idea or content piece</summary><ContentRecordForm locationId={locationId} recordId={randomUUID()} version={0} /></details>
     </main>
   );
 }

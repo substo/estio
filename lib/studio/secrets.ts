@@ -51,4 +51,4 @@ export function decryptStudioSecret(value: StudioSecretCiphertext, context: stri
   return Buffer.concat([decipher.update(Buffer.from(value.ciphertext, "base64")), decipher.final()]).toString("utf8");
 }
 
-export const aiCredentialContext = (workspaceId: string, provider: string) => `studio:ai-credential:${workspaceId.toLowerCase()}:${provider}`;
+export const aiCredentialContext = (locationId: string, provider: string) => `studio:ai-credential:${locationId.toLowerCase()}:${provider}`;

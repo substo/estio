@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getStudioWorkspaceAccess } from "@/lib/studio/access";
+import { getStudioAccess } from "@/lib/studio/access";
 import { reviewStudioKnowledgeInsight } from "@/lib/studio/knowledge";
 import { isKnowledgeId, maySubmitKnowledgeReview, readKnowledgeReviewDraft } from "@/lib/studio/knowledge-policy";
 import { StudioRestError } from "@/lib/studio/rest";
@@ -11,22 +11,22 @@ import { StudioRestError } from "@/lib/studio/rest";
 export type KnowledgeReviewActionState = { error?: string };
 
 export async function submitKnowledgeReviewAction(
-  workspaceId: string,
+  locationId: string,
   insightId: string,
   expectedVersion: number,
   _previous: KnowledgeReviewActionState,
   form: FormData,
 ): Promise<KnowledgeReviewActionState> {
-  const access = await getStudioWorkspaceAccess(workspaceId);
+  const access = await getStudioAccess(locationId);
   if (!access || !isKnowledgeId(insightId)) notFound();
-  if (!maySubmitKnowledgeReview({ hasWorkspaceAccess: true, isImpersonating: Boolean((await auth()).actor) })) {
+  if (!maySubmitKnowledgeReview({ hasLocationAccess: true, isImpersonating: Boolean((await auth()).actor) })) {
     return { error: "Review decisions are unavailable during impersonation. Return to your own account to review this finding." };
   }
   let draft;
   try { draft = readKnowledgeReviewDraft(form); }
   catch (error) { return { error: error instanceof Error ? error.message : "Check your review decision." }; }
   try {
-    await reviewStudioKnowledgeInsight(workspaceId, insightId, expectedVersion, draft.action, draft.reason);
+    await reviewStudioKnowledgeInsight(locationId, insightId, expectedVersion, draft.action, draft.reason);
   } catch (error) {
     if (error instanceof StudioRestError && error.code === "40001") {
       return { error: "This finding changed in another tab. Your note is still here. Copy it before reloading the latest decision." };

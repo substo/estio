@@ -10,10 +10,10 @@ const labels: Record<string, string> = { no_charge: "Confirmed no charge", bille
 export default async function TranscriptionReconciliationPage({ params, searchParams }: {
   params: Promise<{  }>; searchParams: Promise<{ page?: string }>;
 }) {
-  const { workspaceId } = await studioRouteParams(params);
+  const { locationId } = await studioRouteParams(params);
   const raw = Number((await searchParams).page);
   const page = Number.isSafeInteger(raw) && raw > 0 ? Math.min(1000, raw) : 0;
-  const result = await listStudioTranscriptionReviews(workspaceId, page);
+  const result = await listStudioTranscriptionReviews(locationId, page);
   if (!result) notFound();
   return <main className="mx-auto max-w-4xl space-y-6 p-6 md:p-10">
     <header className="space-y-2">
@@ -39,7 +39,7 @@ export default async function TranscriptionReconciliationPage({ params, searchPa
           <p className="whitespace-pre-wrap break-words">{e.evidence}</p>
           <p className="text-muted-foreground">{e.actor_clerk_user_id} · {when(e.created_at)}</p>
         </div>)}
-        {!a.replacement_authorized ? <TranscriptionReviewForm workspaceId={workspaceId} attemptId={a.id} version={Number(a.review_version)} billingReviewed={!!a.billing_outcome} /> : null}
+        {!a.replacement_authorized ? <TranscriptionReviewForm locationId={locationId} attemptId={a.id} version={Number(a.review_version)} billingReviewed={!!a.billing_outcome} /> : null}
       </article>;
     })}
     {!result.attempts.length ? <p>No uncertain or in-flight AI attempts on this page.</p> : null}

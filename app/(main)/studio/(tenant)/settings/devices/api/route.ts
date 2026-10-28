@@ -9,8 +9,8 @@ export async function GET(request: Request) {
   try {
     const profile = await getPlatformProfile();
     if (!profile) return deviceJson({ ok: false, error: "Sign in as yourself." }, 401);
-    const { workspaceId } = await studioRouteParams(Promise.resolve({}), request);
-    const result = await getStudioDevices(workspaceId);
+    const { locationId } = await studioRouteParams(Promise.resolve({}), request);
+    const result = await getStudioDevices(locationId);
     if (!result) return deviceJson({ ok: false, error: "Access denied." }, 403);
     return deviceJson({ ok: true, data: result });
   } catch (error) {
@@ -24,9 +24,9 @@ export async function POST(request: Request) {
     const profile = await getPlatformProfile();
     if (!profile) return deviceJson({ ok: false, error: "Sign in as yourself." }, 401);
     if (request.headers.get("origin") !== profile.origin) return deviceJson({ ok: false, error: "Forbidden." }, 403);
-    const { workspaceId } = await studioRouteParams(Promise.resolve({}), request);
+    const { locationId } = await studioRouteParams(Promise.resolve({}), request);
     const command = readDeviceManagementCommand(await readDeviceJson(request));
-    return deviceJson({ ok: true, data: await executeStudioDeviceManagement(workspaceId, command) });
+    return deviceJson({ ok: true, data: await executeStudioDeviceManagement(locationId, command) });
   } catch (error) {
     if (error instanceof StudioTenantContextError) return deviceJson({ ok: false, error: error.message }, error.status);
     return deviceError(error);

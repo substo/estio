@@ -1,6 +1,6 @@
 import type { ScheduleImportProvenance } from "@/lib/studio/schedule-history-reader";
 
-export function ImportProvenance({ workspaceId, imported }: { workspaceId: string; imported: ScheduleImportProvenance | null }) {
+export function ImportProvenance({ locationId, imported }: { locationId: string; imported: ScheduleImportProvenance | null }) {
   if (!imported) return <p className="text-sm text-muted-foreground">No import provenance is available.</p>;
   const issues = Array.isArray(imported.preview_evidence.issues) ? imported.preview_evidence.issues : [];
   return <section className="space-y-3 rounded-xl border bg-card p-5" aria-label="Import provenance">

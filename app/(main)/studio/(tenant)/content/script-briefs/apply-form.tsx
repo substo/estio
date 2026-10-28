@@ -2,7 +2,7 @@
 import { useStudioTenantHeaders } from "../../../_components/studio-tenant-context";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-export function ScriptBriefApplyForm({ workspaceId, reviewId, expectedVersion }: { workspaceId: string; reviewId: string; expectedVersion: number }) {
+export function ScriptBriefApplyForm({ locationId, reviewId, expectedVersion }: { locationId: string; reviewId: string; expectedVersion: number }) {
   const tenantHeaders = useStudioTenantHeaders();
   const router = useRouter(); const [confirm,setConfirm] = useState(false); const [pending,setPending] = useState(false);
   const [error,setError] = useState<string|null>(null); const [retry,setRetry] = useState<object|null>(null); const [saved,setSaved] = useState(false);

@@ -27,10 +27,10 @@ test("stage, audience stage and pillar reject unsupported values without coercio
 });
 
 test("pipeline projections stay scoped and do not fetch script/transcript bodies", () => {
-  const query = contentListQuery("authorized-workspace", false);
-  assert.equal(query.workspace_id, "eq.authorized-workspace"); assert.equal(query.kind, "eq.content");
-  assert.equal(query.archived, "eq.false"); assert.equal(contentListQuery("authorized-workspace", true).archived, undefined);
-  assert.match(query.select, /stage:payload->>stage/); assert.doesNotMatch(query.select, /script|transcript/);
+  const query = contentListQuery("authorized-location", false);
+  assert.deepEqual(query.values, ["authorized-location"]); assert.match(query.sql, /kind = 'content'/);
+  assert.match(query.sql, /archived = false/); assert.doesNotMatch(contentListQuery("authorized-location", true).sql, /archived = false/);
+  assert.match(query.sql, /payload->>'stage' as stage/); assert.doesNotMatch(query.sql, /script|transcript/);
   assert.equal(contentStageForDisplay("ready"), "ready"); assert.equal(contentStageForDisplay("not-a-stage"), "unclassified");
 });
 
@@ -66,6 +66,6 @@ test("combined stage and search filters retain exact summary rows, ordering and 
   assert.deepEqual(filterContentSummaries(records, readContentFilters({ stage: ["idea", "script"] })), records);
   assert.deepEqual(records, before, "filtering cannot rewrite imported stages, approval, versions or text");
   // Archive visibility is still scoped by the existing authorized list query.
-  assert.equal(contentListQuery("resolved-workspace", false).archived, "eq.false");
-  assert.equal(contentListQuery("resolved-workspace", true).archived, undefined);
+  assert.match(contentListQuery("resolved-location", false).text, /and archived = false/);
+  assert.doesNotMatch(contentListQuery("resolved-location", true).text, /archived = false/);
 });

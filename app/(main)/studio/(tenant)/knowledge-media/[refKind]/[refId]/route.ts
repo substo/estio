@@ -3,8 +3,8 @@ import { studioKnowledgeMediaRedirectResponse } from "@/lib/studio/media-downloa
 
 export const dynamic = "force-dynamic";
 async function GETHandler(_request: Request, { params }: { params: Promise<{ refKind: string; refId: string }> }) {
-  const { workspaceId, refKind, refId } = await studioRouteParams(params, _request);
-  return studioKnowledgeMediaRedirectResponse(workspaceId, refKind, refId);
+  const { locationId, refKind, refId } = await studioRouteParams(params, _request);
+  return studioKnowledgeMediaRedirectResponse(locationId, refKind, refId);
 }
 
 export const GET = withStudioRoute(GETHandler);

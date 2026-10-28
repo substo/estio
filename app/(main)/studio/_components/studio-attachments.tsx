@@ -3,7 +3,7 @@ import { studioMediaKind } from "@/lib/studio/media-policy";
 type AttachmentRow = { id: string; payload: Record<string, unknown>; media_object_id: string | null };
 
 /** Media URLs go through the authorized route, which issues a short-lived private R2 link. */
-export function StudioAttachments({ workspaceId, files }: { workspaceId: string; files: AttachmentRow[] }) {
+export function StudioAttachments({ locationId, files }: { locationId: string; files: AttachmentRow[] }) {
   if (!files.length) return null;
   return (
     <section className="space-y-2">

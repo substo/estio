@@ -12,6 +12,6 @@ export function validRecordLinkChange(source: string, target: string, version: n
     && Number.isSafeInteger(version) && version > 0 && (action === "add" || action === "remove");
 }
 export function recordLinkCandidates(workspace: string, source: string, page: number, kind: RecordLinkKind): Record<string, string> {
-  return { select: "id,kind,title,archived", workspace_id: `eq.${workspace}`, id: `neq.${source}`,
+  return { select: "id,kind,title,archived", location_id: `eq.${workspace}`, id: `neq.${source}`,
     ...(kind === "all" ? {} : { kind: `eq.${kind}` }), order: "title.asc,id.asc", limit: "21", offset: String(page * 20) };
 }

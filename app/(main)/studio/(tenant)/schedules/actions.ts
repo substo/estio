@@ -5,12 +5,12 @@ import { readScheduleDraft } from "@/lib/studio/schedule-policy";
 import { saveStudioSchedule } from "@/lib/studio/schedules";
 import { StudioRestError } from "@/lib/studio/rest";
 
-export async function saveScheduleAction(workspaceId: string, id: string, version: number,
+export async function saveScheduleAction(locationId: string, id: string, version: number,
   _previous: { error?: string }, form: FormData): Promise<{ error?: string }> {
   let draft;
   try { draft = readScheduleDraft(form); }
   catch (error) { return { error: error instanceof Error ? error.message : "Check the schedule fields." }; }
-  try { await saveStudioSchedule(workspaceId, id, version, draft); }
+  try { await saveStudioSchedule(locationId, id, version, draft); }
   catch (error) {
     if (error instanceof StudioRestError && error.code === "40001") {
       return { error: "This schedule changed or was already saved. Copy your changes before reloading." };

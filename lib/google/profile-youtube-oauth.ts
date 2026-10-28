@@ -49,6 +49,6 @@ export async function finishProfileYoutube(request: NextRequest) {
 export async function removeProfileYoutube(request: NextRequest) {
   const profile = await getPlatformProfile(); if (!profile) return new Response("Unauthorized", { status: 401 });
   if (request.headers.get("origin") !== profile.origin) return new Response("Forbidden", { status: 403 });
-  await studioRest("rpc/platform_clear_youtube_connection", { method: "POST", body: JSON.stringify({ p_brand: profile.brand, p_user: profile.userId }) });
+  await studioRest("rpc/platform_clear_youtube_connection", { method: "POST", body: JSON.stringify({ p_app: profile.brand, p_user: profile.userId }) });
   return response(profile.origin, "removed");
 }

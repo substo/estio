@@ -1,6 +1,6 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
-import { getStudioWorkspaceAccess, type StudioWorkspaceAccess } from "./access";
+import { getStudioAccess, type StudioAccess } from "./access";
 import { canManageStudioAi } from "./ai-settings-policy";
 import { queryPath, studioRest } from "./rest";
 
@@ -12,7 +12,7 @@ export interface StudioJobRow {
   device: { revoked_at: string | null } | null;
 }
 /** Device retries consume the paired manager's subscription authority. */
-export function canRetryStudioJob(access: StudioWorkspaceAccess, job: Pick<StudioJobRow, "execution_target" | "device">) {
+export function canRetryStudioJob(access: StudioAccess, job: Pick<StudioJobRow, "execution_target" | "device">) {
   return job.execution_target === "hosted" || (canManageStudioAi(access)
     && job.device !== null && job.device.revoked_at === null);
 }
@@ -35,13 +35,13 @@ export function studioDiagnosticDisplayResult(kind: string, value: unknown): str
   return Object.keys(safe).length ? JSON.stringify(safe, null, 2) : null;
 }
 
-export async function listStudioJobs(workspaceId: string, page = 0) {
-  const access = await getStudioWorkspaceAccess(workspaceId);
+export async function listStudioJobs(locationId: string, page = 0) {
+  const access = await getStudioAccess(locationId);
   if (!access) return null;
   const [jobs, workers] = await Promise.all([
     studioRest<StudioJobRow[]>(queryPath("studio_jobs", {
       select: "id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at,execution_target,device_id,result,device:studio_devices(revoked_at)",
-      workspace_id: `eq.${access.workspace.id}`, order: "created_at.desc,id.asc", limit: "26", offset: String(page * 25) })),
+      location_id: `eq.${access.locationId}`, order: "created_at.desc,id.asc", limit: "26", offset: String(page * 25) })),
     studioRest<Array<{ seen_at: string }>>(queryPath("studio_worker_heartbeats", { select: "seen_at", order: "seen_at.desc", limit: "1" })),
   ]);
   const lastSeen = workers[0]?.seen_at ?? null;
@@ -49,30 +49,30 @@ export async function listStudioJobs(workspaceId: string, page = 0) {
     workerOnline: lastSeen !== null && Date.now() - Date.parse(lastSeen) < WORKER_ONLINE_SECONDS * 1000 };
 }
 
-async function requireMember(workspaceId: string) {
-  const access = await getStudioWorkspaceAccess(workspaceId);
+async function requireMember(locationId: string) {
+  const access = await getStudioAccess(locationId);
   if (!access || (await auth()).actor) throw new Error("Job actions require your own authorized account.");
   return access;
 }
 
-export async function studioJobAction(workspaceId: string, jobId: string, action: "retry" | "cancel") {
-  const access = await requireMember(workspaceId);
+export async function studioJobAction(locationId: string, jobId: string, action: "retry" | "cancel") {
+  const access = await requireMember(locationId);
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("Invalid job.");
   if (action === "retry") {
     const jobs = await studioRest<Array<Pick<StudioJobRow, "execution_target" | "device">>>(queryPath("studio_jobs", {
-      select: "execution_target,device:studio_devices(revoked_at)", workspace_id: `eq.${access.workspace.id}`, id: `eq.${jobId}`, limit: "1" }));
+      select: "execution_target,device:studio_devices(revoked_at)", location_id: `eq.${access.locationId}`, id: `eq.${jobId}`, limit: "1" }));
     if (!jobs[0]) throw new Error("Job not found.");
     if (!canRetryStudioJob(access, jobs[0])) throw new Error("A Business admin and an active paired Mac are required to retry this job.");
   }
   return studioRest("rpc/studio_member_job_action", { method: "POST", body: JSON.stringify({
-    p_workspace_id: access.workspace.id, p_actor_brand: access.brand, p_clerk_user_id: access.userId, p_job_id: jobId, p_action: action }) });
+    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_job_id: jobId, p_action: action }) });
 }
 
 /** Queue a no-cost worker check; repeated clicks within a minute reuse one job. */
-export async function enqueueStudioWorkerCheck(workspaceId: string) {
-  const access = await requireMember(workspaceId);
+export async function enqueueStudioWorkerCheck(locationId: string) {
+  const access = await requireMember(locationId);
   const minute = Math.floor(Date.now() / 60_000);
   return studioRest("rpc/studio_enqueue_job", { method: "POST", body: JSON.stringify({
-    p_workspace_id: access.workspace.id, p_kind: "studio.diagnostic", p_payload: {}, p_idempotency_key: `diagnostic:${access.userId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100)}:${minute}`,
+    p_location_id: access.locationId, p_kind: "studio.diagnostic", p_payload: {}, p_idempotency_key: `diagnostic:${access.userId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100)}:${minute}`,
     p_created_by: access.userId, p_max_attempts: 3 }) });
 }

@@ -5,15 +5,15 @@ import { finishStudioUpload, startStudioUpload, StudioUploadError } from "@/lib/
 
 type Started = { ok: true; uploadId: string; url: string; headers: Record<string, string> } | { ok: false; error: string };
 
-export async function startUploadAction(workspaceId: string, input: { recordId: string; filename: string; contentType: string; byteSize: number }): Promise<Started> {
+export async function startUploadAction(locationId: string, input: { recordId: string; filename: string; contentType: string; byteSize: number }): Promise<Started> {
   let request;
   try { request = readStudioUploadRequest(input); } catch (error) { return { ok: false, error: (error as Error).message }; }
-  try { return { ok: true, ...await startStudioUpload(workspaceId, request) }; }
+  try { return { ok: true, ...await startStudioUpload(locationId, request) }; }
   catch (error) { return { ok: false, error: error instanceof StudioUploadError ? error.message : "Could not start the upload. Check your access and try again." }; }
 }
 
-export async function finishUploadAction(workspaceId: string, uploadId: string, recordPath: string): Promise<{ ok: boolean; error?: string }> {
-  try { await finishStudioUpload(workspaceId, uploadId); }
+export async function finishUploadAction(locationId: string, uploadId: string, recordPath: string): Promise<{ ok: boolean; error?: string }> {
+  try { await finishStudioUpload(locationId, uploadId); }
   catch (error) { return { ok: false, error: error instanceof StudioUploadError ? error.message : "Could not register the upload. Try again." }; }
   if (recordPath.startsWith(`/studio/`)) revalidatePath(recordPath);
   return { ok: true };

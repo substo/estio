@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 export type KnowledgeStatus = "pending" | "approved" | "rejected" | "all";
 export type KnowledgeReviewAction = "approve" | "reject" | "reopen";
 
@@ -5,8 +6,8 @@ export function availableKnowledgeReviewActions(status: Exclude<KnowledgeStatus,
   return status === "pending" ? ["approve", "reject"] : ["reopen"];
 }
 
-export function maySubmitKnowledgeReview(context: { hasWorkspaceAccess: boolean; isImpersonating: boolean }): boolean {
-  return context.hasWorkspaceAccess && !context.isImpersonating;
+export function maySubmitKnowledgeReview(context: { hasLocationAccess: boolean; isImpersonating: boolean }): boolean {
+  return context.hasLocationAccess && !context.isImpersonating;
 }
 
 /** Keep the review note exact; only constrain its size and the submitted action. */
@@ -41,21 +42,9 @@ export function knowledgeTopic(value: string | string[] | undefined): string | n
   return typeof value === "string" && isKnowledgeId(value) ? value.toLowerCase() : null;
 }
 
-export function knowledgeListQuery(workspaceId: string, status: KnowledgeStatus, topicId: string | null, page: number): Record<string, string> {
-  return {
-    select: "id,source_id,topic_id,status,statement,kind:payload->>kind,suggested_topic:payload->>suggested_topic",
-    workspace_id: `eq.${workspaceId}`,
-    ...(status === "all" ? {} : { status: `eq.${status}` }),
-    ...(topicId ? { topic_id: `eq.${topicId}` } : {}),
-    order: "id.asc", limit: "51", offset: String(page * 50),
-  };
-}
-
-export function knowledgeDetailPageQuery(workspaceId: string, field: "insight_id" | "source_id", id: string, page: number, select: string): Record<string, string> {
-  return { select, workspace_id: `eq.${workspaceId}`, [field]: `eq.${id}`, order: "id.asc", limit: "51", offset: String(page * 50) };
-}
-
-/** Imported review IDs are random UUIDs; event time orders the history. */
-export function knowledgeReviewPageQuery(workspaceId: string, insightId: string, page: number): Record<string, string> {
-  return { ...knowledgeDetailPageQuery(workspaceId, "insight_id", insightId, page, "id,payload"), order: "payload->>at.asc,id.asc" };
+/** One list page (51 rows: the 51st tells whether there is a next page), for an authorized Location. */
+export function knowledgeListQuery(locationId: string, status: KnowledgeStatus, topicId: string | null, page: number): Prisma.Sql {
+  return Prisma.sql`select id, source_id, topic_id, status, statement, payload->>'kind' as kind, payload->>'suggested_topic' as suggested_topic
+    from studio.studio_knowledge_insights where location_id = ${locationId}${status === "all" ? Prisma.empty : Prisma.sql` and status = ${status}`}${topicId ? Prisma.sql` and topic_id = ${topicId}::uuid` : Prisma.empty}
+    order by id asc limit 51 offset ${page * 50}`;
 }

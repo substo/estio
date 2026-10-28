@@ -2,9 +2,9 @@ import type { UserRole } from "@prisma/client";
 
 export const MAX_MONTHLY_BUDGET_USD = 100_000;
 
-/** Substo owner/admin, or an Estio location ADMIN. Impersonation is checked separately. */
-export function canManageStudioAi(access: { brand: "estio"; role: UserRole } | { brand: "substo"; role: "owner" | "admin" | "member" }) {
-  return access.brand === "substo" ? access.role === "owner" || access.role === "admin" : access.role === "ADMIN";
+/** Location admins in either app may manage AI settings. Impersonation is checked separately. */
+export function canManageStudioAi(access: { app: "estio" | "substo"; role: UserRole }) {
+  return access.role === "ADMIN";
 }
 
 /** OpenAI secret keys (project, service-account, or legacy user keys). */

@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { availableKnowledgeReviewActions, type KnowledgeReviewAction } from "@/lib/studio/knowledge-policy";
 import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-command";
 const labels = { edit: "Save statement edit and return to pending", approve: "Approve finding and topic", reject: "Reject finding", reopen: "Reopen for review" };
-export function ReviewDecisionForm({ workspaceId, insightId, version, status, statement, suggestedTopic, currentTopic, initialTopics }: {
- workspaceId: string; insightId: string; version: number; status: "pending" | "approved" | "rejected";
+export function ReviewDecisionForm({ locationId, insightId, version, status, statement, suggestedTopic, currentTopic, initialTopics }: {
+ locationId: string; insightId: string; version: number; status: "pending" | "approved" | "rejected";
  statement: string; suggestedTopic: string; currentTopic: { id: string; name: string } | null;
  initialTopics: { topics: Array<{ id: string; name: string }>; hasMore: boolean };
 }) {

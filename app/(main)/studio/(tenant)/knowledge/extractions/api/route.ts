@@ -5,8 +5,8 @@ import {readKnowledgeExtractionCommand} from "@/lib/studio/knowledge-extraction-
 import {executeKnowledgeExtraction} from "@/lib/studio/knowledge-extraction";
 export const dynamic="force-dynamic";
 async function POSTHandler(request:Request,{params}:{params: Promise<{  }>}){
- const {workspaceId}=await studioRouteParams(params, request);
- return studioCommandResponse(request,{profile:getPlatformProfile,parse:readKnowledgeExtractionCommand,execute:command=>executeKnowledgeExtraction(workspaceId,command)});
+ const {locationId}=await studioRouteParams(params, request);
+ return studioCommandResponse(request,{profile:getPlatformProfile,parse:readKnowledgeExtractionCommand,execute:command=>executeKnowledgeExtraction(locationId,command)});
 }
 
 export const POST = withStudioRoute(POSTHandler);

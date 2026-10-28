@@ -20,7 +20,7 @@ const id = "00000000-0000-4000-8000-000000000001";
 const config: CompanionConfig = { version: 2, origin: "https://studio.example", name: "Test Mac", deviceId: id };
 const token = `studio_device_${"a".repeat(43)}`;
 const credentials = { origin: config.origin, token };
-const job = { id, workspace_id: id, kind: "studio.diagnostic", payload: {}, lease_token: id, lease_expires_at: new Date(Date.now() + 120000).toISOString(), attempts: 1, max_attempts: 2 };
+const job = { id, location_id: id, kind: "studio.diagnostic", payload: {}, lease_token: id, lease_expires_at: new Date(Date.now() + 120000).toISOString(), attempts: 1, max_attempts: 2 };
 const context = { workerId: "mac:test", signal: new AbortController().signal };
 const envelope = (data: unknown) => Response.json({ ok: true, data });
 

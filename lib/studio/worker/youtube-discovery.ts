@@ -9,24 +9,24 @@ export interface YoutubeDiscoveryContext {
 }
 export interface YoutubeDiscoveryDeps {
   rest: ScheduleRest;
-  authorize(workspaceId: string, userId: string): Promise<boolean>;
+  authorize(locationId: string, userId: string): Promise<boolean>;
   discover(context: YoutubeDiscoveryContext): Promise<string[]>;
 }
 export function createYoutubeDiscoveryHandler(deps: YoutubeDiscoveryDeps): StudioJobHandler {
   return async (job, context) => {
     const id = String(job.payload.discoveryRunId ?? "");
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new StudioJobError("invalid_job_payload", "This discovery job is invalid.", false);
-    const [run] = await deps.rest<Array<{ result: Record<string, unknown> | null; actor_brand: string; created_by_clerk_user_id: string }>>(queryPath("studio_youtube_schedule_runs", {
-      select: "result,actor_brand,created_by_clerk_user_id", workspace_id: `eq.${job.workspace_id}`, id: `eq.${id}`, job_id: `eq.${job.id}`, limit: "1" }));
+    const [run] = await deps.rest<Array<{ result: Record<string, unknown> | null; actor_app: string; created_by_clerk_user_id: string }>>(queryPath("studio_youtube_schedule_runs", {
+      select: "result,actor_app,created_by_clerk_user_id", location_id: `eq.${job.location_id}`, id: `eq.${id}`, job_id: `eq.${job.id}`, limit: "1" }));
     if (!run) throw new StudioJobError("discovery_missing", "This discovery run is unavailable.", false);
     if (run.result) return { discoveryRunId: id, alreadySaved: true };
-    const fence = { p_workspace: job.workspace_id, p_run: id, p_job: job.id, p_worker: context.workerId, p_lease: job.lease_token };
+    const fence = { p_location: job.location_id, p_run: id, p_job: job.id, p_worker: context.workerId, p_lease: job.lease_token };
     const rpc = <T>(name: string, body: Record<string, unknown> = {}) => deps.rest<T>(`rpc/${name}`, { method: "POST", body: JSON.stringify({ ...fence, ...body }) });
     const active = () => { if (context.signal.aborted) throw new StudioJobError("worker_lease_lost", "The worker lost its lease.", true); };
     let stop: string | null = null;
     async function authority() {
       active();
-      if (run!.actor_brand === "estio" && !await deps.authorize(job.workspace_id, run!.created_by_clerk_user_id)) {
+      if (run!.actor_app === "estio" && !await deps.authorize(job.location_id, run!.created_by_clerk_user_id)) {
         stop = "authority_revoked"; throw new StudioJobError("discovery_authority_revoked", "Discovery authorization no longer has workspace access.", false);
       }
     }
@@ -62,6 +62,6 @@ export async function discoverScheduledYoutube(input: YoutubeDiscoveryContext, r
   return [...new Set(result.videos.map(video => video.id))].slice(0, 10);
 }
 export function productionYoutubeDiscoveryDeps(rest: ScheduleRest): YoutubeDiscoveryDeps {
-  return { rest, authorize: (workspaceId, userId) => authorizeEstioSchedule(rest, workspaceId, userId),
+  return { rest, authorize: (locationId, userId) => authorizeEstioSchedule(rest, locationId, userId),
     discover: input => discoverScheduledYoutube(input, rest) };
 }

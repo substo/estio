@@ -12,7 +12,7 @@ const snapshot: IdeaSnapshot = { focus: "AI freelancers", ideas: [{ id: ideaId, 
   sources: [{ id: sourceId, version: 1, title: "Saved research", url: "https://example.com/source", excerpt: "User saved text", excerpted: true }] }] };
 const result = { recommendation: ideaId, reason: "The best supported idea.", verificationGap: "Verify the claim with independent evidence.", scores: [{
   ideaId, relevance: 4, evidence: 2, timeliness: 3, differentiation: 4, ease: 5, rationale: "Useful, evidence remains incomplete.", sourceIds: [sourceId] }] };
-const job = { id: "f4000000-0000-4000-8000-000000000001", workspace_id: "f1000000-0000-4000-8000-000000000001", kind: "studio.idea_review",
+const job = { id: "f4000000-0000-4000-8000-000000000001", location_id: "f1000000-0000-4000-8000-000000000001", kind: "studio.idea_review",
   payload: { reviewId: "f3000000-0000-4000-8000-000000000001" }, lease_token: "claim", attempts: 1, max_attempts: 5 };
 const command = { requestId: "f5000000-0000-4000-8000-000000000001", ideas: [{ id: ideaId, version: 1 }], focus: "AI", confirmPaid: true };
 const providerBody = () => ({ id: "resp_synthetic", status: "completed", model: IDEA_REVIEW_MODEL, service_tier: "default", usage: { input_tokens: 1001, output_tokens: 100,
@@ -62,7 +62,7 @@ function fixture(options: { outcome?: string; lostCommit?: boolean; failCommit?:
   const deps: IdeaReviewDeps={
     async rest<T>(p: string,init?: RequestInit) {
       if(p.startsWith("studio_idea_reviews")) return [{snapshot,result:saved?result:null,model:IDEA_REVIEW_MODEL,prompt_version:"studio.idea-review.v1",workflow:"idea_review"}] as T;
-      if(p.startsWith("studio_workspace_ai_credentials")) return (options.missingKey?[]:[{}]) as T;
+      if(p.startsWith("studio_location_ai_credentials")) return (options.missingKey?[]:[{}]) as T;
       const body=JSON.parse(String(init?.body)); calls.push({name:p,body});
       if(p.endsWith("studio_begin_text_run_attempt")) { if(state) return {outcome:state} as T; state="uncertain"; return {outcome:"started",attempt_id:"a"} as T; }
       if(p.endsWith("studio_finish_text_run_attempt")) {
@@ -85,7 +85,7 @@ test("worker commits paid results once and reuses a saved response after respons
     if(lostCommit) await assert.rejects(run(job,context)); else await run(job,context);
     await run(job,context); assert.equal(f.count(),1);
     assert.equal(f.calls[0].name,"rpc/studio_begin_text_run_attempt");
-    assert.ok(f.calls.every(c => c.body.p_lease_token === "claim" && c.body.p_workspace_id === job.workspace_id));
+    assert.ok(f.calls.every(c => c.body.p_lease_token === "claim" && c.body.p_location_id === job.location_id));
   }
 });
 
@@ -118,8 +118,8 @@ test("enqueue HTTP boundary enforces own origin, explicit spending and stable re
 test("recurring authority denial/outage and paused SQL consent stop before paid generation", async () => {
   for (const outcome of ["denied", "outage", "schedule_inactive"]) {
     const f = fixture(outcome === "schedule_inactive" ? { outcome } : {});
-    f.deps.authorizeScheduledJob = async (workspaceId, jobId) => {
-      assert.equal(workspaceId, job.workspace_id); assert.equal(jobId, job.id);
+    f.deps.authorizeScheduledJob = async (locationId, jobId) => {
+      assert.equal(locationId, job.location_id); assert.equal(jobId, job.id);
       if (outcome === "outage") throw Error("Authority store unavailable");
       return outcome !== "denied";
     };

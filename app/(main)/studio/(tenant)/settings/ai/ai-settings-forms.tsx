@@ -9,9 +9,9 @@ function Status({ state }: { state: { error?: string; saved?: string } }) {
   return state.saved ? <p role="status" className="text-sm text-muted-foreground">{state.saved}</p> : null;
 }
 
-export function OpenAiKeyForm({ workspaceId, hasKey }: { workspaceId: string; hasKey: boolean }) {
-  const [state, action, pending] = useActionState(saveOpenAiKeyAction.bind(null, workspaceId), {});
-  const [removeState, remove, removing] = useActionState(removeOpenAiKeyAction.bind(null, workspaceId), {});
+export function OpenAiKeyForm({ locationId, hasKey }: { locationId: string; hasKey: boolean }) {
+  const [state, action, pending] = useActionState(saveOpenAiKeyAction.bind(null, locationId), {});
+  const [removeState, remove, removing] = useActionState(removeOpenAiKeyAction.bind(null, locationId), {});
   return <div className="space-y-3">
     <form action={action} className="space-y-3">
       <label className="block text-sm">{hasKey ? "Replace OpenAI API key" : "OpenAI API key"}
@@ -24,8 +24,8 @@ export function OpenAiKeyForm({ workspaceId, hasKey }: { workspaceId: string; ha
   </div>;
 }
 
-export function BudgetForm({ workspaceId, budgetUsd }: { workspaceId: string; budgetUsd: string }) {
-  const [state, action, pending] = useActionState(saveBudgetAction.bind(null, workspaceId), {});
+export function BudgetForm({ locationId, budgetUsd }: { locationId: string; budgetUsd: string }) {
+  const [state, action, pending] = useActionState(saveBudgetAction.bind(null, locationId), {});
   return <form action={action} className="space-y-3">
     <label className="block text-sm">Monthly spending cap (US dollars)
       <input name="monthlyBudget" inputMode="decimal" required defaultValue={budgetUsd} className={inputClass} /></label>

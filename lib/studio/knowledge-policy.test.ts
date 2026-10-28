@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { availableKnowledgeReviewActions, knowledgeDetailPageQuery, knowledgeListQuery, knowledgePage, knowledgeReviewPageQuery, knowledgeStatus, knowledgeTopic, maySubmitKnowledgeReview, readKnowledgeReviewDraft } from "./knowledge-policy";
+import { availableKnowledgeReviewActions, knowledgeListQuery, knowledgePage, knowledgeStatus, knowledgeTopic, maySubmitKnowledgeReview, readKnowledgeReviewDraft } from "./knowledge-policy";
 
-const workspace = "10000000-0000-4000-8000-000000000001";
+const location = "10000000-0000-4000-8000-000000000001";
 const topic = "20000000-0000-4000-8000-000000000002";
 
 test("knowledge filters reject repeated and malformed query values", () => {
@@ -15,23 +15,17 @@ test("knowledge filters reject repeated and malformed query values", () => {
   assert.equal(knowledgePage("2"), 2);
 });
 
-test("knowledge list and detail queries always include workspace and bounded pages", () => {
-  assert.deepEqual(knowledgeListQuery(workspace, "pending", topic, 2), {
-    select: "id,source_id,topic_id,status,statement,kind:payload->>kind,suggested_topic:payload->>suggested_topic",
-    workspace_id: `eq.${workspace}`, status: "eq.pending", topic_id: `eq.${topic}`, order: "id.asc", limit: "51", offset: "100",
-  });
-  assert.deepEqual(knowledgeDetailPageQuery(workspace, "insight_id", topic, 1, "id,payload"), {
-    select: "id,payload", workspace_id: `eq.${workspace}`, insight_id: `eq.${topic}`, order: "id.asc", limit: "51", offset: "50",
-  });
-  assert.deepEqual(knowledgeReviewPageQuery(workspace, topic, 1), {
-    select: "id,payload", workspace_id: `eq.${workspace}`, insight_id: `eq.${topic}`, order: "payload->>at.asc,id.asc", limit: "51", offset: "50",
-  });
+test("knowledge list query always includes the Location and a bounded page", () => {
+  const query = knowledgeListQuery(location, "pending", topic, 2);
+  assert.deepEqual(query.values, [location, "pending", topic, 100]);
+  assert.match(query.text, /where location_id = \$1 and status = \$2 and topic_id = \$3::uuid\s+order by id asc limit 51 offset \$4$/);
+  assert.deepEqual(knowledgeListQuery(location, "all", null, 0).values, [location, 0]);
 });
 
-test("review policy blocks missing workspace access and impersonation", () => {
-  assert.equal(maySubmitKnowledgeReview({ hasWorkspaceAccess: false, isImpersonating: false }), false);
-  assert.equal(maySubmitKnowledgeReview({ hasWorkspaceAccess: true, isImpersonating: true }), false);
-  assert.equal(maySubmitKnowledgeReview({ hasWorkspaceAccess: true, isImpersonating: false }), true);
+test("review policy blocks missing Location access and impersonation", () => {
+  assert.equal(maySubmitKnowledgeReview({ hasLocationAccess: false, isImpersonating: false }), false);
+  assert.equal(maySubmitKnowledgeReview({ hasLocationAccess: true, isImpersonating: true }), false);
+  assert.equal(maySubmitKnowledgeReview({ hasLocationAccess: true, isImpersonating: false }), true);
   assert.deepEqual(availableKnowledgeReviewActions("pending"), ["approve", "reject"]);
   assert.deepEqual(availableKnowledgeReviewActions("approved"), ["reopen"]);
   assert.deepEqual(availableKnowledgeReviewActions("rejected"), ["reopen"]);

@@ -10,11 +10,11 @@ export default async function RecordLinksPage({ params, searchParams }: {
   params: Promise<{ recordId: string }>;
   searchParams: Promise<{ linksPage?: string | string[]; candidatesPage?: string | string[]; kind?: string | string[] }>;
 }) {
-  const { workspaceId, recordId } = await studioRouteParams(params);
+  const { locationId, recordId } = await studioRouteParams(params);
   const query = await searchParams;
   const pages = { links: recordLinkPage(query.linksPage), candidates: recordLinkPage(query.candidatesPage) };
   const kind = recordLinkKind(query.kind);
-  const result = await listStudioRecordLinks(workspaceId, recordId, pages, kind);
+  const result = await listStudioRecordLinks(locationId, recordId, pages, kind);
   if (!result) notFound();
   const canEdit = !(await auth()).actor;
   const root = `/studio`;
@@ -31,7 +31,7 @@ export default async function RecordLinksPage({ params, searchParams }: {
       <h2 className="text-xl font-medium">Current links</h2>
       {result.links.map(link => <article key={link.id} className="flex flex-wrap items-start justify-between gap-4 rounded-xl border bg-card p-5">
         <div><Link href={recordHref(link)} className="font-medium text-primary hover:underline">{link.title}</Link><p className="text-sm text-muted-foreground">{link.kind}{link.archived ? " · archived" : ""}</p></div>
-        {canEdit ? <RecordLinkButton key={`${link.id}:${result.record.version}`} workspaceId={result.access.workspace.id} sourceId={result.record.id} targetId={link.id} version={result.record.version} operation="remove" title={link.title} /> : null}
+        {canEdit ? <RecordLinkButton key={`${link.id}:${result.record.version}`} locationId={result.access.locationId} sourceId={result.record.id} targetId={link.id} version={result.record.version} operation="remove" title={link.title} /> : null}
       </article>)}
       {!result.links.length ? <p className="text-sm text-muted-foreground">No current links on this page.</p> : null}
       <nav aria-label="Current link pages" className="flex gap-4 text-sm text-primary">{pages.links > 0 ? <Link href={href(pages.links - 1, pages.candidates)}>Previous links</Link> : null}{result.hasMoreLinks ? <Link href={href(pages.links + 1, pages.candidates)}>More links</Link> : null}</nav>
@@ -44,7 +44,7 @@ export default async function RecordLinksPage({ params, searchParams }: {
       </nav>
       {result.candidates.map(candidate => <article key={candidate.id} className="flex flex-wrap items-start justify-between gap-4 rounded-xl border bg-card p-5">
         <div><Link href={recordHref(candidate)} className="font-medium text-primary hover:underline">{candidate.title}</Link><p className="text-sm text-muted-foreground">{candidate.kind}{candidate.archived ? " · archived" : ""}</p></div>
-        {candidate.linked ? <p className="text-sm text-muted-foreground">Already linked</p> : canEdit ? <RecordLinkButton key={`${candidate.id}:${result.record.version}`} workspaceId={result.access.workspace.id} sourceId={result.record.id} targetId={candidate.id} version={result.record.version} operation="add" title={candidate.title} /> : null}
+        {candidate.linked ? <p className="text-sm text-muted-foreground">Already linked</p> : canEdit ? <RecordLinkButton key={`${candidate.id}:${result.record.version}`} locationId={result.access.locationId} sourceId={result.record.id} targetId={candidate.id} version={result.record.version} operation="add" title={candidate.title} /> : null}
       </article>)}
       {!result.candidates.length ? <p className="text-sm text-muted-foreground">No matching records on this page.</p> : null}
       <nav aria-label="Candidate pages" className="flex gap-4 text-sm text-primary">{pages.candidates > 0 ? <Link href={href(pages.links, pages.candidates - 1)}>Previous records</Link> : null}{result.hasMoreCandidates ? <Link href={href(pages.links, pages.candidates + 1)}>More records</Link> : null}</nav>

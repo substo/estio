@@ -13,18 +13,18 @@ export async function currentEstioScheduleAuthority(userId: string, locationId: 
   return scopeDirectLocationsForSession(intersectAuthorizedLocations({ connectedLocations: user.locations, roles: user.locationRoles }),
     { platformRole: user.platformRole, isImpersonating: false }).some(location => location.id === locationId && (!requiredRole || location.role === requiredRole));
 }
-export async function authorizeEstioSchedule(rest: ScheduleRest, workspaceId: string, userId: string,
+export async function authorizeEstioSchedule(rest: ScheduleRest, locationId: string, userId: string,
   check = currentEstioScheduleAuthority): Promise<boolean> {
   if (await isPlatformProfileDeleted(rest, "estio", userId)) return false;
   const [workspace] = await rest<Array<{ brand: string; estio_location_id: string | null }>>(queryPath("studio_workspaces", {
-    select: "brand,estio_location_id", id: `eq.${workspaceId}`, limit: "1" }));
+    select: "brand,estio_location_id", id: `eq.${locationId}`, limit: "1" }));
   return !!workspace && workspace.brand === "estio" && !!workspace.estio_location_id && check(userId, workspace.estio_location_id);
 }
 /** Substo is checked under SQL membership lock; Estio resides in Business. */
-export async function authorizeScheduledTextJob(rest: ScheduleRest, workspaceId: string, jobId: string,
+export async function authorizeScheduledTextJob(rest: ScheduleRest, locationId: string, jobId: string,
   check = currentEstioScheduleAuthority): Promise<boolean> {
-  const [execution] = await rest<Array<{ actor_brand: string; created_by_clerk_user_id: string }>>(queryPath("studio_schedule_executions", {
-    select: "actor_brand,created_by_clerk_user_id", workspace_id: `eq.${workspaceId}`, job_id: `eq.${jobId}`, activation_token: "not.is.null", limit: "1" }));
-  if (!execution || execution.actor_brand === "substo") return true;
-  return execution.actor_brand === "estio" && authorizeEstioSchedule(rest, workspaceId, execution.created_by_clerk_user_id, check);
+  const [execution] = await rest<Array<{ actor_app: string; created_by_clerk_user_id: string }>>(queryPath("studio_schedule_executions", {
+    select: "actor_app,created_by_clerk_user_id", location_id: `eq.${locationId}`, job_id: `eq.${jobId}`, activation_token: "not.is.null", limit: "1" }));
+  if (!execution || execution.actor_app === "substo") return true;
+  return execution.actor_app === "estio" && authorizeEstioSchedule(rest, locationId, execution.created_by_clerk_user_id, check);
 }

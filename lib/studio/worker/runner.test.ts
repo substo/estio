@@ -4,7 +4,7 @@ import { StudioJobError, studioJobHandlers, type StudioJobHandler } from "./hand
 import type { StudioJob, StudioQueue } from "./queue";
 import { runStudioJob, runStudioWorker } from "./runner";
 
-const job = (id: string, kind = "studio.diagnostic"): StudioJob => ({ id, lease_token: "token", workspace_id: "w", kind, payload: {}, attempts: 1, max_attempts: 5 });
+const job = (id: string, kind = "studio.diagnostic"): StudioJob => ({ id, lease_token: "token", location_id: "w", kind, payload: {}, attempts: 1, max_attempts: 5 });
 function fakeQueue(jobs: StudioJob[], options: { extend?: boolean } = {}) {
   const calls: Array<[string, ...unknown[]]> = [];
   const queue: StudioQueue = {

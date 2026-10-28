@@ -25,12 +25,12 @@ test("secrets round-trip, bind to workspace and purpose, and survive key rotatio
   assert.throws(() => encryptStudioSecret(secret, "c", {}), /not configured/);
 });
 
-test("only Substo owners/admins and Estio location admins manage AI settings", () => {
-  assert.equal(canManageStudioAi({ brand: "substo", role: "owner" }), true);
-  assert.equal(canManageStudioAi({ brand: "substo", role: "admin" }), true);
-  assert.equal(canManageStudioAi({ brand: "substo", role: "member" }), false);
-  assert.equal(canManageStudioAi({ brand: "estio", role: "ADMIN" }), true);
-  assert.equal(canManageStudioAi({ brand: "estio", role: "MEMBER" }), false);
+test("only Location admins in either app manage AI settings", () => {
+  assert.equal(canManageStudioAi({ app: "substo", role: "ADMIN" }), true);
+  assert.equal(canManageStudioAi({ app: "substo", role: "ADMIN" }), true);
+  assert.equal(canManageStudioAi({ app: "substo", role: "MEMBER" }), false);
+  assert.equal(canManageStudioAi({ app: "estio", role: "ADMIN" }), true);
+  assert.equal(canManageStudioAi({ app: "estio", role: "MEMBER" }), false);
 });
 
 test("key and budget inputs are validated exactly", () => {

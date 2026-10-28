@@ -4,8 +4,8 @@ import { schedulePresets } from "@/lib/studio/schedule-policy";
 import type { StudioSchedule } from "@/lib/studio/schedules";
 import { saveScheduleAction } from "./actions";
 
-export function ScheduleForm({ workspaceId, id, schedule }: { workspaceId: string; id: string; schedule?: StudioSchedule }) {
-  const [state, action, pending] = useActionState(saveScheduleAction.bind(null, workspaceId, id, schedule?.version ?? 0), {});
+export function ScheduleForm({ locationId, id, schedule }: { locationId: string; id: string; schedule?: StudioSchedule }) {
+  const [state, action, pending] = useActionState(saveScheduleAction.bind(null, locationId, id, schedule?.version ?? 0), {});
   const [preset, setPreset] = useState(schedule?.preset_id ?? "idea-review");
   const [focus, setFocus] = useState(schedule?.focus ?? "");
   const [interval, setInterval] = useState(String(schedule?.interval_hours ?? 24));

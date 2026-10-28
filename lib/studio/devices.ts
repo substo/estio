@@ -1,8 +1,8 @@
 import "server-only";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { canManageStudioAi } from "./ai-settings-policy";
-import { getStudioWorkspaceAccess } from "./access";
-import { requireOwnStudioCommandWorkspace } from "./paid-workspace";
+import { getStudioAccess } from "./access";
+import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { StudioCommandError } from "./command-error";
 import { queryPath, studioRest } from "./rest";
 import { StudioRestError } from "./rest-client";
@@ -51,17 +51,17 @@ function safeConfigReport(value: Record<string, unknown>): StudioDeviceSummary["
   return out;
 }
 
-export async function getStudioDevices(workspaceId: string) {
-  const access = await getStudioWorkspaceAccess(workspaceId); if (!access) return null;
+export async function getStudioDevices(locationId: string) {
+  const access = await getStudioAccess(locationId); if (!access) return null;
   const rows = await studioRest<DeviceRow[]>(queryPath("studio_devices", {
     select: "id,name,platform,created_at,revoked_at,seen_at,release,started_at,allowed_kinds,report,processing_enabled,paused,desired_config,config_version,applied_config_version,config_status,config_report",
-    workspace_id: `eq.${access.workspace.id}`, brand: `eq.${access.brand}`, order: "created_at.desc", limit: "100" }));
+    location_id: `eq.${access.locationId}`, brand: `eq.${access.app}`, order: "created_at.desc", limit: "100" }));
   const active = rows.filter(row => !row.revoked_at).map(row => row.id);
   const [running, commands] = active.length ? await Promise.all([
-    studioRest<Array<{ device_id: string }>>(queryPath("studio_jobs", { select: "device_id", workspace_id: `eq.${access.workspace.id}`,
+    studioRest<Array<{ device_id: string }>>(queryPath("studio_jobs", { select: "device_id", location_id: `eq.${access.locationId}`,
       device_id: `in.(${active.join(",")})`, status: "eq.running", limit: "100" })),
     studioRest<Array<StudioDeviceCommandSummary & { device_id: string }>>(queryPath("studio_device_commands", {
-      select: "id,device_id,kind,provider,status,display,error,created_at,updated_at,finished_at", workspace_id: `eq.${access.workspace.id}`,
+      select: "id,device_id,kind,provider,status,display,error,created_at,updated_at,finished_at", location_id: `eq.${access.locationId}`,
       device_id: `in.(${active.join(",")})`, order: "created_at.desc", limit: "200" })),
   ]) : [[], []];
   const busy = new Set(running.map(job => job.device_id));
@@ -86,10 +86,10 @@ export async function getStudioDevices(workspaceId: string) {
 
 const PAIRING_ACTIONS = { approve_pairing: "approve", deny_pairing: "deny", lookup_pairing: "lookup" } as const;
 /** Manager of the active Business (Substo owner/admin or Estio location ADMIN), acting as themselves. */
-export async function executeStudioDeviceManagement(workspaceId: string, command: DeviceManagementCommand) {
-  const access = await requireOwnStudioCommandWorkspace(workspaceId);
+export async function executeStudioDeviceManagement(locationId: string, command: DeviceManagementCommand) {
+  const access = await requireOwnStudioCommandLocation(locationId);
   if (!canManageStudioAi(access)) throw new StudioCommandError("A Business admin is required.", 403);
-  const actor = { p_workspace_id: access.workspace.id, p_actor_brand: access.brand, p_clerk_user_id: access.userId };
+  const actor = { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId };
   if (command.action === "approve_pairing" || command.action === "deny_pairing" || command.action === "lookup_pairing") {
     const result = await studioRest<Record<string, unknown>>("rpc/studio_device_pairing_action", { method: "POST", body: JSON.stringify({
       ...actor, p_action: PAIRING_ACTIONS[command.action], p_user_code: command.userCode, p_request_id: "requestId" in command ? command.requestId : null }) });
@@ -107,17 +107,17 @@ export async function executeStudioDeviceManagement(workspaceId: string, command
 /** Estio Business ADMIN lives in Estio's database, so it is re-checked here on every device request. */
 const currentEstioAdmin = (userId: string, locationId: string) => currentEstioScheduleAuthority(userId, locationId, "ADMIN");
 export async function executeStudioDeviceCommand(token: string, brand: "estio" | "substo", operation: DeviceOperation, body: Record<string, unknown>,
-  authorizeEstio = (workspaceId: string, userId: string) => authorizeEstioSchedule(studioRest, workspaceId, userId, currentEstioAdmin)) {
+  authorizeEstio = (locationId: string, userId: string) => authorizeEstioSchedule(studioRest, locationId, userId, currentEstioAdmin)) {
   const tokenHash = hashStudioDeviceToken(token);
   let estioAuthorizedBy: string | null = null;
   if (brand === "estio") {
-    const identity = await studioRest<{ workspaceId: string; approvedBy: string } | null>("rpc/studio_device_identity", { method: "POST",
-      body: JSON.stringify({ p_token_hash: tokenHash, p_brand: brand }), signal: AbortSignal.timeout(30_000) });
-    if (!identity || !await authorizeEstio(identity.workspaceId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
+    const identity = await studioRest<{ locationId: string; approvedBy: string } | null>("rpc/studio_device_identity", { method: "POST",
+      body: JSON.stringify({ p_token_hash: tokenHash, p_app: brand }), signal: AbortSignal.timeout(30_000) });
+    if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
   return studioRest<unknown>("rpc/studio_device_command", { method: "POST", body: JSON.stringify({
-    p_token_hash: tokenHash, p_brand: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy }), signal: AbortSignal.timeout(30_000) });
+    p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy }), signal: AbortSignal.timeout(30_000) });
 }
 
 export const PAIRING_POLL_SECONDS = 5;
@@ -129,7 +129,7 @@ export async function startStudioDevicePairing(brand: "estio" | "substo", origin
     const userCode = generatePairingCode();
     try {
       const result = await studioRest<{ pairingId: string; userCode: string; expiresAt: string }>("rpc/studio_device_pair_start", { method: "POST", body: JSON.stringify({
-        p_brand: brand, p_name: input.name, p_platform: input.platform, p_device_code_hash: hashStudioDeviceToken(deviceCode), p_user_code: userCode }) });
+        p_app: brand, p_name: input.name, p_platform: input.platform, p_device_code_hash: hashStudioDeviceToken(deviceCode), p_user_code: userCode }) });
       const display = formatPairingCode(result.userCode);
       return { pairingId: result.pairingId, deviceCode, userCode: display, verificationUrl: `${origin}/studio/settings/computer?code=${display}`,
         expiresAt: result.expiresAt, intervalSeconds: PAIRING_POLL_SECONDS };
@@ -146,6 +146,6 @@ export async function startStudioDevicePairing(brand: "estio" | "substo", origin
 export async function pollStudioDevicePairing(brand: "estio" | "substo", input: { pairingId: string; deviceCode: string }) {
   const token = `studio_device_${randomBytes(32).toString("base64url")}`;
   const result = await studioRest<{ status: "pending" | "approved" | "denied" | "expired" | "consumed"; deviceId?: string; businessName?: string }>("rpc/studio_device_pair_poll", {
-    method: "POST", body: JSON.stringify({ p_brand: brand, p_pairing_id: input.pairingId, p_device_code_hash: hashStudioDeviceToken(input.deviceCode), p_token_hash: hashStudioDeviceToken(token) }) });
+    method: "POST", body: JSON.stringify({ p_app: brand, p_pairing_id: input.pairingId, p_device_code_hash: hashStudioDeviceToken(input.deviceCode), p_token_hash: hashStudioDeviceToken(token) }) });
   return result.status === "approved" ? { status: "approved" as const, token, deviceId: result.deviceId, businessName: result.businessName } : { status: result.status };
 }

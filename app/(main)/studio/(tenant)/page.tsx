@@ -2,7 +2,7 @@ import { studioRouteParams } from "@/lib/studio/route-context";
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { getStudioWorkspaceAccess } from "@/lib/studio/access";
+import { getStudioAccess } from "@/lib/studio/access";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +11,14 @@ export default async function StudioWorkspacePage({
 }: {
   params: Promise<{  }>;
 }) {
-  const { workspaceId } = await studioRouteParams(params);
+  const { locationId } = await studioRouteParams(params);
   const { userId } = await auth();
   if (!userId) redirect("/sign-in?redirect_url=%2Fstudio");
-  const access = await getStudioWorkspaceAccess(workspaceId);
+  const access = await getStudioAccess(locationId);
   if (!access) notFound();
   const { workspace } = access;
 
-  if (access.brand === "substo") {
+  if (access.app === "substo") {
     return (
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6 md:p-10">
         <div className="flex flex-wrap items-center justify-between gap-3">

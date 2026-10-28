@@ -3,8 +3,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-command";
-export function YoutubeScheduleForm({ workspaceId, scheduleId, version, stateVersion, settings, active }: {
- workspaceId: string; scheduleId: string; version: number; stateVersion: number; active: boolean;
+export function YoutubeScheduleForm({ locationId, scheduleId, version, stateVersion, settings, active }: {
+ locationId: string; scheduleId: string; version: number; stateVersion: number; active: boolean;
  settings: { connected: boolean; connectionVersion: string | null; channels: Array<{ channel_id: string; label: string }> };
 }) {
  const router = useRouter(); const command = useStudioCommand(`/studio/schedules/api`);

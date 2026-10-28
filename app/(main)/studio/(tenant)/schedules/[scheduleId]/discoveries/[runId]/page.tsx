@@ -5,7 +5,7 @@ import { getStudioYoutubeScheduleRun } from "@/lib/studio/youtube-schedules";
 import { RefreshScheduleHistory } from "../../../run-now-form";
 export const dynamic = "force-dynamic";
 export default async function YoutubeDiscoveryRunPage({ params }: { params: Promise<{ scheduleId: string; runId: string }> }) {
- const { workspaceId, scheduleId, runId } = await studioRouteParams(params); const data = await getStudioYoutubeScheduleRun(workspaceId, scheduleId, runId);
+ const { locationId, scheduleId, runId } = await studioRouteParams(params); const data = await getStudioYoutubeScheduleRun(locationId, scheduleId, runId);
  if (!data) notFound();
  return <main className="mx-auto max-w-4xl space-y-5 p-6">
   <Link href={`/studio/schedules/${scheduleId}`} className="text-primary hover:underline">Back to schedule</Link>

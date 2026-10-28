@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { ApprovedYoutubeChannel } from "@/lib/studio/youtube";
 import type { YoutubeChannel, YoutubeVideo } from "@/lib/google/youtube-api";
 type Results = { kind: "channels" | "videos"; channels?: YoutubeChannel[]; videos?: Array<YoutubeVideo & { ticket: string }>; identity?: string | null; nextPageToken?: string | null; provenance?: string; observedAt?: string; };
-export function YoutubeDiscovery({ workspaceId, channels: initialChannels, canManage, connected }: { workspaceId: string; channels: ApprovedYoutubeChannel[]; canManage: boolean; connected: boolean }) {
+export function YoutubeDiscovery({ locationId, channels: initialChannels, canManage, connected }: { locationId: string; channels: ApprovedYoutubeChannel[]; canManage: boolean; connected: boolean }) {
   const tenantHeaders = useStudioTenantHeaders();
   const [channels, setChannels] = useState(initialChannels); const [mode, setMode] = useState("search"); const [query, setQuery] = useState("");
   const [channel, setChannel] = useState(initialChannels[0]?.channel_id ?? ""); const [results, setResults] = useState<Results | null>(null);

@@ -19,7 +19,7 @@ function actions(options: { app?: string; access?: any; resolution?: any } = {})
       ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/" },
       validateActiveLocationSelection: async (id: string) => { checks.push(id); return options.resolution ?? { status: "authorized", user: { clerkId: "substo-user" }, location: { id: "brand-b", authRealm: "substo" } }; },
     },
-    "@/lib/studio/access": { getStudioWorkspaceAccess: async (id: string) => { assert.equal(id, workspace); return options.access === undefined ? { brand: "substo", locationId: "brand-b" } : options.access; } },
+    "@/lib/studio/access": { getStudioAccess: async (id: string) => { assert.equal(id, workspace); return options.access === undefined ? { brand: "substo", locationId: "brand-b" } : options.access; } },
     "@/lib/auth/host-brand": { getHostBrandConfig: () => ({}), resolveHostBrand: () => options.app ?? "substo" },
     "@/lib/studio/supabase-service": {},
     "@/lib/locations/location-service": { ensureLocationWorkspace: async (_deps: unknown, brand: any, clerkId: string) => { assert.equal(brand.authRealm, "substo"); assert.equal(clerkId, "substo-user"); return workspace; } },
@@ -89,7 +89,7 @@ test("CRM switch uses the correct realm action and brand field on desktop, colla
   const estio = () => {};
   for (const realm of ["estio", "substo"]) {
     const { productShellConfig } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: estio } });
-    const { targets } = productShellConfig(realm, "crm", { locationId: "brand-b", workspaceId: null });
+    const { targets } = productShellConfig(realm, "crm", { locationId: "brand-b", locationId: null });
     assert.equal(targets.crm.href, "/admin");
     if (realm === "substo") { assert.equal(targets.studio.formAction, "/api/studio/product-switch"); assert.equal(targets.studio.fields.product, "studio"); } else assert.equal(targets.studio.action, estio);
     assert.equal(targets.studio.fields[realm === "substo" ? "brandId" : "locationId"], "brand-b");
@@ -112,7 +112,7 @@ function renderShell(app: string, product: "crm" | "studio", overrides: Record<s
   });
   const tree = AppShell({
     product, app, activeLocationId: "location-b", locations: [{ id: "location-b", name: "Tenant B" }], platformLoginLocations: null,
-    impersonation: null, canViewAiUsage: true, workspaceId: "private-storage-key", children: null, ...overrides,
+    impersonation: null, canViewAiUsage: true, locationId: "private-storage-key", children: null, ...overrides,
   });
   const find = (type: unknown): any[] => {
     const found: any[] = [];
@@ -134,7 +134,7 @@ test("both Studio menus bind CRM to the displayed Location rather than a storage
     for (const targets of [switches[0].props.targets, headers[0].props.productConfig.targets]) {
       assert.equal(targets.crm.formAction, "/api/studio/tenant-switch");
       assert.equal(targets.crm.fields.locationId, "location-b");
-      assert.equal(targets.crm.fields.workspaceId, undefined);
+      assert.equal(targets.crm.fields.locationId, undefined);
     }
   }
 });

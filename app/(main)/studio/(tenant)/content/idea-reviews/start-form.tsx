@@ -2,7 +2,7 @@
 import { useStudioTenantHeaders } from "../../../_components/studio-tenant-context";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-export function IdeaReviewStartForm({ workspaceId, ideas, workflow = "idea_review" }: { workspaceId: string; workflow?: "idea_review" | "script_brief"; ideas: Array<{ id: string; version: number; title: string }> }) {
+export function IdeaReviewStartForm({ locationId, ideas, workflow = "idea_review" }: { locationId: string; workflow?: "idea_review" | "script_brief"; ideas: Array<{ id: string; version: number; title: string }> }) {
   const tenantHeaders = useStudioTenantHeaders();
   const isScript = workflow === "script_brief";
   const section = isScript ? "script-briefs" : "idea-reviews";

@@ -11,13 +11,13 @@ import { readScheduleCommand } from "../schedule-execution-policy";
 const runId = "c2400000-0000-4000-8000-000000000001";
 const channel = "UC" + "a".repeat(22);
 const input: YoutubeDiscoveryContext = { outcome: "ready", brand: "substo", userId: "profile-owner", connectionVersion: "grant-version", source: "subscription", channelId: channel, query: "Saved query" };
-const job = { id: "j", workspace_id: "w", kind: "studio.youtube_discovery", payload: { discoveryRunId: runId }, lease_token: "lease", attempts: 1, max_attempts: 3 };
+const job = { id: "j", location_id: "w", kind: "studio.youtube_discovery", payload: { discoveryRunId: runId }, lease_token: "lease", attempts: 1, max_attempts: 3 };
 function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; providerError?: Error; abort?: boolean; denied?: boolean; outage?: boolean; quota?: boolean } = {}) {
  const calls: Array<{ path: string; body: any }> = []; let saved = false; let reads = 0;
  const controller = new AbortController();
  const deps: YoutubeDiscoveryDeps = {
   async rest<T>(path: string, init?: RequestInit) {
-   if (!init) return [{ result: saved ? { links: [] } : null, actor_brand: options.denied || options.outage ? "estio" : "substo", created_by_clerk_user_id: "profile-owner" }] as T;
+   if (!init) return [{ result: saved ? { links: [] } : null, actor_app: options.denied || options.outage ? "estio" : "substo", created_by_clerk_user_id: "profile-owner" }] as T;
    const body = JSON.parse(String(init.body)); calls.push({ path, body });
    if (path.endsWith("studio_begin_youtube_discovery")) return (options.quota ? { outcome: "quota" } : input) as T;
    if (path.endsWith("studio_finish_youtube_discovery")) {
@@ -26,7 +26,7 @@ function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; provi
    }
    return {} as T;
   },
-  authorize: async (workspaceId, userId) => { assert.equal(workspaceId, "w"); assert.equal(userId, "profile-owner"); if (options.outage) throw Error("Authority unavailable"); return !options.denied; },
+  authorize: async (locationId, userId) => { assert.equal(locationId, "w"); assert.equal(userId, "profile-owner"); if (options.outage) throw Error("Authority unavailable"); return !options.denied; },
   discover: async context => { assert.equal(context.userId, "profile-owner"); reads++; if (options.abort) controller.abort(); if (options.providerError) throw options.providerError; return ["aaaaaaaaaaa"]; },
  };
  return { deps, calls, controller, count: () => reads };
@@ -45,7 +45,7 @@ test("saved discovery survives lost commit response without more Google reads", 
  await assert.rejects(handle(job, { signal: f.controller.signal, workerId: "worker" }));
  await handle(job, { signal: f.controller.signal, workerId: "worker" }); assert.equal(f.count(), 1);
  assert.deepEqual(f.calls.at(-1)?.body.p_videos, ["aaaaaaaaaaa"]);
- assert.ok(f.calls.every(call => call.body.p_lease === "lease" && call.body.p_workspace === "w"));
+ assert.ok(f.calls.every(call => call.body.p_lease === "lease" && call.body.p_location === "w"));
  assert.equal(f.calls.some(call => /ai_|text_run/.test(call.path)), false);
 });
 test("authority denial/outage, exhausted quota and lease loss prevent ingestion", async () => {

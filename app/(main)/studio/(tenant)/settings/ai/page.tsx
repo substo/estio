@@ -8,8 +8,8 @@ import Link from "next/link";
 export const dynamic = "force-dynamic";
 
 export default async function StudioAiSettingsPage({ params }: { params: Promise<{  }> }) {
-  const { workspaceId } = await studioRouteParams(params);
-  const settings = await getStudioAiSettings(workspaceId);
+  const { locationId } = await studioRouteParams(params);
+  const settings = await getStudioAiSettings(locationId);
   if (!settings) notFound();
   const { openai, monthlyBudgetMicros, spentMicros, heldMicros, canManage, encryptionReady } = settings;
   const active = Boolean(openai) && monthlyBudgetMicros > 0;
@@ -30,11 +30,11 @@ export default async function StudioAiSettingsPage({ params }: { params: Promise
       {canManage ? <>
         <section className="space-y-3 rounded-xl border bg-card p-5">
           <h2 className="text-lg font-medium">OpenAI key</h2>
-          {encryptionReady ? <OpenAiKeyForm workspaceId={workspaceId} hasKey={Boolean(openai)} /> : <p className="text-sm text-muted-foreground">Secure key storage is not configured on this server yet.</p>}
+          {encryptionReady ? <OpenAiKeyForm locationId={locationId} hasKey={Boolean(openai)} /> : <p className="text-sm text-muted-foreground">Secure key storage is not configured on this server yet.</p>}
         </section>
         <section className="space-y-3 rounded-xl border bg-card p-5">
           <h2 className="text-lg font-medium">Spending cap</h2>
-          <BudgetForm workspaceId={workspaceId} budgetUsd={(monthlyBudgetMicros / 1_000_000).toFixed(2)} />
+          <BudgetForm locationId={locationId} budgetUsd={(monthlyBudgetMicros / 1_000_000).toFixed(2)} />
         </section>
       </> : <p className="text-sm text-muted-foreground">Only a Business admin can change hosted API settings.</p>}
     </main>

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { dispatchDueStudioSchedules, type DueSchedule } from "./schedule-dispatcher";
 import { authorizeScheduledTextJob, authorizeEstioSchedule } from "./schedule-authority";
-const due: DueSchedule = { workspace_id: "w", schedule_id: "s", activation_token: "a", next_run_at: "2026-10-24T00:00:00Z", actor_brand: "substo", authorized_by: "owner" };
+const due: DueSchedule = { location_id: "w", schedule_id: "s", activation_token: "a", next_run_at: "2026-10-24T00:00:00Z", actor_app: "substo", authorized_by: "owner" };
 test("bounded dispatch binds exact due/token identities; SQL handles Substo authority", async () => {
   const calls: Array<{ path: string; body: any }> = [];
   const result = await dispatchDueStudioSchedules({ now: new Date("2026-10-24T01:00:00Z"),
@@ -20,7 +20,7 @@ test("confirmed Estio denial reaches SQL for pause; authority outages leave due 
   let dispatched = 0;
   for (const outage of [false, true]) {
     const result = await dispatchDueStudioSchedules({ rest: async <T>(_path: string, init?: RequestInit) => {
-      if (!init) return [{ ...due, actor_brand: "estio" }] as T;
+      if (!init) return [{ ...due, actor_app: "estio" }] as T;
       dispatched++; assert.equal(JSON.parse(String(init.body)).p_estio_authorized, false);
       return { outcome: "authority_revoked" } as T;
     }, authorizeEstio: async () => { if (outage) throw Error("Database unavailable"); return false; } });
@@ -31,7 +31,7 @@ test("confirmed Estio denial reaches SQL for pause; authority outages leave due 
 test("scheduled paid checks bind persisted realm/author/workspace and reject missing Estio mappings", async () => {
   let actor = "estio"; let mapping: string | null = "location"; let called = 0;
   const rest = async <T>(path: string) => (path.startsWith("platform_profile_deletions") ? [] : path.startsWith("studio_schedule_executions")
-    ? [{ actor_brand: actor, created_by_clerk_user_id: "persisted-author" }]
+    ? [{ actor_app: actor, created_by_clerk_user_id: "persisted-author" }]
     : [{ brand: "estio", estio_location_id: mapping }]) as T;
   const check = async (user: string, location: string) => { called++; assert.equal(user, "persisted-author"); assert.equal(location, "location"); return false; };
   assert.equal(await authorizeScheduledTextJob(rest, "w", "j", check), false);

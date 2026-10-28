@@ -121,7 +121,9 @@ Rollback: redeploy the previous build.
       - the Mac reconnects.
 8. The old Studio project stays **untouched, read-only fallback**; do not delete it.
 
-**Rollback (stage 2):** redeploy the stage-1 build, which still reads the Studio project; that project was never written during the move. Then `drop schema studio cascade` and delete the migration's `_prisma_migrations` row. Writes made after the cutover are lost, which is acceptable with no real users. The CRM dump covers anything else.
+**Rollback (stage 2):** Freeze Studio writes and stop the worker first. Before any post-cutover writes, redeploying stage 1 can use the unchanged old Studio database. After any post-cutover writes, first back up the CRM database and reconcile/export the new Studio writes; switching to the stale source without accounting for them is forbidden. Keep the new schema and Prisma migration history intact during traffic rollback. Never drop the schema or delete migration records as a routine rollback. Validate the selected build against the retained database state before reopening Studio.
+
+**Cutover sequencing gate:** The new web, worker, cron and companion endpoints must not serve or write before copy verification completes. The existing deploy readiness gate must stay enabled. A rehearsed maintenance/write-freeze and copy-before-activation procedure is required before deploying stage 2; the numbered sequence above alone does not establish this protection.
 
 **Stage 3: clean up and re-measure.**
 - Remove `STUDIO_SUPABASE_*` from runtime code, the deploy check and the docs, and remove the provider-specific degraded mode (general database error handling stays).

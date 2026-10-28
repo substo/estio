@@ -1,7 +1,8 @@
 import "server-only";
-import { getStudioWorkspaceAccess } from "./access";
+import { getStudioAccess } from "./access";
 import { getStudioRecordRelations } from "./record-relations";
-import { queryPath, studioRest, studioRestAll } from "./rest";
+import { Prisma } from "@prisma/client";
+import { studioDb } from "./studio-db";
 import { contentListQuery, type ContentDraft } from "./content-policy";
 
 export interface StudioContentSummary {
@@ -15,32 +16,28 @@ export interface StudioContentRecord {
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function listStudioContent(workspaceId: string, showArchived = false) {
-  const access = await getStudioWorkspaceAccess(workspaceId);
+export async function listStudioContent(locationId: string, showArchived = false) {
+  const access = await getStudioAccess(locationId);
   if (!access) return null;
-  const records = await studioRestAll<StudioContentSummary>("studio_records", contentListQuery(access.workspace.id, showArchived));
+  const records = await studioDb.rows<StudioContentSummary>(contentListQuery(access.locationId, showArchived));
   return { access, records };
 }
 
-export async function getStudioContentRecord(workspaceId: string, recordId: string) {
-  const access = await getStudioWorkspaceAccess(workspaceId);
+export async function getStudioContentRecord(locationId: string, recordId: string) {
+  const access = await getStudioAccess(locationId);
   if (!access || !uuid.test(recordId)) return null;
-  const rows = await studioRest<StudioContentRecord[]>(queryPath("studio_records", {
-    select: "id,title,version,updated_at,approved,archived,payload",
-    workspace_id: `eq.${access.workspace.id}`, id: `eq.${recordId}`, kind: "eq.content", limit: "1",
-  }));
-  if (!rows[0]) return null;
+  const record = await studioDb.one<StudioContentRecord>(Prisma.sql`
+    select id, title, version, updated_at, approved, archived, payload from studio.studio_records
+    where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content'`);
+  if (!record) return null;
   const { links, files, uploads } = await getStudioRecordRelations(access, recordId);
-  return { access, record: rows[0], links, files, uploads };
+  return { access, record, links, files, uploads };
 }
 
-export async function saveStudioContentRecord(workspaceId: string, recordId: string, draft: ContentDraft, version: number) {
-  const access = await getStudioWorkspaceAccess(workspaceId);
-  if (!access) throw new Error("Studio workspace access denied.");
+export async function saveStudioContentRecord(locationId: string, recordId: string, draft: ContentDraft, version: number) {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new Error("Studio access denied.");
   if (!uuid.test(recordId) || !Number.isSafeInteger(version) || version < 0) throw new Error("Invalid content record request.");
-  return studioRest<StudioContentRecord>("rpc/studio_save_record", {
-    method: "POST",
-    body: JSON.stringify({ p_workspace_id: access.workspace.id, p_record_id: recordId, p_kind: "content",
-      p_title: draft.title, p_payload_patch: draft.payload, p_expected_version: version, p_clerk_user_id: access.userId }),
-  });
+  return studioDb.call<StudioContentRecord>("studio_save_record", { p_location_id: access.locationId, p_record_id: recordId, p_kind: "content",
+    p_title: draft.title, p_payload_patch: draft.payload, p_expected_version: version, p_clerk_user_id: access.userId });
 }

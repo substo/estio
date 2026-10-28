@@ -2,8 +2,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-command";
-export function ScheduleRunNowForm({ workspaceId, scheduleId, version, stateVersion, isScript, ideas, active }: {
-  workspaceId: string; scheduleId: string; version: number; stateVersion: number; isScript: boolean;
+export function ScheduleRunNowForm({ locationId, scheduleId, version, stateVersion, isScript, ideas, active }: {
+  locationId: string; scheduleId: string; version: number; stateVersion: number; isScript: boolean;
   ideas: Array<{ id: string; title: string; version: number }>; active: boolean;
 }) {
   const router = useRouter();
@@ -54,8 +54,8 @@ export function RefreshScheduleHistory() {
   return <button className="rounded-md border px-3 py-2 text-sm" onClick={() => router.refresh()}>Refresh status</button>;
 }
 
-export function SchedulePauseForm({ workspaceId, scheduleId, version, stateVersion }: {
-  workspaceId: string; scheduleId: string; version: number; stateVersion: number;
+export function SchedulePauseForm({ locationId, scheduleId, version, stateVersion }: {
+  locationId: string; scheduleId: string; version: number; stateVersion: number;
 }) {
   const router = useRouter();
   const command = useStudioCommand(`/studio/schedules/api`);

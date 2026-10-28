@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { StudioQueue } from "../worker/queue";
 import { appOrigin, deviceTokenPattern, type DeviceCredentials } from "./config";
 
-const job = z.object({ id: z.string().uuid(), workspace_id: z.string().uuid(), kind: z.literal("studio.diagnostic"),
+const job = z.object({ id: z.string().uuid(), location_id: z.string().uuid(), kind: z.literal("studio.diagnostic"),
   payload: z.record(z.unknown()), lease_token: z.string().uuid(), lease_expires_at: z.string().datetime({ offset: true }),
   attempts: z.number().int().nonnegative(), max_attempts: z.number().int().positive() });
 export const providerCommand = z.object({ id: z.string().uuid(), kind: z.enum(["provider_login", "provider_logout"]), provider: z.enum(["codex", "claude"]) });

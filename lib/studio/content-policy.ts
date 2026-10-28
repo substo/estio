@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 export const CONTENT_STAGES = ["idea", "research", "script", "record", "edit", "cover", "ready"] as const;
 export const CONTENT_LEVELS = ["discover", "consider", "decide", "retain"] as const;
 export type ContentStage = typeof CONTENT_STAGES[number];
@@ -41,15 +42,13 @@ export function readContentDraft(form: FormData): ContentDraft {
   return { kind: "content", title, payload };
 }
 
-/** Called with the authorized workspace ID, never a free-form browser filter. */
-export function contentListQuery(workspaceId: string, showArchived: boolean): Record<string, string> {
-  return {
-    select: "id,title,version,updated_at,summary,approved,archived,stage:payload->>stage,level:payload->>level,pillar:payload->pillar",
-    workspace_id: `eq.${workspaceId}`,
-    kind: "eq.content",
-    order: "updated_at.desc,id.asc",
-    ...(showArchived ? {} : { archived: "eq.false" }),
-  };
+/** Called with the authorized Location ID, never a free-form browser filter. At most 10,000 rows. */
+export function contentListQuery(locationId: string, showArchived: boolean): Prisma.Sql {
+  return Prisma.sql`select id, title, version, updated_at, summary, approved, archived,
+      payload->>'stage' as stage, payload->>'level' as level, payload->'pillar' as pillar
+    from studio.studio_records
+    where location_id = ${locationId} and kind = 'content'${showArchived ? Prisma.empty : Prisma.sql` and archived = false`}
+    order by updated_at desc, id asc limit 10000`;
 }
 
 

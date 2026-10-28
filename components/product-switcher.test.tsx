@@ -28,8 +28,8 @@ test("action targets submit their hidden fields", () => {
 
 
 test("document product handoffs use native POST forms and preserve the workspace selector", () => {
-  const html = render({ active: "studio", targets: { crm: { formAction: "/api/studio/product-switch", fields: { product: "crm", workspaceId: "workspace-a" } }, studio: { href: "/studio" } } });
+  const html = render({ active: "studio", targets: { crm: { formAction: "/api/studio/product-switch", fields: { product: "crm", locationId: "workspace-a" } }, studio: { href: "/studio" } } });
   assert.match(html, /<form[^>]*action="\/api\/studio\/product-switch"[^>]*method="post"/);
-  assert.match(html, /name="workspaceId" value="workspace-a"/);
+  assert.match(html, /name="locationId" value="workspace-a"/);
   assert.doesNotMatch(html, /javascript:|\$ACTION/);
 });

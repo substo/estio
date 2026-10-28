@@ -17,6 +17,6 @@ export const profileYoutubeAccess = (profile: PlatformProfile) => readProfileYou
 export async function profileOAuthRpc(profile: PlatformProfile, action: "begin" | "consume" | "commit", stateHash: string, sessionHash: string, refresh?: { refreshToken: string; scopes: string[] }) {
   const client = youtubeClientConfig();
   return studioRest<boolean>("rpc/platform_youtube_oauth", { method: "POST", body: JSON.stringify({ p_action: action,
-    p_brand: profile.brand, p_user: profile.userId, p_session_hash: sessionHash, p_state_hash: stateHash,
+    p_app: profile.brand, p_user: profile.userId, p_session_hash: sessionHash, p_state_hash: stateHash,
     ...(refresh && client ? { p_cipher: encryptStudioSecret(refresh.refreshToken, youtubeProfileContext(profile.brand, profile.userId, "refresh")), p_client_id: client.clientId, p_scopes: refresh.scopes } : {}) }) });
 }

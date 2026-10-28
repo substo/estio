@@ -11,7 +11,7 @@ const jobText = (upload: StudioRecordUpload) => {
   return job.attempts ? `Waiting to retry (attempt ${job.attempts} of ${job.max_attempts})${job.last_error_message ? `: ${job.last_error_message}` : ""}` : "Waiting for the worker…";
 };
 
-export function StudioUploads({ workspaceId, uploads }: { workspaceId: string; uploads: StudioRecordUpload[] }) {
+export function StudioUploads({ locationId, uploads }: { locationId: string; uploads: StudioRecordUpload[] }) {
   if (!uploads.length) return null;
   return <section className="space-y-3">
     <h2 className="font-medium">Uploads</h2>

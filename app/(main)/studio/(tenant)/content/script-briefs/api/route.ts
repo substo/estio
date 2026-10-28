@@ -5,9 +5,9 @@ import { readScriptBriefCommand } from "@/lib/studio/script-brief-policy";
 import { enqueueStudioScriptBrief, applyStudioScriptBrief } from "@/lib/studio/script-brief";
 export const dynamic = "force-dynamic";
 async function POSTHandler(request: Request, { params }: { params: Promise<{  }> }) {
-  const { workspaceId } = await studioRouteParams(params, request);
+  const { locationId } = await studioRouteParams(params, request);
   return studioCommandResponse(request, { profile: getPlatformProfile, parse: readScriptBriefCommand,
-    execute: command => command.action === "enqueue" ? enqueueStudioScriptBrief(workspaceId, command) : applyStudioScriptBrief(workspaceId, command) });
+    execute: command => command.action === "enqueue" ? enqueueStudioScriptBrief(locationId, command) : applyStudioScriptBrief(locationId, command) });
 }
 
 export const POST = withStudioRoute(POSTHandler);

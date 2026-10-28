@@ -8,8 +8,8 @@ import type { PendingStudioUpload } from "@/lib/studio/uploads";
 
 type Pending = PendingStudioUpload & { start?: UploadCommand };
 /** Metadata lives on the server; signed URLs and file bytes are never put in browser storage. */
-export function StudioUploadForm({ workspaceId, recordId, pendingUploads = [] }: {
-  workspaceId: string; recordId: string; pendingUploads?: PendingStudioUpload[];
+export function StudioUploadForm({ locationId, recordId, pendingUploads = [] }: {
+  locationId: string; recordId: string; pendingUploads?: PendingStudioUpload[];
 }) {
   const tenantHeaders = useStudioTenantHeaders();
   const router = useRouter();

@@ -1,7 +1,7 @@
 import { requestStudioRest, type StudioRestConfig } from "../rest-client";
 
 export interface StudioJob {
-  id: string; workspace_id: string; kind: string; payload: Record<string, unknown>;
+  id: string; location_id: string; kind: string; payload: Record<string, unknown>;
   lease_token: string; lease_expires_at?: string;
   attempts: number; max_attempts: number;
 }

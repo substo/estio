@@ -14,14 +14,14 @@ function load(file: string, deps: Record<string, any>) {
   vm.runInNewContext(code, { module, exports: module.exports, require: (name: string) => { if (name === "react" && !(name in deps)) return passthroughReact; assert.ok(name in deps, `Unexpected dependency: ${name}`); return deps[name]; }, URL });
   return module.exports;
 }
-const workspaceId = "11111111-1111-4111-8111-111111111111";
+const locationId = "11111111-1111-4111-8111-111111111111";
 function context(options: { realm?: string; denied?: boolean; deleted?: boolean; unmapped?: boolean } = {}) {
   const selected: string[] = [];
   const realm = options.realm ?? "substo";
-  const authorized = { status: "authorized", location: { id: "tenant-b", name: "Canonical name", authRealm: realm, studioWorkspaceId: workspaceId }, availableLocations: [{ id: "tenant-b", name: "Canonical name" }] };
-  const workspace = { id: workspaceId, name: "Stale workspace name", estio_location_id: "tenant-b" };
+  const authorized = { status: "authorized", location: { id: "tenant-b", name: "Canonical name", authRealm: realm, studioWorkspaceId: locationId }, availableLocations: [{ id: "tenant-b", name: "Canonical name" }] };
+  const workspace = { id: locationId, name: "Stale workspace name", estio_location_id: "tenant-b" };
   const api = load("lib/auth/tenant-context.ts", {
-    "server-only": {}, "@/lib/db": { default: { location: { findFirst: async (args: any) => { assert.equal(args.where.authRealm, realm); assert.equal(args.where.studioWorkspaceId, workspaceId); return options.unmapped ? null : { id: "tenant-b" }; } } } },
+    "server-only": {}, "@/lib/db": { default: { location: { findFirst: async (args: any) => { assert.equal(args.where.authRealm, realm); assert.equal(args.where.studioWorkspaceId, locationId); return options.unmapped ? null : { id: "tenant-b" }; } } } },
     "@clerk/nextjs/server": { auth: async () => ({ userId: "person" }) }, "./request-realm": { getRequestAuthRealm: async () => realm },
     "./active-location": { resolveActiveLocation: async () => ({ status: "authorized", location: { id: "cookie-a" } }), validateActiveLocationSelection: async (id: string) => { selected.push(id); return options.denied ? { status: "no_access", location: null } : authorized; } },
     "@/lib/studio/supabase-service": { getEstioStudioWorkspace: async () => workspace, getEstioStudioWorkspaceById: async () => workspace, getSubstoStudioWorkspace: async () => workspace },
@@ -31,13 +31,13 @@ function context(options: { realm?: string; denied?: boolean; deleted?: boolean;
 }
 test("explicit workspace wins over cookie context in each realm without provisioning", async () => {
   for (const realm of ["estio", "substo"]) {
-    const { api, selected } = context({ realm }); const value = await api.resolveTenantContext({ workspaceId });
-    assert.equal(value.resolution.location.id, "tenant-b"); assert.equal(value.workspaceId, workspaceId); assert.deepEqual(selected, ["tenant-b"]);
+    const { api, selected } = context({ realm }); const value = await api.resolveTenantContext({ locationId });
+    assert.equal(value.resolution.location.id, "tenant-b"); assert.equal(value.locationId, locationId); assert.deepEqual(selected, ["tenant-b"]);
   }
 });
 test("foreign/revoked, deleted profile, unmapped and malformed workspaces fail closed", async () => {
   for (const options of [{ denied: true }, { deleted: true }, { unmapped: true }, { realm: "unknown" }]) {
-    assert.equal(await context(options).api.resolveTenantContext({ workspaceId }), null);
+    assert.equal(await context(options).api.resolveTenantContext({ locationId }), null);
   }
   assert.equal(await context().api.resolveWorkspaceTenant("not-a-uuid"), null);
 });
@@ -87,14 +87,14 @@ test("Studio shell loads the same platform location choices as CRM without repla
       const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
         "server-only": {},
         "@clerk/nextjs/server": { auth: async () => ({ actor: null }) },
-        "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ app: "estio", workspaceId, resolution: { location: { id: "tenant-b" }, role, availableLocations: available } }) },
+        "@/lib/auth/tenant-context": { resolveTenantContext: async () => ({ app: "estio", locationId, resolution: { location: { id: "tenant-b" }, role, availableLocations: available } }) },
         "@/lib/auth/impersonation": {},
         "@/components/app-shell/app-shell-data": shellData,
         "@/lib/auth/active-location": {}, "@/lib/auth/request-realm": {}, "@/lib/studio/rest": { isStudioProviderUnavailable: () => false },
       });
-      const result = await api.getStudioShellData({ workspaceId });
+      const result = await api.getStudioShellData({ locationId });
       assert.equal(result.activeLocationId, "tenant-b");
-      assert.equal(result.workspaceId, workspaceId);
+      assert.equal(result.locationId, locationId);
       assert.equal(result.platformLoginLocations, platform ? choices : null);
       assert.equal(optionsCalls, platform ? 1 : 0);
       assert.deepEqual(Array.from(result.locations, (row: any) => row.id), ["tenant-b"]);
@@ -127,9 +127,9 @@ test("a restricted Studio database keeps the Studio shell from the CRM Location 
       "@/lib/auth/active-location": { resolveActiveLocation: async () => ({ status: "authorized", location: { id: "crm-location" }, availableLocations: [] }) },
       "@/lib/auth/request-realm": { getRequestAuthRealm: async () => app },
       "@/lib/studio/rest": { isStudioProviderUnavailable: (error: unknown) => error === restricted },
-      "@/components/app-shell/app-shell-data": { getAppShellData: async (input: any) => ({ app: input.app, activeLocationId: input.resolution.location.id, workspaceId: input.workspaceId }) },
+      "@/components/app-shell/app-shell-data": { getAppShellData: async (input: any) => ({ app: input.app, activeLocationId: input.resolution.location.id, locationId: input.locationId }) },
     });
-    assert.deepEqual(await api.getStudioShellData(), { app, activeLocationId: "crm-location", workspaceId: null });
+    assert.deepEqual(await api.getStudioShellData(), { app, activeLocationId: "crm-location", locationId: null });
   }
   const other = load("app/(main)/studio/_components/studio-shell-data.ts", {
     "server-only": {}, "@clerk/nextjs/server": {}, "@/lib/auth/impersonation": {}, "@/lib/auth/active-location": {}, "@/lib/auth/request-realm": {},

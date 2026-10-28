@@ -10,12 +10,12 @@ export default async function StudioKnowledgePage({ params, searchParams }: {
   params: Promise<{  }>;
   searchParams: Promise<{ status?: string | string[]; topic?: string | string[]; page?: string | string[] }>;
 }) {
-  const { workspaceId } = await studioRouteParams(params);
+  const { locationId } = await studioRouteParams(params);
   const query = await searchParams;
   const status = knowledgeStatus(query.status);
   const topicId = knowledgeTopic(query.topic);
   const page = knowledgePage(query.page);
-  const result = await listStudioKnowledge(workspaceId, status, topicId, page);
+  const result = await listStudioKnowledge(locationId, status, topicId, page);
   if (!result) notFound();
   const root = `/studio`;
   const href = (nextStatus: KnowledgeStatus, nextPage: number, nextTopic = topicId) => {
@@ -26,7 +26,7 @@ export default async function StudioKnowledgePage({ params, searchParams }: {
   return (
     <main className="mx-auto max-w-6xl space-y-8 p-6 md:p-10">
       <header className="space-y-2">
-        <nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.workspace.name}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link><Link href={`${root}/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
+        <nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link><Link href={`${root}/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
         <h1 className="text-3xl font-semibold tracking-tight">Knowledge</h1>
         <p className="text-muted-foreground">Read source findings alongside their citations and imported review decisions.</p>
       </header>

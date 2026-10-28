@@ -11,15 +11,15 @@ export const dynamic = "force-dynamic";
 export default async function StudioLibraryPage({ params, searchParams }: {
   params: Promise<{  }>; searchParams: Promise<{ page?: string }>;
 }) {
-  const { workspaceId } = await studioRouteParams(params);
+  const { locationId } = await studioRouteParams(params);
   const query = await searchParams;
-  const result = await listStudioLibrary(workspaceId, Number(query.page || 0));
+  const result = await listStudioLibrary(locationId, Number(query.page || 0));
   if (!result) notFound();
   const root = `/studio`;
   return (
     <main className="mx-auto max-w-6xl space-y-8 p-6 md:p-10">
       <header className="space-y-2">
-        <nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.workspace.name}</Link><Link href={`${root}/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
+        <nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
         <h1 className="text-3xl font-semibold tracking-tight">Research library</h1>
         <p className="text-muted-foreground">Keep sources, channel references, citations, and research notes together for this location.</p>
       </header>
@@ -39,7 +39,7 @@ export default async function StudioLibraryPage({ params, searchParams }: {
         {result.page > 0 ? <Link href={`${root}/library?page=${result.page - 1}`}>Previous page</Link> : null}
         {result.hasNext ? <Link href={`${root}/library?page=${result.page + 1}`}>Next page</Link> : null}
       </nav>
-      <section className="max-w-3xl space-y-4"><h2 className="text-xl font-medium">Add a source or channel</h2><LibraryRecordForm workspaceId={workspaceId} recordId={randomUUID()} version={0} /></section>
+      <section className="max-w-3xl space-y-4"><h2 className="text-xl font-medium">Add a source or channel</h2><LibraryRecordForm locationId={locationId} recordId={randomUUID()} version={0} /></section>
     </main>
   );
 }

@@ -3,7 +3,7 @@ import {useState} from "react";
 import {useRouter} from "next/navigation";
 import type {ExtractionInputs} from "@/lib/studio/knowledge-extraction";
 import {useStudioCommand} from "../../../_components/use-studio-command";
-export function ExtractionStartForm({workspaceId,source,inputs}:{workspaceId:string;source:ExtractionInputs["source"];inputs:ExtractionInputs["inputs"]}){
+export function ExtractionStartForm({locationId,source,inputs}:{locationId:string;source:ExtractionInputs["source"];inputs:ExtractionInputs["inputs"]}){
  const router=useRouter();const [choice,setChoice]=useState(0);const [start,setStart]=useState(0);const [count,setCount]=useState(2);const [focus,setFocus]=useState("");const [confirm,setConfirm]=useState(false);const [queued,setQueued]=useState(false);
  const command=useStudioCommand(`/studio/knowledge/extractions/api`);const input=inputs[choice];
  async function submit(event:React.FormEvent){event.preventDefault();if(!input||queued)return;
@@ -22,7 +22,7 @@ export function ExtractionStartForm({workspaceId,source,inputs}:{workspaceId:str
  <button disabled={command.pending||!input||queued} className="rounded-md border px-3 py-2 disabled:opacity-50">{command.pending?"Queuing…":command.retry?"Retry same request":"Extract proposed findings"}</button>
  {command.error?<p role="alert" className="text-destructive">{command.error}</p>:null}</form>;
 }
-export function ExtractionApplyForm({workspaceId,reviewId,version,available}:{workspaceId:string;reviewId:string;version:number;available:Array<{index:number;statement:string}>}){
+export function ExtractionApplyForm({locationId,reviewId,version,available}:{locationId:string;reviewId:string;version:number;available:Array<{index:number;statement:string}>}){
  const router=useRouter();const [selected,setSelected]=useState<number[]>([]);const [confirm,setConfirm]=useState(false);const [saved,setSaved]=useState(false);
  const command=useStudioCommand(`/studio/knowledge/extractions/api`);
  async function submit(event:React.FormEvent){event.preventDefault();if(saved)return;

@@ -4,8 +4,8 @@ import { reviewStudioTranscription } from "@/lib/studio/transcription-reconcilia
 import { transcriptionReviewResponse } from "@/lib/studio/transcription-reconciliation-http";
 export const dynamic = "force-dynamic";
 async function POSTHandler(request: Request, { params }: { params: Promise<{  }> }) {
-  const { workspaceId } = await studioRouteParams(params, request);
-  return transcriptionReviewResponse(request, { profile: getPlatformProfile, execute: command => reviewStudioTranscription(workspaceId, command) });
+  const { locationId } = await studioRouteParams(params, request);
+  return transcriptionReviewResponse(request, { profile: getPlatformProfile, execute: command => reviewStudioTranscription(locationId, command) });
 }
 
 export const POST = withStudioRoute(POSTHandler);

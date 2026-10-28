@@ -9,13 +9,13 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 async function POSTHandler(request: NextRequest, { params }: { params: Promise<{  }> }) {
   const profile = await getPlatformProfile(); if (!profile) return json({ error: "Sign in as yourself." }, 401);
   if (request.headers.get("origin") !== profile.origin) return json({ error: "Forbidden" }, 403);
-  const { workspaceId } = await studioRouteParams(params, request);
+  const { locationId } = await studioRouteParams(params, request);
   try {
     const text = await readYoutubeRequestText(request);
     const body = JSON.parse(text); if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid request." }, 400);
-    if (body.action === "browse") return json(await browseStudioYoutube(workspaceId, body));
-    if (body.action === "save") return json({ recordId: await saveStudioYoutubeLink(workspaceId, body) });
-    if (body.action === "channel") { const channelId = await manageStudioYoutubeChannel(workspaceId, body); return json({ ok: true, channelId }); }
+    if (body.action === "browse") return json(await browseStudioYoutube(locationId, body));
+    if (body.action === "save") return json({ recordId: await saveStudioYoutubeLink(locationId, body) });
+    if (body.action === "channel") { const channelId = await manageStudioYoutubeChannel(locationId, body); return json({ ok: true, channelId }); }
     return json({ error: "Unknown action." }, 400);
   } catch (error) {
     if (error instanceof YoutubeError) return json({ error: error.message, code: error.code }, error.code === "access_denied" ? 403 : error.code === "request_too_large" ? 413 : 400);

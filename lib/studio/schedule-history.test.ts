@@ -40,7 +40,7 @@ test("schedule history scopes every read to resolved workspace and immutable imp
   const result = await r.service.schedule("untrusted-input-workspace", schedule, 2);
   assert.ok(result); assert.equal(result.history.length, 20); assert.equal(result.hasMore, true);
   assert.equal(r.authorizations[0], "untrusted-input-workspace");
-  for (const path of r.paths) assert.equal(query(path).get("workspace_id"), `eq.${workspace}`);
+  for (const path of r.paths) assert.equal(query(path).get("location_id"), `eq.${workspace}`);
   const history = r.paths.find(p => p.startsWith("studio_schedule_legacy_runs"))!;
   assert.equal(query(history).get("schedule_id"), `eq.${schedule}`);
   assert.equal(query(history).get("import_run_id"), `eq.${imported}`);
@@ -66,16 +66,16 @@ test("run details require workspace, parent schedule and run ID together, preser
   assert.deepEqual(result?.run.payload, payload);
   assert.equal(query(r.paths[0]).get("schedule_id"), `eq.${schedule}`);
   assert.equal(query(r.paths[0]).get("id"), `eq.${run}`);
-  assert.equal(query(r.paths[0]).get("workspace_id"), `eq.${workspace}`);
+  assert.equal(query(r.paths[0]).get("location_id"), `eq.${workspace}`);
   assert.equal(query(r.paths[1]).get("id"), `eq.${imported}`);
-  assert.equal(query(r.paths[1]).get("workspace_id"), `eq.${workspace}`);
+  assert.equal(query(r.paths[1]).get("location_id"), `eq.${workspace}`);
   const missing = reader(); missing.responses.push([]);
   assert.equal(await missing.service.run(workspace, schedule, run), null); assert.equal(missing.paths.length, 1);
 });
 test("full snapshots are fetched only through a separately authorized workspace-scoped read", async () => {
   const r = reader(); r.responses.push([{ id: imported, source_canonical_json: '{"exact":"snapshot"}' }]);
   assert.ok(await r.service.snapshot(workspace, imported));
-  assert.equal(query(r.paths[0]).get("workspace_id"), `eq.${workspace}`);
+  assert.equal(query(r.paths[0]).get("location_id"), `eq.${workspace}`);
   assert.equal(query(r.paths[0]).get("id"), `eq.${imported}`);
   assert.ok(query(r.paths[0]).get("select")!.includes("source_canonical_json"));
   const missing = reader(); missing.responses.push([]);
@@ -97,7 +97,7 @@ test("provenance downloads preserve private exact content and forbid caching or 
   assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
   assert.match(response.headers.get("Content-Type")!, /application\/json/);
   assert.match(response.headers.get("Content-Disposition")!, /^attachment;/);
-  assert.deepEqual(await response.json(), { workspaceId: workspace, ...snapshot });
+  assert.deepEqual(await response.json(), { locationId: workspace, ...snapshot });
   const denied = scheduleImportDownloadResponse(null);
   assert.equal(denied.status, 404); assert.equal(denied.headers.get("Cache-Control"), "private, no-store");
   assert.equal(await denied.text(), "Not found");

@@ -41,5 +41,5 @@ export function reconciliationCostMicros(value: string): number {
 /** App realm and principal must agree; a matching email is never authority. */
 export function canReviewTranscription(profile: { brand: "estio" | "substo"; userId: string } | null,
   access: (Parameters<typeof canManageStudioAi>[0] & { userId: string }) | null): boolean {
-  return !!profile && !!access && profile.brand === access.brand && profile.userId === access.userId && canManageStudioAi(access);
+  return !!profile && !!access && profile.brand === access.app && profile.userId === access.userId && canManageStudioAi(access);
 }

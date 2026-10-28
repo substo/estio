@@ -17,17 +17,17 @@ export default async function StudioKnowledgeInsightPage({ params, searchParams 
   params: Promise<{ insightId: string }>;
   searchParams: Promise<{ evidencePage?: string | string[]; reviewsPage?: string | string[]; unitsPage?: string | string[] }>;
 }) {
-  const { workspaceId, insightId } = await studioRouteParams(params);
+  const { locationId, insightId } = await studioRouteParams(params);
   const query = await searchParams;
   const pages = { evidence: knowledgePage(query.evidencePage), reviews: knowledgePage(query.reviewsPage), units: knowledgePage(query.unitsPage) };
-  const result = await getStudioKnowledgeInsight(workspaceId, insightId, pages);
+  const result = await getStudioKnowledgeInsight(locationId, insightId, pages);
   if (!result) notFound();
   const canReview = maySubmitKnowledgeReview({
-    hasWorkspaceAccess: true,
+    hasLocationAccess: true,
     isImpersonating: Boolean((await auth()).actor),
   });
   const { insight, source, topic, record } = result;
-  const reviewTopics = canReview ? await findStudioKnowledgeTopics(workspaceId, "") : { topics: [], hasMore: false };
+  const reviewTopics = canReview ? await findStudioKnowledgeTopics(locationId, "") : { topics: [], hasMore: false };
   const root = `/studio`;
   const detail = `${root}/knowledge/${insightId}`;
   const pageHref = (section: "evidence" | "reviews" | "units", next: number) => {
@@ -40,12 +40,12 @@ export default async function StudioKnowledgeInsightPage({ params, searchParams 
   return (
     <main className="mx-auto max-w-5xl space-y-8 p-6 md:p-10">
       <header className="space-y-3">
-        <nav className="flex flex-wrap gap-4 text-sm"><Link href={`${root}/knowledge`} className="text-muted-foreground hover:underline">Knowledge</Link><Link href={root} className="text-muted-foreground hover:underline">{result.access.workspace.name}</Link></nav>
+        <nav className="flex flex-wrap gap-4 text-sm"><Link href={`${root}/knowledge`} className="text-muted-foreground hover:underline">Knowledge</Link><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link></nav>
         <div className="flex flex-wrap gap-3 text-sm text-muted-foreground"><span>Current status: {insight.status}</span><span>Review version {insight.version}</span><span>{text(imported.kind)?.replaceAll("_", " ") || "Finding"}</span>{topic ? <span>Topic: {text(topic.payload.name) || topic.id}</span> : text(imported.suggested_topic) ? <span>Suggested topic: {text(imported.suggested_topic)}</span> : null}</div>
         <h1 className="whitespace-pre-wrap text-3xl font-semibold tracking-tight">{insight.statement}</h1>
         <p className="text-sm text-muted-foreground">Statement edits, topic assignments and review decisions are recorded in the history below. Source wording and provenance stay available for inspection.</p>
       </header>
-      {canReview ? <ReviewDecisionForm key={`${insight.id}:${insight.version}`} workspaceId={workspaceId} insightId={insight.id} version={insight.version} status={insight.status} statement={insight.statement} suggestedTopic={text(insight.payload.suggested_topic) ?? ""} currentTopic={topic ? { id: topic.id, name: text(topic.payload.name) ?? topic.id } : null} initialTopics={reviewTopics} />
+      {canReview ? <ReviewDecisionForm key={`${insight.id}:${insight.version}`} locationId={locationId} insightId={insight.id} version={insight.version} status={insight.status} statement={insight.statement} suggestedTopic={text(insight.payload.suggested_topic) ?? ""} currentTopic={topic ? { id: topic.id, name: text(topic.payload.name) ?? topic.id } : null} initialTopics={reviewTopics} />
         : <p className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">Review decisions are unavailable while impersonating another account. Return to your own account to review this finding.</p>}
       <section className="space-y-3 rounded-xl border bg-card p-5" aria-label="Knowledge source">
         <h2 className="text-lg font-medium">Source</h2>
@@ -79,7 +79,7 @@ export default async function StudioKnowledgeInsightPage({ params, searchParams 
       </section>
       <section className="space-y-4" aria-label="Reviews">
         <h2 className="text-xl font-medium">Review history</h2>
-        {result.reviews.map((entry) => <article key={entry.id} className="rounded-xl border bg-card p-5 text-sm"><p>{text(entry.payload.action) || "Review event"} · {text(entry.payload.previous_status) || "?"} → {text(entry.payload.new_status) || "?"}</p>{text(entry.payload.at) ? <p className="mt-1 text-muted-foreground">{text(entry.payload.at)}</p> : null}{text(entry.payload.actor_clerk_user_id) ? <p className="mt-1 text-muted-foreground">Reviewed by {text(entry.payload.actor_brand) || "workspace"} account {text(entry.payload.actor_clerk_user_id)}</p> : null}{entry.payload.previous_statement !== undefined && entry.payload.previous_statement !== entry.payload.new_statement ? <div className="mt-3 space-y-1"><p className="font-medium">Statement changed</p><p className="whitespace-pre-wrap">Before: {text(entry.payload.previous_statement)}</p><p className="whitespace-pre-wrap">After: {text(entry.payload.new_statement)}</p></div> : null}{entry.payload.previous_topic_id !== undefined && entry.payload.previous_topic_id !== entry.payload.new_topic_id ? <p className="mt-3">Topic: {text(entry.payload.previous_topic_name) ?? "Unassigned"} → {text(entry.payload.new_topic_name) ?? "Unassigned"}</p> : null}{text(entry.payload.reason) ? <p className="mt-3 whitespace-pre-wrap">{text(entry.payload.reason)}</p> : null}<details className="mt-3"><summary className="cursor-pointer">Exact review event</summary><pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3">{JSON.stringify(entry.payload, null, 2)}</pre></details></article>)}
+        {result.reviews.map((entry) => <article key={entry.id} className="rounded-xl border bg-card p-5 text-sm"><p>{text(entry.payload.action) || "Review event"} · {text(entry.payload.previous_status) || "?"} → {text(entry.payload.new_status) || "?"}</p>{text(entry.payload.at) ? <p className="mt-1 text-muted-foreground">{text(entry.payload.at)}</p> : null}{text(entry.payload.actor_clerk_user_id) ? <p className="mt-1 text-muted-foreground">Reviewed by {text(entry.payload.actor_app) || "workspace"} account {text(entry.payload.actor_clerk_user_id)}</p> : null}{entry.payload.previous_statement !== undefined && entry.payload.previous_statement !== entry.payload.new_statement ? <div className="mt-3 space-y-1"><p className="font-medium">Statement changed</p><p className="whitespace-pre-wrap">Before: {text(entry.payload.previous_statement)}</p><p className="whitespace-pre-wrap">After: {text(entry.payload.new_statement)}</p></div> : null}{entry.payload.previous_topic_id !== undefined && entry.payload.previous_topic_id !== entry.payload.new_topic_id ? <p className="mt-3">Topic: {text(entry.payload.previous_topic_name) ?? "Unassigned"} → {text(entry.payload.new_topic_name) ?? "Unassigned"}</p> : null}{text(entry.payload.reason) ? <p className="mt-3 whitespace-pre-wrap">{text(entry.payload.reason)}</p> : null}<details className="mt-3"><summary className="cursor-pointer">Exact review event</summary><pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3">{JSON.stringify(entry.payload, null, 2)}</pre></details></article>)}
         {!result.reviews.length ? <p className="text-sm text-muted-foreground">No review events on this page.</p> : null}
         <nav className="flex gap-4 text-sm" aria-label="Review pages">{pages.reviews > 0 ? <Link href={pageHref("reviews", pages.reviews - 1)}>Previous events</Link> : null}{result.hasMoreReviews ? <Link href={pageHref("reviews", pages.reviews + 1)}>More events</Link> : null}</nav>
       </section>

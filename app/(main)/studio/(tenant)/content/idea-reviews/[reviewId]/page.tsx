@@ -6,7 +6,7 @@ import { getStudioIdeaReview } from "@/lib/studio/idea-review";
 import { RefreshIdeaReview } from "../start-form";
 export const dynamic = "force-dynamic";
 export default async function IdeaReviewPage({ params }: { params: Promise<{ reviewId: string }> }) {
-  const { workspaceId, reviewId } = await studioRouteParams(params); const data = await getStudioIdeaReview(workspaceId, reviewId); if (!data) notFound();
+  const { locationId, reviewId } = await studioRouteParams(params); const data = await getStudioIdeaReview(locationId, reviewId); if (!data) notFound();
   const { review, job, stale } = data; const result = review.result;
   return <main className="mx-auto max-w-4xl space-y-6 p-6 md:p-10">
     <header className="space-y-2"><Link href={`/studio/content/idea-reviews`} className="text-sm text-primary hover:underline">Idea reviews</Link><h1 className="text-3xl font-semibold">Idea review result</h1><p className="text-sm text-muted-foreground">{review.model} · {review.prompt_version} · {new Date(review.created_at).toLocaleString("en-GB", { timeZone: "Asia/Nicosia" })}</p></header>
@@ -22,6 +22,6 @@ export default async function IdeaReviewPage({ params }: { params: Promise<{ rev
         <p className="whitespace-pre-wrap">{s.rationale}</p><p className="text-muted-foreground">Cited source IDs: {s.sourceIds.length ? s.sourceIds.join(", ") : "None — verify missing evidence"}</p>
       </section>)}
     </> : null}
-    <TextRunProvenance workspaceId={workspaceId} snapshot={review.snapshot} />
+    <TextRunProvenance locationId={locationId} snapshot={review.snapshot} />
   </main>;
 }

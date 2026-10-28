@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { IdeaSnapshot } from "@/lib/studio/idea-review-policy";
 function sourceUrl(url: string | null) { try { const parsed = new URL(url ?? ""); return ["https:", "http:"].includes(parsed.protocol) ? parsed.href : null; } catch { return null; } }
-export function TextRunProvenance({ workspaceId, snapshot }: { workspaceId: string; snapshot: IdeaSnapshot }) {
+export function TextRunProvenance({ locationId, snapshot }: { locationId: string; snapshot: IdeaSnapshot }) {
   return (
     <section className="space-y-3"><h2 className="text-xl font-medium">Input snapshot and provenance</h2>
       <p className="text-sm text-muted-foreground">Saved notes and partial research excerpts, not independently verified facts. These inputs were snapshotted for generation; current records may differ.</p>

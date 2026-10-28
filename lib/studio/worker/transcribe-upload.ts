@@ -13,7 +13,7 @@ const MAX_DURATION_SECONDS = 6 * 3600;
 export interface TranscribeDeps {
   rest<T>(path: string, init?: RequestInit): Promise<T>;
   presignWorkerRead(key: string): Promise<string>;
-  decryptKey(workspaceId: string, credential: { ciphertext: string; iv: string; auth_tag: string; key_id: string }): string;
+  decryptKey(locationId: string, credential: { ciphertext: string; iv: string; auth_tag: string; key_id: string }): string;
   probe(url: string, signal: AbortSignal): Promise<{ durationSeconds: number; hasAudio: boolean }>;
   extractChunks(url: string, directory: string, chunkSeconds: number, signal: AbortSignal): Promise<string[]>;
   transcribe(filePath: string, apiKey: string, signal: AbortSignal): Promise<TranscribedChunk>;
@@ -34,21 +34,21 @@ function secondsUntilNextUtcMonth(now: Date) {
  */
 export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHandler {
   return async (job, context) => {
-    const workspaceId = job.workspace_id;
+    const locationId = job.location_id;
     const uploadId = String(job.payload.uploadId ?? "");
     if (!/^[0-9a-f-]{36}$/.test(uploadId)) throw new StudioJobError("invalid_job_payload", "This job is missing its upload.", false);
     const [upload] = await deps.rest<Array<{ object_key: string; status: string }>>(queryPath("studio_uploads", {
-      select: "object_key,status", workspace_id: `eq.${workspaceId}`, id: `eq.${uploadId}`, limit: "1" }));
+      select: "object_key,status", location_id: `eq.${locationId}`, id: `eq.${uploadId}`, limit: "1" }));
     if (!upload || upload.status !== "uploaded") throw new StudioJobError("upload_missing", "The upload is no longer available.", false);
     const existing = await deps.rest<Array<{ duration_seconds: number }>>(queryPath("studio_transcripts", {
-      select: "duration_seconds", workspace_id: `eq.${workspaceId}`, upload_id: `eq.${uploadId}`, limit: "1" }));
+      select: "duration_seconds", location_id: `eq.${locationId}`, upload_id: `eq.${uploadId}`, limit: "1" }));
     if (existing.length) return { uploadId, alreadyTranscribed: true };
 
-    const [credential] = await deps.rest<Array<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>>(queryPath("studio_workspace_ai_credentials", {
-      select: "ciphertext,iv,auth_tag,key_id", workspace_id: `eq.${workspaceId}`, provider: "eq.openai", limit: "1" }));
+    const [credential] = await deps.rest<Array<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>>(queryPath("studio_location_ai_credentials", {
+      select: "ciphertext,iv,auth_tag,key_id", location_id: `eq.${locationId}`, provider: "eq.openai", limit: "1" }));
     if (!credential) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings, then retry this job.", false);
     let apiKey: string;
-    try { apiKey = deps.decryptKey(workspaceId, credential); }
+    try { apiKey = deps.decryptKey(locationId, credential); }
     catch { throw new StudioJobError("openai_key_unreadable", "The saved OpenAI key could not be read. Save it again in AI settings, then retry.", false); }
 
     const url = await deps.presignWorkerRead(upload.object_key);
@@ -58,11 +58,11 @@ export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHa
     if (media.durationSeconds > MAX_DURATION_SECONDS) throw new StudioJobError("media_too_long", "Transcription supports recordings up to 6 hours.", false);
 
     const done = await deps.rest<Array<{ chunk_index: number; duration_seconds: number }>>(queryPath("studio_transcript_chunks", {
-      select: "chunk_index,duration_seconds", workspace_id: `eq.${workspaceId}`, upload_id: `eq.${uploadId}`, order: "chunk_index.asc" }));
+      select: "chunk_index,duration_seconds", location_id: `eq.${locationId}`, upload_id: `eq.${uploadId}`, order: "chunk_index.asc" }));
     const doneIndexes = new Set(done.map(c => c.chunk_index));
     const chunkCount = Math.ceil(media.durationSeconds / CHUNK_SECONDS);
     const chunkDuration = (index: number) => Math.min(CHUNK_SECONDS, media.durationSeconds - index * CHUNK_SECONDS);
-    const fence = { p_workspace_id: workspaceId, p_upload_id: uploadId, p_job_id: job.id,
+    const fence = { p_location_id: locationId, p_upload_id: uploadId, p_job_id: job.id,
       p_worker_id: context.workerId, p_lease_token: job.lease_token };
     const assertActive = () => {
       if (context.signal.aborted) throw new StudioJobError("worker_lease_lost", "The worker lost its job lease.", true);
@@ -105,7 +105,7 @@ export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHa
       } finally { await rm(directory, { recursive: true, force: true }); }
     }
     const saved = await deps.rest<Array<{ chunk_index: number }>>(queryPath("studio_transcript_chunks", {
-      select: "chunk_index", workspace_id: `eq.${workspaceId}`, upload_id: `eq.${uploadId}` }));
+      select: "chunk_index", location_id: `eq.${locationId}`, upload_id: `eq.${uploadId}` }));
     if (saved.length < chunkCount) throw new StudioJobError("transcription_incomplete", "Part of the recording was not transcribed. The job will retry the missing part.", true);
     assertActive();
     await rpc(deps, "studio_finish_upload_transcript", { ...fence, p_model: TRANSCRIBE_MODEL,
@@ -121,5 +121,5 @@ function uncertainOutcome() {
 /** Production wiring: service REST, private R2 reads, ffmpeg, and OpenAI. */
 export function productionTranscribeDeps(input: { rest: TranscribeDeps["rest"]; presignWorkerRead: TranscribeDeps["presignWorkerRead"] }): TranscribeDeps {
   return { ...input, probe: probeMedia, extractChunks: extractAudioChunks, transcribe: (file, key, signal) => transcribeChunk(file, key, signal),
-    decryptKey: (workspaceId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(workspaceId, "openai")) };
+    decryptKey: (locationId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(locationId, "openai")) };
 }

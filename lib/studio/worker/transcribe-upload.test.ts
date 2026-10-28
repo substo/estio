@@ -11,7 +11,7 @@ import { CHUNK_SECONDS, createTranscribeUploadHandler, type TranscribeDeps } fro
 
 const ws = "70000000-0000-4000-8000-000000000001";
 const uploadId = "a3000000-0000-4000-8000-000000000001";
-const job = { id: "j", lease_token: "claim-1", workspace_id: ws, kind: "studio.transcribe_upload", payload: { uploadId }, attempts: 1, max_attempts: 5 };
+const job = { id: "j", lease_token: "claim-1", location_id: ws, kind: "studio.transcribe_upload", payload: { uploadId }, attempts: 1, max_attempts: 5 };
 const context = { signal: new AbortController().signal, workerId: "w" };
 
 function fakeDeps(options: { duration?: number; reserve?: string | null; credential?: boolean; done?: number[]; failAt?: number; uncertain?: number[]; transcript?: boolean } = {}) {
@@ -45,7 +45,7 @@ function fakeDeps(options: { duration?: number; reserve?: string | null; credent
       }
       if (p.startsWith("studio_uploads")) return [{ object_key: `${ws}/uploads/${uploadId}/original`, status: "uploaded" }] as T;
       if (p.startsWith("studio_transcripts")) return (options.transcript ? [{ duration_seconds: 1 }] : []) as T;
-      if (p.startsWith("studio_workspace_ai_credentials")) return (options.credential === false ? [] : [{ ciphertext: "c", iv: "i", auth_tag: "t", key_id: "v1" }]) as T;
+      if (p.startsWith("studio_location_ai_credentials")) return (options.credential === false ? [] : [{ ciphertext: "c", iv: "i", auth_tag: "t", key_id: "v1" }]) as T;
       if (p.startsWith("studio_transcript_chunks")) return [...chunks.keys()].sort().map(i => ({ chunk_index: i, duration_seconds: chunks.get(i) })) as T;
       throw new Error(`unexpected ${p}`);
     },
