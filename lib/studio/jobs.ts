@@ -1,9 +1,9 @@
+import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess, type StudioAccess } from "./access";
 import { canManageStudioAi } from "./ai-settings-policy";
-import { queryPath, studioRest } from "./rest";
 
 export interface StudioJobRow {
   id: string; kind: string; status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -40,10 +40,8 @@ export async function listStudioJobs(locationId: string, page = 0) {
   const access = await getStudioAccess(locationId);
   if (!access) return null;
   const [jobs, workers] = await Promise.all([
-    studioRest<StudioJobRow[]>(queryPath("studio_jobs", {
-      select: "id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at,execution_target,device_id,result,device:studio_devices(revoked_at)",
-      location_id: `eq.${access.locationId}`, order: "created_at.desc,id.asc", limit: "26", offset: String(page * 25) })),
-    studioRest<Array<{ seen_at: string }>>(queryPath("studio_worker_heartbeats", { select: "seen_at", order: "seen_at.desc", limit: "1" })),
+    studioDb.rows<StudioJobRow>(Prisma.sql`select id,kind,status,attempts,max_attempts,run_after,last_error_code,last_error_message,created_at,finished_at,execution_target,device_id,result,(select jsonb_build_object('revoked_at', d.revoked_at) from studio.studio_devices d where d.id = t.device_id and d.location_id = t.location_id) as device from studio.studio_jobs t where location_id = ${access.locationId} order by created_at desc,id asc limit 26 offset ${page * 25}`),
+    studioDb.rows<{ seen_at: string }>(Prisma.sql`select seen_at from studio.studio_worker_heartbeats t order by seen_at desc limit 1`),
   ]);
   const lastSeen = workers[0]?.seen_at ?? null;
   return { access, jobs: jobs.slice(0, 25), hasMore: jobs.length > 25, workerLastSeen: lastSeen,
@@ -60,8 +58,7 @@ export async function studioJobAction(locationId: string, jobId: string, action:
   const access = await requireMember(locationId);
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("Invalid job.");
   if (action === "retry") {
-    const jobs = await studioRest<Array<Pick<StudioJobRow, "execution_target" | "device">>>(queryPath("studio_jobs", {
-      select: "execution_target,device:studio_devices(revoked_at)", location_id: `eq.${access.locationId}`, id: `eq.${jobId}`, limit: "1" }));
+    const jobs = await studioDb.rows<Pick<StudioJobRow, "execution_target" | "device">>(Prisma.sql`select execution_target,(select jsonb_build_object('revoked_at', d.revoked_at) from studio.studio_devices d where d.id = t.device_id and d.location_id = t.location_id) as device from studio.studio_jobs t where location_id = ${access.locationId} and id = ${jobId}::uuid limit 1`);
     if (!jobs[0]) throw new Error("Job not found.");
     if (!canRetryStudioJob(access, jobs[0])) throw new Error("A Business admin and an active paired Mac are required to retry this job.");
   }

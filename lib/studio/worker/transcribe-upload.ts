@@ -1,7 +1,8 @@
+import { Prisma } from "@prisma/client";
+import type { StudioDb } from "../db";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { queryPath } from "../rest-client";
 import { aiCredentialContext, decryptStudioSecret } from "../secrets";
 import { extractAudioChunks, probeMedia } from "./ffmpeg";
 import { StudioJobError, StudioProviderRejectedError, type StudioJobHandler } from "./handlers";
@@ -11,7 +12,7 @@ export const CHUNK_SECONDS = 600;
 const MAX_DURATION_SECONDS = 6 * 3600;
 
 export interface TranscribeDeps {
-  rest<T>(path: string, init?: RequestInit): Promise<T>;
+  db: StudioDb;
   presignWorkerRead(key: string): Promise<string>;
   decryptKey(locationId: string, credential: { ciphertext: string; iv: string; auth_tag: string; key_id: string }): string;
   probe(url: string, signal: AbortSignal): Promise<{ durationSeconds: number; hasAudio: boolean }>;
@@ -21,7 +22,7 @@ export interface TranscribeDeps {
 }
 
 const rpc = (deps: TranscribeDeps, name: string, body: Record<string, unknown>) =>
-  deps.rest<unknown>(`rpc/${name}`, { method: "POST", body: JSON.stringify(body) });
+  deps.db.call<unknown>(name, body);
 
 function secondsUntilNextUtcMonth(now: Date) {
   return Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now.getTime()) / 1000) + 60;
@@ -37,15 +38,12 @@ export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHa
     const locationId = job.location_id;
     const uploadId = String(job.payload.uploadId ?? "");
     if (!/^[0-9a-f-]{36}$/.test(uploadId)) throw new StudioJobError("invalid_job_payload", "This job is missing its upload.", false);
-    const [upload] = await deps.rest<Array<{ object_key: string; status: string }>>(queryPath("studio_uploads", {
-      select: "object_key,status", location_id: `eq.${locationId}`, id: `eq.${uploadId}`, limit: "1" }));
+    const [upload] = await deps.db.rows<{ object_key: string; status: string }>(Prisma.sql`select object_key,status from studio.studio_uploads t where location_id = ${locationId} and id = ${uploadId}::uuid limit 1`);
     if (!upload || upload.status !== "uploaded") throw new StudioJobError("upload_missing", "The upload is no longer available.", false);
-    const existing = await deps.rest<Array<{ duration_seconds: number }>>(queryPath("studio_transcripts", {
-      select: "duration_seconds", location_id: `eq.${locationId}`, upload_id: `eq.${uploadId}`, limit: "1" }));
+    const existing = await deps.db.rows<{ duration_seconds: number }>(Prisma.sql`select duration_seconds from studio.studio_transcripts t where location_id = ${locationId} and upload_id = ${uploadId}::uuid limit 1`);
     if (existing.length) return { uploadId, alreadyTranscribed: true };
 
-    const [credential] = await deps.rest<Array<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>>(queryPath("studio_location_ai_credentials", {
-      select: "ciphertext,iv,auth_tag,key_id", location_id: `eq.${locationId}`, provider: "eq.openai", limit: "1" }));
+    const [credential] = await deps.db.rows<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>(Prisma.sql`select ciphertext,iv,auth_tag,key_id from studio.studio_location_ai_credentials t where location_id = ${locationId} and provider = ${'openai'} limit 1`);
     if (!credential) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings, then retry this job.", false);
     let apiKey: string;
     try { apiKey = deps.decryptKey(locationId, credential); }
@@ -57,8 +55,7 @@ export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHa
     if (!Number.isFinite(media.durationSeconds) || media.durationSeconds <= 0) throw new StudioJobError("media_unreadable", "The uploaded file could not be read as audio or video.", false);
     if (media.durationSeconds > MAX_DURATION_SECONDS) throw new StudioJobError("media_too_long", "Transcription supports recordings up to 6 hours.", false);
 
-    const done = await deps.rest<Array<{ chunk_index: number; duration_seconds: number }>>(queryPath("studio_transcript_chunks", {
-      select: "chunk_index,duration_seconds", location_id: `eq.${locationId}`, upload_id: `eq.${uploadId}`, order: "chunk_index.asc" }));
+    const done = await deps.db.rows<{ chunk_index: number; duration_seconds: number }>(Prisma.sql`select chunk_index,duration_seconds from studio.studio_transcript_chunks t where location_id = ${locationId} and upload_id = ${uploadId}::uuid order by chunk_index asc`);
     const doneIndexes = new Set(done.map(c => c.chunk_index));
     const chunkCount = Math.ceil(media.durationSeconds / CHUNK_SECONDS);
     const chunkDuration = (index: number) => Math.min(CHUNK_SECONDS, media.durationSeconds - index * CHUNK_SECONDS);
@@ -104,8 +101,7 @@ export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHa
         }
       } finally { await rm(directory, { recursive: true, force: true }); }
     }
-    const saved = await deps.rest<Array<{ chunk_index: number }>>(queryPath("studio_transcript_chunks", {
-      select: "chunk_index", location_id: `eq.${locationId}`, upload_id: `eq.${uploadId}` }));
+    const saved = await deps.db.rows<{ chunk_index: number }>(Prisma.sql`select chunk_index from studio.studio_transcript_chunks t where location_id = ${locationId} and upload_id = ${uploadId}::uuid`);
     if (saved.length < chunkCount) throw new StudioJobError("transcription_incomplete", "Part of the recording was not transcribed. The job will retry the missing part.", true);
     assertActive();
     await rpc(deps, "studio_finish_upload_transcript", { ...fence, p_model: TRANSCRIBE_MODEL,
@@ -119,7 +115,7 @@ function uncertainOutcome() {
 }
 
 /** Production wiring: service REST, private R2 reads, ffmpeg, and OpenAI. */
-export function productionTranscribeDeps(input: { rest: TranscribeDeps["rest"]; presignWorkerRead: TranscribeDeps["presignWorkerRead"] }): TranscribeDeps {
+export function productionTranscribeDeps(input: { db: TranscribeDeps["db"]; presignWorkerRead: TranscribeDeps["presignWorkerRead"] }): TranscribeDeps {
   return { ...input, probe: probeMedia, extractChunks: extractAudioChunks, transcribe: (file, key, signal) => transcribeChunk(file, key, signal),
     decryptKey: (locationId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(locationId, "openai")) };
 }

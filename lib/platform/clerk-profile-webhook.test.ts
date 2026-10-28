@@ -1,3 +1,4 @@
+import { fixtureDb } from "../studio/testing/fixture-db";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Webhook } from "svix";
@@ -59,10 +60,10 @@ test("unrelated verified events are ignored; storage failures return retryable f
 test("deleted-profile reads are realm/user scoped and stop unattended Estio checks before Business access", async () => {
  const reads: string[] = [];
  const read = async <T>(path: string) => { reads.push(path); return [{ clerk_user_id: "user_same_id" }] as T; };
- assert.equal(await isPlatformProfileDeleted(read, "substo", "user_same_id"), true);
- const q = new URLSearchParams(reads[0].split("?")[1]); assert.equal(q.get("brand"), "eq.substo"); assert.equal(q.get("clerk_user_id"), "eq.user_same_id");
+ assert.equal(await isPlatformProfileDeleted(fixtureDb(read), "substo", "user_same_id"), true);
+ const q = new URLSearchParams(reads[0].split("?")[1]); assert.equal(q.get("app"), "eq.substo"); assert.equal(q.get("clerk_user_id"), "eq.user_same_id");
  let checks = 0;
- assert.equal(await authorizeEstioSchedule(read, "workspace", "user_same_id", async () => { checks++; return true; }), false);
+ assert.equal(await authorizeEstioSchedule(fixtureDb(read), "workspace", "user_same_id", async () => { checks++; return true; }), false);
  assert.equal(checks, 0); assert.equal(reads.length, 2);
- await assert.rejects(isPlatformProfileDeleted(async () => { throw Error("Storage unavailable"); }, "estio", "user_same_id"));
+ await assert.rejects(isPlatformProfileDeleted(fixtureDb(async () => { throw Error("Storage unavailable"); }), "estio", "user_same_id"));
 });

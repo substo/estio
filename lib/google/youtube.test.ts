@@ -84,10 +84,10 @@ test("profile OAuth state binds realm, user, session, origin and expiry; selecti
     assert.equal(readProfileYoutubeState(raw, { ...profile, origin: "https://evil.test" }, params, now), null);
     assert.equal(readProfileYoutubeState(raw, profile, params, now + 600_001), null);
     params.append("state", oauth.state); assert.equal(readProfileYoutubeState(raw, profile, params, now), null);
-    const principal = { workspaceId: "workspace_fixture", brand: profile.brand, userId: profile.userId };
+    const principal = { locationId: "workspace_fixture", brand: profile.brand, userId: profile.userId };
     const ticket = sealYoutubeSelection(principal, video, { kind: "subscription", observedAt: new Date(now).toISOString(), provider: "youtube_data_api", rights: "research_link_only", channelId: channel }, now);
     const opened = openYoutubeSelection(ticket, principal, now)!; assert.equal(opened.videoId, video); assert.equal("title" in opened, false);
-    assert.equal(openYoutubeSelection(ticket, { ...principal, workspaceId: "other" }, now), null);
+    assert.equal(openYoutubeSelection(ticket, { ...principal, locationId: "other" }, now), null);
     assert.equal(openYoutubeSelection(ticket, { ...principal, userId: "other" }, now), null);
     assert.equal(openYoutubeSelection(ticket, { ...principal, brand: "estio" }, now), null);
     assert.equal(openYoutubeSelection(ticket, principal, now + 1_200_001), null);

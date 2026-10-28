@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { createHash, randomBytes, randomInt } from "node:crypto";
@@ -5,8 +6,7 @@ import { canManageStudioAi } from "./ai-settings-policy";
 import { getStudioAccess } from "./access";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { StudioCommandError } from "./command-error";
-import { queryPath, studioRest } from "./rest";
-import { StudioRestError } from "./rest-client";
+import { StudioDbError } from "./db";
 import { authorizeEstioSchedule, currentEstioScheduleAuthority } from "./schedule-authority";
 import { WORKER_ONLINE_SECONDS } from "./jobs";
 import {
@@ -54,16 +54,11 @@ function safeConfigReport(value: Record<string, unknown>): StudioDeviceSummary["
 
 export async function getStudioDevices(locationId: string) {
   const access = await getStudioAccess(locationId); if (!access) return null;
-  const rows = await studioRest<DeviceRow[]>(queryPath("studio_devices", {
-    select: "id,name,platform,created_at,revoked_at,seen_at,release,started_at,allowed_kinds,report,processing_enabled,paused,desired_config,config_version,applied_config_version,config_status,config_report",
-    location_id: `eq.${access.locationId}`, brand: `eq.${access.app}`, order: "created_at.desc", limit: "100" }));
+  const rows = await studioDb.rows<DeviceRow>(Prisma.sql`select id,name,platform,created_at,revoked_at,seen_at,release,started_at,allowed_kinds,report,processing_enabled,paused,desired_config,config_version,applied_config_version,config_status,config_report from studio.studio_devices t where location_id = ${access.locationId} and app = ${access.app} order by created_at desc limit 100`);
   const active = rows.filter(row => !row.revoked_at).map(row => row.id);
   const [running, commands] = active.length ? await Promise.all([
-    studioRest<Array<{ device_id: string }>>(queryPath("studio_jobs", { select: "device_id", location_id: `eq.${access.locationId}`,
-      device_id: `in.(${active.join(",")})`, status: "eq.running", limit: "100" })),
-    studioRest<Array<StudioDeviceCommandSummary & { device_id: string }>>(queryPath("studio_device_commands", {
-      select: "id,device_id,kind,provider,status,display,error,created_at,updated_at,finished_at", location_id: `eq.${access.locationId}`,
-      device_id: `in.(${active.join(",")})`, order: "created_at.desc", limit: "200" })),
+    studioDb.rows<{ device_id: string }>(Prisma.sql`select device_id from studio.studio_jobs t where location_id = ${access.locationId} and device_id = any(string_to_array(${active.join(",")}, ',')::uuid[]) and status = ${'running'} limit 100`),
+    studioDb.rows<StudioDeviceCommandSummary & { device_id: string }>(Prisma.sql`select id,device_id,kind,provider,status,display,error,created_at,updated_at,finished_at from studio.studio_device_commands t where location_id = ${access.locationId} and device_id = any(string_to_array(${active.join(",")}, ',')::uuid[]) order by created_at desc limit 200`),
   ]) : [[], []];
   const busy = new Set(running.map(job => job.device_id));
   const now = Date.now();
@@ -108,17 +103,15 @@ export async function executeStudioDeviceManagement(locationId: string, command:
 /** Estio Business ADMIN lives in Estio's database, so it is re-checked here on every device request. */
 const currentEstioAdmin = (userId: string, locationId: string) => currentEstioScheduleAuthority(userId, locationId, "ADMIN");
 export async function executeStudioDeviceCommand(token: string, brand: "estio" | "substo", operation: DeviceOperation, body: Record<string, unknown>,
-  authorizeEstio = (locationId: string, userId: string) => authorizeEstioSchedule(studioRest, locationId, userId, currentEstioAdmin)) {
+  authorizeEstio = (locationId: string, userId: string) => authorizeEstioSchedule(studioDb, locationId, userId, currentEstioAdmin)) {
   const tokenHash = hashStudioDeviceToken(token);
   let estioAuthorizedBy: string | null = null;
   if (brand === "estio") {
-    const identity = await studioRest<{ locationId: string; approvedBy: string } | null>("rpc/studio_device_identity", { method: "POST",
-      body: JSON.stringify({ p_token_hash: tokenHash, p_app: brand }), signal: AbortSignal.timeout(30_000) });
+    const identity = await studioDb.call<{ locationId: string; approvedBy: string } | null>("studio_device_identity", { p_token_hash: tokenHash, p_app: brand });
     if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
-  return studioRest<unknown>("rpc/studio_device_command", { method: "POST", body: JSON.stringify({
-    p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy }), signal: AbortSignal.timeout(30_000) });
+  return studioDb.call<unknown>("studio_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
 }
 
 export const PAIRING_POLL_SECONDS = 5;
@@ -136,7 +129,7 @@ export async function startStudioDevicePairing(brand: "estio" | "substo", origin
         expiresAt: result.expiresAt, intervalSeconds: PAIRING_POLL_SECONDS };
     } catch (error) {
       // A user-code collision with another open pairing: draw again.
-      if (!(error instanceof StudioRestError && error.code === "23505") || attempt >= 4) throw error;
+      if (!(error instanceof StudioDbError && error.code === "23505") || attempt >= 4) throw error;
     }
   }
 }

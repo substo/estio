@@ -1,3 +1,4 @@
+import { fixtureDb } from "../testing/fixture-db";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { IDEA_REVIEW_MODEL, readIdeaReviewRequest, readIdeaReviewResult, type IdeaSnapshot } from "../idea-review-policy";
@@ -60,7 +61,7 @@ function fixture(options: { outcome?: string; lostCommit?: boolean; failCommit?:
   const calls: Array<{name:string; body:any}> = []; let saved=false; let state=options.outcome; let providerCalls=0;
   const controller=new AbortController();
   const deps: IdeaReviewDeps={
-    async rest<T>(p: string,init?: RequestInit) {
+    db: fixtureDb(async <T>(p: string,init?: RequestInit) => {
       if(p.startsWith("studio_idea_reviews")) return [{snapshot,result:saved?result:null,model:IDEA_REVIEW_MODEL,prompt_version:"studio.idea-review.v1",workflow:"idea_review"}] as T;
       if(p.startsWith("studio_location_ai_credentials")) return (options.missingKey?[]:[{}]) as T;
       const body=JSON.parse(String(init?.body)); calls.push({name:p,body});
@@ -71,7 +72,7 @@ function fixture(options: { outcome?: string; lostCommit?: boolean; failCommit?:
       }
       if(p.endsWith("studio_close_ai_attempt") && body.p_rejected) state=undefined;
       return true as T;
-    },
+    }),
     decryptKey: () => "sk-synthetic",
     generate: async () => { providerCalls++; if(options.abort) controller.abort(); if(options.providerError) throw options.providerError;
       return { result,providerResponseId:"resp_synthetic",inputTokens:1001,outputTokens:100,costMicros:151,rateVersion:"gpt-6-luna-standard-2026-10-23" }; },

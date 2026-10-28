@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { APP_DOMAIN, APP_URL, SYSTEM_DOMAINS } from "@/lib/app-config";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { getClerkBrandKeys, getSubstoClerkConfigConflicts, hasClerkEncryptionKey } from "@/lib/auth/clerk-runtime";
-import { hasStudioSupabaseConfig } from "@/lib/studio/config";
+import { hasStudioDatabaseConfig } from "@/lib/studio/config";
 import { isSubstoSitePath } from "@/lib/substo-sites/policy";
 import { CLERK_PROFILE_WEBHOOK_PATH, classifySubstoRoute, skipsLegacyEstioMiddleware } from "@/lib/auth/host-routing-policy";
 
@@ -221,7 +221,7 @@ export default async function middleware(req: NextRequest, evt: any) {
       console.error("[Substo auth] Remove conflicting global Clerk settings", conflicts);
       return new NextResponse("Substo Clerk configuration conflicts with shared routing settings", { status: 503 });
     }
-    if (!getClerkBrandKeys("substo") || !hasClerkEncryptionKey() || !hasStudioSupabaseConfig()) {
+    if (!getClerkBrandKeys("substo") || !hasClerkEncryptionKey() || !hasStudioDatabaseConfig()) {
       return new NextResponse("Substo Studio is not configured", {
         status: 503,
         headers: { "Retry-After": "60" },

@@ -1,8 +1,9 @@
+import { fixtureDb } from "../testing/fixture-db";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createYoutubeDiscoveryHandler, discoverScheduledYoutube, type YoutubeDiscoveryContext, type YoutubeDiscoveryDeps } from "./youtube-discovery";
 import { YoutubeError } from "../../google/youtube-api";
-import { StudioRestError } from "../rest-client";
+import { StudioDbError as StudioRestError } from "../db";
 import { StudioJobError } from "./handlers";
 import { encryptStudioSecret } from "../secrets";
 import { youtubeProfileContext } from "../../google/youtube-policy";
@@ -16,7 +17,7 @@ function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; provi
  const calls: Array<{ path: string; body: any }> = []; let saved = false; let reads = 0;
  const controller = new AbortController();
  const deps: YoutubeDiscoveryDeps = {
-  async rest<T>(path: string, init?: RequestInit) {
+  db: fixtureDb(async <T>(path: string, init?: RequestInit) => {
    if (!init) return [{ result: saved ? { links: [] } : null, actor_app: options.denied || options.outage ? "estio" : "substo", created_by_clerk_user_id: "profile-owner" }] as T;
    const body = JSON.parse(String(init.body)); calls.push({ path, body });
    if (path.endsWith("studio_begin_youtube_discovery")) return (options.quota ? { outcome: "quota" } : input) as T;
@@ -25,7 +26,7 @@ function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; provi
     saved = true; if (options.lostFinish) throw Error("Lost committed response");
    }
    return {} as T;
-  },
+  }),
   authorize: async (locationId, userId) => { assert.equal(locationId, "w"); assert.equal(userId, "profile-owner"); if (options.outage) throw Error("Authority unavailable"); return !options.denied; },
   discover: async context => { assert.equal(context.userId, "profile-owner"); reads++; if (options.abort) controller.abort(); if (options.providerError) throw options.providerError; return ["aaaaaaaaaaa"]; },
  };
@@ -74,7 +75,7 @@ test("profile tokens are selected by realm/user/version; one subscribed source, 
   process.env.PLATFORM_GOOGLE_CLIENT_ID = "fixture-client"; process.env.PLATFORM_GOOGLE_CLIENT_SECRET = "fixture-secret";
   const cipher = encryptStudioSecret("private-refresh", youtubeProfileContext("substo", "profile-owner", "refresh"));
   const rest = async <T>(path: string) => {
-   const q = new URLSearchParams(path.split("?")[1]); assert.equal(q.get("brand"), "eq.substo"); assert.equal(q.get("clerk_user_id"), "eq.profile-owner");
+   const q = new URLSearchParams(path.split("?")[1]); assert.equal(q.get("app"), "eq.substo"); assert.equal(q.get("clerk_user_id"), "eq.profile-owner");
    return [{ version: "grant-version", client_id: "fixture-client", refresh_cipher: cipher }] as T;
   };
   const ids = Array.from({ length: 12 }, (_, i) => String(i).padStart(11, "a")); let calls = 0; let allowSubscription = true;
@@ -91,9 +92,9 @@ test("profile tokens are selected by realm/user/version; one subscribed source, 
    if (u.pathname.endsWith("/videos")) return Response.json({ items: ids.map((id, index) => ({ id, status: { privacyStatus: index === 0 ? "unlisted" : "public" }, snippet: { title: "Provider title not persisted", channelId: channel } })) });
    throw Error("Unexpected API endpoint");
   };
-  const found = await discoverScheduledYoutube(input, rest, fetcher); assert.equal(found.length, 10); assert.equal(found.includes(ids[0]), false);
+  const found = await discoverScheduledYoutube(input, fixtureDb(rest), fetcher); assert.equal(found.length, 10); assert.equal(found.includes(ids[0]), false);
   assert.equal(found.every(id => typeof id === "string" && id.length === 11), true);
-  const count = calls; await assert.rejects(discoverScheduledYoutube({ ...input, connectionVersion: "other-version" }, rest, fetcher)); assert.equal(calls, count);
-  allowSubscription = false; await assert.rejects(discoverScheduledYoutube(input, rest, fetcher), (error: YoutubeError) => error.code === "not_subscribed");
+  const count = calls; await assert.rejects(discoverScheduledYoutube({ ...input, connectionVersion: "other-version" }, fixtureDb(rest), fetcher)); assert.equal(calls, count);
+  allowSubscription = false; await assert.rejects(discoverScheduledYoutube(input, fixtureDb(rest), fetcher), (error: YoutubeError) => error.code === "not_subscribed");
  } finally { for (const name of names) { if (before[name] === undefined) delete process.env[name]; else process.env[name] = before[name]; } }
 });

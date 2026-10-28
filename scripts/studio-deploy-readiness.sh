@@ -7,6 +7,8 @@ studio_active=${2:-}
 studio_worker=${3:-estio-studio-worker}
 cd "$studio_target"
 studio_tsx="$studio_target/node_modules/.bin/tsx"
+# Fail before worker replacement or public traffic activation.
+NODE_ENV=production "$studio_tsx" -e 'import { assertStudioMergeReady } from "./lib/studio/merge-gate"; assertStudioMergeReady()'
 if "$studio_tsx" scripts/studio-readiness.ts --mode=required; then
     :
 else
@@ -18,25 +20,12 @@ else
     exit 1
 fi
 # Failure here leaves the old worker and public traffic untouched.
-# Exit 3 means only the Studio database provider has restricted/paused the project.
-studio_degraded=0
-if "$studio_tsx" scripts/studio-readiness.ts --mode=dependencies; then
-    :
-else
-    studio_status=$?
-    [ "$studio_status" -eq 3 ] || exit 1
-    studio_degraded=1
-fi
+"$studio_tsx" scripts/studio-readiness.ts --mode=dependencies
 studio_instance=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
 if pm2 describe "$studio_worker" >/dev/null 2>&1; then pm2 delete "$studio_worker"; fi
 studio_failed=0
 NODE_ENV=production PROCESS_ROLE=studio-worker STUDIO_WORKER_INSTANCE="$studio_instance" \
     pm2 start npm --name "$studio_worker" --cwd "$studio_target" --kill-timeout 30000 -- run start:studio-worker || studio_failed=1
-if [ "$studio_degraded" -eq 1 ] && [ "$studio_failed" -eq 0 ]; then
-    # The worker cannot heartbeat to a restricted project; it waits and resumes by itself.
-    echo '⚠️  STUDIO DEGRADED: Studio database provider restricted. Continuing deploy; Studio shows its unavailable state.' >&2
-    exit 0
-fi
 if [ "$studio_failed" -eq 0 ]; then
     # Each probe is bounded by the readiness service; at most six probes and five short delays.
     for studio_attempt in 1 2 3 4 5 6; do

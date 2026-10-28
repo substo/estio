@@ -1,4 +1,6 @@
-import { StudioRestError, queryPath } from "../rest-client";
+import { Prisma } from "@prisma/client";
+import type { StudioDb } from "../db";
+import { StudioDbError } from "../db";
 import { authorizeEstioSchedule, type ScheduleRest } from "../schedule-authority";
 import { readProfileYoutubeAccess } from "../../google/profile-youtube-credentials";
 import { createYoutubeApi, YoutubeError } from "../../google/youtube-api";
@@ -8,7 +10,7 @@ export interface YoutubeDiscoveryContext {
   source: "approved_channel" | "search" | "subscription"; channelId: string; query: string;
 }
 export interface YoutubeDiscoveryDeps {
-  rest: ScheduleRest;
+  db: StudioDb;
   authorize(locationId: string, userId: string): Promise<boolean>;
   discover(context: YoutubeDiscoveryContext): Promise<string[]>;
 }
@@ -16,12 +18,11 @@ export function createYoutubeDiscoveryHandler(deps: YoutubeDiscoveryDeps): Studi
   return async (job, context) => {
     const id = String(job.payload.discoveryRunId ?? "");
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new StudioJobError("invalid_job_payload", "This discovery job is invalid.", false);
-    const [run] = await deps.rest<Array<{ result: Record<string, unknown> | null; actor_app: string; created_by_clerk_user_id: string }>>(queryPath("studio_youtube_schedule_runs", {
-      select: "result,actor_app,created_by_clerk_user_id", location_id: `eq.${job.location_id}`, id: `eq.${id}`, job_id: `eq.${job.id}`, limit: "1" }));
+    const [run] = await deps.db.rows<{ result: Record<string, unknown> | null; actor_app: string; created_by_clerk_user_id: string }>(Prisma.sql`select result,actor_app,created_by_clerk_user_id from studio.studio_youtube_schedule_runs t where location_id = ${job.location_id} and id = ${id}::uuid and job_id = ${job.id}::uuid limit 1`);
     if (!run) throw new StudioJobError("discovery_missing", "This discovery run is unavailable.", false);
     if (run.result) return { discoveryRunId: id, alreadySaved: true };
     const fence = { p_location: job.location_id, p_run: id, p_job: job.id, p_worker: context.workerId, p_lease: job.lease_token };
-    const rpc = <T>(name: string, body: Record<string, unknown> = {}) => deps.rest<T>(`rpc/${name}`, { method: "POST", body: JSON.stringify({ ...fence, ...body }) });
+    const rpc = <T>(name: string, body: Record<string, unknown> = {}) => deps.db.call<T>(name, { ...fence, ...body });
     const active = () => { if (context.signal.aborted) throw new StudioJobError("worker_lease_lost", "The worker lost its lease.", true); };
     let stop: string | null = null;
     async function authority() {
@@ -45,14 +46,14 @@ export function createYoutubeDiscoveryHandler(deps: YoutubeDiscoveryDeps): Studi
       if (error instanceof YoutubeError && ["google_reconnect", "youtube_not_connected", "profile_key_unavailable"].includes(error.code)) stop = "profile_grant_changed";
       if (error instanceof YoutubeError && ["not_subscribed", "youtube_channel_missing"].includes(error.code)) stop = "source_unavailable";
       if (stop && !context.signal.aborted) await rpc("studio_stop_youtube_discovery", { p_reason: stop }).catch(() => {});
-      if (error instanceof StudioRestError && error.code === "42501") throw new StudioJobError("discovery_authorization_changed", "Profile grant, channel approval or schedule consent changed. Reauthorize discovery.", false);
+      if (error instanceof StudioDbError && error.code === "42501") throw new StudioJobError("discovery_authorization_changed", "Profile grant, channel approval or schedule consent changed. Reauthorize discovery.", false);
       if (error instanceof YoutubeError) throw new StudioJobError(stop ? "discovery_authorization_changed" : "youtube_unavailable", stop ? "Reconnect your profile or review the selected source, then reauthorize discovery." : "YouTube is unavailable or quota-limited. This bounded read can retry.", !stop);
       throw error;
     }
   };
 }
-export async function discoverScheduledYoutube(input: YoutubeDiscoveryContext, rest: ScheduleRest, fetcher: typeof fetch = fetch) {
-  const grant = await readProfileYoutubeAccess(rest, { brand: input.brand, userId: input.userId }, input.connectionVersion, fetcher);
+export async function discoverScheduledYoutube(input: YoutubeDiscoveryContext, db: StudioDb, fetcher: typeof fetch = fetch) {
+  const grant = await readProfileYoutubeAccess(db, { brand: input.brand, userId: input.userId }, input.connectionVersion, fetcher);
   const api = createYoutubeApi({ accessToken: grant.token }, fetcher);
   if (input.source === "subscription") {
     const subscribed = await api.subscriptions("", input.channelId);
@@ -61,7 +62,7 @@ export async function discoverScheduledYoutube(input: YoutubeDiscoveryContext, r
   const result = input.source === "search" ? await api.search(input.query) : await api.channelVideos(input.channelId);
   return [...new Set(result.videos.map(video => video.id))].slice(0, 10);
 }
-export function productionYoutubeDiscoveryDeps(rest: ScheduleRest): YoutubeDiscoveryDeps {
-  return { rest, authorize: (locationId, userId) => authorizeEstioSchedule(rest, locationId, userId),
-    discover: input => discoverScheduledYoutube(input, rest) };
+export function productionYoutubeDiscoveryDeps(db: StudioDb): YoutubeDiscoveryDeps {
+  return { db, authorize: (locationId, userId) => authorizeEstioSchedule(db, locationId, userId),
+    discover: input => discoverScheduledYoutube(input, db) };
 }

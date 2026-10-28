@@ -1,3 +1,4 @@
+import { fixtureDb } from "../testing/fixture-db";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
@@ -20,7 +21,7 @@ function fakeDeps(options: { duration?: number; reserve?: string | null; credent
   const transcribed: string[] = [];
   const attempts = new Map<number, string>((options.uncertain ?? []).map(i => [i, "uncertain"]));
   const deps: TranscribeDeps = {
-    async rest<T>(p: string, init?: RequestInit) {
+    db: fixtureDb(async <T>(p: string, init?: RequestInit) => {
       if (p.startsWith("rpc/")) {
         const body = JSON.parse(String(init?.body)); rpcs.push([p.slice(4), body]);
         if (p === "rpc/studio_begin_transcription_attempt") {
@@ -48,7 +49,7 @@ function fakeDeps(options: { duration?: number; reserve?: string | null; credent
       if (p.startsWith("studio_location_ai_credentials")) return (options.credential === false ? [] : [{ ciphertext: "c", iv: "i", auth_tag: "t", key_id: "v1" }]) as T;
       if (p.startsWith("studio_transcript_chunks")) return [...chunks.keys()].sort().map(i => ({ chunk_index: i, duration_seconds: chunks.get(i) })) as T;
       throw new Error(`unexpected ${p}`);
-    },
+    }),
     presignWorkerRead: async key => `https://r2.example/${key}?sig=SECRET`,
     decryptKey: () => "sk-test-key",
     probe: async () => ({ durationSeconds: options.duration ?? 1500, hasAudio: true }),
@@ -110,10 +111,10 @@ test("lost provider responses keep their durable hold and block automatic replay
 
 test("a failed result commit never releases a paid hold or resends the chunk", async () => {
   const f = fakeDeps({ duration: 10 });
-  const rest = f.deps.rest;
-  f.deps.rest = async <T>(p: string, init?: RequestInit): Promise<T> => {
-    if (p === "rpc/studio_finish_transcription_attempt" || p === "rpc/studio_save_transcript_chunk") throw new Error("commit unavailable");
-    return rest<T>(p, init);
+  const call = f.deps.db.call;
+  f.deps.db.call = async <T>(p: string, args?: Record<string, unknown>): Promise<T> => {
+    if (p === "studio_finish_transcription_attempt" || p === "studio_save_transcript_chunk") throw new Error("commit unavailable");
+    return call<T>(p, args);
   };
   await assert.rejects(createTranscribeUploadHandler(f.deps)(job, context));
   assert.equal(f.transcribed.length, 1);
@@ -125,11 +126,11 @@ test("a failed result commit never releases a paid hold or resends the chunk", a
 
 test("a committed result with a lost database response is reused without another provider call", async () => {
   const f = fakeDeps({ duration: 10 });
-  const rest = f.deps.rest;
+  const call = f.deps.db.call;
   let loseResponse = true;
-  f.deps.rest = async <T>(p: string, init?: RequestInit): Promise<T> => {
-    const result = await rest<T>(p, init);
-    if (p === "rpc/studio_finish_transcription_attempt" && loseResponse) {
+  f.deps.db.call = async <T>(p: string, args?: Record<string, unknown>): Promise<T> => {
+    const result = await call<T>(p, args);
+    if (p === "studio_finish_transcription_attempt" && loseResponse) {
       loseResponse = false;
       throw new Error("commit response lost");
     }
@@ -151,10 +152,10 @@ test("lease loss during a provider call cannot save the result or send another c
 
 test("billing reconciliation alone does not authorize a replacement provider call", async () => {
   const f = fakeDeps({ duration: 10 });
-  const rest = f.deps.rest;
-  f.deps.rest = async <T>(p: string, init?: RequestInit): Promise<T> => {
-    if (p === "rpc/studio_begin_transcription_attempt") return { outcome: "reconciled" } as T;
-    return rest<T>(p, init);
+  const call = f.deps.db.call;
+  f.deps.db.call = async <T>(p: string, args?: Record<string, unknown>): Promise<T> => {
+    if (p === "studio_begin_transcription_attempt") return { outcome: "reconciled" } as T;
+    return call<T>(p, args);
   };
   await assert.rejects(createTranscribeUploadHandler(f.deps)(job, context), (e: StudioJobError) => e.code === "transcription_replacement_required" && !e.retryable);
   assert.equal(f.transcribed.length, 0);

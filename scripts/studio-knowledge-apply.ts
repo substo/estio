@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson as canonicalLibraryJson, normalizeLegacyLibrary, type JsonValue } from "../lib/studio/import/legacy-library";
 import { canonicalKnowledgeJson, normalizeLegacyKnowledge, type KnowledgeJson, type LegacyKnowledgeManifest } from "../lib/studio/import/legacy-knowledge";
-import { hasStudioSupabaseConfig } from "../lib/studio/config";
+import { hasStudioSupabaseConfig } from "../lib/studio/recovery/config";
 import { queryPath, requestStudioRest, StudioRestError } from "../lib/studio/rest-client";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

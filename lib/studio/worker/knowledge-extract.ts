@@ -7,4 +7,4 @@ export const knowledgeExtractionSpec:TextRunSpec<KnowledgeExtractionResult,Knowl
 export const requestKnowledgeExtraction=(snapshot:KnowledgeExtractionSnapshot,key:string,signal:AbortSignal,fetcher:typeof fetch=fetch)=>requestStructuredText(knowledgeExtractionSpec,snapshot,key,signal,fetcher);
 export type KnowledgeExtractionDeps=TextRunDeps<KnowledgeExtractionResult,KnowledgeExtractionSnapshot>;
 export const createKnowledgeExtractionHandler=(deps:KnowledgeExtractionDeps)=>createTextRunHandler(knowledgeExtractionSpec,deps);
-export const productionKnowledgeExtractionDeps=(rest:KnowledgeExtractionDeps["rest"])=>productionTextRunDeps(rest,requestKnowledgeExtraction);
+export const productionKnowledgeExtractionDeps=(rest:KnowledgeExtractionDeps["db"])=>productionTextRunDeps(rest,requestKnowledgeExtraction);

@@ -1,3 +1,4 @@
+import { fixtureDb } from "../testing/fixture-db";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {readKnowledgeExtractionCommand,readKnowledgeExtractionResult,type KnowledgeExtractionSnapshot} from "../knowledge-extraction-policy";
@@ -35,12 +36,12 @@ test("provider receives bounded source units with no tools or media and returns 
 test("lost provider/persistence outcomes retain the hold, block resend, and never apply findings",async()=>{
  for(const mode of ["success","response_lost","persist_failed","abort"]){
   let calls=0,saved=false,started=false;const rpcNames:string[]=[];const controller=new AbortController();
-  const deps:KnowledgeExtractionDeps={rest:async<T>(p:string,init?:RequestInit):Promise<T>=>{
+  const deps:KnowledgeExtractionDeps={db:fixtureDb(async<T>(p:string,init?:RequestInit):Promise<T>=>{
    if(p.startsWith("studio_idea_reviews"))return [{snapshot,result:saved?result:null,model:"gpt-6-luna",prompt_version:"studio.knowledge-extract.v1",workflow:"knowledge_extract"}] as T;
    if(p.startsWith("studio_location_ai_credentials"))return [{}] as T;rpcNames.push(p);const body=JSON.parse(String(init?.body));assert.equal(body.p_lease_token,"lease");
    if(p.endsWith("studio_begin_text_run_attempt")){if(started)return {outcome:"uncertain"} as T;started=true;return {outcome:"started",attempt_id:"attempt"} as T;}
    if(p.endsWith("studio_finish_text_run_attempt")){if(mode==="persist_failed")throw new Error("Persistence failure");saved=true;}return true as T;
-  },decryptKey:()=>"sk-synthetic",generate:async()=>{calls++;if(mode==="response_lost")throw new Error("Lost response");if(mode==="abort")controller.abort();return {result,providerResponseId:"resp_extract",inputTokens:1000,outputTokens:1000,costMicros:600,rateVersion:"gpt-6-luna-standard-2026-10-23"};}};
+  }),decryptKey:()=>"sk-synthetic",generate:async()=>{calls++;if(mode==="response_lost")throw new Error("Lost response");if(mode==="abort")controller.abort();return {result,providerResponseId:"resp_extract",inputTokens:1000,outputTokens:1000,costMicros:600,rateVersion:"gpt-6-luna-standard-2026-10-23"};}};
   const handler=createKnowledgeExtractionHandler(deps);const job={id:"job",location_id:"workspace",kind:"studio.knowledge_extract",payload:{reviewId:runId},lease_token:"lease",attempts:1,max_attempts:5};const context={workerId:"worker",signal:controller.signal};
   if(mode==="success"){await handler(job,context);await handler(job,context);}else{await assert.rejects(handler(job,context),(e:StudioJobError)=>e.code==="ai_outcome_uncertain"&&!e.retryable);if(mode!=="abort")await assert.rejects(handler(job,context));}
   assert.equal(calls,1);assert.ok(!rpcNames.some(n=>n.includes("apply_knowledge")));

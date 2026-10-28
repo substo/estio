@@ -1,15 +1,38 @@
 #!/usr/bin/env python3
-"""LOCAL ONLY copy verifier. Requires the disposable restore cluster; never accepts URLs.
+"""Copy verifier. Defaults to disposable local restore; operator mode requires explicit services and source freeze.
 Private CSV/SQL/evidence remain in the cluster directory outside the repository.
 """
 import csv, hashlib, json, os, pathlib, subprocess, sys
 os.umask(0o077)
 root = pathlib.Path(os.path.abspath(sys.argv[1]))
-if not (root / 'db/PG_VERSION').exists() or not (root / 'source-counts').exists():
-    raise SystemExit('Expected a rehearsal cluster from rehearse-restore.sh')
+operator = '--operator-apply' in sys.argv[2:]
 env = {k:v for k,v in os.environ.items() if not k.startswith('PG')}
+if operator:
+    import re
+    source_service=os.environ.get('STUDIO_COPY_SOURCE_SERVICE','')
+    target_service=os.environ.get('STUDIO_COPY_TARGET_SERVICE','')
+    if not all(re.fullmatch(r'[a-zA-Z0-9_-]+',v) for v in [source_service,target_service]) or source_service==target_service:
+        raise SystemExit('Two distinct explicit pg_service names required')
+    service_file=os.environ.get('PGSERVICEFILE')
+    if not service_file: raise SystemExit('Explicit private PGSERVICEFILE required')
+    env['PGSERVICEFILE']=service_file
+    gate=os.environ.get('STUDIO_MERGE_STATE_FILE')
+    if not gate or pathlib.Path(gate).exists(): raise SystemExit('Remove activation receipt to freeze target before copy')
+    root.mkdir(mode=0o700, parents=True, exist_ok=False)
+else:
+    if not (root / 'db/PG_VERSION').exists() or not (root / 'source-counts').exists():
+        raise SystemExit('Expected a rehearsal cluster from rehearse-restore.sh')
+def connection(db):
+    if operator: return ['-d','service='+ (source_service if db=='studio_source' else target_service)]
+    return ['-h',str(root/'socket'),'-p','55441','-U','rehearsal','-d',db]
 def sql(db, query):
-    return subprocess.check_output(['psql','-X','-At','-v','ON_ERROR_STOP=1','-h',str(root/'socket'),'-p','55441','-U','rehearsal','-d',db,'-c',query],env=env,text=True)
+    return subprocess.check_output(['psql','-X','-At','-v','ON_ERROR_STOP=1',*connection(db),'-c',query],env=env,text=True)
+if operator:
+    missing=sql('studio_source', """select count(*) from pg_tables t where schemaname='public'
+      and (tablename like 'studio\\_%' escape '\\' or tablename like 'platform\\_%' escape '\\')
+      and not exists(select 1 from pg_trigger g where g.tgrelid=format('public.%I',t.tablename)::regclass
+      and g.tgname='studio_merge_write_freeze' and g.tgenabled='O')""").strip()
+    if missing != '0': raise SystemExit('Source write freeze is incomplete')
 def rows(db, query):
     return [json.loads(s) for s in sql(db,query).splitlines()]
 def columns(db, schema):
@@ -76,7 +99,7 @@ for seq in sequences:
 statements.append('commit;')
 script=root/'copy.sql'; script.write_text('\n'.join(statements)+'\n')
 with (root/'copy.log').open('w') as log:
-    subprocess.run(['psql','-X','-v','ON_ERROR_STOP=1','-h',str(root/'socket'),'-p','55441','-U','rehearsal','-d','crm','-f',str(script)],env=env,stdout=log,stderr=log,check=True)
+    subprocess.run(['psql','-X','-v','ON_ERROR_STOP=1',*connection('crm'),'-f',str(script)],env=env,stdout=log,stderr=log,check=True)
 results=[]
 for t in target_tables:
     actual=sql('crm',f'''select count(*)||'|'||md5(coalesce(string_agg(to_jsonb(t)::text,E'\\n' order by to_jsonb(t)::text),'')) from studio."{t}" t''').strip()

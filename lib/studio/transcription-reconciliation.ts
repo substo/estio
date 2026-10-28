@@ -1,8 +1,8 @@
+import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { getPlatformProfile } from "../platform/profile";
 import { getStudioAccess } from "./access";
-import { queryPath, studioRest } from "./rest";
 import { canReviewTranscription, ReconciliationError, type ReconciliationCommand } from "./transcription-reconciliation-policy";
 
 async function requireManager(locationId: string) {
@@ -36,18 +36,12 @@ export async function listStudioTranscriptionReviews(locationId: string, page: n
   try { access = await requireManager(locationId); }
   catch (error) { if (error instanceof ReconciliationError) return null; throw error; }
   const workspace = access.locationId;
-  const rows = await studioRest<ReviewedTranscriptionAttempt[]>(queryPath("studio_ai_attempts", {
-    select: "id,job_id,operation,idea_review_id,upload_id,chunk_index,duration_seconds,status,review_version,billing_outcome,replacement_authorized,created_at,usage_id",
-    location_id: `eq.${workspace}`, status: "in.(started,uncertain)", order: "created_at.desc,id.asc", limit: "26", offset: String(page * 25) }));
+  const rows = await studioDb.rows<ReviewedTranscriptionAttempt>(Prisma.sql`select id,job_id,operation,idea_review_id,upload_id,chunk_index,duration_seconds,status,review_version,billing_outcome,replacement_authorized,created_at,usage_id from studio.studio_ai_attempts t where location_id = ${workspace} and status in ('started','uncertain') order by created_at desc,id asc limit 26 offset ${page * 25}`);
   const attempts = rows.slice(0, 25);
   if (!attempts.length) return { attempts, events: [], usage: [], hasMore: false };
   const [events, usage] = await Promise.all([
-    studioRest<TranscriptionReviewEvent[]>(queryPath("studio_ai_attempt_reviews", {
-      select: "id,attempt_id,actor_clerk_user_id,action,evidence,cost_micros,created_at,version", location_id: `eq.${workspace}`,
-      attempt_id: `in.(${attempts.map(a => a.id).join(",")})`, order: "created_at.asc,id.asc", limit: "100" })),
-    studioRest<Array<{ id: string; status: string; reserved_micros: number; cost_micros: number | null; usage_month: string }>>(queryPath("studio_ai_usage", {
-      select: "id,status,reserved_micros,cost_micros,usage_month", location_id: `eq.${workspace}`,
-      id: `in.(${attempts.map(a => a.usage_id).join(",")})`, limit: "25" })),
+    studioDb.rows<TranscriptionReviewEvent>(Prisma.sql`select id,attempt_id,actor_clerk_user_id,action,evidence,cost_micros,created_at,version from studio.studio_ai_attempt_reviews t where location_id = ${workspace} and attempt_id = any(string_to_array(${attempts.map(a => a.id).join(",")}, ',')::uuid[]) order by created_at asc,id asc limit 100`),
+    studioDb.rows<{ id: string; status: string; reserved_micros: number; cost_micros: number | null; usage_month: string }>(Prisma.sql`select id,status,reserved_micros,cost_micros,usage_month from studio.studio_ai_usage t where location_id = ${workspace} and id = any(string_to_array(${attempts.map(a => a.usage_id).join(",")}, ',')::uuid[]) limit 25`),
   ]);
   return { attempts, events, usage, hasMore: rows.length > 25 };
 }

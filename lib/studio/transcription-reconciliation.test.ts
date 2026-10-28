@@ -32,7 +32,7 @@ test("confirmed costs retain sub-cent precision without floating point conversio
 
 import { transcriptionReviewResponse } from "./transcription-reconciliation-http";
 import { ReconciliationError } from "./transcription-reconciliation-policy";
-import { StudioRestError } from "./rest-client";
+import { StudioDbError as StudioRestError } from "./db";
 const request = (body: unknown, origin: string | null = "https://substo.com", contentType = "application/json") => new Request("https://substo.com/studio/review", {
   method: "POST", headers: { ...(origin ? { origin } : {}), "content-type": contentType }, body: JSON.stringify(body) });
 
@@ -66,14 +66,12 @@ test("bounded review endpoint returns explicit conflicts and safe uncertain resp
   assert.ok(!(await lost.text()).includes("sk-private"));
 });
 
-test("review authority requires a manager in the same realm and signed-in principal", () => {
-  const profile = { brand: "substo" as const, userId: "same-id" };
-  assert.equal(canReviewTranscription(profile, { ...profile, role: "owner" }), true);
-  assert.equal(canReviewTranscription(profile, { ...profile, role: "admin" }), true);
-  assert.equal(canReviewTranscription(profile, { ...profile, role: "member" }), false);
-  assert.equal(canReviewTranscription(profile, { ...profile, userId: "other", role: "owner" }), false);
-  assert.equal(canReviewTranscription(profile, { brand: "estio", userId: "same-id", role: "ADMIN" }), false);
-  assert.equal(canReviewTranscription(null, { ...profile, role: "owner" }), false);
-  assert.equal(canReviewTranscription(profile, null), false);
-  assert.equal(canReviewTranscription({ brand: "estio", userId: "same-id" }, { brand: "estio", userId: "same-id", role: "ADMIN" }), true);
+test("review authority requires a canonical manager in the same realm and signed-in principal", () => {
+ const profile={brand:"substo" as const,userId:"same-id"};
+ assert.equal(canReviewTranscription(profile,{app:"substo",userId:"same-id",role:"ADMIN"}),true);
+ assert.equal(canReviewTranscription(profile,{app:"substo",userId:"same-id",role:"MEMBER"}),false);
+ assert.equal(canReviewTranscription(profile,{app:"estio",userId:"same-id",role:"ADMIN"}),false);
+ assert.equal(canReviewTranscription(profile,{app:"substo",userId:"other",role:"ADMIN"}),false);
+ assert.equal(canReviewTranscription(null,{app:"substo",userId:"same-id",role:"ADMIN"}),false);
+ assert.equal(canReviewTranscription(profile,null),false);
 });

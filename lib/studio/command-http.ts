@@ -1,4 +1,5 @@
-import { isStudioProviderUnavailable, StudioRestError, studioUnavailableResponse } from "./rest-client";
+import { StudioDbError as StudioRestError } from "./db";
+import { isStudioProviderUnavailable, studioUnavailableResponse } from "./rest-client";
 import { StudioCommandError } from "./command-error";
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 /** Shared same-origin, bounded, retry-aware HTTP boundary for paid commands. */

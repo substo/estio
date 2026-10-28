@@ -7,4 +7,4 @@ export const scriptBriefSpec: TextRunSpec<ScriptBriefResult> = { workflow: "scri
 export const requestScriptBrief = (snapshot: IdeaSnapshot, key: string, signal: AbortSignal, fetcher: typeof fetch = fetch) => requestStructuredText(scriptBriefSpec, snapshot, key, signal, fetcher);
 export type ScriptBriefDeps = TextRunDeps<ScriptBriefResult>;
 export const createScriptBriefHandler = (deps: ScriptBriefDeps) => createTextRunHandler(scriptBriefSpec, deps);
-export const productionScriptBriefDeps = (rest: ScriptBriefDeps["rest"]) => productionTextRunDeps(rest, requestScriptBrief);
+export const productionScriptBriefDeps = (rest: ScriptBriefDeps["db"]) => productionTextRunDeps(rest, requestScriptBrief);

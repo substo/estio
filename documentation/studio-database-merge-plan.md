@@ -108,17 +108,7 @@ Rollback: redeploy the previous build.
    - a CRM schema dump, plus the Studio dump restored as the "source";
    - `prisma migrate deploy`, the copy, the verification;
    - `scripts/test-studio-schema.sh` adapted to the `studio` schema, and the focused tests.
-7. **Cutover** (Studio downtime of about 15 minutes):
-   1. stop `estio-studio-worker`;
-   2. `pg_dump` both projects to `/Users/martingreen/Backups/estio-2026-10-28/`, outside the repo;
-   3. deploy (the migration creates `studio.*`);
-   4. run the copy and verify;
-   5. run the readiness check against the CRM database, then restart the worker.
-   6. Verify:
-      - the Substo Location shows 10 records, 4 sources, 200 insights and 1,738 units;
-      - old frames load from their old R2 keys;
-      - Estio Studio opens;
-      - the Mac reconnects.
+7. **Cutover:** follow the exact gated sequence in [studio-merge-cutover.md](studio-merge-cutover.md). Freeze source writes across every producer before final backups; stage artifacts/migrations with `STUDIO_MERGE_COPY_WAIT_SECONDS=1800`; copy and independently reverify all table counts/digests; atomically install the target-bound receipt; only then start candidate web/worker and switch traffic. Never deploy new runtime before copy verification. The r5 local round does not authorize or execute production deployment.
 8. The old Studio project stays **untouched, read-only fallback**; do not delete it.
 
 **Rollback (stage 2):** Freeze Studio writes and stop the worker first. Before any post-cutover writes, redeploying stage 1 can use the unchanged old Studio database. After any post-cutover writes, first back up the CRM database and reconcile/export the new Studio writes; switching to the stale source without accounting for them is forbidden. Keep the new schema and Prisma migration history intact during traffic rollback. Never drop the schema or delete migration records as a routine rollback. Validate the selected build against the retained database state before reopening Studio.

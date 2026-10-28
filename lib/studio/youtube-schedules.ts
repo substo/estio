@@ -1,9 +1,9 @@
+import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { getPlatformProfile } from "../platform/profile";
 import { getStudioAccess } from "./access";
-import { studioRest, queryPath } from "./rest";
 import { profileYoutubeAccess, profileYoutubeConnection } from "../google/profile-youtube";
 import { createYoutubeApi } from "../google/youtube-api";
 import { StudioCommandError } from "./command-error";
@@ -47,7 +47,7 @@ export async function getStudioYoutubeScheduleSettings(locationId: string) {
   const access = await getStudioAccess(locationId); const profile = await getPlatformProfile();
   if (!access || !profile || profile.userId !== access.userId || profile.brand !== access.app) return null;
   const [channels, connection] = await Promise.all([
-    studioRest<Array<{ channel_id: string; label: string }>>(queryPath("studio_youtube_channels", { select: "channel_id,label", location_id: `eq.${access.locationId}`, order: "label.asc,channel_id.asc", limit: "100" })),
+    studioDb.rows<{ channel_id: string; label: string }>(Prisma.sql`select channel_id,label from studio.studio_youtube_channels t where location_id = ${access.locationId} order by label asc,channel_id asc limit 100`),
     profileYoutubeConnection(profile),
   ]);
   return { connected: !!connection, connectionVersion: connection?.version ?? null, channels };
@@ -55,11 +55,9 @@ export async function getStudioYoutubeScheduleSettings(locationId: string) {
 export async function getStudioYoutubeScheduleRun(locationId: string, scheduleId: string, runId: string) {
   const access = await getStudioAccess(locationId);
   if (!access || !/^[0-9a-f-]{36}$/i.test(scheduleId) || !/^[0-9a-f-]{36}$/i.test(runId)) return null;
-  const [run] = await studioRest<Array<{ job_id: string; created_at: string; completed_at: string | null;
-    result: { links: Array<{ videoId: string; recordId: string; reused: boolean }>; observedAt: string } | null }>>(queryPath("studio_youtube_schedule_runs", {
-      select: "job_id,created_at,completed_at,result", location_id: `eq.${access.locationId}`, schedule_id: `eq.${scheduleId}`, id: `eq.${runId}`, limit: "1" }));
+  const [run] = await studioDb.rows<{ job_id: string; created_at: string; completed_at: string | null;
+    result: { links: Array<{ videoId: string; recordId: string; reused: boolean }>; observedAt: string } | null }>(Prisma.sql`select job_id,created_at,completed_at,result from studio.studio_youtube_schedule_runs t where location_id = ${access.locationId} and schedule_id = ${scheduleId}::uuid and id = ${runId}::uuid limit 1`);
   if (!run) return null;
-  const [job] = await studioRest<Array<{ status: string; last_error_message: string | null }>>(queryPath("studio_jobs", { select: "status,last_error_message",
-    location_id: `eq.${access.locationId}`, id: `eq.${run.job_id}`, limit: "1" }));
+  const [job] = await studioDb.rows<{ status: string; last_error_message: string | null }>(Prisma.sql`select status,last_error_message from studio.studio_jobs t where location_id = ${access.locationId} and id = ${run.job_id}::uuid limit 1`);
   return { run, job };
 }

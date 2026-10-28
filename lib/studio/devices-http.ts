@@ -1,5 +1,6 @@
+import { StudioDbError as StudioRestError } from "./db";
 import { StudioCommandError } from "./command-error";
-import { isStudioProviderUnavailable, StudioRestError, STUDIO_UNAVAILABLE_MESSAGE, studioUnavailableResponse } from "./rest-client";
+import { isStudioProviderUnavailable, STUDIO_UNAVAILABLE_MESSAGE, studioUnavailableResponse } from "./rest-client";
 export const deviceJson = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 /** Heartbeats carry a whitelisted report of up to 16 KiB plus the envelope. */
 export const DEVICE_BODY_LIMIT = 32768;

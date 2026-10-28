@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { deviceError, limitDeviceRequest, readDeviceJson } from "./devices-http";
-import { StudioRestError } from "./rest-client";
+import { StudioDbError as StudioRestError } from "./db";
 test("device HTTP bounds actual streamed bytes and validates JSON", async () => {
   await assert.rejects(readDeviceJson(new Request("https://substo.com/api/studio/device/claim", { method: "POST", headers: { "content-type": "application/json" }, body: "a".repeat(32769) })), /too large/);
   await assert.rejects(readDeviceJson(new Request("https://substo.com/api/studio/device/claim", { method: "POST", headers: { "content-type": "application/json" }, body: "{" })), /Invalid JSON/);

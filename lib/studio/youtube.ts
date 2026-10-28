@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import { sameYoutubePrincipal } from "./youtube-consumer-policy";
 import "server-only";
@@ -9,7 +10,6 @@ import { getStudioAccess } from "./access";
 import { canManageStudioAi } from "./ai-settings-policy";
 import { openYoutubeSelection, sealYoutubeSelection, type YoutubeProvenance } from "./youtube-selection";
 import { hasStudioSecretsKey } from "./secrets";
-import { queryPath, studioRest } from "./rest";
 
 export interface ApprovedYoutubeChannel { channel_id: string; label: string; }
 async function context(locationId: string, manager = false) {
@@ -20,7 +20,7 @@ async function context(locationId: string, manager = false) {
 }
 export async function getStudioYoutubeSettings(locationId: string) {
   const { access, profile } = await context(locationId);
-  const channels = await studioRest<ApprovedYoutubeChannel[]>(queryPath("studio_youtube_channels", { select: "channel_id,label", location_id: `eq.${access.locationId}`, order: "label.asc,channel_id.asc", limit: "100" }));
+  const channels = await studioDb.rows<ApprovedYoutubeChannel>(Prisma.sql`select channel_id,label from studio.studio_youtube_channels t where location_id = ${access.locationId} order by label asc,channel_id asc limit 100`);
   const connection = await profileYoutubeConnection(profile);
   return { access, channels, connected: Boolean(connection), canManage: canManageStudioAi(access), publicConfigured: Boolean(process.env.YOUTUBE_DATA_API_KEY?.trim()) || Boolean(connection) };
 }
@@ -30,7 +30,7 @@ export async function browseStudioYoutube(locationId: string, input: unknown) {
   let request;
   try { request = readDiscoveryRequest(input); } catch (error) { throw new YoutubeError("invalid_request", (error as Error).message); }
   if (request.mode === "channel") {
-    const approved = await studioRest<ApprovedYoutubeChannel[]>(queryPath("studio_youtube_channels", { select: "channel_id,label", location_id: `eq.${access.locationId}`, channel_id: `eq.${request.channelId}`, limit: "1" }));
+    const approved = await studioDb.rows<ApprovedYoutubeChannel>(Prisma.sql`select channel_id,label from studio.studio_youtube_channels t where location_id = ${access.locationId} and channel_id = ${request.channelId} limit 1`);
     if (!approved.length) throw new YoutubeError("channel_not_approved", "A manager must approve this channel for the workspace first.");
   }
   const slot = await studioDb.call<boolean>("studio_youtube_request_slot", { p_location: access.locationId, p_app: access.app, p_user: access.userId });

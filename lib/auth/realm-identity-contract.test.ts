@@ -111,9 +111,8 @@ test("Substo brand pages are allowed and protected; lookalike paths stay blocked
 
 test("Substo Studio access comes from the brand team, never from Studio membership alone", () => {
   const access = read("lib/studio/access.ts");
-  assert.match(access, /resolveLocationWorkspaceAccess\(substoLocationDeps\(\), workspaceId, state\.userId\)/);
-  const service = read("lib/studio/supabase-service.ts");
-  assert.doesNotMatch(service, /getSubstoStudioWorkspaceForUser|createSubstoStudioInvitation|acceptSubstoStudioInvitation/);
+  assert.match(access, /active\.location\.id !== locationId \|\| active\.location\.authRealm !== app/);
+  assert.equal(fs.existsSync("lib/studio/supabase-service.ts"), false);
   const actions = read("app/(main)/studio/actions.ts");
   assert.doesNotMatch(actions, /Invite|invitation/i);
   assert.match(actions, /substoStudioDestination\(locationId\)/);

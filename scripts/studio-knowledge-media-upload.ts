@@ -7,7 +7,7 @@ import { inspectLegacyKnowledgeMedia, type KnowledgeMediaManifest } from "../lib
 import { canonicalKnowledgeJson, type KnowledgeJson } from "../lib/studio/import/legacy-knowledge";
 import { MediaTransferError, parseMediaUploadArgs, readPinnedManifest, transferPinnedObject } from "../lib/studio/import/media-transfer";
 import { SourceSnapshotError } from "../lib/studio/import/source-snapshot";
-import { hasStudioSupabaseConfig } from "../lib/studio/config";
+import { hasStudioSupabaseConfig } from "../lib/studio/recovery/config";
 import { createStudioR2Store, readStudioR2Config, type StudioObjectStore } from "../lib/studio/media-r2";
 import { requestStudioRest, StudioRestError } from "../lib/studio/rest-client";
 

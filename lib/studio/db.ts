@@ -1,3 +1,4 @@
+import { assertStudioMergeReady } from "./merge-gate";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 /**
@@ -94,6 +95,7 @@ export function createStudioDb(client: PrismaClient): StudioDb {
 
   return {
     async call<T>(fn: string, args: Record<string, unknown> = {}) {
+      assertStudioMergeReady();
       const given = Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
       const sig = await signatureFor(fn, Object.keys(given));
       const used = sig.args.filter((arg) => arg.name in given);
@@ -108,9 +110,11 @@ export function createStudioDb(client: PrismaClient): StudioDb {
       return run<T>(Prisma.sql`select to_jsonb(${target}) as v ${from}`);
     },
     rows<T>(query: Prisma.Sql) {
+      assertStudioMergeReady();
       return run<T[]>(Prisma.sql`select coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) as v from (${query}) q`);
     },
     async one<T>(query: Prisma.Sql) {
+      assertStudioMergeReady();
       const rows = await run<T[]>(Prisma.sql`select coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) as v from (${query} limit 1) q`);
       return rows[0] ?? null;
     },

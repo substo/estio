@@ -22,7 +22,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 | **Team member** | An account with a role (Admin/Member) in one Location. | Team | `UserLocationRole` (fine as is) |
 | **Companies** (CRM module) | Your *contacts'* companies. Not a Location. | Companies | unchanged |
 
-**No Studio workspace.** Studio data belongs to the Location directly and uses the same `location_id` as the CRM. Today Studio still has a separate `studio_workspaces` record and ID, mapped 1:1, and that is being removed. The plan is in `business-rename-plan.md`, revised for the Location name.
+**No Studio workspace.** Studio data belongs to the Location directly and uses the same `location_id` as the CRM. The approved merge uses the CRM PostgreSQL database: Prisma owns `public`, Studio SQL/functions own `studio`, and same-realm `UserLocationRole` is the authority without a stored team mirror. The `studio-db-merge` branch is being verified locally; production remains unchanged until the gated cutover in `studio-merge-cutover.md`.
 
 ## Rules
 
@@ -40,7 +40,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 ## Data and hosting
 
 - **CRM database** (Prisma/Postgres): accounts, Locations, teams, and all CRM data for both apps.
-- **Studio database** (Supabase): all Studio content per Location. Its membership rows are only a mirror of the Location team, so the database rules still apply.
+- **Studio target:** the same CRM database/pool, in schema `studio`, with Location foreign keys and canonical same-realm team authority. The old Studio Supabase project remains the frozen fallback after cutover; the local readiness round does not activate production. Both projects remain Free; R2 keys are preserved.
 - **Media** is in Cloudflare R2.
 - **Hosting:** Hetzner + Caddy + Cloudflare. Deploy only with `deploy-local-build.sh`, which ships the **local working tree** and runs `prisma migrate deploy` first. Never Vercel.
 - **`release/studio-go-live` is the deployed branch.** Keep it equal to what's live. Never deploy from an older branch or a checkout with stale changes.

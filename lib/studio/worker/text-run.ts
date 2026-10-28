@@ -1,11 +1,12 @@
+import { Prisma } from "@prisma/client";
+import type { StudioDb } from "../db";
 import { authorizeScheduledTextJob } from "../schedule-authority";
-import { queryPath } from "../rest-client";
 import { aiCredentialContext, decryptStudioSecret } from "../secrets";
 import type { IdeaSnapshot } from "../idea-review-policy";
 import { StudioJobError, StudioProviderRejectedError, type StudioJobHandler } from "./handlers";
 import type { TextProviderResult, TextRunSpec } from "./openai-text";
 export interface TextRunDeps<T, S = IdeaSnapshot> {
-  rest<T>(path: string, init?: RequestInit): Promise<T>;
+  db: StudioDb;
   authorizeScheduledJob?(locationId: string, jobId: string): Promise<boolean>;
   decryptKey(locationId: string, credential: { ciphertext: string; iv: string; auth_tag: string; key_id: string }): string;
   generate(snapshot: S, key: string, signal: AbortSignal): Promise<TextProviderResult<T>>;
@@ -14,20 +15,18 @@ export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S
   return async (job, context) => {
     const reviewId = String(job.payload.reviewId ?? "");
     if (!/^[0-9a-f-]{36}$/.test(reviewId)) throw new StudioJobError("invalid_job_payload", "This job is missing its text workflow.", false);
-    const [review] = await deps.rest<Array<{ snapshot: S; result: unknown; model: string; prompt_version: string; workflow: string }>>(queryPath("studio_idea_reviews", {
-      select: "snapshot,result,model,prompt_version,workflow", workflow: `eq.${spec.workflow}`, location_id: `eq.${job.location_id}`, id: `eq.${reviewId}`, job_id: `eq.${job.id}`, limit: "1" }));
+    const [review] = await deps.db.rows<{ snapshot: S; result: unknown; model: string; prompt_version: string; workflow: string }>(Prisma.sql`select snapshot,result,model,prompt_version,workflow from studio.studio_idea_reviews t where workflow = ${spec.workflow} and location_id = ${job.location_id} and id = ${reviewId}::uuid and job_id = ${job.id}::uuid limit 1`);
     if (!review) throw new StudioJobError("text_run_missing", "The text workflow is no longer available.", false);
     if (review.model !== spec.model || review.prompt_version !== spec.promptVersion || review.workflow !== spec.workflow) throw new StudioJobError("text_run_version_unsupported", "This review requires a matching worker version before processing.", false);
     if (review.result) return { reviewId, alreadyReviewed: true };
     if (deps.authorizeScheduledJob && !await deps.authorizeScheduledJob(job.location_id, job.id)) throw new StudioJobError("schedule_authority_revoked", "The recurring schedule author no longer has workspace access. Reauthorize the schedule before retrying.", false);
-    const [credential] = await deps.rest<Array<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>>(queryPath("studio_location_ai_credentials", {
-      select: "ciphertext,iv,auth_tag,key_id", location_id: `eq.${job.location_id}`, provider: "eq.openai", limit: "1" }));
+    const [credential] = await deps.db.rows<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>(Prisma.sql`select ciphertext,iv,auth_tag,key_id from studio.studio_location_ai_credentials t where location_id = ${job.location_id} and provider = ${'openai'} limit 1`);
     if (!credential) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings before retrying.", false);
     let key: string;
     try { key = deps.decryptKey(job.location_id, credential); }
     catch { throw new StudioJobError("openai_key_unreadable", "Save the workspace OpenAI key again before retrying.", false); }
     const fence = { p_location_id: job.location_id, p_review_id: reviewId, p_job_id: job.id, p_worker_id: context.workerId, p_lease_token: job.lease_token };
-    const rpc = <T>(name: string, body: Record<string, unknown>) => deps.rest<T>(`rpc/${name}`, { method: "POST", body: JSON.stringify(body) });
+    const rpc = <T>(name: string, body: Record<string, unknown>) => deps.db.call<T>(name, body);
     const active = () => { if (context.signal.aborted) throw new StudioJobError("worker_lease_lost", "The worker lost its lease.", true); };
     active();
     const attempt = await rpc<{ outcome: string; attempt_id?: string }>("studio_begin_text_run_attempt", fence);
@@ -54,6 +53,6 @@ export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S
   };
 }
 const uncertain = () => new StudioJobError("ai_outcome_uncertain", "An AI call may have been billed without a usable saved result. The budget hold is retained; an AI manager can review this from Jobs. Automatic resend is blocked.", false);
-export function productionTextRunDeps<T, S = IdeaSnapshot>(rest: TextRunDeps<T, S>["rest"], generate: TextRunDeps<T, S>["generate"]): TextRunDeps<T, S> {
-  return { rest, generate, authorizeScheduledJob: (locationId, jobId) => authorizeScheduledTextJob(rest, locationId, jobId), decryptKey: (locationId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(locationId, "openai")) };
+export function productionTextRunDeps<T, S = IdeaSnapshot>(db: TextRunDeps<T, S>["db"], generate: TextRunDeps<T, S>["generate"]): TextRunDeps<T, S> {
+  return { db, generate, authorizeScheduledJob: (locationId, jobId) => authorizeScheduledTextJob(db, locationId, jobId), decryptKey: (locationId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(locationId, "openai")) };
 }

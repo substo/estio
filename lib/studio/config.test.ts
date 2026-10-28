@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasStudioSupabaseConfig } from "./config";
+import { hasStudioSupabaseConfig } from "./recovery/config";
 
 const env = (values: Record<string, string>): NodeJS.ProcessEnv => values as unknown as NodeJS.ProcessEnv;
 

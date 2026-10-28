@@ -5,7 +5,6 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { getPlatformProfile } from "@/lib/platform/profile";
 import { encryptStudioSecret, hasStudioSecretsKey } from "@/lib/studio/secrets";
-import { studioRest } from "@/lib/studio/rest";
 import { exchangeYoutubeCode, newYoutubeOAuth, stateHash } from "./youtube-api";
 import { youtubeClientConfig, youtubeProfileContext } from "./youtube-policy";
 import { profileOAuthRpc } from "./profile-youtube";

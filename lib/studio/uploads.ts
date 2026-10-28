@@ -1,9 +1,9 @@
+import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
 import { createStudioR2Store, readStudioR2Config } from "./media-r2";
-import { queryPath, studioRest } from "./rest";
 import type { StudioUploadRequest } from "./upload-policy";
 import { recoverUpload, type RecoverableUpload, type UploadCommand } from "./upload-recovery";
 import { StudioCommandError } from "./command-error";
@@ -30,10 +30,7 @@ export async function executeStudioUploadCommand(locationId: string, command: Up
       p_record_id: request.recordId, p_original_filename: request.filename, p_content_type: request.contentType,
       p_byte_size: request.byteSize, p_bucket_id: store.bucket });
   } else {
-    [upload] = await studioRest<RecoverableUpload[]>(queryPath("studio_uploads", {
-      select: "id,record_id,object_key,byte_size,bucket_id,content_type,original_filename,status,created_by_clerk_user_id,expires_at",
-      location_id: `eq.${access.locationId}`, record_id: `eq.${recordId}`, created_by_clerk_user_id: `eq.${access.userId}`,
-      id: `eq.${command.uploadId}`, limit: "1" }));
+    [upload] = await studioDb.rows<RecoverableUpload>(Prisma.sql`select id,record_id,object_key,byte_size,bucket_id,content_type,original_filename,status,created_by_clerk_user_id,expires_at from studio.studio_uploads t where location_id = ${access.locationId} and record_id = ${recordId}::uuid and created_by_clerk_user_id = ${access.userId} and id = ${command.uploadId}::uuid limit 1`);
   }
   return recoverUpload(upload ?? null, { userId: access.userId, recordId }, {
     bucket: store.bucket, head: key => store.headObject(key), sign: input => store.presignUpload(input),
@@ -53,8 +50,7 @@ export async function startStudioUpload(locationId: string, request: StudioUploa
 export async function finishStudioUpload(locationId: string, uploadId: string) {
   const { access } = await requireUploader(locationId);
   if (!/^[0-9a-f-]{36}$/i.test(uploadId)) throw new StudioUploadError("Invalid upload.");
-  const [upload] = await studioRest<Array<{ record_id: string }>>(queryPath("studio_uploads", {
-    select: "record_id", location_id: `eq.${access.locationId}`, id: `eq.${uploadId}`, limit: "1" }));
+  const [upload] = await studioDb.rows<{ record_id: string }>(Prisma.sql`select record_id from studio.studio_uploads t where location_id = ${access.locationId} and id = ${uploadId}::uuid limit 1`);
   if (!upload) throw new StudioUploadError("Upload not found.");
   const result = await executeStudioUploadCommand(locationId, { action: "recover", uploadId, recordId: upload.record_id });
   if (result.status !== "uploaded") throw new StudioUploadError("The file did not reach storage. Recover it from the record page.");
@@ -65,11 +61,7 @@ export interface PendingStudioUpload { id: string; original_filename: string; co
 export async function listPendingStudioUploads(locationId: string, recordId: string): Promise<PendingStudioUpload[]> {
   const access = await getStudioAccess(locationId);
   if (!access || (await auth()).actor) return [];
-  return studioRest<PendingStudioUpload[]>(queryPath("studio_uploads", {
-    select: "id,original_filename,content_type,byte_size,expires_at", location_id: `eq.${access.locationId}`,
-    record_id: `eq.${recordId}`, created_by_clerk_user_id: `eq.${access.userId}`, status: "eq.awaiting_upload",
-    // expires_at is the initial hour; completion permits another six hours.
-    expires_at: `gt.${new Date(Date.now() - 6 * 3600_000).toISOString()}`, order: "created_at.asc", limit: "100" }));
+  return studioDb.rows<PendingStudioUpload>(Prisma.sql`select id,original_filename,content_type,byte_size,expires_at from studio.studio_uploads t where location_id = ${access.locationId} and record_id = ${recordId}::uuid and created_by_clerk_user_id = ${access.userId} and status = ${'awaiting_upload'} and expires_at > ${new Date(Date.now() - 6 * 3600_000).toISOString()}::timestamptz order by created_at asc limit 100`);
 }
 
 export interface StudioRecordUpload {
@@ -80,17 +72,13 @@ export interface StudioRecordUpload {
 
 /** Call only after resolving the record inside this authorized workspace. */
 export async function listStudioRecordUploads(locationId: string, recordId: string): Promise<StudioRecordUpload[]> {
-  const uploads = await studioRest<StudioRecordUpload[]>(queryPath("studio_uploads", {
-    select: "id,original_filename,content_type,byte_size,status,created_at,transcription_job_id",
-    location_id: `eq.${locationId}`, record_id: `eq.${recordId}`, status: "eq.uploaded", order: "created_at.desc", limit: "20" }));
+  const uploads = await studioDb.rows<StudioRecordUpload>(Prisma.sql`select id,original_filename,content_type,byte_size,status,created_at,transcription_job_id from studio.studio_uploads t where location_id = ${locationId} and record_id = ${recordId}::uuid and status = ${'uploaded'} order by created_at desc limit 20`);
   if (!uploads.length) return [];
   const ids = uploads.map(u => u.id).join(",");
   const jobIds = uploads.map(u => u.transcription_job_id).filter(Boolean).join(",");
   const [transcripts, jobs] = await Promise.all([
-    studioRest<Array<{ upload_id: string; text: string; duration_seconds: number; model: string }>>(queryPath("studio_transcripts", {
-      select: "upload_id,text,duration_seconds,model", location_id: `eq.${locationId}`, upload_id: `in.(${ids})` })),
-    jobIds ? studioRest<Array<{ id: string; status: string; attempts: number; max_attempts: number; last_error_message: string | null }>>(queryPath("studio_jobs", {
-      select: "id,status,attempts,max_attempts,last_error_message", location_id: `eq.${locationId}`, id: `in.(${jobIds})` })) : [],
+    studioDb.rows<{ upload_id: string; text: string; duration_seconds: number; model: string }>(Prisma.sql`select upload_id,text,duration_seconds,model from studio.studio_transcripts t where location_id = ${locationId} and upload_id = any(string_to_array(${ids}, ',')::uuid[])`),
+    jobIds ? studioDb.rows<{ id: string; status: string; attempts: number; max_attempts: number; last_error_message: string | null }>(Prisma.sql`select id,status,attempts,max_attempts,last_error_message from studio.studio_jobs t where location_id = ${locationId} and id = any(string_to_array(${jobIds}, ',')::uuid[])`) : [],
   ]);
   return uploads.map(u => ({ ...u, transcript: transcripts.find(t => t.upload_id === u.id) ?? null, job: jobs.find(j => j.id === u.transcription_job_id) ?? null }));
 }

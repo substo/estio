@@ -6,7 +6,6 @@ import { studioReadinessRequired, STUDIO_WORKER_HANDLERS } from "../lib/studio/r
 import { readStudioRelease, runtimeStudioReadiness } from "../lib/studio/readiness-runtime";
 import { studioJobHandlers } from "../lib/studio/worker/handlers";
 import { createStudioR2Store, readStudioR2Config } from "../lib/studio/media-r2";
-import { requestStudioRest } from "../lib/studio/rest-client";
 import { createTranscribeUploadHandler, productionTranscribeDeps } from "../lib/studio/worker/transcribe-upload";
 import { createDbStudioQueue } from "../lib/studio/worker/queue";
 import { createIdeaReviewHandler, productionIdeaReviewDeps } from "../lib/studio/worker/idea-review";
@@ -33,16 +32,6 @@ async function main() {
   }
   const release = await readStudioRelease();
   let readiness = await runtimeStudioReadiness("dependencies");
-  // A restricted/paused provider is not a crash: wait quietly (no pm2 restart loop,
-  // one small probe per interval) and start working once the project is reachable.
-  while (readiness.ready && readiness.degraded && !controller.signal.aborted) {
-    log({ event: "studio_provider_restricted_waiting", retryInMs: PROVIDER_RETRY_MS });
-    await new Promise<void>(resolve => {
-      const timer = setTimeout(resolve, PROVIDER_RETRY_MS);
-      controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-    });
-    if (!controller.signal.aborted) readiness = await runtimeStudioReadiness("dependencies");
-  }
   if (controller.signal.aborted) return;
   if (!readiness.ready || !release) {
     log({ event: "dependencies_not_ready", checks: readiness.checks, releaseAvailable: Boolean(release) });
@@ -50,21 +39,21 @@ async function main() {
   }
   const instanceId = process.env.STUDIO_WORKER_INSTANCE?.trim() || randomUUID();
   const workerId = `${os.hostname().replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 60)}:${process.pid}:${randomBytes(3).toString("hex")}`;
-  const config = { projectUrl: process.env.STUDIO_SUPABASE_URL!.trim(), serviceRoleKey: process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY!.trim() };
   const { default: prisma } = await import("../lib/db");
   const { createStudioDb } = await import("../lib/studio/db");
-  const queue = createDbStudioQueue(createStudioDb(prisma));
+  const db = createStudioDb(prisma);
+  const queue = createDbStudioQueue(db);
   const handlers = { ...studioJobHandlers };
-  handlers["studio.idea_review"] = createIdeaReviewHandler(productionIdeaReviewDeps((path, init) => requestStudioRest(config, path, { ...init, signal: init?.signal ?? AbortSignal.timeout(60_000) })));
-  handlers["studio.script_brief"] = createScriptBriefHandler(productionScriptBriefDeps((path, init) => requestStudioRest(config, path, { ...init, signal: init?.signal ?? AbortSignal.timeout(60_000) })));
-  handlers["studio.knowledge_extract"] = createKnowledgeExtractionHandler(productionKnowledgeExtractionDeps((path, init) => requestStudioRest(config, path, { ...init, signal: init?.signal ?? AbortSignal.timeout(60_000) })));
-  handlers["studio.youtube_discovery"] = createYoutubeDiscoveryHandler(productionYoutubeDiscoveryDeps((path, init) => requestStudioRest(config, path, { ...init, signal: init?.signal ?? AbortSignal.timeout(60_000) })));
+  handlers["studio.idea_review"] = createIdeaReviewHandler(productionIdeaReviewDeps(db));
+  handlers["studio.script_brief"] = createScriptBriefHandler(productionScriptBriefDeps(db));
+  handlers["studio.knowledge_extract"] = createKnowledgeExtractionHandler(productionKnowledgeExtractionDeps(db));
+  handlers["studio.youtube_discovery"] = createYoutubeDiscoveryHandler(productionYoutubeDiscoveryDeps(db));
   const r2 = readStudioR2Config();
   // Startup preflight has already required the dedicated R2/media dependencies.
   if (r2) {
     const store = createStudioR2Store(r2);
     handlers["studio.transcribe_upload"] = createTranscribeUploadHandler(productionTranscribeDeps({
-      rest: (path, init) => requestStudioRest(config, path, { ...init, signal: init?.signal ?? AbortSignal.timeout(60_000) }),
+      db,
       presignWorkerRead: key => store.presignWorkerRead(key) }));
   }
   if (STUDIO_WORKER_HANDLERS.some(kind => !handlers[kind])) throw new Error("missing_worker_handler");

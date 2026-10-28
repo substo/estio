@@ -6,7 +6,7 @@ import { normalizeLegacySchedules, ScheduleImportError } from "../lib/studio/imp
 import type { SchedulePreviewManifest } from "../lib/studio/import/inspect-schedules";
 import { readSourceSnapshot, SourceSnapshotError } from "../lib/studio/import/source-snapshot";
 import { requireStandaloneImportOwner } from "../lib/studio/import/apply-target";
-import { hasStudioSupabaseConfig } from "../lib/studio/config";
+import { hasStudioSupabaseConfig } from "../lib/studio/recovery/config";
 import { requestStudioRest, StudioRestError } from "../lib/studio/rest-client";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

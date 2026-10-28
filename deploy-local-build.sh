@@ -257,7 +257,7 @@ if [ -n "$STUDIO_ACTIVATION" ]; then
         exit 1
     fi
     missing=""
-    for key in STUDIO_SUPABASE_URL STUDIO_SUPABASE_SERVICE_ROLE_KEY STUDIO_SECRETS_KEY STUDIO_SECRETS_KEY_ID \
+    for key in STUDIO_SECRETS_KEY STUDIO_SECRETS_KEY_ID \
         SUBSTO_CLERK_PUBLISHABLE_KEY SUBSTO_CLERK_SECRET_KEY CLERK_ENCRYPTION_KEY; do
         grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=[^[:space:]]" "$studio_env" || missing="$missing $key"
     done
@@ -414,6 +414,23 @@ ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
     esac
 ENDSSH
 
+# Optional approved cutover pause: artifacts and migrations are staged, no candidate starts.
+# In another operator shell freeze/copy/reverify, then install the receipt to release this gate.
+if [[ "${STUDIO_MERGE_COPY_WAIT_SECONDS:-0}" != "0" ]]; then
+    [[ "$STUDIO_MERGE_COPY_WAIT_SECONDS" =~ ^[0-9]+$ ]] && (( STUDIO_MERGE_COPY_WAIT_SECONDS <= 3600 )) || exit 1
+    echo "Studio copy gate waiting in $TARGET_DIR (no candidate runtime started)."
+    ssh $SSH_OPTS $SERVER /bin/bash -s -- "$TARGET_DIR" "$STUDIO_MERGE_COPY_WAIT_SECONDS" <<'STUDIO_COPY_WAIT'
+set -euo pipefail
+cd "$1"
+set -a; . ./.env; set +a
+deadline=$((SECONDS + $2))
+until NODE_ENV=production node_modules/.bin/tsx -e 'import { assertStudioMergeReady } from "./lib/studio/merge-gate"; assertStudioMergeReady()' >/dev/null 2>&1; do
+    (( SECONDS < deadline )) || { echo 'Copy verification gate timed out; old runtime retained.' >&2; exit 1; }
+    sleep 5
+done
+STUDIO_COPY_WAIT
+fi
+
 # Step 6: Runtime-Safe Blue/Green Switch
 TARGET_APP_NAME="${APP_NAME_PREFIX}-${TARGET_COLOR}"
 if [[ "$ACTIVE_COLOR" == "none" ]]; then
@@ -504,6 +521,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         . ./.env
         set +a
     fi
+    # The candidate must not start before the reviewed copy receipt exists.
+    NODE_ENV=production "\$TARGET_DIR/node_modules/.bin/tsx" -e 'import { assertStudioMergeReady } from "./lib/studio/merge-gate"; assertStudioMergeReady()'
     echo "🔐 Verifying secure settings storage..."
     npm run settings:kms-preflight
     PORT="\$TARGET_PORT" NODE_ENV=production PROCESS_ROLE=web pm2 start npm --name "\$TARGET_APP_NAME" -- start

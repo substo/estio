@@ -6,7 +6,7 @@ import { inspectLegacyMedia, MediaPreviewError, type MediaPreviewManifest } from
 import { canonicalJson, type JsonValue } from "../lib/studio/import/legacy-library";
 import { SourceSnapshotError } from "../lib/studio/import/source-snapshot";
 import { MediaTransferError, parseMediaUploadArgs, readPinnedManifest, transferPinnedObject } from "../lib/studio/import/media-transfer";
-import { hasStudioSupabaseConfig } from "../lib/studio/config";
+import { hasStudioSupabaseConfig } from "../lib/studio/recovery/config";
 import { requestStudioRest, StudioRestError } from "../lib/studio/rest-client";
 import { createStudioR2Store, readStudioR2Config, type StudioObjectStore } from "../lib/studio/media-r2";
 
