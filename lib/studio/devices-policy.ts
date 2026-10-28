@@ -248,3 +248,14 @@ export function readDeviceConfig(value: unknown): StudioDeviceConfig {
       allowOnBattery: r.allowOnBattery as boolean, maxConcurrentJobs: 1, launchAtLogin: r.launchAtLogin as boolean, workingHours },
   };
 }
+
+/**
+ * Connected-computer page refresh: every 3s while a command runs, every 60s otherwise,
+ * and none after 10 minutes on the page (the Refresh button still works). Each refresh
+ * re-runs the page's database reads, so an open tab must not poll forever.
+ */
+export const COMPANION_REFRESH_WINDOW_MS = 10 * 60_000;
+export function companionRefreshDelay(commandActive: boolean, elapsedMs: number): number | null {
+  if (elapsedMs >= COMPANION_REFRESH_WINDOW_MS) return null;
+  return commandActive ? 3_000 : 60_000;
+}

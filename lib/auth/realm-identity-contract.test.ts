@@ -106,7 +106,7 @@ test("Substo brand pages are allowed and protected; lookalike paths stay blocked
   assert.equal(classifySubstoRoute("/brand-x"), "blocked");
   assert.match(read("middleware.ts"), /routeKind === "studio" \|\| routeKind === "brand" \|\| routeKind === "profile" \|\| routeKind === "crm"\) await auth\.protect\(\)/);
   assert.match(read("app/(main)/brand/layout.tsx"), /!== "substo"\) notFound\(\)/);
-  assert.match(read("app/(main)/admin/layout.tsx"), /prepareCurrentSubstoUser\(\)/);
+  assert.match(read("app/(main)/admin/layout.tsx"), /prepareCurrentSubstoUserOnEntry\(\)/);
 });
 
 test("Substo Studio access comes from the brand team, never from Studio membership alone", () => {

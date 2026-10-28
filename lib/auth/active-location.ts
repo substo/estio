@@ -3,6 +3,7 @@ import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import type { Location, PlatformRole } from "@prisma/client";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import db from "@/lib/db";
 import {
   chooseActiveLocation,
@@ -43,7 +44,11 @@ export type ActiveLocationResolution = {
   locationCount: number;
 };
 
-export async function resolveActiveLocation(): Promise<ActiveLocationResolution> {
+/**
+ * Cached per request: layouts, pages, the shell and Studio access all ask for the
+ * active Location, and each uncached call is several database round trips.
+ */
+export const resolveActiveLocation = cache(async (): Promise<ActiveLocationResolution> => {
   const authState = await auth();
   const { userId: clerkUserId } = authState;
   if (!clerkUserId) {
@@ -101,14 +106,16 @@ export async function resolveActiveLocation(): Promise<ActiveLocationResolution>
     location: { ...fullLocation, membershipRole: selection.location.role, contactAccessScope: selection.location.contactAccessScope },
     role: selection.location.role, availableLocations, locationCount: availableLocations.length,
   };
-}
+});
 
-export async function validateActiveLocationSelection(locationId: string): Promise<ActiveLocationResolution> {
+export const validateActiveLocationSelection = cache(async (locationId: string): Promise<ActiveLocationResolution> => {
   const resolution = await resolveActiveLocation();
   const selected = resolution.availableLocations.find((location) => location.id === String(locationId || "").trim());
   if (!resolution.user || !resolution.clerkUserId || !selected) {
     return { ...resolution, status: resolution.clerkUserId ? "no_access" : "unauthenticated", location: null, role: null };
   }
+  // The active Location was just loaded and realm-checked; reuse it instead of a second read.
+  if (resolution.status === "authorized" && resolution.location?.id === selected.id) return resolution;
   const fullLocation = await db.location.findUnique({ where: { id: selected.id } });
   if (!fullLocation || fullLocation.authRealm !== await getRequestAuthRealm()) return { ...resolution, status: "no_access", location: null, role: null };
   return {
@@ -116,4 +123,4 @@ export async function validateActiveLocationSelection(locationId: string): Promi
     location: { ...fullLocation, membershipRole: selected.role, contactAccessScope: selected.contactAccessScope },
     role: selected.role,
   };
-}
+});

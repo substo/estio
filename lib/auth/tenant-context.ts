@@ -2,6 +2,7 @@ import "server-only";
 
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
+import { cache } from "react";
 import { getRequestAuthRealm } from "./request-realm";
 import { resolveActiveLocation, validateActiveLocationSelection } from "./active-location";
 import { getEstioStudioWorkspace, getEstioStudioWorkspaceById, getSubstoStudioWorkspace } from "@/lib/studio/supabase-service";
@@ -25,13 +26,19 @@ export async function resolveWorkspaceTenant(workspaceId: string) {
   return resolution.status === "authorized" && resolution.location?.authRealm === realm ? resolution : null;
 }
 
-export async function resolveTenantContext(input: { workspaceId?: string; locationId?: string } = {}) {
+export function resolveTenantContext(input: { workspaceId?: string; locationId?: string } = {}) {
+  return resolveTenantContextCached(input.workspaceId, input.locationId);
+}
+
+/** Cached per request by its primitive inputs (the layout and the page both resolve it). */
+const resolveTenantContextCached = cache(async (workspaceId: string | undefined, locationId: string | undefined) => {
+  const input = { workspaceId, locationId };
   const realm = await getRequestAuthRealm();
   if (realm !== "estio" && realm !== "substo") return null;
   const resolution = input.workspaceId !== undefined ? await resolveWorkspaceTenant(input.workspaceId)
     : input.locationId !== undefined ? await validateActiveLocationSelection(input.locationId) : await resolveActiveLocation();
   if (!resolution || ((input.workspaceId !== undefined || input.locationId !== undefined) && resolution.status !== "authorized")) return null;
   const location = resolution.location;
-  const workspaceId = input.workspaceId ?? (location ? realm === "substo" ? location.studioWorkspaceId : (await getEstioStudioWorkspace(location.id))?.id : null);
-  return { app: realm, resolution, workspaceId: workspaceId ?? null };
-}
+  const resolvedWorkspaceId = input.workspaceId ?? (location ? realm === "substo" ? location.studioWorkspaceId : (await getEstioStudioWorkspace(location.id))?.id : null);
+  return { app: realm, resolution, workspaceId: resolvedWorkspaceId ?? null };
+});

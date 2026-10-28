@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createClerkClient, currentUser, type User } from "@clerk/nextjs/server";
+import { auth, createClerkClient, currentUser, type User } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import db from "@/lib/db";
 import { resolveActiveLocation, validateActiveLocationSelection } from "@/lib/auth/active-location";
@@ -83,6 +83,25 @@ export async function prepareCurrentSubstoUser() {
   const user = await currentUser();
   if (!user) return null;
   return prepareSubstoSignIn(substoLocationDeps(), toClerkIdentity(user));
+}
+
+/**
+ * Entry setup for CRM pages. It needs the Clerk API and several queries, so a user who
+ * completed it in this process within the last minute is not prepared again; invitations
+ * sent meanwhile are claimed on the next page after that.
+ */
+const SUBSTO_ENTRY_TTL_MS = 60_000;
+const preparedUntil = new Map<string, number>();
+
+export async function prepareCurrentSubstoUserOnEntry() {
+  if (await getRequestAuthRealm() !== "substo") return;
+  const { userId } = await auth();
+  if (!userId) return;
+  const now = Date.now();
+  if ((preparedUntil.get(userId) ?? 0) > now) return;
+  await prepareCurrentSubstoUser();
+  if (preparedUntil.size > 5_000) preparedUntil.clear();
+  preparedUntil.set(userId, now + SUBSTO_ENTRY_TTL_MS);
 }
 
 /** The signed-in user acting on their active Substo location. */

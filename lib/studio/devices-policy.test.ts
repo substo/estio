@@ -70,3 +70,11 @@ test("device config validator normalizes and rejects unsafe setups", async () =>
     { ...defaultDeviceConfig, resources: { ...defaultDeviceConfig.resources, workingHours: { start: "9:00", end: "18:00", timeZone: "Mars/Base" } } },
     { ...defaultDeviceConfig, translationTargets: Array.from({ length: 21 }, () => "en") }]) assert.throws(() => readDeviceConfig(bad));
 });
+
+test("the Connected-computer page refreshes fast only during a command and stops after its window", async () => {
+  const { companionRefreshDelay, COMPANION_REFRESH_WINDOW_MS } = await import("./devices-policy");
+  assert.equal(companionRefreshDelay(true, 0), 3_000);
+  assert.equal(companionRefreshDelay(false, 0), 60_000);
+  assert.equal(companionRefreshDelay(false, COMPANION_REFRESH_WINDOW_MS - 1), 60_000);
+  assert.equal(companionRefreshDelay(true, COMPANION_REFRESH_WINDOW_MS), null);
+});

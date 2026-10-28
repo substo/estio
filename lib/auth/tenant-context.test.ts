@@ -5,10 +5,13 @@ import test from "node:test";
 import ts from "typescript";
 import { NextRequest, NextResponse } from "next/server";
 
+// Per-request React.cache is a pass-through outside a server render.
+const passthroughReact = { cache: <T>(fn: T) => fn };
+
 function load(file: string, deps: Record<string, any>) {
   const module = { exports: {} as any };
   const code = ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-  vm.runInNewContext(code, { module, exports: module.exports, require: (name: string) => { assert.ok(name in deps, `Unexpected dependency: ${name}`); return deps[name]; }, URL });
+  vm.runInNewContext(code, { module, exports: module.exports, require: (name: string) => { if (name === "react" && !(name in deps)) return passthroughReact; assert.ok(name in deps, `Unexpected dependency: ${name}`); return deps[name]; }, URL });
   return module.exports;
 }
 const workspaceId = "11111111-1111-4111-8111-111111111111";

@@ -5,6 +5,7 @@ import { studioRest } from "./rest";
 import { auth } from "@clerk/nextjs/server";
 import type { UserRole } from "@prisma/client";
 import { headers } from "next/headers";
+import { cache } from "react";
 import { resolveActiveLocation, validateActiveLocationSelection, type ActiveLocationResolution } from "@/lib/auth/active-location";
 import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { getImpersonationContextFromAuth } from "@/lib/auth/impersonation";
@@ -68,8 +69,11 @@ export async function getEstioStudioLocationAccess(locationId: string): Promise<
   return resolveEstioLocationAccess(locationId, await auth());
 }
 
-/** Resolve every workspace ID against its host's identity realm and authority. */
-export async function getStudioWorkspaceAccess(workspaceId: string): Promise<StudioWorkspaceAccess | null> {
+/**
+ * Resolve every workspace ID against its host's identity realm and authority.
+ * Cached per request: the layout, the page and its sections all ask.
+ */
+export const getStudioWorkspaceAccess = cache(async (workspaceId: string): Promise<StudioWorkspaceAccess | null> => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workspaceId)) return null;
   const brand = await requestBrand();
   if (brand !== "estio" && brand !== "substo") return null;
@@ -98,4 +102,4 @@ export async function getStudioWorkspaceAccess(workspaceId: string): Promise<Stu
   if (!workspace?.estio_location_id || workspace.estio_location_id !== active.location.id) return null;
   const access = await resolveEstioLocationAccess(workspace.estio_location_id, state);
   return access ? { brand, userId: access.userId, workspace: { ...workspace, name: access.location.name?.trim() || "Unnamed location" }, role: access.role, locationId: access.location.id } : null;
-}
+});

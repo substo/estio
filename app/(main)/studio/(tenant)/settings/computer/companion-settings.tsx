@@ -7,6 +7,7 @@ import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-com
 import type { StudioDeviceCommandSummary, StudioDeviceSummary } from "@/lib/studio/devices";
 import { DeviceSetupForm } from "./device-setup-form";
 import { buttonClass, endpoint, inputClass, providerReport, record, type Provider } from "./shared";
+import { companionRefreshDelay } from "@/lib/studio/devices-policy";
 
 const when = (value: string) => new Date(value).toLocaleString("en-GB", { timeZone: "Asia/Nicosia", dateStyle: "medium", timeStyle: "short" });
 const providerName = (provider: Provider) => provider === "codex" ? "Codex" : "Claude";
@@ -18,14 +19,21 @@ const commandLabel: Record<StudioDeviceCommandSummary["status"], string> = {
   succeeded: "Done.", failed: "Failed.", cancelled: "Cancelled.",
 };
 
-/** Refresh server data: every 3s while a sign-in command is in progress, otherwise every 15s, only while the page is visible. */
+/** Refresh server data while the page is visible, per `companionRefreshDelay`; the window restarts when the tab is shown again. */
 function useAutoRefresh(fast: boolean) {
   const router = useRouter();
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === "visible") router.refresh(); };
-    const timer = window.setInterval(tick, fast ? 3_000 : 15_000);
-    document.addEventListener("visibilitychange", tick);
-    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
+    let since = Date.now();
+    let timer: number | undefined;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      const delay = companionRefreshDelay(fast, Date.now() - since);
+      if (delay !== null) timer = window.setTimeout(() => { if (document.visibilityState === "visible") router.refresh(); schedule(); }, delay);
+    };
+    const onVisibility = () => { if (document.visibilityState !== "visible") return; since = Date.now(); router.refresh(); schedule(); };
+    schedule();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", onVisibility); };
   }, [fast, router]);
 }
 

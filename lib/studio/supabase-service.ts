@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { isPlatformProfileDeleted } from "../platform/profile-lifecycle";
 import { queryPath, studioRest, studioRestAll } from "./rest";
 
@@ -23,7 +24,7 @@ interface WorkspaceMembershipRow {
   role: SubstoStudioWorkspace["role"];
 }
 
-export async function getEstioStudioWorkspace(locationId: string): Promise<StudioWorkspace | null> {
+async function readEstioStudioWorkspace(locationId: string): Promise<StudioWorkspace | null> {
   const rows = await studioRest<StudioWorkspace[]>(queryPath("studio_workspaces", {
     select: "id,brand,workspace_type,name,estio_location_id,created_at",
     brand: "eq.estio",
@@ -33,7 +34,11 @@ export async function getEstioStudioWorkspace(locationId: string): Promise<Studi
   return rows[0] ?? null;
 }
 
-export async function getEstioStudioWorkspaceById(workspaceId: string): Promise<StudioWorkspace | null> {
+/** Cached per request; provisioning below always re-reads uncached. */
+export const getEstioStudioWorkspace = cache(readEstioStudioWorkspace);
+
+/** Cached per request. */
+export const getEstioStudioWorkspaceById = cache(async (workspaceId: string): Promise<StudioWorkspace | null> => {
   const rows = await studioRest<StudioWorkspace[]>(queryPath("studio_workspaces", {
     select: "id,brand,workspace_type,name,estio_location_id,created_at",
     id: `eq.${workspaceId}`,
@@ -42,12 +47,12 @@ export async function getEstioStudioWorkspaceById(workspaceId: string): Promise<
     limit: "1",
   }));
   return rows[0] ?? null;
-}
+});
 
 export async function ensureEstioStudioWorkspace(
   location: { id: string; name: string | null },
 ): Promise<StudioWorkspace> {
-  const existing = await getEstioStudioWorkspace(location.id);
+  const existing = await readEstioStudioWorkspace(location.id);
   if (existing) return existing;
 
   const row = {
@@ -67,12 +72,12 @@ export async function ensureEstioStudioWorkspace(
   } catch (error) {
     // The unique location index makes concurrent first access safe. Re-read to
     // return the winner without creating a second workspace for that location.
-    const concurrent = await getEstioStudioWorkspace(location.id);
+    const concurrent = await readEstioStudioWorkspace(location.id);
     if (concurrent) return concurrent;
     throw error;
   }
 
-  const concurrent = await getEstioStudioWorkspace(location.id);
+  const concurrent = await readEstioStudioWorkspace(location.id);
   if (concurrent) return concurrent;
   throw new Error("Studio workspace could not be created for this Estio location.");
 }
@@ -146,14 +151,15 @@ export async function substoStudioWorkspaceExists(workspaceId: string): Promise<
   return rows.length === 1;
 }
 
-export async function getSubstoStudioWorkspace(workspaceId: string): Promise<StudioWorkspace | null> {
+/** Cached per request. */
+export const getSubstoStudioWorkspace = cache(async (workspaceId: string): Promise<StudioWorkspace | null> => {
   requireWorkspaceId(workspaceId);
   const rows = await studioRest<StudioWorkspace[]>(queryPath("studio_workspaces", {
     select: "id,brand,workspace_type,name,estio_location_id,created_at",
     id: `eq.${workspaceId}`, brand: "eq.substo", workspace_type: "eq.substo_standalone", limit: "1",
   }));
   return rows[0] ?? null;
-}
+});
 
 export async function renameSubstoStudioWorkspace(workspaceId: string, name: string): Promise<void> {
   requireWorkspaceId(workspaceId);

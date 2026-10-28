@@ -176,7 +176,9 @@ fi
 
 # Studio dispatch is service-authorized and SQL-fenced across concurrent hosts.
 # Installing this owner is a separately authorized production operation.
-(crontab -l 2>/dev/null | grep -v -E "run-cron-endpoint\.sh studio-schedules|api/cron/studio-schedules"; echo "*/1 * * * * ${SCRIPT_DIR}/run-cron-endpoint.sh studio-schedules 110") | crontab -
+# Every 5 minutes: due runs are claimed by next_run_at, so a later tick only delays
+# them, and each tick is a database prune plus a due-schedules read (free-plan egress).
+(crontab -l 2>/dev/null | grep -v -E "run-cron-endpoint\.sh studio-schedules|api/cron/studio-schedules"; echo "*/5 * * * * ${SCRIPT_DIR}/run-cron-endpoint.sh studio-schedules 110") | crontab -
 
 # Remove retired schedules that must never be reinstalled.
 (crontab -l 2>/dev/null \

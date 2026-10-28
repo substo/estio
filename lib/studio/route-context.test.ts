@@ -7,10 +7,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { cleanStudioLegacyPath } from "./route-policy";
 import * as restClient from "./rest-client";
 
+// Per-request React.cache is a pass-through outside a server render.
+const passthroughReact = { cache: <T>(fn: T) => fn };
+
 function load(file: string, deps: Record<string, any>) {
   const module = { exports: {} as any };
   const code = ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-  vm.runInNewContext(code, { module, exports: module.exports, Request, Response, URL, require: (name: string) => { assert.ok(name in deps, name); return deps[name]; } });
+  vm.runInNewContext(code, { module, exports: module.exports, Request, Response, URL, require: (name: string) => { if (name === "react" && !(name in deps)) return passthroughReact; assert.ok(name in deps, name); return deps[name]; } });
   return module.exports;
 }
 function context(status = "authorized", storage: string | null = "storage-a") {

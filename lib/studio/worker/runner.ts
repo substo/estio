@@ -1,10 +1,11 @@
 import { StudioJobError, type StudioJobHandler } from "./handlers";
 import type { StudioJob, StudioQueue } from "./queue";
+import { pollDelay } from "../poll-backoff";
 
 export interface StudioWorkerOptions {
   queue: StudioQueue; handlers: Record<string, StudioJobHandler>; workerId: string; release?: string | null;
   report?: { instanceId: string; handlers: string[] };
-  concurrency?: number; leaseSeconds?: number; pollMs?: number; heartbeatMs?: number;
+  concurrency?: number; leaseSeconds?: number; pollMs?: number; idlePollMaxMs?: number; failurePollMaxMs?: number; heartbeatMs?: number;
   signal: AbortSignal; log?: (event: Record<string, unknown>) => void; sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -65,14 +66,19 @@ export async function runStudioWorker(options: StudioWorkerOptions): Promise<voi
   const { queue, workerId, signal, log = () => {} } = options;
   const concurrency = options.concurrency ?? 2;
   const leaseSeconds = options.leaseSeconds ?? 120;
+  // Fast while jobs arrive; an idle or failing queue is polled less and less often.
   const pollMs = options.pollMs ?? 5000;
-  const heartbeatMs = options.heartbeatMs ?? 30_000;
+  const idlePollMaxMs = Math.max(pollMs, options.idlePollMaxMs ?? 30_000);
+  const failurePollMaxMs = Math.max(pollMs, options.failurePollMaxMs ?? 300_000);
+  // Within WORKER_ONLINE_SECONDS (90s) twice, so one slow pulse never looks offline.
+  const heartbeatMs = options.heartbeatMs ?? 45_000;
   const sleep = options.sleep ?? defaultSleep;
   const startedAt = new Date();
   const running = new Set<Promise<void>>();
   let heartbeatConfirmed = false;
   let claimHealthy = false;
   let pulse: Promise<void> | null = null;
+  let idleStreak = 0, failureStreak = 0;
   const heartbeat = (draining = false): Promise<void> => {
     if (pulse) return pulse;
     pulse = queue.heartbeat(workerId, options.release ?? null, startedAt,
@@ -92,6 +98,8 @@ export async function runStudioWorker(options: StudioWorkerOptions): Promise<voi
         claimed = await queue.claim(workerId, concurrency - running.size, leaseSeconds).then(jobs => { claimSucceeded = true; return jobs; }, () => {
           log({ event: "claim_failed" }); return [];
         });
+        if (!claimSucceeded) failureStreak += 1;
+        else { failureStreak = 0; idleStreak = claimed.length ? 0 : idleStreak + 1; }
         const changed = claimHealthy !== claimSucceeded;
         claimHealthy = claimSucceeded;
         if (changed) await heartbeat();
@@ -101,7 +109,8 @@ export async function runStudioWorker(options: StudioWorkerOptions): Promise<voi
           running.add(task);
         }
       }
-      if (!claimed.length || running.size >= concurrency) await sleep(pollMs, signal);
+      if (running.size >= concurrency) await sleep(pollMs, signal);
+      else if (!claimed.length) await sleep(failureStreak ? pollDelay(failureStreak, pollMs, failurePollMaxMs) : pollDelay(idleStreak - 1, pollMs, idlePollMaxMs), signal);
     }
   } finally {
     clearInterval(heartbeatTimer);

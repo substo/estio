@@ -151,7 +151,9 @@ async function getAiUsageSummary(
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const [todayAgg, allTimeAgg, records] = await Promise.all([
+    // Totals are grouped in the database: the badge is on every page, and reading
+    // every row of the month to add it up here cost the most database egress.
+    const [todayAgg, allTimeAgg, groups, quickAssistRows] = await Promise.all([
         db.aiUsage.aggregate({
             where: { ...usageScope, recordedAt: { gte: startOfToday } },
             _count: { id: true },
@@ -162,76 +164,62 @@ async function getAiUsageSummary(
             _count: { id: true },
             _sum: { totalTokens: true, estimatedCostUsd: true }
         }),
+        db.aiUsage.groupBy({
+            by: ["featureArea", "action", "provider", "model"],
+            where: { ...usageScope, recordedAt: { gte: startOfMonth } },
+            _count: { _all: true },
+            _sum: { totalTokens: true, estimatedCostUsd: true },
+        }),
         db.aiUsage.findMany({
-            where: {
-                ...usageScope,
-                recordedAt: { gte: startOfMonth },
-            },
-            select: {
-                resourceType: true, metadata: true, recordedAt: true,
-                featureArea: true,
-                action: true,
-                provider: true,
-                model: true,
-                totalTokens: true,
-                estimatedCostUsd: true,
-            },
-        })
+            where: { ...usageScope, recordedAt: { gte: startOfMonth }, resourceType: "viewing_session" },
+            select: { metadata: true, recordedAt: true, provider: true, estimatedCostUsd: true },
+        }),
     ]);
 
     const quickAssist = { monthCost: 0, todayCost: 0, calls: 0, unavailableCalls: 0, subscriptionCalls: 0 };
+    for (const r of quickAssistRows) {
+        const cost = r.estimatedCostUsd || 0;
+        const metadata = (r.metadata || {}) as Record<string, unknown>;
+        quickAssist.monthCost += cost; quickAssist.calls += 1;
+        if (r.recordedAt >= startOfToday) quickAssist.todayCost += cost;
+        if (metadata.costStatus === "unavailable" || (cost === 0 && !metadata.costStatus && r.provider !== "chatgpt_subscription")) quickAssist.unavailableCalls += 1;
+        if (r.provider === "chatgpt_subscription") quickAssist.subscriptionCalls += 1;
+    }
+
     const featureMap = new Map<string, { count: number; tokens: number; costUsd: number }>();
     const actionMap = new Map<string, { featureArea: string; action: string; count: number; tokens: number; costUsd: number }>();
     const modelMap = new Map<string, { provider: string; model: string; count: number; tokens: number; costUsd: number }>();
 
+    let totalCalls = 0;
     let totalTokens = 0;
     let totalCost = 0;
 
-    for (const r of records) {
-        const tokens = r.totalTokens || 0;
-        const cost = r.estimatedCostUsd || 0;
+    for (const g of groups) {
+        const count = g._count._all;
+        const tokens = g._sum.totalTokens || 0;
+        const cost = g._sum.estimatedCostUsd || 0;
+        totalCalls += count;
         totalTokens += tokens;
         totalCost += cost;
 
-        if (r.resourceType === "viewing_session") {
-            const metadata = (r.metadata || {}) as Record<string, unknown>;
-            quickAssist.monthCost += cost; quickAssist.calls += 1;
-            if (r.recordedAt >= startOfToday) quickAssist.todayCost += cost;
-            if (metadata.costStatus === "unavailable" || (cost === 0 && !metadata.costStatus && r.provider !== "chatgpt_subscription")) quickAssist.unavailableCalls += 1;
-            if (r.provider === "chatgpt_subscription") quickAssist.subscriptionCalls += 1;
-        }
-        // By feature area
-        const fe = featureMap.get(r.featureArea) || { count: 0, tokens: 0, costUsd: 0 };
-        fe.count += 1;
-        fe.tokens += tokens;
-        fe.costUsd += cost;
-        featureMap.set(r.featureArea, fe);
+        const fe = featureMap.get(g.featureArea) || { count: 0, tokens: 0, costUsd: 0 };
+        fe.count += count; fe.tokens += tokens; fe.costUsd += cost;
+        featureMap.set(g.featureArea, fe);
 
         // By feature/action, i.e. the actual API-call purpose.
-        const actionKey = `${r.featureArea}::${r.action}`;
-        const ae = actionMap.get(actionKey) || {
-            featureArea: r.featureArea,
-            action: r.action,
-            count: 0,
-            tokens: 0,
-            costUsd: 0,
-        };
-        ae.count += 1;
-        ae.tokens += tokens;
-        ae.costUsd += cost;
+        const actionKey = `${g.featureArea}::${g.action}`;
+        const ae = actionMap.get(actionKey) || { featureArea: g.featureArea, action: g.action, count: 0, tokens: 0, costUsd: 0 };
+        ae.count += count; ae.tokens += tokens; ae.costUsd += cost;
         actionMap.set(actionKey, ae);
 
-        // By model
-        const modelKey = `${r.provider}::${r.model}`;
-        const me = modelMap.get(modelKey) || { provider: r.provider, model: r.model, count: 0, tokens: 0, costUsd: 0 };
-        me.count += 1;
-        me.tokens += tokens;
-        me.costUsd += cost;
+        const modelKey = `${g.provider}::${g.model}`;
+        const me = modelMap.get(modelKey) || { provider: g.provider, model: g.model, count: 0, tokens: 0, costUsd: 0 };
+        me.count += count; me.tokens += tokens; me.costUsd += cost;
         modelMap.set(modelKey, me);
     }
 
     return {
-        totalCalls: records.length,
+        totalCalls,
         totalTokens,
         totalEstimatedCostUsd: totalCost,
         quickAssist,

@@ -126,3 +126,28 @@ test("heartbeat failure blocks claims until confirmed; failed claims withdraw re
     pollMs: 2, heartbeatMs: 10, signal: controller.signal });
   assert.equal(calls.filter(c => c[0] === "claim").length, 1); assert.ok(pulses >= 3);
 });
+
+test("an idle queue is polled less often up to the cap, and found work resets it", async () => {
+  const batches: StudioJob[][] = [[], [], [], [], [], [job("a")], [], []];
+  const { queue } = fakeQueue([]);
+  queue.claim = async () => batches.shift() ?? [];
+  const controller = new AbortController();
+  const delays: number[] = [];
+  await runStudioWorker({ queue, handlers: { "studio.diagnostic": async () => ({}) }, workerId: "w1", pollMs: 100, idlePollMaxMs: 400, heartbeatMs: 60_000,
+    signal: controller.signal, sleep: async (ms) => { delays.push(ms); if (delays.length === 8) controller.abort(); } });
+  // Equal jitter keeps each delay within [cap/2, cap]: 100, 200, 400, 400, 400; the claim polls again at once, then the streak restarts.
+  const caps = [100, 200, 400, 400, 400, 100, 200, 400];
+  assert.equal(delays.length, 8);
+  delays.forEach((ms, i) => assert.ok(ms >= caps[i] / 2 && ms <= caps[i], `delay ${i}: ${ms} not within ${caps[i]}`));
+});
+
+test("failed claims back off up to the failure cap", async () => {
+  const { queue } = fakeQueue([]);
+  queue.claim = async () => { throw new Error("database unavailable"); };
+  const controller = new AbortController();
+  const delays: number[] = [];
+  await runStudioWorker({ queue, handlers: {}, workerId: "w1", pollMs: 100, failurePollMaxMs: 800, heartbeatMs: 60_000,
+    signal: controller.signal, sleep: async (ms) => { delays.push(ms); if (delays.length === 6) controller.abort(); } });
+  const caps = [200, 400, 800, 800, 800, 800];
+  delays.forEach((ms, i) => assert.ok(ms >= caps[i] / 2 && ms <= caps[i], `delay ${i}: ${ms} not within ${caps[i]}`));
+});

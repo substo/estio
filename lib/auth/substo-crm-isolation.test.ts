@@ -10,6 +10,9 @@ import * as actionPolicy from "./substo-crm-actions";
 import { classifySubstoRoute } from "./host-routing-policy";
 import { hasPropertyContactInput } from "./substo-crm-policy";
 
+// Per-request React.cache is a pass-through outside a server render.
+const passthroughReact = { cache: <T>(fn: T) => fn };
+
 // Execute the actual server boundary with explicit ports; no Clerk, DB or network calls.
 function load(file: string, deps: Record<string, unknown>): any {
   const code = ts.transpileModule(fs.readFileSync(file, "utf8"), {
@@ -18,6 +21,7 @@ function load(file: string, deps: Record<string, unknown>): any {
   const exports = {};
   vm.runInNewContext(`(function(require, exports, process) { ${code}\n})`, {}, { filename: file })(
     (name: string) => {
+      if (name === "react" && !(name in deps)) return passthroughReact;
       if (!(name in deps)) throw new Error(`Unexpected dependency: ${name}`);
       return deps[name];
     }, exports, { env: { NODE_ENV: "test" } },

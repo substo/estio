@@ -115,7 +115,9 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       refreshing = true; void Promise.all([readiness(), discover()]).then(([p, d]) => { providers = p; discovery = d; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
     const quick = setInterval(() => { if (!refreshing) void discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }).catch(() => {}); }, 60_000);
-    try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1, heartbeatMs: 15_000, signal: controller.signal, log }); }
+    try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,
+      // Sign-in commands ride on heartbeats, so they stay at 30s; an idle Mac claims at most once a minute.
+      heartbeatMs: 30_000, idlePollMaxMs: 60_000, signal: controller.signal, log }); }
     finally { clearInterval(refresh); clearInterval(quick); await Promise.allSettled(active.values()); }
   } finally { process.off("SIGINT", shutdown); process.off("SIGTERM", shutdown); }
 }
