@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { checkStudioReadiness, hasReadyWorker, readReadinessSnapshot, STUDIO_WORKER_HANDLERS, studioReadinessRequired, type ReadinessSnapshot } from "./readiness";
@@ -6,7 +7,7 @@ import { StudioRestError } from "./rest-client";
 const env = { NODE_ENV: "test", DATABASE_URL: "postgresql://fixture.invalid/crm", STUDIO_READINESS_REQUIRED: "1",
  STUDIO_R2_ENDPOINT: "https://r2.example", STUDIO_R2_ACCESS_KEY_ID: "synthetic-access", STUDIO_R2_SECRET_ACCESS_KEY: "synthetic-secret", STUDIO_R2_BUCKET_NAME: "studio-media",
  STUDIO_SECRETS_KEY: Buffer.alloc(32, 1).toString("base64") } as const;
-const snapshot = (): ReadinessSnapshot => ({ schema: 27, protocol: 1, checkedAt: "2026-10-24T12:00:00Z", keyIds: ["v1"],
+const snapshot = (): ReadinessSnapshot => ({ schema: 29, protocol: 1, checkedAt: "2026-10-24T12:00:00Z", keyIds: ["v1"],
  queue: { due: 5, oldestDueAt: "2026-10-24T11:00:00Z", expiredLeases: 1, uncertainAttempts: 2 },
  workers: [{ release: "release-a", instance_id: "instance-a", protocol: 1, handlers: [...STUDIO_WORKER_HANDLERS], healthy: true, draining: false,
  seen_at: "2026-10-24T11:59:59Z", started_at: "2026-10-24T11:00:00Z" }] });
@@ -77,4 +78,12 @@ test("all database failures block deployment, including legacy provider restrict
   const result = await checkStudioReadiness({ ...deps(), mode: "dependencies", snapshot: probe, timeoutMs: 50 });
   assert.equal(result.ready, false);
  }
+});
+
+test("readiness accepts the schema version emitted by the merged production migration", () => {
+ const sql = readFileSync("prisma/migrations/20261028100000_studio_schema/migration.sql", "utf8");
+ const body = sql.split("CREATE FUNCTION studio.studio_readiness_snapshot()")[1]?.split("$$;")[0];
+ const version = Number(body?.match(/'schema',\s*(\d+)/)?.[1]);
+ assert.ok(Number.isSafeInteger(version));
+ assert.equal(readReadinessSnapshot({ ...snapshot(), schema: version }).schema, version);
 });

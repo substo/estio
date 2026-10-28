@@ -1,6 +1,6 @@
 # Studio merge: local readiness and next-round cutover
 
-No production commands in this document were executed in the local readiness round.
+No production commands were executed in the local readiness round. The separately authorized production attempt below staged and copied the merge, but did not switch public traffic.
 The original Studio project remains the fallback; both projects stay on Free. No R2
 objects move: the 471 old keys keep their legacy prefix.
 
@@ -141,3 +141,17 @@ Legacy filenames/local variable labels such as `paid-workspace.ts` do not create
 workspace identity or authority; immutable imported legacy payloads retain original
 keys for lossless provenance. Historical SQL and old-source recovery necessarily
 retain their original workspace schema names.
+
+## Authorized production attempt (2026-10-28; blocked before traffic switch)
+
+- Reviewed/deployed source `222077198a58c8b2b251e30e1e990e13cb6d4f13`; both remote release branches were atomically advanced to it. All 82 existing migration checksums matched. No concurrent deployment was found. The server has no Git metadata, so the old exact source commit could not be independently established.
+- Production-configured build **Ps5n63m_D1BbjBKFYejcG** passed. The synthetic readiness artifact was discarded. Exact command: `DEPLOY_PREBUILT_BUILD_ID= STUDIO_MERGE_COPY_WAIT_SECONDS=1800 PRISMA_SCHEMA_SYNC_MODE=migrate-only bash deploy-local-build.sh`.
+- Source worker stopped; all **56** Studio/platform tables fenced at 13:30 UTC. Five jobs succeeded; both paid-attempt tables were empty. Fresh source/CRM dumps, full archive decoding and SHA256SUMS: `/Users/martingreen/Backups/estio-2026-10-28/frozen-20261028T1332/`. Earlier premerge backups retained.
+- Initial CRM size 202,984,595 bytes; after schema/copy 209,259,667 bytes, below the 500 MB free limit. No subscriptions or paid jobs were started; no R2 keys moved.
+- Migration `20261028100000_studio_schema` applied through owned migrate-only deployment. Gate waited before candidate activation. Because Hetzner lacks psql, the identical operator copy script ran locally with private named services, after confirming the actual server receipt was absent.
+- Copy evidence: `/Users/martingreen/Backups/estio-2026-10-28/copy-20261028T1344/copy-verification.json`: **53** counts/digests matched, **89** FKs validated, **2** Location mappings. Includes 10 records, 4 sources, 200 insights, 1,738 units, 471 media objects and 471 knowledge media links. Independent server target re-verification passed; receipt installed at `/home/martin/.deploy-state/studio-merge-ready.json`. Server evidence: `/root/studio-merge-evidence-20261028T1347/`.
+- Candidate blue health passed, but dependency readiness failed `database_schema`: the migrated snapshot returns **29**, while TypeScript required **27**. All other dependency checks passed. The deployment exited **1** before worker replacement, symlink change or Caddy switch. Fix prepared locally: require version 29, with a regression test reading the real migration function; **9/9** readiness tests pass. Never edit the already-applied migration checksum to fix this.
+- Actual retained state: public green build **rZ2ij9xCjCSbQpfgt-yKF** health/version OK; blue candidate is online on 3001; old Studio worker stopped; old source remains frozen; target copy, migration ledger, receipt and backups retained. Target receipt is installed, so target is no longer fenced by that gate. No rollback, receipt removal, worker restart, source unfreeze or deployment retry was attempted after failure. Review target post-copy writes before any rollback; never reopen both sources.
+- Logs and preflight manifest (private): `/Users/martingreen/Backups/estio-2026-10-28/cutover-preflight/`. Deploy skill requires separate authorization before retry/recovery following script failure. Next authorized attempt must rebuild the fixed source with production configuration and preserve the committed copy; **do not rerun the copy or empty the target**.
+- Browser: Estio redirects to sign-in. Substo signed-in overview verified using T3 evaluation; snapshots timed out twice and computer-use fallback had no browser. Fresh pre-cutover Substo library five-fetch header timings: 2690,1754,1669,1591,1558 ms (median 1669); product-switch POST following redirect: 2547,2426,2633,2328,2236 ms (median 2426). No post-cutover comparison exists. Mac reconnect and live media smoke remain unverified.
+- Stage 3 removal of `Location.studioWorkspaceId`, final live UI/worker/Mac verification and post-cutover timing remain pending. Runtime REST/provider-degraded-mode removal was already included. Keep both projects Free; paid contingency thresholds in the merge plan remain informational, not upgrade authorization.

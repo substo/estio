@@ -22,7 +22,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 | **Team member** | An account with a role (Admin/Member) in one Location. | Team | `UserLocationRole` (fine as is) |
 | **Companies** (CRM module) | Your *contacts'* companies. Not a Location. | Companies | unchanged |
 
-**No Studio workspace.** Studio data belongs to the Location directly and uses the same `location_id` as the CRM. The approved merge uses the CRM PostgreSQL database: Prisma owns `public`, Studio SQL/functions own `studio`, and same-realm `UserLocationRole` is the authority without a stored team mirror. The `studio-db-merge` branch is being verified locally; production remains unchanged until the gated cutover in `studio-merge-cutover.md`.
+**No Studio workspace.** Studio data belongs to the Location directly and uses the same `location_id` as the CRM. The approved merge uses the CRM PostgreSQL database: Prisma owns `public`, Studio SQL/functions own `studio`, and same-realm `UserLocationRole` is the authority without a stored team mirror. The authorized merge copy and schema migration have been staged in production, but public traffic remains on the old green release: dependency readiness blocked cutover on a schema-version mismatch. Source writes remain frozen and the Studio worker is stopped; see the exact retained state and retry requirements in `studio-merge-cutover.md`.
 
 ## Rules
 
