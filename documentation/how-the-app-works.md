@@ -42,6 +42,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 - **CRM database** (Prisma/Postgres): accounts, Locations, teams, and all CRM data for both apps.
 - **Studio target:** the same CRM database/pool, in schema `studio`, with Location foreign keys and canonical same-realm team authority. The old Studio Supabase project remains the frozen fallback after cutover; production cutover completed on October 28. Both projects remain Free; R2 keys are preserved.
 - **Media** is in Cloudflare R2.
+- **Video editor:** `video-editor/` is the native macOS editor (Swift) for both apps, kept in this repository since 2026-10-29. It is not part of the web build or deploy. Studio will link content items to editor projects through the paired Mac companion. The old `~/Projects/Substo` folder is retired; its code is on GitHub (`substo/substo-studio`, branch `archive/final-local-state`).
 - **Hosting:** Hetzner + Caddy + Cloudflare. Deploy only with `deploy-local-build.sh`, which ships the **local working tree** and runs `prisma migrate deploy` first. Never Vercel.
 - **`release/studio-go-live` is the deployed branch.** Keep it equal to what's live. Never deploy from an older branch or a checkout with stale changes.
 - **Platform sign-ins** (Google/YouTube and others) are OAuth connections owned by the person's account, at `/account/connections`. No cookies or passwords are imported. Long term, a local Mac app will route these sign-ins through the user's own network, so platforms see the user's location, not the server's.

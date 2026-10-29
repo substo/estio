@@ -1,7 +1,7 @@
 # Working on substo
 
 Substo Video is a native macOS video editor with a CLI and MCP server. Work from
-this repo root. It requires macOS 15 or newer and Xcode 26 or newer with Swift 6.
+`video-editor/` in the Estio repository; the web app's rules in the root `AGENTS.md` do not apply here. It requires macOS 15 or newer and Xcode 26 or newer with Swift 6.
 
 ## Changes and checks
 

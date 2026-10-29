@@ -339,6 +339,7 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
            --exclude='node_modules_old' \
            --exclude='.next_bak' \
            --exclude='Down-Town-Cyprus-Website-Redesign' \
+           --exclude='video-editor/' \
            --exclude='.git' \
            --exclude='.env*' \
            --exclude='.DS_Store' \

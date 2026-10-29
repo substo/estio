@@ -1,5 +1,7 @@
 # Estio–Substo Studio: audit and continuation handoff
 
+> 2026-10-29: `/Users/martingreen/Projects/Substo` is retired. Its app code is on GitHub (`substo/substo-studio`, branch `archive/final-local-state`) and the video editor is now `video-editor/` in this repository. Paths to the old folder below are historical.
+
 This document captures the latest conversation's read-only audit and the next implementation plan. It supplements the original approved brief in `studio-agent-handoff.md`. **`studio-implementation-progress.md` remains the status source**; update it after each completed implementation milestone. Verify observations against the current tree/environment rather than treating this document as proof of completion.
 
 ## Start here

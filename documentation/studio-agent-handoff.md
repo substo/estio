@@ -1,5 +1,7 @@
 # Shared Studio implementation: agent handoff
 
+> 2026-10-29: `/Users/martingreen/Projects/Substo` is retired. Its app code is on GitHub (`substo/substo-studio`, branch `archive/final-local-state`) and the video editor is now `video-editor/` in this repository. Paths to the old folder below are historical.
+
 **Latest continuation:** read [the audit and continuation handoff](studio-audit-continuation-handoff.md) before following older “next” steps below. It records code defects, missing first-release workflows, live production blockers, verification results, and a starter prompt. The [progress record](studio-implementation-progress.md) remains the status source.
 
 Updated 2026-10-24. Work in `/Users/martingreen/Projects/Estio`. The former `IDX` folder was renamed; do not use old absolute paths. This is a working handoff, so inspect the current tree and [progress record](studio-implementation-progress.md) before editing. The Studio files are largely untracked and the repository also contains unrelated uncommitted SIMRelay and other work. Preserve all of it. `/Users/martingreen/Projects/Substo` is a separate local application and Git repository; its nested `video-editor/` is another repository. Do not merge those repositories or edit ignored user data as part of ordinary implementation.

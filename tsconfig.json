@@ -37,6 +37,7 @@
   ],
   "exclude": [
     "node_modules",
-    "Down-Town-Cyprus-Website-Redesign"
+    "Down-Town-Cyprus-Website-Redesign",
+    "video-editor"
   ]
 }

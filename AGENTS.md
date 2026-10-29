@@ -14,3 +14,7 @@ Provider-neutral Next.js route exports such as `maxDuration` are execution hints
 ## Current project context
 
 Read [architecture and decisions](documentation/how-the-app-works.md) and [current status and tasks](documentation/current-status.md) first. Historical checkpoints are evidence, not current instructions. Studio has no legacy URL compatibility requirement; preserve data/media and recovery safeguards.
+
+## Video editor
+
+- `video-editor/` is the native macOS video editor (Swift, SwiftPM) used by both apps. It is not part of the Next.js build or the server deploy. Follow `video-editor/AGENTS.md` when working there.

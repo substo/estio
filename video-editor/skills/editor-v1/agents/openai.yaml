@@ -1,0 +1,4 @@
+interface:
+  display_name: "Editor V1"
+  short_description: "Local documentary-style talking-head video editor"
+  default_prompt: "Use $editor-v1 to plan a documentary-style edit of my recording, with sources and rights flags."

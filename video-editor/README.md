@@ -24,7 +24,7 @@ the Lottie dependency during the first build. Install ffmpeg if you want to
 import formats macOS can't decode, such as WebM (`brew install ffmpeg`).
 
 ```bash
-cd "/Users/martingreen/projects/Substo/video-editor"
+cd "/Users/martingreen/Projects/Estio/video-editor"
 bash setup_mac.sh
 SUBSTO_SKILL_DIRS="" bash install.sh "$PWD/.local/bin"
 "$PWD/.local/bin/substo" app
