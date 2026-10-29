@@ -1,4 +1,4 @@
-# Studio merge: local readiness and next-round cutover
+# Studio merge: completed cutover and recovery runbook
 
 Production cutover completed on 2026-10-28 at approximately 17:31 UTC. The first attempt failed closed; the explicitly authorized retry below is now live.
 The original Studio project remains the fallback; both projects stay on Free. No R2

@@ -29,13 +29,13 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 1. **Build once, share it.** Every feature is one implementation used by both apps and both products. App differences are configuration (menus, wording, capabilities), never a copied page, editor or workflow.
 2. **Separate logins.** There are two Clerk instances, and accounts never merge across apps. A Location belongs to one app, and only that app's accounts can join it (enforced in the database).
 3. **One Location, both products.** Joining a Location gives CRM and Studio access by role. Invites go to the Location in the app, never to Studio separately.
-4. **The active Location is the only tenant input.** It's a cookie, checked against membership on every request. The header, CRM, Studio, Team and Settings all read it. URLs carry no Location or workspace IDs; old links redirect after an access check.
+4. **The active Location is the only tenant input.** It's a cookie, checked against membership on every request. The header, CRM, Studio, Team and Settings all read it. URLs carry no Location or workspace IDs. Retired workspace URLs return 404; there is no legacy-link compatibility.
 5. **First Substo sign-in creates a Location** if the person has none and no pending invite, and makes them its admin. An invite joins its Location instead. Estio is unchanged (invites and onboarding).
 6. **One shell, one header** (`components/app-shell/`). From left to right: the Location name, or a selector if there are several; Live Assist (Estio only); the bell; usage; the profile; the theme. The app logo is in the sidebar. Team and General live under Settings.
 7. **Substo CRM is default-deny.** Property-only modules (listings, imports, prospecting, viewings, print designer, match campaigns) are blocked on the server. Unfinished modules show as *Setup pending*.
 8. **No GoHighLevel** on either app. The app is clean and self-hosted.
 9. **Everything live while developing.** Both apps are public for testing, and unfinished parts are allowed. Every committed change gets deployed, so the live app shows what works. Retain the verified cutover backups and frozen source; use the unified database recovery procedure before risky changes.
-10. **All paid usage counts.** Every paid API call, AI or not, from CRM or Studio, is recorded against the Location. The header shows one daily and monthly total per Location. This is built up over time.
+10. **All paid usage counts.** Every paid API call, AI or not, from CRM or Studio, is recorded against the Location. The header shows one daily and monthly total per Location. Shared CRM and Studio recorded totals are live. This is not provider invoice reconciliation; missing historical usage is not reconstructed.
 
 ## Data and hosting
 
