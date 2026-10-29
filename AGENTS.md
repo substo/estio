@@ -10,3 +10,7 @@
 - Production schedules are owned by `scripts/install-cron.sh` and the scripts it installs.
 
 Provider-neutral Next.js route exports such as `maxDuration` are execution hints only and do not identify the hosting provider.
+
+## Current project context
+
+Read [architecture and decisions](documentation/how-the-app-works.md) and [current status and tasks](documentation/current-status.md) first. Historical checkpoints are evidence, not current instructions. Studio has no legacy URL compatibility requirement; preserve data/media and recovery safeguards.

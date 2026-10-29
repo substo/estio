@@ -64,33 +64,13 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
   All of them were later removed or merged. Each came from guessing at an unclear point instead of asking.
 - **Same thing, same name.** The confusion between location, brand, workspace, company and tenant came from having several names for one thing. The fix is one name, used everywhere, including in the backend.
 - **What was worth it:** separate logins on one shared database. It is done, and doesn't need more work.
-- **Keep docs short.** Long progress logs hid the current state. Update this page when a rule changes, and keep a one-line entry in the progress log.
+- **Keep docs short.** Long progress logs hid the current state. Update this page when a rule changes, and update the current status page.
 
-## Status (2026-10-28)
+## Current work and release
 
-**Studio merged and live.** Web, worker, cron and companion APIs use the CRM database's `studio` schema. Database failures block readiness. The old source is frozen for recovery, not a runtime dependency. Signed Estio core-page and no-spend onboarding acceptance passed October 29. Existing Mac pairing reconnected and completed a no-provider diagnostic; the once-mode companion then shut down cleanly. See `studio-merge-cutover.md` for evidence and `unified-database-recovery.md` for backup scope.
+Read [current-status.md](current-status.md) for the deployed artifact, acceptance limits and next three tasks. This page owns architecture and decisions; the status page owns tasks and completion evidence.
 
-**Working on both apps:**
-- separate sign-in;
-- the auto-created Location;
-- team invites and roles;
-- the Location selector;
-- the shared shell and header;
-- the CRM's reviewed modules and the shared website editor;
-- Studio's library, pipeline, knowledge, uploads and transcription.
-
-**Next:**
-1. Signed Estio core pages and existing-pairing Mac diagnostic passed; retain the recovery mapping until the fallback window ends.
-2. **First Studio workflow: guided onboarding**, implemented from `onboarding-chat-plan.md`. Fixed questions and bounded public URL look-up are free; drafting uses the existing Studio OpenAI key, cap and durable paid-job ledger after confirmation. Admins review/save a Location profile in existing AI settings; it also renders the shared CRM brandVoice. Members read the saved profile. Existing YouTube connection and social-link paths are reused. Signed Estio/Substo no-spend smoke and mobile core-page checks passed; real paid-provider acceptance remains untested under the no-paid-jobs scope. Free-form chat, web search and additional OAuth connectors remain future work.
-3. **Scheduled runs**, once the user has connected YouTube at `/account/connections`. No credentials were imported from the old local app.
-
-**Later, decided:**
-- One usage total per Location (rule 10).
-- CRM integrations for Substo, one by one.
-- Custom fields per niche.
-- Custom domains for Substo Location websites.
-- One Mac companion for the network proxy and optional Studio processing, configured from Settings with detected hardware, per-feature/model choices and a researched model catalogue. Local jobs wait without a timeout or automatic paid fallback; Process now promotes queued work. See [the connected-computer plan](studio-mac-processing-plan.md).
-- Billing.
+**No legacy compatibility:** this is early development with no users. Studio uses `/studio` and clean subpaths with the active canonical Location. Retired workspace URLs and preference protocols have no compatibility contract. Preserve actual content, media keys, immutable provenance, recovery mappings, frozen dumps and tested recovery safeguards.
 
 **Android device gateway (SIM relay):** optional. It sends WhatsApp Web traffic out through a connected Android phone. On this server it only runs for a test-access (canary) entry, which lasts at most 7 days and is never renewed automatically. When no canary is active, the gateway and the WhatsApp bridge are **off**. They log `disabled: canary_scope_expired` and exit cleanly, without restarting. Deploys remove them and still finish. The deploy records the state in `/home/martin/.deploy-state/device-egress-status`. No Location has a device connected (the last device activity was in August 2026).
 

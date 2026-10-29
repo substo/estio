@@ -3,9 +3,6 @@ import fs from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 import ts from "typescript";
-import { NextRequest, NextResponse } from "next/server";
-import { cleanStudioLegacyPath } from "./route-policy";
-import * as restClient from "./rest-client";
 
 // Per-request React.cache is a pass-through outside a server render.
 const passthroughReact = { cache: <T>(fn: T) => fn };
@@ -20,7 +17,6 @@ function context(status = "authorized", storage: string | null = "location-a") {
   return load("lib/studio/route-context.ts", {
     "server-only": {}, "next/navigation": { redirect: (path: string) => { throw new Error(`REDIRECT:${path}`); } },
     "@/lib/auth/tenant-context": { resolveTenantContext: async () => status !== "authorized" ? null : ({ resolution: { status, location: status === "authorized" ? { id: "location-a" } : null }, locationId: storage }) },
-    "./rest-client": restClient,
   });
 }
 function request(tenant?: string, method = "POST") {
@@ -50,25 +46,6 @@ test("no-access and missing storage fail closed; pages return to the existing te
     await assert.rejects(api.studioRouteParams(Promise.resolve({})), /REDIRECT:\/studio\/select/);
   }
 });
-test("legacy resource paths cannot become open redirects or route escapes", () => {
-  assert.equal(cleanStudioLegacyPath(), "/studio");
-  assert.equal(cleanStudioLegacyPath(["library", "record-a"]), "/studio/library/record-a");
-  for (const path of [["select"], ["workspace"], ["https://foreign.invalid"], ["library", ".."], ["library", "a/b"], ["library", "a\\b"]]) assert.equal(cleanStudioLegacyPath(path), null);
-});
-test("legacy IDs select nothing and compatibility redirects never change the Location cookie", async () => {
-  for (const host of ["estio.co", "substo.com"]) {
-    const api = load("app/(main)/studio/workspace/[legacyId]/[[...path]]/route.ts", {
-      "@/lib/auth/host-brand": { getHostOrigin: (requestHost: string) => requestHost === host ? `https://${host}` : null },
-      "next/server": { NextResponse }, "@/lib/studio/route-policy": { cleanStudioLegacyPath },
-    });
-    for (const legacyId of ["old-workspace", "revoked-location", "unrelated-account"]) {
-      const response = await api.GET(new NextRequest(`http://localhost:3002/studio/workspace/${legacyId}/library?page=2`, { headers: { host } }), { params: Promise.resolve({ legacyId, path: ["library"] }) });
-      assert.equal(response.status, 303); assert.equal(response.cookies.get("active_location_id"), undefined);
-      const destination = new URL(response.headers.get("location")); assert.equal(destination.host, host); assert.equal(destination.pathname, "/studio/library"); assert.equal(destination.search, "?page=2");
-    }
-    const post = await api.POST(); assert.equal(post.status, 409);
-  }
-});
 test("generated Studio links never expose the legacy workspace prefix", () => {
   const files = ["app", "lib", "components"].flatMap((root) => fs.readdirSync(root, { recursive: true }).filter((name) => /\.(ts|tsx)$/.test(String(name)) && !/\.test\./.test(String(name))).map((name) => `${root}/${name}`));
   for (const file of files) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /\/studio\/workspace\/\$\{/ , file);
@@ -94,10 +71,7 @@ test("storage access follows the active canonical Location and realm without a m
   }
 });
 
-test("Studio API routes answer a restricted provider with one 503 + Retry-After, and rethrow anything else", async () => {
+test("Studio API database failures propagate without old provider fallback", async () => {
   const api = context();
-  const unavailable = await api.withStudioRoute(async () => { throw new restClient.StudioRestError(402, undefined, true); })(request("location-a"), { params: Promise.resolve({}) });
-  assert.equal(unavailable.status, 503); assert.equal(unavailable.headers.get("Retry-After"), "120");
-  assert.match((await unavailable.json()).error, /temporarily unavailable/);
-  await assert.rejects(api.withStudioRoute(async () => { throw new restClient.StudioRestError(402); })(request("location-a"), { params: Promise.resolve({}) }), restClient.StudioRestError);
+  await assert.rejects(api.withStudioRoute(async () => { throw new Error("database unavailable"); })(request("location-a"), { params: Promise.resolve({}) }), /database unavailable/);
 });
