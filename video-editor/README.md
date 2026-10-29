@@ -94,6 +94,11 @@ touching your app. The default Swift tests use synthetic media and fixtures.
 Real footage, live provider calls and paid generation use opt-in flags
 documented in the guides. `SUBSTO_SPEECH_TESTS=1` enables the speech-service
 test, which may install a language model and needs macOS 26.
+`SUBSTO_LIVE_CONNECT=1` adds the test that reads the public brand endpoint
+on estio.co and substo.com. Starting the app with
+`SUBSTO_CONNECT_HEARTBEAT_ONLY=1` makes its connections heartbeat without
+claiming jobs or running Codex/Claude sign-in commands (see
+`docs/SUBSTO.md`).
 
 | Doc | What's in it |
 | --- | --- |

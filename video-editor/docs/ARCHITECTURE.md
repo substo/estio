@@ -36,10 +36,46 @@ change the code and the tests with it.
 | `TandemApp` | The macOS app (SwiftUI shell, AppKit timeline and viewer) | everything |
 | `TandemCLI` | The `substo` command, including `substo mcp` and `substo export` | Core, Media, Render, API |
 | `TandemAssets` | Asset library: catalogue, providers, normalising on import, copying into projects, credits, the shared library folder (see ASSETS.md) | Core, Media, AVFoundation, ImageIO, Core Text, Lottie |
+| `TandemConnect` | Connections to estio.co and substo.com: the connections file, device keys in Keychain, the device HTTP client, pairing, the worker (heartbeats, setup acknowledgements, the local gate, claims, leases), the diagnostic job, Codex/Claude sign-in commands, Mac discovery, brands and the menu model (see Connections) | Foundation, Security |
 
 Only `TandemApp` imports AppKit or SwiftUI. One exception: the asset
 library's SVG rasteriser uses `NSImage`, the only SVG renderer macOS has,
 drawing into its own bitmap off the main thread.
+
+## Connections
+
+Studio connects itself to estio.co and substo.com (one Location each, both
+at once if you like), replacing the Node companion in the web repo. It
+speaks the same device protocol, unchanged: `POST /api/studio/device/pair/start`
+and `pair/poll` to pair, then `heartbeat`, `claim`, `extend`, `complete`,
+`fail` and `command` with `Authorization: Bearer studio_device_...`, and the
+public `GET /api/studio/device/brand` for the site's name and icon.
+`TandemConnect` ports the companion (`scripts/studio-companion.ts`,
+`lib/studio/companion/`, `lib/studio/worker/runner.ts`) and keeps its rules:
+no redirects, 15 second calls, 256 KB replies, failures as stable codes
+(`device_<op>_failed`, with the HTTP status so a 401/403 shows as revoked)
+and never a reply's text; CLIs run without a shell in their own process
+group, with a minimal environment and the usual install folders on PATH.
+
+- `connections.json` (in `~/Library/Application Support/Studio/Connections`,
+  0700, file 0600, written atomically) lists each site's origin, this Mac's
+  name there, the device ID, the Location name and the cached brand, plus
+  the active site. Keys are only in Keychain: service
+  `com.estio.studio-companion.device-token`, account = origin, shared with
+  the Node companion.
+- A pairing the Node companion made (its `config.json`) is offered in the
+  menu and adopted only when the owner chooses it, because reading its key
+  the first time shows macOS's Keychain dialog. At launch keys are read with
+  user interaction off, so a key macOS would ask about shows "Allow Keychain
+  access…" instead of a dialog.
+- Each connection has its own `ConnectionWorker`; one `LocalCapabilities`
+  serves them all (CLI sign-in and runtimes every 10 minutes, power and disk
+  every minute). Sleep stops claims and wake resumes them; quitting sends a
+  draining heartbeat.
+- `TandemApp` owns the menu-bar item (`StatusMenuController`, built from the
+  pure `ConnectMenuModel`), the badge on the Dock icon, the welcome window's
+  brand line and the About panel. The active connection only chooses the
+  brand; with none, Studio shows its own. The Finder icon is always Studio's.
 
 ## Project folder
 
@@ -618,5 +654,8 @@ the generic controls after them.
   moving, relinking from it, and segments saved with their media and
   inserted into another project, all on temporary folders.
 - Real footage: the decision-models project rebuilt from its EDL.
+- Connections: the Node companion's cases with a fake transport, an
+  in-memory key store and temporary folders, never the real Keychain or a
+  real site (`SUBSTO_LIVE_CONNECT=1` adds the public brand endpoints).
 
 Run everything with `swift test --package-path .`.

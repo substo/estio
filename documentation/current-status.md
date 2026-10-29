@@ -8,6 +8,7 @@ Runtime `b1c8a5f061e77c1257adb1fb3e47f2c9552a6393`, build `5ycy5vOy9gkNegk5mnZ2z
 
 ## Done
 
+- Studio Mac rename and built-in Swift connector implemented: two site connections, server-fetched active branding, menu-bar presence and launch at login; 55 focused tests (one opt-in skip), installer checks and app/menu inspection pass. Live Keychain/pairing/job acceptance and Node retirement remain open; see [Mac plan](studio-mac-processing-plan.md#connector-verification-2026-10-29).
 - One database: CRM public schema and Studio schema, canonical Location foreign keys, shared roles and realm authority. Runtime has no workspace/membership mirror dependency.
 - Shared usage totals and fixed-script onboarding live. Totals are recorded application usage, not provider invoice reconciliation; missing historical usage is not guessed.
 - Unified restore drill: 184 table inventories/digests, 83 migrations at snapshot time, zero invalid FKs, 471 media references. This predates the later tested profile migration; it is not a fresh restore of today's production.

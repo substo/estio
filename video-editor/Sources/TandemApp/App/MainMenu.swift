@@ -17,7 +17,7 @@ enum MainMenu {
         let main = EditorMainMenu()
 
         let app = submenu(main, "Studio")
-        app.addItem(withTitle: "About Studio", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(withTitle: "About Studio", action: #selector(AppDelegate.showAbout(_:)), keyEquivalent: "")
         app.addItem(.separator())
         let settings = app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
         settings.image = Icons.menuImage("gearshape")

@@ -92,6 +92,8 @@ struct WelcomeView: View {
                     .font(.ui(12.5))
                     .foregroundStyle(Theme.textMuted.color)
                     .padding(.top, 4)
+                WelcomeBrandLine()
+                    .padding(.top, 14)
                 Spacer()
                 VStack(alignment: .leading, spacing: 8) {
                     WelcomeButton(title: "New project…", detail: "Pick the video's folder", primary: true) {
@@ -143,6 +145,26 @@ struct WelcomeView: View {
         }
         .frame(minWidth: 560, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
         .background(Theme.panel.color)
+    }
+}
+
+/// "Connected to Estio · Acme Ltd" with the site's icon, when Studio is
+/// connected; nothing otherwise.
+private struct WelcomeBrandLine: View {
+    var body: some View {
+        let presence = BrandPresence.shared
+        if let line = presence.line {
+            HStack(spacing: 7) {
+                Image(nsImage: BrandImages.image(presence.brand, size: 16))
+                    .resizable()
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                Text(line)
+                    .font(.ui(11.5))
+                    .foregroundStyle(Theme.textMuted.color)
+                    .lineLimit(2)
+            }
+        }
     }
 }
 

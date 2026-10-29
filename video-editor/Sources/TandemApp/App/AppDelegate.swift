@@ -1,4 +1,5 @@
 import AppKit
+import TandemConnect
 import TandemCore
 
 /// Starts the app: menus, the keymap, projects from the command line,
@@ -12,8 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     /// `AppURLKey`). Nil if it couldn't be read or made: then no link acts.
     private var urlKey: AppURLKey?
     private var terminationSignal: DispatchSourceSignal?
+    private var statusMenu: StatusMenuController?
+    /// macOS opened Studio as a login item: no windows, just the menu-bar
+    /// item and the connections.
+    private var launchedAtLogin = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        launchedAtLogin = LaunchKind.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)
         // Tooltips name every button and its shortcut; half a second (the
         // system waits about a second and a half) so they come up while
         // you're still looking.
@@ -47,7 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         let urls = pendingURLs + fromCommandLine
         pendingURLs = []
         handle(urls)
-        if documents.windows.isEmpty && !documents.isOpening { documents.showWelcome() }
+        launchedAtLogin = launchedAtLogin || LaunchKind.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)
+        if documents.windows.isEmpty && !documents.isOpening && !(launchedAtLogin && urls.isEmpty) { documents.showWelcome() }
+        startConnections()
         // No activate() here: Finder, the Dock and `open` bring the app
         // forward themselves, and `open -g` (agents, scripts) must leave
         // whatever the creator is using in front.
@@ -79,21 +87,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         }
         documents.isTerminating = true
         documents.closeAll()
+        // Each connection sends a draining heartbeat, so the site shows this
+        // Mac offline straight away instead of after 90 seconds.
+        let connections = ConnectionsController.shared
+        let drained = DrainFlag()
+        if connections.hasWorkers {
+            Task { @MainActor in
+                await connections.drain()
+                drained.done = true
+            }
+        } else {
+            drained.done = true
+        }
         // Closing makes each project's icon; give them a moment to land.
         // A run loop timer, not a task: if quitting started inside a main
         // queue block, main actor work can't run until it's over, and the
         // timer still ends the wait.
-        guard ProjectIcons.shared.isBusy else { return .terminateNow }
+        guard ProjectIcons.shared.isBusy || !drained.done else { return .terminateNow }
         let deadline = Date().addingTimeInterval(3)
+        let drainDeadline = Date().addingTimeInterval(4)
         let timer = Timer(timeInterval: 0.05, repeats: true) { timer in
             MainActor.assumeIsolated {
-                guard !ProjectIcons.shared.isBusy || Date() >= deadline else { return }
+                let iconsDone = !ProjectIcons.shared.isBusy || Date() >= deadline
+                let drainDone = drained.done || Date() >= drainDeadline
+                guard iconsDone && drainDone else { return }
                 timer.invalidate()
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         return .terminateLater
+    }
+
+    /// The menu-bar item and the connections to estio.co and substo.com.
+    private func startConnections() {
+        let connections = ConnectionsController.shared
+        let menu = StatusMenuController(connections: connections)
+        connections.onChange = { [weak menu] in menu?.refresh() }
+        statusMenu = menu
+        connections.start()
+    }
+
+    /// Studio > About Studio: the name stays Studio; with a connection it
+    /// says which site and Location, with that site's badge on the icon.
+    @objc func showAbout(_ sender: Any?) {
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [.applicationName: "Studio"]
+        let brand = ConnectionsController.shared.activeBrand
+        if let icon = BrandImages.dockIcon(brand) { options[.applicationIcon] = icon }
+        if let line = ConnectionsController.shared.activeLine {
+            let style = NSMutableParagraphStyle()
+            style.alignment = .center
+            options[.credits] = NSAttributedString(string: line, attributes: [.font: NSFont.systemFont(ofSize: 11), .paragraphStyle: style,
+                                                                              .foregroundColor: NSColor.secondaryLabelColor])
+        }
+        NSApp.orderFrontStandardAboutPanel(options: options)
+        NSApp.activate()
     }
 
     /// Set when SIGTERM asked Studio to quit.
@@ -224,6 +272,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             if let search { host.update(section) { $0.text = search } }
             if let scope { host.update(section) { $0.scope = scope } }
             if online { host.searchOnline(section) }
+        case .menuBar(let seconds, let pick, let out):
+            if let pick { statusMenu?.pick(pick) }
+            if let seconds { statusMenu?.open(for: seconds, capture: out) }
         case .saveVersion(let out):
             // Links never replace a file; Save As in the app asks first.
             guard let front, !FileManager.default.fileExists(atPath: out) else {
@@ -281,4 +332,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+}
+
+/// Set once every connection has drained, for the quit timer.
+@MainActor
+private final class DrainFlag {
+    var done = false
 }

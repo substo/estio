@@ -143,6 +143,9 @@ enum AppURLCommand: Equatable {
     /// Brings the front window in front of other apps' windows, or sends
     /// it behind them, without activating Studio.
     case windowOrder(toFront: Bool)
+    /// The menu-bar menu: open it for `open` seconds (to capture it), or
+    /// choose the item titled `pick`, for checking the connections menu.
+    case menuBar(openSeconds: Double?, pick: String?, out: String? = nil)
 
     /// `substo`, plus any scheme the app's bundle registers, so a copy of the
     /// app built under another bundle ID (for measuring beside the installed
@@ -218,6 +221,11 @@ enum AppURLCommand: Equatable {
             }
             guard let width = query["width"].flatMap(Double.init), let height = query["height"].flatMap(Double.init), width > 0, height > 0 else { return nil }
             return .windowSize(width: width, height: height)
+        case "menubar":
+            let seconds = query["open"].flatMap(Double.init).map { min(max($0, 0.5), 60) }
+            let pick = query["pick"].flatMap { $0.isEmpty ? nil : $0 }
+            guard seconds != nil || pick != nil else { return nil }
+            return .menuBar(openSeconds: seconds, pick: pick, out: path(query["out"], extension: "png"))
         case "inout":
             let start = query["in"].flatMap(Double.init).map { Time(seconds: $0) }
             let end = query["out"].flatMap(Double.init).map { Time(seconds: $0) }

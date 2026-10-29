@@ -15,7 +15,8 @@ let package = Package(
         .library(name: "TandemMedia", targets: ["TandemMedia"]),
         .library(name: "TandemRender", targets: ["TandemRender"]),
         .library(name: "TandemAPI", targets: ["TandemAPI"]),
-        .library(name: "TandemAssets", targets: ["TandemAssets"])
+        .library(name: "TandemAssets", targets: ["TandemAssets"]),
+        .library(name: "TandemConnect", targets: ["TandemConnect"])
     ],
     dependencies: [
         // Renders Lottie stickers to video at import (TandemAssets only).
@@ -44,10 +45,14 @@ let package = Package(
         // Importers: Filmora .wfp projects and the JSON EDLs agents cut with.
         // They build through the coordinator, so imports always validate.
         .target(name: "TandemImport", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemImport"),
+        // The connection to estio.co and substo.com: pairing, the device token
+        // in Keychain, heartbeats, claiming jobs and the Mac's capability
+        // report. Foundation and Security only, no AppKit.
+        .target(name: "TandemConnect", path: "Sources/TandemConnect", linkerSettings: [.linkedFramework("Security")]),
         // The macOS app. Its keymap and other defaults ship as resources.
         .executableTarget(
             name: "TandemApp",
-            dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemAssets"],
+            dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemAssets", "TandemConnect"],
             path: "Sources/TandemApp",
             resources: [.copy("Resources/Keymaps")]
         ),
@@ -80,7 +85,10 @@ let package = Package(
         ),
         // The app's pure logic: timeline maths, snapping, hit testing, the
         // keymap and how gestures become edit batches.
-        .testTarget(name: "TandemAppTests", dependencies: ["TandemApp", "TandemCore"], path: "tests/TandemAppTests")
+        .testTarget(name: "TandemAppTests", dependencies: ["TandemApp", "TandemCore", "TandemConnect"], path: "tests/TandemAppTests"),
+        // The connection: the Node companion's cases, with a fake transport,
+        // an in-memory token store and temporary folders.
+        .testTarget(name: "TandemConnectTests", dependencies: ["TandemConnect"], path: "tests/TandemConnectTests")
     ],
     swiftLanguageModes: [.v5]
 )
