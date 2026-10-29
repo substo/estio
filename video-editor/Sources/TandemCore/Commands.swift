@@ -1,0 +1,367 @@
+import Foundation
+
+/// Every change to a project is one of these commands. The app, the CLI and
+/// agents (over MCP) all submit the same commands to `ProjectCoordinator`,
+/// so anything you can do by hand an agent can do too, and vice versa.
+///
+/// JSON form uses the case name as the key and leaves out anything optional,
+/// for example `{"blade": {"at": 12.5}}` or
+/// `{"updateClip": {"clipID": "clip_k3f9x2", "patch": {"video": {"opacity": 0.5}}}}`.
+/// Times are seconds.
+public enum EditCommand: Codable, Equatable, Sendable {
+    // MARK: Project and tracks
+
+    /// Merge patch on `name` and `metadata`.
+    case updateProject(patch: JSONValue)
+    case updateSettings(patch: JSONValue)
+    case addTrack(kind: TrackKind, name: String? = nil, index: Int? = nil, id: String? = nil)
+    /// Removes the track and everything on it.
+    case removeTrack(trackID: String)
+    case moveTrack(trackID: String, index: Int)
+    /// JSON merge patch (RFC 7396) on the track, for example
+    /// `{"muted": true}`. `id`, `kind`, `clips` and `transitions` can't change.
+    case updateTrack(trackID: String, patch: JSONValue)
+
+    // MARK: Media
+
+    case addMedia(item: MediaItem)
+    case updateMedia(mediaID: String, patch: JSONValue)
+    /// Fails if any clip still uses the media.
+    case removeMedia(mediaID: String)
+
+    // MARK: Placing and removing clips
+
+    /// Puts media on the timeline the way the app does when you drag it in.
+    /// Each file goes to the track for its role (camera to "Camera", screen
+    /// to "Screen", music to "Music"...) and a camera file's sound goes to
+    /// "Voice" as a linked clip. Files from one take are placed in sync and
+    /// linked. `sourceStart` is measured from the start of the take (or the
+    /// file), and `duration` defaults to all the media that's left.
+    /// Stickers sit at the bottom of the frame at a sensible size instead of
+    /// filling it; `anchor` puts one (or any other picture) at another edge
+    /// or corner, and `pop` pops it in and out. `speed` plays it faster or
+    /// slower (the linked sound too, pitch corrected as `setSpeed` does);
+    /// `duration` is then the length on the timeline.
+    case placeMedia(
+        mediaIDs: [String],
+        at: Time,
+        sourceStart: Time? = nil,
+        duration: Time? = nil,
+        mode: InsertMode? = nil,
+        videoTrackID: String? = nil,
+        audioTrackID: String? = nil,
+        includeAudio: Bool? = nil,
+        anchor: StickerAnchor? = nil,
+        pop: Bool? = nil,
+        speed: Double? = nil
+    )
+    /// Puts a file synced to a take (`substo sync <file>` sets its
+    /// `takeID` and `takeOffset` by sound) alongside the take's camera
+    /// clips already on the timeline, linked to them, so ripple cuts,
+    /// trims and moves keep it in step. The take is cut where the file
+    /// starts and stops (on whole frames), unless that's within half a
+    /// second of a cut already there, where the file stops short of the cut
+    /// instead (place the shortest file first). A picture (another camera angle)
+    /// goes on its own `cut` video track right above the camera's, "Angle
+    /// 2" unless `trackID` names one, with its clips off so the camera
+    /// still shows until `showAngle` picks it; its sound isn't placed. A
+    /// sound file (an external mic) goes on Voice (or `trackID`), and the
+    /// camera's own sound there moves to a muted "Camera sound" track, so
+    /// the mic is what plays.
+    case placeSynced(mediaID: String, trackID: String? = nil)
+    /// `.place` (the default) fails if the range is occupied, `.overwrite`
+    /// replaces what's there, `.insert` pushes later clips right.
+    case insertClip(trackID: String, clip: Clip, mode: InsertMode? = nil)
+    /// Without `ripple` the clips are lifted and leave a gap. With `ripple`
+    /// the gap closes, like Shift-Delete. `includeLinked` defaults to true.
+    case removeClips(clipIDs: [String], ripple: Bool? = nil, includeLinked: Bool? = nil)
+    /// Removes a stretch of time and closes it up. This is how pauses get
+    /// tightened. With no `trackIDs` every `.cut` track is cut and `.follow`
+    /// tracks follow; named tracks are always cut.
+    case rippleDeleteRange(range: TimeRange, trackIDs: [String]? = nil)
+    /// Ripple deletes several ranges, all given in the timeline's times
+    /// before this command. They're cut latest first, so an earlier cut never
+    /// moves a later range, and overlapping or touching ranges are cut once.
+    /// `trackIDs` works as it does for `rippleDeleteRange`.
+    case cutRanges(ranges: [TimeRange], trackIDs: [String]? = nil)
+    /// Closes the gap on `trackID` that contains `at`. Fails if another
+    /// `.cut` track has something in that gap.
+    case closeGap(trackID: String, at: Time)
+    /// Opens up empty time at `at`, pushing everything later to the right.
+    /// A marker right at `at` stays there. An `at` within half a frame of
+    /// a cut goes on the cut.
+    case insertTime(at: Time, duration: Time, trackIDs: [String]? = nil)
+    /// Expands a template (section card, call to action) into linked clips
+    /// at `at`, filling `{{field}}` placeholders from `values`. Media the
+    /// template uses is matched by path; a clip that carries its media item
+    /// (a saved segment's do, and the section card tile's whooshes) adds it
+    /// when the project doesn't have it.
+    case insertTemplate(template: Template, at: Time, values: [String: String]? = nil, mode: InsertMode? = nil)
+    /// Puts a numbered section card (the built-in `sectionCard` graphic) at
+    /// every section marker after the start, or at `markerIDs`: numbered in
+    /// time order, `total` the count, the title from the marker's name and
+    /// the subtitle from its note. Each card hides the frame from its
+    /// marker on, so the cut between sections isn't seen. A card already at
+    /// a marker is renumbered and keeps its own words and length. Each new
+    /// card is as long as its words need (`SectionCard.fittedDuration`,
+    /// 4 to 7 s) unless `duration` is given. `mode` `overwrite` (the
+    /// default) lays the cards over the timeline; `insert` also makes room,
+    /// so the card is a pause and its wipes show the shots either side.
+    /// `soundIn` and `soundOut` put a whoosh on SFX for each sweep.
+    /// `cuts` (insert only) moves where the take is cut for a marker's
+    /// room, by marker ID, up to `SectionCard.maxCutShift` from it: into
+    /// the pause before the section's first word, so the word isn't
+    /// clipped. `substo cards --insert` works them out from the voice.
+    case addSectionCards(
+        markerIDs: [String]? = nil,
+        trackID: String? = nil,
+        duration: Time? = nil,
+        kicker: String? = nil,
+        mode: InsertMode? = nil,
+        soundIn: SectionCardSound? = nil,
+        soundOut: SectionCardSound? = nil,
+        cuts: [String: Time]? = nil
+    )
+    /// Makes section cards as long as their words need
+    /// (`SectionCard.fittedDuration`), like Fit to text in the app: every
+    /// card, or `clipIDs`. Each keeps its start, its end moves and its
+    /// whoosh out moves with its sweep out. Cards that fit already are left
+    /// alone. JSON: `{"fitSectionCards": {}}`.
+    case fitSectionCards(clipIDs: [String]? = nil)
+
+    // MARK: Cutting and trimming
+
+    /// Splits clips at a time. With `clipIDs` only those clips (and their
+    /// linked partners) are cut. Otherwise every clip under `at` on the given
+    /// tracks, or on all targeted unlocked tracks. A clip cut earlier in the
+    /// batch is followed to its piece at `at`; a clip with nothing at `at`
+    /// fails, saying where it is.
+    case blade(at: Time, trackIDs: [String]? = nil, clipIDs: [String]? = nil)
+    /// Joins a through-edit, the opposite of a blade: `clipID` and the clip
+    /// right after it on its track become one clip, when they play one
+    /// stretch of one file straight on (the same file and speed, touching,
+    /// the file carrying on where `clipID` stops, within half a frame) with
+    /// the same settings. The joined clip keeps `clipID`'s ID, start and
+    /// link group, and plays exactly what the two did. The clips linked to
+    /// them across the same cut (camera, screen, voice) join too. Fails,
+    /// saying why, when that would change what plays (`ThroughEdits`).
+    case join(clipID: String)
+    /// Shows one angle of a take over `range` (snapped to frames): the
+    /// clips on `trackID` there come on and the take's other angles there go
+    /// off. Naming the camera's own track shows the camera (every angle
+    /// above it goes off). The take is cut at the range's edges on every
+    /// track it's on, so each piece stays linked one clip a track and the
+    /// sound plays just as before. Angles are the take's tracks above the
+    /// camera's, as `placeSynced` puts them.
+    case showAngle(range: TimeRange, trackID: String)
+    /// Joins every through-edit (see `join`) with its cut in `range`, both
+    /// ends included, or on the whole timeline, in one go. Cuts that look
+    /// like through-edits but can't be joined are left, with a warning
+    /// saying why. JSON: `{"joinThroughEdits": {}}`.
+    case joinThroughEdits(range: TimeRange? = nil)
+    /// Moves a clip edge to `to` (a timeline time). With `ripple` the clip
+    /// keeps its place and everything after it moves instead.
+    case trim(clipID: String, edge: ClipEdge, to: Time, ripple: Bool? = nil, includeLinked: Bool? = nil)
+    /// Moves the cut between two adjacent clips, trimming both.
+    case roll(leftClipID: String, rightClipID: String, delta: Time)
+    /// Changes which part of the media a clip shows without moving it.
+    /// `delta` is in media time.
+    case slip(clipID: String, delta: Time, includeLinked: Bool? = nil)
+    /// Moves a clip between its neighbours, trimming them to compensate.
+    case slide(clipID: String, delta: Time)
+    /// Holds the frame `clipID` shows a frame before `range` over `range`
+    /// (timeline times inside the clip), to cover a flash: a stale frame,
+    /// or the preview jumping for a frame as the creator clicked. Picture only:
+    /// just this clip is cut, the held piece is a freeze frame, and every
+    /// piece stays linked to the take, whose sound plays on uncut.
+    case holdFrame(clipID: String, range: TimeRange)
+    /// Changes speed but keeps the same media, so the clip gets shorter or
+    /// longer. Linked clips change with it.
+    case setSpeed(clipID: String, speed: Double, ripple: Bool? = nil, includeLinked: Bool? = nil)
+
+    // MARK: Moving and editing clips
+
+    /// Moves clips in time and optionally to another track. `mode` defaults
+    /// to `.place`, which fails if the destination is occupied.
+    case moveClips(
+        clipIDs: [String],
+        delta: Time? = nil,
+        toTrackID: String? = nil,
+        includeLinked: Bool? = nil,
+        mode: MoveMode? = nil
+    )
+    /// JSON merge patch on the clip, for example
+    /// `{"video": {"transform": {"scale": 0.5}}}` or `{"audio": {"gainDB": -3}}`.
+    case updateClip(clipID: String, patch: JSONValue)
+    case link(clipIDs: [String])
+    case unlink(clipIDs: [String])
+    /// Sets a one-key layout (full, PiP right, PiP left, split) on video
+    /// clips. Audio clips in the list are skipped.
+    case applyLayout(clipIDs: [String], preset: LayoutPreset)
+    /// Zooms a video clip into a rectangle of its source (0...1 from the top
+    /// left). Without `at` the zoom is static. With `at` (timeline time) it
+    /// animates there over `duration` (default 0.5 s) with an ease; zoom back
+    /// out later with the rectangle `{x: 0, y: 0, width: 1, height: 1}`.
+    case zoomToRegion(clipID: String, rect: Rect, at: Time? = nil, duration: Time? = nil)
+    /// Places video clips in an alternate output format (see
+    /// `ProjectSettings.alternateFormats`), for example the top or bottom
+    /// half of the 9:16 short. `cutout` turns the cutout on or off there.
+    case setFormatLayout(clipIDs: [String], format: String, slot: PortraitSlot, cutout: Bool? = nil)
+    /// Makes an alternate output format the canvas: its size becomes the
+    /// project's, and each clip's placement there becomes its main one.
+    /// Scale-only keyframes (a sticker's pop) are scaled to match; a zoom
+    /// that also moves is dropped, as the format never showed it. A clip
+    /// hidden in the format is switched off. Makes a short its own project.
+    case adoptFormat(format: String)
+    /// A slow zoom or pan over the whole of each clip (the Ken Burns
+    /// effect), for stills and photos. Starts from the clip's current
+    /// placement (apply the `fill` layout first for a short). `amount`
+    /// defaults to 1.12. Replaces the clip's position and scale animation.
+    case addMotion(clipIDs: [String], style: MotionStyle, amount: Double? = nil)
+
+    // MARK: Transitions
+
+    /// `sound` plays a sound effect with it, on the first free SFX track,
+    /// tied to it from then on (`TransitionSounds`).
+    case addTransition(trackID: String, transition: Transition, sound: TransitionSound? = nil)
+    /// Merge patch on `type`, `direction` and `duration`, plus `sound`: an
+    /// object with any of `mediaID`, `gainDB` and `offset` changes the
+    /// sound (or adds one), `null` removes it.
+    case updateTransition(transitionID: String, patch: JSONValue)
+    /// Removes the transition and its sound.
+    case removeTransition(transitionID: String)
+
+    // MARK: Effects and animation
+
+    /// Adds to the clip's video or audio effects, depending on the effect.
+    case addEffect(clipID: String, effect: Effect, index: Int? = nil)
+    case updateEffect(clipID: String, effectID: String, patch: JSONValue)
+    case removeEffect(clipID: String, effectID: String)
+    case moveEffect(clipID: String, effectID: String, index: Int)
+    /// Replaces the keyframes of one parameter, for example
+    /// `video.transform.scale`. An empty list removes the animation.
+    case setKeyframes(clipID: String, parameter: String, keyframes: [Keyframe])
+
+    // MARK: Sound
+
+    /// Levels every speech clip (camera and voice sound, and anything on a
+    /// take track like Voice) to the project's speech level
+    /// (`settings.speechLoudness`) and clears its clip gain, so the voice
+    /// sits at one level whatever gains it came with. Music and sound
+    /// effects keep theirs. JSON: `{"normalizeSpeech": {}}`.
+    ///
+    /// When levelling would put a clip's peaks over the project's
+    /// `truePeakCeiling`, it keeps the speech at the speech level and adds
+    /// a compressor and a limiter that hold them under it, in the clip's
+    /// audio effects where they can be seen and removed. That needs each
+    /// file's measured loudness and true peak, `measured` by media ID; the
+    /// coordinator fills it in from the media analysis
+    /// (`ProjectCoordinator.measureSound`), so a replay of the journal
+    /// makes the same edit.
+    case normalizeSpeech(measured: [String: MeasuredSound]? = nil)
+
+    // MARK: Markers
+
+    case addMarker(marker: Marker)
+    case updateMarker(markerID: String, patch: JSONValue)
+    case removeMarker(markerID: String)
+}
+
+public enum InsertMode: String, Codable, Sendable {
+    case place, overwrite, insert
+}
+
+public enum MoveMode: String, Codable, Sendable {
+    /// Fails if the destination is occupied.
+    case place
+    /// Replaces whatever is at the destination.
+    case overwrite
+}
+
+public enum ClipEdge: String, Codable, Sendable {
+    case start, end
+}
+
+/// A group of commands applied atomically as one undo step.
+public struct EditBatch: Codable, Equatable, Sendable {
+    /// Shown in the undo menu and activity feed, for example
+    /// "Claude: tightened 14 pauses in section 4".
+    public var label: String
+    /// `"user"` for edits made in the app, otherwise the agent name.
+    public var author: String
+    public var commands: [EditCommand]
+    /// When set, the batch is rejected if the project has moved on since the
+    /// caller last looked, so an agent never edits a stale timeline.
+    public var expectedRevision: Int?
+    /// Retrying a batch with the same key returns the first result instead of
+    /// applying it twice.
+    public var idempotencyKey: String?
+
+    public init(
+        label: String,
+        author: String = "user",
+        commands: [EditCommand],
+        expectedRevision: Int? = nil,
+        idempotencyKey: String? = nil
+    ) {
+        self.label = label
+        self.author = author
+        self.commands = commands
+        self.expectedRevision = expectedRevision
+        self.idempotencyKey = idempotencyKey
+    }
+
+    /// The label of the edit Substo Video makes when it finds new files in the
+    /// project folder.
+    public static let mediaScanLabel = "Found new media"
+
+    /// Substo Video adding files it found in the folder, which doesn't make an
+    /// agent's `expectedRevision` stale.
+    public var isMediaScan: Bool {
+        author == EditAuthor.system && label == Self.mediaScanLabel
+    }
+
+    /// Adds, changes or removes media. Such a batch was worked out against
+    /// the media a scan may have just added (the same file under another
+    /// ID), so a scan in between does make it stale.
+    public var changesMedia: Bool {
+        commands.contains { command in
+            switch command {
+            case .addMedia, .updateMedia, .removeMedia: return true
+            default: return false
+            }
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decode(.label, or: "Edit")
+        author = try c.decode(.author, or: "user")
+        commands = try c.decode([EditCommand].self, forKey: .commands)
+        expectedRevision = try c.decodeIfPresent(Int.self, forKey: .expectedRevision)
+        idempotencyKey = try c.decodeIfPresent(String.self, forKey: .idempotencyKey)
+    }
+}
+
+public enum EditError: Error, Equatable, CustomStringConvertible, LocalizedError, Sendable {
+    case notFound(String)
+    case overlap(String)
+    case locked(String)
+    case invalid(String)
+    case staleRevision(expected: Int, actual: Int)
+    case notImplemented(String)
+
+    public var description: String {
+        switch self {
+        case .notFound(let what): return "Not found: \(what)"
+        case .overlap(let what): return "Overlap: \(what)"
+        case .locked(let what): return "Locked: \(what)"
+        case .invalid(let what): return "Invalid edit: \(what)"
+        case .staleRevision(let expected, let actual):
+            return "The project changed (expected revision \(expected), now \(actual)). Re-read it and try again."
+        case .notImplemented(let op): return "Not implemented yet: \(op)"
+        }
+    }
+
+    public var errorDescription: String? { description }
+}

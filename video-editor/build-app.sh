@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_CONFIGURATION="${SUBSTO_BUILD_CONFIGURATION:-release}"
+APP_NAME="Substo Video"
+FINAL_DIR="${SUBSTO_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
+# The bundle is built beside the installed one and swapped in at the end, so
+# a `tandem` command run meanwhile (an agent's, mid-install) never finds the
+# app missing, half copied or half signed.
+APP_DIR="$(dirname "$FINAL_DIR")/.$(basename "$FINAL_DIR").staging.$$"
+OLD_DIR="$(dirname "$FINAL_DIR")/.$(basename "$FINAL_DIR").old.$$"
+cleanup() {
+  # A swap cut short puts the old bundle back.
+  if [[ ! -e "$FINAL_DIR" && -e "$OLD_DIR" ]]; then mv "$OLD_DIR" "$FINAL_DIR"; fi
+  rm -rf "$APP_DIR" "$OLD_DIR"
+}
+trap cleanup EXIT
+APP_BIN="$APP_DIR/Contents/MacOS/substo-app"
+CLI_BIN="$APP_DIR/Contents/MacOS/substo"
+ICON_SOURCE="$SCRIPT_DIR/icons/substo.png"
+SIGNING_IDENTITY="${SUBSTO_CODESIGN_IDENTITY:-}"
+SIGNING_REQUIREMENTS=()
+
+if ! command -v swift >/dev/null 2>&1; then
+  echo "ERROR: swift is not on PATH. Install Xcode or Command Line Tools first."
+  exit 1
+fi
+
+echo "Building Substo Video ($BUILD_CONFIGURATION)..."
+swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION"
+BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION" --show-bin-path)"
+
+for binary in substo-app substo; do
+  if [[ ! -x "$BIN_DIR/$binary" ]]; then
+    echo "ERROR: built binary not found at $BIN_DIR/$binary"
+    exit 1
+  fi
+done
+
+echo "Staging $FINAL_DIR..."
+rm -rf "$APP_DIR"
+mkdir -p "$(dirname "$FINAL_DIR")"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+cp "$BIN_DIR/substo-app" "$APP_BIN"
+cp "$BIN_DIR/substo" "$CLI_BIN"
+cp "$SCRIPT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+# SwiftPM resource bundles (keymaps, packs) sit next to the binaries.
+for bundle in "$BIN_DIR"/*.bundle; do
+  [[ -e "$bundle" ]] || continue
+  # Test fixtures are bundles too; they don't belong in the app.
+  [[ "$(basename "$bundle")" == *Tests.bundle ]] && continue
+  cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+done
+chmod +x "$APP_BIN" "$CLI_BIN"
+
+if [[ -f "$ICON_SOURCE" ]]; then
+  ICONSET="$(mktemp -d)/substo.iconset"
+  mkdir -p "$ICONSET"
+  for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    double=$((size * 2))
+    sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/substo.icns"
+  rm -rf "$(dirname "$ICONSET")"
+fi
+
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="$({
+    security find-identity -v -p codesigning 2>/dev/null \
+      | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' \
+      | head -n 1
+  } || true)"
+fi
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="-"
+fi
+
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+  BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_DIR/Contents/Info.plist")"
+  # Keep a stable designated requirement for ad-hoc signatures so macOS
+  # privacy permissions survive rebuilds when the binary hash changes.
+  SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"$BUNDLE_ID\"")
+fi
+
+codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
+  --identifier "com.substo.video.cli" "$CLI_BIN" >/dev/null
+codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
+  ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "$APP_DIR" >/dev/null
+
+# Two renames: the old bundle is gone for an instant, never half there.
+if [[ -e "$FINAL_DIR" ]]; then mv "$FINAL_DIR" "$OLD_DIR"; fi
+mv "$APP_DIR" "$FINAL_DIR"
+rm -rf "$OLD_DIR"
+echo "Built $FINAL_DIR"

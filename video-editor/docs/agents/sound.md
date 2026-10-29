@@ -1,0 +1,169 @@
+# Sound
+
+Recipes for levelling the voice, holding a quiet mic's peaks, cleaning up a roomy mic, measuring the mix instead of guessing (loudness over time, checking gain lanes), and putting a swoosh on every push. Gain keyframes and clip gain are in [edit-commands.md](edit-commands.md#keyframes).
+
+## Level the voice
+
+Speech is levelled per take to the project's speech level, -20 LUFS, and
+export brings the whole mix to the project's `loudnessTarget` (-14 LUFS
+unless set) with true peaks under its `truePeakCeiling` (-1 dBTP), and says
+what it mastered to. So the speech level sets how the voice sits against
+the music and sound effects (and how loud the app plays), not how loud the
+video is. Placing media levels new speech by itself; a project imported
+with its own gains, or made before the speech level existed, gets there
+with one command:
+
+```bash
+substo loudness                              # each file's loudness, each track's levels
+substo apply - <<< '{"normalizeSpeech": {}}'
+substo loudness                              # "Speech is levelled to -20.0 LUFS" and no stragglers
+```
+
+To move the voice for the whole video, change the level (clips normalised
+to the old level follow it), then check a review clip:
+
+```json
+{"label": "Voice a little louder", "commands": [
+  {"updateSettings": {"patch": {"speechLoudness": -18}}}
+]}
+```
+
+A single clip can still differ: `{"updateClip": {"clipID": "clip_voc7",
+"patch": {"audio": {"gainDB": 2}}}}` plays it 2 dB over the rest.
+
+## Tame the peaks on a quiet mic
+
+A separate mic recorded quietly gets lifted a long way to reach the speech
+level, and its bumps, claps and shouts come up with it: Ian's whiteboard
+mic is lifted 23.5 dB, which puts a knock at 0:14.8 at +23.5 dBFS.
+Export's limiter would squash all of that, which sounds artificial.
+`substo loudness` says when it's coming:
+
+```bash
+substo loudness
+# 1 speech clip peaks over the -1.0 dBTP ceiling once levelled (up to +23.5 dBTP) ...
+substo apply - <<< '{"normalizeSpeech": {}}'
+# Warning: ... it has a compressor and a limiter holding its peaks under -1 dBFS (clip_mic1) ...
+```
+
+The speech stays at the speech level. The compressor rides the passages
+where the speaker gets louder and the limiter catches what's left, both in
+the clip's audio effects, where `substo timeline` shows them as
+`fx compressor,limiter`. Their levels are dBFS as the clip plays (after
+levelling), the numbers `substo loudness --tracks Voice` shows. To set
+them by hand, or on a clip of music, add them yourself; `substo effects
+compressor` and `substo effects limiter` list the parameters:
+
+```json
+{"label": "Hold the voice's peaks", "commands": [
+  {"addEffect": {"clipID": "clip_mic1", "effect": {"type": "compressor", "params": {"threshold": -14, "ratio": 3}}}},
+  {"addEffect": {"clipID": "clip_mic1", "effect": {"type": "limiter", "params": {"ceiling": -1}}}}
+]}
+```
+
+They render ahead of time over the whole file (a few seconds for a long
+take), and then every cut of that take shares the render. Check them with
+`substo loudness --from 4:50 --to 5:20 --tracks Voice --step 0.4`: no
+peaks over the ceiling, and the normal speech where it was.
+
+## Clean up a roomy mic
+
+For a mic that hears the room (echo, hum, air conditioning), isolate the
+voice and add Voice clean-up, a high-pass for rumble and boom and a gentle
+expander that turns the room down between words. The app's Audio tab does
+both with Clean up voice; as a batch:
+
+```json
+{"label": "Clean up the voice", "commands": [
+  {"updateClip": {"clipID": "clip_mic1", "patch": {"audio": {"voiceIsolation": 1}}}},
+  {"addEffect": {"clipID": "clip_mic1", "effect": {"type": "voiceCleanup", "params": {"expanderThreshold": -35}}, "index": 0}}
+]}
+```
+
+Isolation is Apple's voice isolation (`AUSoundIsolation`), run over the
+file in the background. It's made for noise and takes some of the echo
+with it, but it isn't a de-reverb, and macOS doesn't ship one. Put the expander's
+threshold a few dB over the quiet between sentences as the clip plays:
+`substo loudness --tracks Voice --step 0.1` over a pause shows it. Ian's
+mic sits around -38 there, so -35; the default, -40, suits a quieter
+room. Keep the clean-up first in the effects, so the compressor and
+limiter work on the cleaned voice.
+
+## Check the sound
+
+Don't run ffmpeg on a review clip to hear how loud something is. Substo Video
+measures the mix itself, through the same composition, gain taps and
+time-pitch as export:
+
+```bash
+substo loudness --from 1:00 --to 1:30              # the mix, a row every 0.5 s
+substo loudness --from 1:00 --to 1:30 --tracks Music --step 0.2
+substo loudness --from 1:00 --to 1:30 --gains      # does the render follow the gain lanes?
+substo loudness --from 0 --to 18:00 --tracks Voice --over 0   # where does the voice clip?
+substo clip 1:00 1:30 --tracks Music --audio-only  # listen to the music bed alone
+substo assets show elevenlabs:music_2p839smz       # its prompt, licence, loudness and file
+```
+
+Each row has the momentary loudness (the 400 ms centred on its time), the
+short-term (3 s) and the highest sample, with the range's integrated
+loudness, true peak and a sparkline above. They're the levels the timeline
+plays at, before export's master gain, which moves the whole range by the
+same amount, so compare things with each other: a swell 6 dB over the bed
+around it, the bed about 25 LU under the voice, a sound effect's peak
+against the speech. `--tracks` measures only those audio tracks (names or
+IDs); `--json` gives every point. A long range at a small step reads as
+the summary without the rows; the JSON still has them.
+
+`--over <dBFS>` lists only the windows whose highest sample is over that
+level, merged into stretches with their peak: the direct answer to "where
+does this clip" (`--over 0`) or "what touches the ceiling" (`--over -1`).
+Without `--step` it measures every 0.4 s, so the windows cover the range.
+
+`--gains` checks the render against the gain lanes (the clips' levelling,
+gain, gain keyframes and fades). It renders each track (the `--tracks`
+ones, or every one that plays there) as it is and again with its gain
+flattened, and compares their difference with the lane 10 ms at a time.
+It says when a change lands late and by how much, and lists where the
+render plays more than 1 dB off the lane. If the creator says a gain change
+plays late, run it before arguing: it checks the render does what the
+lanes say (a lane set in the wrong place is a different problem, which
+`substo timeline` shows).
+
+## Put a swoosh on every push
+
+A swoosh belongs to its transition: give a push a `sound` and it goes
+where the push goes, and away with it. The light swoosh the creator likes (the
+app's default for push, slide, cut slide and wipe) is
+`elevenlabs:sfx_2ybnc2tu` in his asset library. Copy it into the project
+once, find the pushes that have no sound yet, and give them all one in one
+batch:
+
+```bash
+substo assets use elevenlabs:sfx_2ybnc2tu     # adds it to the media: med_rgm8r7d7
+substo timeline --json | jq -r '.project.videoTracks[].transitions[] | select(.type == "push" and .soundClipID == null) | .id'
+# tr_k3f9x2mq
+# tr_p8zq4w2m
+```
+
+```json
+{"label": "Swooshes on the pushes", "commands": [
+  {"updateTransition": {"transitionID": "tr_k3f9x2mq", "patch": {"sound": {"mediaID": "med_rgm8r7d7", "gainDB": -23.3, "offset": -0.39}}}},
+  {"updateTransition": {"transitionID": "tr_p8zq4w2m", "patch": {"sound": {"mediaID": "med_rgm8r7d7", "gainDB": -23.3, "offset": -0.39}}}}
+]}
+```
+
+Each goes on SFX (SFX 2 where SFX is taken) starting 0.39 s before the
+cut, so its loudest moment lands where the push moves fastest (the light
+swoosh is loudest 0.39 s in). -23.3 dB is for speech at Substo Video's -20 LUFS:
+its loudest 400 ms then sits 15 LU under the voice, as the section card
+whooshes do. In a project whose speech plays elsewhere (`substo loudness`
+says where), move the gain by the difference: -32 for speech at -28.7. For
+another sound, `offset` is minus the moment it's loudest, and the gain puts
+that 15 LU under the speech. A push that already has a whoosh placed by
+hand beside it can keep that one: tie it with `{"soundClipID": "clip_..."}`
+in the patch, and it moves and goes with the push from then on. A new push
+can get its sound in the same command:
+
+```json
+{"addTransition": {"trackID": "trk_camera", "transition": {"type": "push", "fromClipID": "clip_a", "toClipID": "clip_b"}, "sound": {"mediaID": "med_rgm8r7d7", "gainDB": -23.3, "offset": -0.39}}}
+```

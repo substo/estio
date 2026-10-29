@@ -1,0 +1,14 @@
+.build/
+.swiftpm/
+build/
+dist/
+*.app/
+*.dSYM/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+.substo/
+.claude/worktrees/
+.local/
